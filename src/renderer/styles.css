@@ -1,0 +1,109 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #0e0f13;
+  color: #d4d4d8;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2f3a;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #353b48;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Markdown rendering */
+.prose-forge {
+  font-size: 14px;
+  line-height: 1.6;
+  word-wrap: break-word;
+}
+.prose-forge p {
+  margin: 0.45em 0;
+}
+.prose-forge p:first-child {
+  margin-top: 0;
+}
+.prose-forge p:last-child {
+  margin-bottom: 0;
+}
+.prose-forge pre {
+  background: #0b0c10;
+  border: 1px solid #272b34;
+  border-radius: 8px;
+  padding: 12px;
+  overflow: auto;
+  margin: 0.5em 0;
+}
+.prose-forge pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 12.5px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.prose-forge code {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.88em;
+  background: #1c1f26;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.prose-forge ul,
+.prose-forge ol {
+  margin: 0.45em 0;
+  padding-left: 1.4em;
+}
+.prose-forge li {
+  margin: 0.15em 0;
+}
+.prose-forge h1,
+.prose-forge h2,
+.prose-forge h3 {
+  font-weight: 600;
+  margin: 0.7em 0 0.3em;
+  line-height: 1.3;
+}
+.prose-forge a {
+  color: #d97757;
+  text-decoration: underline;
+}
+.prose-forge blockquote {
+  border-left: 3px solid #3a3f4a;
+  padding-left: 12px;
+  color: #a1a1aa;
+  margin: 0.5em 0;
+}
+.prose-forge table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 13px;
+}
+.prose-forge th,
+.prose-forge td {
+  border: 1px solid #272b34;
+  padding: 5px 9px;
+}
+.prose-forge hr {
+  border: none;
+  border-top: 1px solid #272b34;
+  margin: 0.8em 0;
+}

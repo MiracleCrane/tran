@@ -1,0 +1,15 @@
+appId: com.forge.agent
+productName: Forge
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**/*
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
