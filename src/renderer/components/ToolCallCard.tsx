@@ -65,7 +65,9 @@ const STATUS_META: Record<
 }
 
 export default function ToolCallCard({ block }: { block: ToolBlock }): JSX.Element {
-  const [collapsed, setCollapsed] = useState(false)
+  // Collapsed by default — tool details (read text, inputs, diffs) stay folded
+  // out of the conversation until clicked, so the transcript isn't cluttered.
+  const [collapsed, setCollapsed] = useState(true)
   const meta = STATUS_META[block.status]
   const summary = summaryForTool(block.name, block.input)
   const resultText = normalizeResult(block.result)

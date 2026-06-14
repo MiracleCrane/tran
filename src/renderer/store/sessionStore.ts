@@ -17,7 +17,8 @@ import type {
   StartArgs,
   SubagentTask,
   SubagentStatus,
-  UserAttachment
+  UserAttachment,
+  PendingMessage
 } from '../types'
 
 interface SessionStore {
@@ -37,6 +38,9 @@ interface SessionStore {
   sessionsLoading: boolean
   /** Task-tool subagents for the StatusBar monitor (kept out of the transcript). */
   tasks: SubagentTask[]
+  /** Messages sent while the agent was busy — hover above the Composer and drop
+   *  into the transcript one-per-turn-end (result). */
+  pendingQueue: PendingMessage[]
 
   startSession: (args: StartArgs) => Promise<void>
   sendMessage: (text: string, attachments?: PickedFile[]) => Promise<void>
@@ -314,7 +318,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   currentStreamingMsgId: null,
   sessions: [],
   sessionsLoading: false,
-  tasks: [],
+  tasks: [], pendingQueue: [],
 
   async startSession(args) {
     // Pre-register synchronously: bridgeSessionId is added to the bridge's map
@@ -339,7 +343,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         tools: []
       },
       items: [],
-      tasks: [],
+      tasks: [], pendingQueue: [],
       status: { running: false },
       currentStreamingMsgId: null
     })
@@ -353,15 +357,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const value = text.trim()
     const atts = attachments ?? []
     if (!value && atts.length === 0) return
-    // If the agent is mid-turn, this message queues behind it — show it as
-    // pending (it flips to delivered when the next turn starts).
-    const queued = get().status.running
     // Build the wire content: plain text, or content blocks when there are
     // attachments (image → image block, text → inlined, other → path ref).
     let content: string | unknown[]
     if (atts.length) {
       const blocks: unknown[] = []
-      if (text.trim()) blocks.push({ type: 'text', text })
+      if (value) blocks.push({ type: 'text', text: value })
       for (const a of atts) {
         if (a.kind === 'image') {
           blocks.push({
@@ -379,10 +380,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
       content = blocks
     } else {
-      content = text
+      content = value
     }
-    // Optimistic render: keep the typed text clean and carry the attachments
-    // separately so the bubble can show image previews + icon chips.
     const displayAttachments: UserAttachment[] | undefined = atts.length
       ? atts.map((a) =>
           a.kind === 'image'
@@ -390,21 +389,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             : { name: a.name, kind: a.kind }
         )
       : undefined
-    set({
-      items: [
-        ...get().items,
-        {
-          id: uid(),
-          kind: 'user',
-          text: value,
-          parentToolUseId: null,
-          queued,
-          ...(displayAttachments ? { attachments: displayAttachments } : {})
-        }
-      ],
-      status: { ...get().status, running: true }
-    })
+    const attProps = displayAttachments ? { attachments: displayAttachments } : {}
+
+    // Always push to the SDK (it queues internally); the UI placement differs:
+    // idle → straight into the transcript; busy → hold above the Composer until
+    // the current turn finishes (then the result handler drops it in).
     await window.api.sendMessage(meta.sessionId, content)
+    if (get().status.running) {
+      set((s) => ({ pendingQueue: [...s.pendingQueue, { id: uid(), text: value, ...attProps }] }))
+    } else {
+      set((s) => ({
+        items: [...s.items, { id: uid(), kind: 'user', text: value, parentToolUseId: null, ...attProps }],
+        status: { ...s.status, running: true }
+      }))
+    }
   },
 
   async interrupt() {
@@ -421,7 +419,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   reset() {
-    set({ starting: false, meta: null, items: [], tasks: [], status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null })
+    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null })
   },
 
   async bootstrap() {
@@ -448,7 +446,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({
       starting: true,
       items: [],
-      tasks: [],
+      tasks: [], pendingQueue: [],
       status: { running: false },
       currentStreamingMsgId: null,
       meta: { sessionId: newId, cwd: path, model, permissionMode: 'default', tools: [] }
@@ -483,7 +481,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({
       starting: true,
       items: [],
-      tasks: [],
+      tasks: [], pendingQueue: [],
       status: { running: false },
       currentStreamingMsgId: null,
       meta: { sessionId: newId, cwd, model, permissionMode, tools: [] }
@@ -512,7 +510,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // Switch UI instantly to the resumed session (history rendered, unlocked).
     set({
       items: historyToItems(history),
-      tasks: [],
+      tasks: [], pendingQueue: [],
       meta: {
         sessionId: newId,
         sdkSessionId,
@@ -599,7 +597,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
     set({
       items,
-      tasks: [],
+      tasks: [], pendingQueue: [],
       currentStreamingMsgId: null,
       meta: { sessionId: newId, sdkSessionId, cwd, model, permissionMode, tools: [] }
     })
@@ -925,7 +923,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         set((s) => ({
           status: {
             ...s.status,
-            running: false,
+            // Stay "running" if a queued message is about to be processed.
+            running: s.pendingQueue.length > 0,
             costUsd: r.total_cost_usd,
             turns: r.num_turns,
             inputTokens: r.usage?.input_tokens,
@@ -939,21 +938,27 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                   ? r.errors.join('; ')
                   : r.subtype
           },
-          // Turn done: clear the streaming flag on any provisional items that
-          // never got replaced by a final assistant message, reset the id, and
-          // advance the queue by one — the oldest queued user message is what
-          // the agent just finished OR is about to be processed next.
+          // Turn done: clear streaming flags, and drop the oldest queued
+          // message into the transcript (the agent will process it next). If
+          // there is one, the agent stays "running"; otherwise it goes idle.
           items: (() => {
-            let clearedQueued = false
-            return s.items.map((i) => {
-              if (i.kind === 'assistant' && i.streaming) return { ...i, streaming: false }
-              if (!clearedQueued && i.kind === 'user' && i.queued) {
-                clearedQueued = true
-                return { ...i, queued: false }
+            const cleared = s.items.map((i) =>
+              i.kind === 'assistant' && i.streaming ? { ...i, streaming: false } : i
+            )
+            const due = s.pendingQueue[0]
+            if (!due) return cleared
+            return [
+              ...cleared,
+              {
+                id: due.id,
+                kind: 'user' as const,
+                text: due.text,
+                parentToolUseId: null,
+                ...(due.attachments ? { attachments: due.attachments } : {})
               }
-              return i
-            })
+            ]
           })(),
+          pendingQueue: s.pendingQueue.slice(1),
           currentStreamingMsgId: null
         }))
         break

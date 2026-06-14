@@ -57,19 +57,7 @@ function UserMessage({ item }: { item: UserItem }): JSX.Element {
   const atts = item.attachments ?? []
   return (
     <div className="flex justify-end">
-      <div
-        className={`max-w-[85%] rounded-[16px] rounded-tr-md border px-4 py-2.5 shadow-lg shadow-black/10 backdrop-blur ${
-          item.queued
-            ? 'border-dashed border-white/15 bg-white/[0.03] opacity-70'
-            : 'border-white/10 bg-white/[0.065]'
-        }`}
-      >
-        {item.queued && (
-          <div className="mb-1 flex items-center gap-1.5 text-[11px] text-zinc-500">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-500" />
-            排队中…
-          </div>
-        )}
+      <div className="max-w-[85%] rounded-[16px] rounded-tr-md border border-white/10 bg-white/[0.065] px-4 py-2.5 shadow-lg shadow-black/10 backdrop-blur">
         {item.text && (
           <div className="whitespace-pre-wrap break-words text-sm text-zinc-200">{item.text}</div>
         )}

@@ -15,6 +15,7 @@ export default function Composer(): JSX.Element {
   const sendMessage = useSessionStore((s) => s.sendMessage)
   const interrupt = useSessionStore((s) => s.interrupt)
   const setModel = useSessionStore((s) => s.setModel)
+  const pending = useSessionStore((s) => s.pendingQueue)
   const [text, setText] = useState('')
   const [models, setModels] = useState(DEFAULT_MODELS)
   const [modelOpen, setModelOpen] = useState(false)
@@ -64,6 +65,21 @@ export default function Composer(): JSX.Element {
   return (
     <div className="bg-transparent px-6 pb-3 pt-2">
       <div className="mx-auto max-w-5xl">
+        {pending.length > 0 && (
+          <div className="mb-2 flex flex-col items-end gap-1.5">
+            {pending.map((p) => (
+              <div
+                key={p.id}
+                className="glass-panel flex max-w-[80%] items-center gap-2 rounded-xl border border-dashed border-white/15 px-3 py-1.5 text-xs text-zinc-400"
+              >
+                <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-zinc-500" />
+                <span className="truncate">
+                  排队中 · {p.text || (p.attachments?.length ? `${p.attachments.length} 个附件` : '…')}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="glass-panel overflow-visible rounded-[18px] p-3">
           <textarea
             value={text}
