@@ -40,6 +40,9 @@ export interface UserItem {
   text: string
   parentToolUseId: string | null
   attachments?: UserAttachment[]
+  /** True while this message sits in the queue waiting for the agent's current
+   *  turn to finish (sent while the agent was already running). */
+  queued?: boolean
 }
 export interface AssistantItem {
   id: string

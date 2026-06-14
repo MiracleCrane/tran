@@ -146,6 +146,9 @@ function applyStreamEvent(
         ...items,
         { id: msgId, kind: 'assistant', blocks: [], parentToolUseId: parent, streaming: true }
       ]
+      // A new turn just started → any queued user messages are now being
+      // processed, so drop their "排队中" badge.
+      items = items.map((i) => (i.kind === 'user' && i.queued ? { ...i, queued: false } : i))
     }
     return { items, currentStreamingMsgId: msgId }
   }
@@ -350,6 +353,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const value = text.trim()
     const atts = attachments ?? []
     if (!value && atts.length === 0) return
+    // If the agent is mid-turn, this message queues behind it — show it as
+    // pending (it flips to delivered when the next turn starts).
+    const queued = get().status.running
     // Build the wire content: plain text, or content blocks when there are
     // attachments (image → image block, text → inlined, other → path ref).
     let content: string | unknown[]
@@ -392,6 +398,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           kind: 'user',
           text: value,
           parentToolUseId: null,
+          queued,
           ...(displayAttachments ? { attachments: displayAttachments } : {})
         }
       ],
