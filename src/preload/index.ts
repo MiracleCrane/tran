@@ -25,6 +25,8 @@ const api: ForgeApi = {
   listMcpServers: (sessionId) => ipcRenderer.invoke('forge:listMcpServers', sessionId),
   toggleMcpServer: (sessionId, name, enabled) =>
     ipcRenderer.invoke('forge:toggleMcpServer', sessionId, name, enabled),
+  backgroundTask: (sessionId, toolUseId) =>
+    ipcRenderer.invoke('forge:backgroundTask', sessionId, toolUseId),
 
   listSkills: (sessionId) => ipcRenderer.invoke('forge:listSkills', sessionId),
   listMarketplacePlugins: () => ipcRenderer.invoke('forge:listMarketplacePlugins'),

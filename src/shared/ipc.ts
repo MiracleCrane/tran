@@ -201,6 +201,10 @@ export interface ForgeApi {
   /** Enable/disable an MCP server by name. Persists to settings (same as `claude mcp`). */
   toggleMcpServer(sessionId: string, name: string, enabled: boolean): Promise<void>
 
+  /** Move a running foreground subagent/Bash (by its tool_use_id) to the
+   *  background, freeing the main agent's turn. Omit id = background all. */
+  backgroundTask(sessionId: string, toolUseId?: string): Promise<boolean>
+
   /** Persist a server to a config file (user/project/local scope). Does NOT touch
    *  the live session — the caller restarts the session to apply. */
   saveMcpServer(args: SaveMcpServerArgs): Promise<void>

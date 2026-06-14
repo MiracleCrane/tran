@@ -55,6 +55,8 @@ interface SessionStore {
   openSession: (sdkSessionId: string) => Promise<void>
   renameSession: (sessionId: string, title: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
+  /** Move a running subagent to the background (frees the main agent's turn). */
+  backgroundTask: (taskId: string) => Promise<void>
   /** Close the current session and re-spawn it (resuming when possible) so that
    *  config-file changes — e.g. MCP servers — get reloaded. History is restored
    *  from the transcript JSONL, so the conversation is preserved. */
@@ -492,6 +494,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
+  async backgroundTask(taskId: string) {
+    const meta = get().meta
+    const task = get().tasks.find((t) => t.taskId === taskId)
+    if (!meta || !task) return
+    // Optimistically mark backgrounded so the UI flips immediately.
+    set((s) => ({
+      tasks: s.tasks.map((t) => (t.taskId === taskId ? { ...t, isBackgrounded: true } : t))
+    }))
+    try {
+      await window.api.backgroundTask(meta.sessionId, task.toolUseId)
+    } catch {
+      /* leave optimistic; status will be corrected by task_updated */
+    }
+  },
+
   async restartSession() {
     const meta = get().meta
     if (!meta || get().starting) return
@@ -631,7 +648,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         } else if (subtype === 'task_updated') {
           const t = msg as unknown as {
             task_id: string
-            patch: { status?: string; description?: string; error?: string }
+            patch: { status?: string; description?: string; error?: string; is_backgrounded?: boolean }
           }
           const mappedStatus: SubagentStatus | undefined = t.patch.status
             ? t.patch.status === 'completed' || t.patch.status === 'failed'
@@ -647,7 +664,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                     ...x,
                     description: t.patch.description ?? x.description,
                     error: t.patch.error ?? x.error,
-                    status: mappedStatus ?? x.status
+                    status: mappedStatus ?? x.status,
+                    isBackgrounded: t.patch.is_backgrounded ?? x.isBackgrounded
                   }
                 : x
             )

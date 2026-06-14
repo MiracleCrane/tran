@@ -108,6 +108,7 @@ interface Props {
 export default function SubagentMonitor({ onClose }: Props): JSX.Element {
   const tasks = useSessionStore((s) => s.tasks)
   const meta = useSessionStore((s) => s.meta)
+  const backgroundTask = useSessionStore((s) => s.backgroundTask)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [items, setItems] = useState<TranscriptItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -185,16 +186,21 @@ export default function SubagentMonitor({ onClose }: Props): JSX.Element {
               {tasks.map((t) => {
                 const m = STATUS_META[t.status]
                 return (
-                  <button
+                  <div
                     key={t.taskId}
                     onClick={() => setSelectedId(t.taskId)}
-                    className="w-full rounded-lg px-2.5 py-2 text-left transition hover:bg-bg-hover"
+                    className="group relative w-full cursor-pointer rounded-lg px-2.5 py-2 transition hover:bg-bg-hover"
                   >
                     <div className="flex items-center gap-2">
                       <span className={`h-2 w-2 shrink-0 rounded-full ${m.dot}`} />
                       <span className="flex-1 truncate text-xs font-medium text-zinc-200">
                         {t.description || '(无描述)'}
                       </span>
+                      {t.isBackgrounded && (
+                        <span className="shrink-0 rounded bg-sky-950/50 px-1 py-0.5 text-[9px] text-sky-300">
+                          后台
+                        </span>
+                      )}
                       <span className={`shrink-0 text-[10px] ${m.text}`}>{m.label}</span>
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-4 text-[10px] text-zinc-600">
@@ -207,7 +213,19 @@ export default function SubagentMonitor({ onClose }: Props): JSX.Element {
                     {t.summary && t.status !== 'running' && (
                       <div className="mt-1 pl-4 text-[10px] text-zinc-500">{t.summary}</div>
                     )}
-                  </button>
+                    {t.status === 'running' && !t.isBackgrounded && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void backgroundTask(t.taskId)
+                        }}
+                        className="absolute right-2 top-2 rounded border border-border-subtle bg-bg-elev px-1.5 py-0.5 text-[10px] text-zinc-400 opacity-0 transition hover:bg-bg-hover hover:text-zinc-200 group-hover:opacity-100"
+                        title="转入后台,释放主会话以便继续对话"
+                      >
+                        转入后台
+                      </button>
+                    )}
+                  </div>
                 )
               })}
             </div>

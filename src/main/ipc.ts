@@ -111,6 +111,13 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
     }
   )
 
+  ipcMain.handle('forge:backgroundTask',
+    async (_e, sessionId: string, toolUseId?: string): Promise<boolean> => {
+      log('ipc', `backgroundTask session=${sessionId} toolUseId=${toolUseId ?? '(all)'}`)
+      return await bridge.backgroundTask(sessionId, toolUseId)
+    }
+  )
+
   ipcMain.handle('forge:listSkills', async (_e, sessionId: string): Promise<SkillInfo[]> => {
     try {
       return await bridge.listSkills(sessionId)

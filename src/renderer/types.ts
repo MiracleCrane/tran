@@ -68,6 +68,9 @@ export interface SubagentTask {
   lastToolName?: string
   summary?: string
   error?: string
+  /** True once moved to the background (task_updated.is_backgrounded) — main
+   *  agent is then free to continue while it keeps running. */
+  isBackgrounded?: boolean
 }
 
 export interface SessionMeta {

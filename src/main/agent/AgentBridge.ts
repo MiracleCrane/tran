@@ -230,6 +230,13 @@ export class AgentBridge {
     await q.toggleMcpServer(name, enabled)
   }
 
+  /** Move an in-flight foreground subagent (or Bash) to the background so the
+   *  main agent's turn can continue / the user can keep chatting. */
+  async backgroundTask(sessionId: string, toolUseId?: string): Promise<boolean> {
+    const q = await this.awaitQuery(sessionId)
+    return await q.backgroundTasks(toolUseId)
+  }
+
   /** Skills available to the session (the SDK surfaces skills as slash commands). */
   async listSkills(sessionId: string): Promise<SkillInfo[]> {
     const q = await this.awaitQuery(sessionId)
