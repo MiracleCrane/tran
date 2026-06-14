@@ -25,11 +25,21 @@ export interface ToolBlock {
 }
 export type AssistantBlock = TextBlock | ThinkingBlock | ToolBlock
 
+/** Display info for an attachment on a user message (icon+name chip, or image
+ *  preview). */
+export interface UserAttachment {
+  name: string
+  kind: 'image' | 'text' | 'other'
+  /** For images: a data: URL to render the preview. */
+  dataUrl?: string
+}
+
 export interface UserItem {
   id: string
   kind: 'user'
   text: string
   parentToolUseId: string | null
+  attachments?: UserAttachment[]
 }
 export interface AssistantItem {
   id: string

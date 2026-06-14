@@ -54,10 +54,38 @@ function buildForest(items: TranscriptItem[]): ItemNode[] {
 }
 
 function UserMessage({ item }: { item: UserItem }): JSX.Element {
+  const atts = item.attachments ?? []
   return (
     <div className="flex justify-end">
       <div className="max-w-[85%] rounded-[16px] rounded-tr-md border border-white/10 bg-white/[0.065] px-4 py-2.5 shadow-lg shadow-black/10 backdrop-blur">
-        <div className="whitespace-pre-wrap break-words text-sm text-zinc-200">{item.text}</div>
+        {item.text && (
+          <div className="whitespace-pre-wrap break-words text-sm text-zinc-200">{item.text}</div>
+        )}
+        {atts.length > 0 && (
+          <div className="mt-2 flex flex-wrap justify-end gap-2">
+            {atts.map((a, i) =>
+              a.kind === 'image' && a.dataUrl ? (
+                <img
+                  key={i}
+                  src={a.dataUrl}
+                  alt={a.name}
+                  className="max-h-44 max-w-[220px] rounded-lg border border-white/10 object-cover"
+                />
+              ) : (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-zinc-300"
+                  title={a.name}
+                >
+                  <span className="text-zinc-500">
+                    {a.kind === 'text' ? '📄' : '📎'}
+                  </span>
+                  <span className="max-w-[10rem] truncate">{a.name}</span>
+                </span>
+              )
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

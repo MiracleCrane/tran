@@ -16,7 +16,8 @@ import type {
   PermissionRequestPayload,
   StartArgs,
   SubagentTask,
-  SubagentStatus
+  SubagentStatus,
+  UserAttachment
 } from '../types'
 
 interface SessionStore {
@@ -346,7 +347,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   async sendMessage(text, attachments) {
     const meta = get().meta
     if (!meta) return
+    const value = text.trim()
     const atts = attachments ?? []
+    if (!value && atts.length === 0) return
     // Build the wire content: plain text, or content blocks when there are
     // attachments (image → image block, text → inlined, other → path ref).
     let content: string | unknown[]
@@ -372,14 +375,25 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     } else {
       content = text
     }
-    // Optimistic render: show the typed text plus the attachment names.
-    const displayText = atts.length
-      ? `${text}${atts.map((a) => `\n📎 ${a.name}`).join('')}`
-      : text
+    // Optimistic render: keep the typed text clean and carry the attachments
+    // separately so the bubble can show image previews + icon chips.
+    const displayAttachments: UserAttachment[] | undefined = atts.length
+      ? atts.map((a) =>
+          a.kind === 'image'
+            ? { name: a.name, kind: 'image', dataUrl: `data:${a.mimeType};base64,${a.data}` }
+            : { name: a.name, kind: a.kind }
+        )
+      : undefined
     set({
       items: [
         ...get().items,
-        { id: uid(), kind: 'user', text: displayText, parentToolUseId: null }
+        {
+          id: uid(),
+          kind: 'user',
+          text: value,
+          parentToolUseId: null,
+          ...(displayAttachments ? { attachments: displayAttachments } : {})
+        }
       ],
       status: { ...get().status, running: true }
     })
@@ -789,12 +803,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               .map((c) => (c && typeof c === 'object' && 'text' in c ? String((c as { text: unknown }).text) : ''))
               .join('')
             if (text) {
-              set((s) => ({
-                items: [
-                  ...s.items,
-                  { id: uid(), kind: 'user', text, parentToolUseId: parent }
-                ]
-              }))
+              set((s) => {
+                // De-dupe: sendMessage already rendered this optimistically
+                // (incl. attachments), so don't add the text-only echo again.
+                const last = s.items[s.items.length - 1]
+                if (last && last.kind === 'user' && last.text === text) {
+                  return { status: { ...s.status, running: true } }
+                }
+                return {
+                  items: [
+                    ...s.items,
+                    { id: uid(), kind: 'user', text, parentToolUseId: parent }
+                  ]
+                }
+              })
             }
           }
         }
