@@ -1,4 +1,6 @@
-import { ipcMain, dialog, type BrowserWindow } from 'electron'
+import { ipcMain, dialog, shell, type BrowserWindow } from 'electron'
+import { readFileSync, statSync, existsSync } from 'node:fs'
+import { basename } from 'node:path'
 import { AgentBridge } from './agent/AgentBridge'
 import { getApiKey, setApiKey } from './settings'
 import { saveMcpServer, deleteMcpServer } from './mcpConfig'
@@ -35,8 +37,26 @@ import type {
   Project,
   SkillInfo,
   MarketplacePlugin,
-  Preferences
+  Preferences,
+  PickedFile
 } from '../shared/ipc'
+
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
+const TEXT_EXTS = new Set([
+  'txt', 'md', 'markdown', 'json', 'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs',
+  'css', 'scss', 'less', 'html', 'htm', 'xml', 'yml', 'yaml', 'csv', 'py',
+  'java', 'c', 'cpp', 'cc', 'h', 'hpp', 'go', 'rs', 'rb', 'php', 'sh', 'bash',
+  'sql', 'ini', 'toml', 'env', 'log', 'vue', 'svelte'
+])
+const MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp'
+}
+const MAX_TEXT_INLINE = 512 * 1024 // inline at most 512KB of a text file
 
 export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBridge {
   const withWindow = (action: (win: BrowserWindow) => void): void => {
@@ -80,9 +100,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
     return { sessionId }
   })
 
-  ipcMain.handle('forge:sendMessage', async (_e, sessionId: string, text: string): Promise<void> => {
+  ipcMain.handle('forge:sendMessage', async (_e, sessionId: string, content: string | unknown[]): Promise<void> => {
     log('ipc', `sendMessage session=${sessionId}`)
-    bridge.send(sessionId, text)
+    bridge.send(sessionId, content)
   })
 
   ipcMain.handle('forge:interrupt', async (_e, sessionId: string): Promise<void> => {
@@ -123,6 +143,53 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
       return await bridge.backgroundTask(sessionId, toolUseId)
     }
   )
+
+  ipcMain.handle('forge:pickFiles', async (_e, cwd: string): Promise<PickedFile[]> => {
+    const res = await dialog.showOpenDialog({
+      title: '选择文件附件',
+      defaultPath: cwd,
+      properties: ['openFile', 'multiSelections']
+    })
+    if (res.canceled || !res.filePaths.length) return []
+    const out: PickedFile[] = []
+    for (const p of res.filePaths) {
+      try {
+        const stat = statSync(p)
+        const ext = (p.split('.').pop() ?? '').toLowerCase()
+        const kind: PickedFile['kind'] = IMAGE_EXTS.has(ext)
+          ? 'image'
+          : TEXT_EXTS.has(ext)
+            ? 'text'
+            : 'other'
+        const buf = readFileSync(p)
+        const data =
+          kind === 'image'
+            ? buf.toString('base64')
+            : kind === 'text'
+              ? buf.toString('utf-8').slice(0, MAX_TEXT_INLINE)
+              : ''
+        out.push({
+          path: p,
+          name: basename(p),
+          kind,
+          mimeType: MIME[ext] ?? 'application/octet-stream',
+          data,
+          size: stat.size
+        })
+      } catch (e) {
+        log('ipc', `pickFiles skip ${p}: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    return out
+  })
+
+  ipcMain.handle('forge:revealInExplorer', async (_e, cwd: string, pathStr: string): Promise<boolean> => {
+    const { resolve } = await import('node:path')
+    const resolved = resolve(cwd, pathStr)
+    if (!existsSync(resolved)) return false
+    shell.showItemInFolder(resolved)
+    return true
+  })
 
   ipcMain.handle('forge:listSkills', async (_e, sessionId: string): Promise<SkillInfo[]> => {
     try {

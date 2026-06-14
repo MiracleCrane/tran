@@ -8,7 +8,7 @@ import type {
 
 const api: ForgeApi = {
   startSession: (opts) => ipcRenderer.invoke('forge:startSession', opts),
-  sendMessage: (sessionId, text) => ipcRenderer.invoke('forge:sendMessage', sessionId, text),
+  sendMessage: (sessionId, content) => ipcRenderer.invoke('forge:sendMessage', sessionId, content),
   interrupt: (sessionId) => ipcRenderer.invoke('forge:interrupt', sessionId),
   setModel: (sessionId, model) => ipcRenderer.invoke('forge:setModel', sessionId, model),
   setPermissionMode: (sessionId, mode) =>
@@ -27,6 +27,9 @@ const api: ForgeApi = {
     ipcRenderer.invoke('forge:toggleMcpServer', sessionId, name, enabled),
   backgroundTask: (sessionId, toolUseId) =>
     ipcRenderer.invoke('forge:backgroundTask', sessionId, toolUseId),
+
+  pickFiles: (cwd) => ipcRenderer.invoke('forge:pickFiles', cwd),
+  revealInExplorer: (cwd, pathStr) => ipcRenderer.invoke('forge:revealInExplorer', cwd, pathStr),
 
   listSkills: (sessionId) => ipcRenderer.invoke('forge:listSkills', sessionId),
   listMarketplacePlugins: () => ipcRenderer.invoke('forge:listMarketplacePlugins'),

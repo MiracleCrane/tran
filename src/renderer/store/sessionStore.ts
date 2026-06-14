@@ -4,7 +4,8 @@ import type {
   StartSessionOptions,
   PermissionResponsePayload,
   SessionListItem,
-  HistoryMessage
+  HistoryMessage,
+  PickedFile
 } from '../../shared/ipc'
 import type {
   TranscriptItem,
@@ -37,7 +38,7 @@ interface SessionStore {
   tasks: SubagentTask[]
 
   startSession: (args: StartArgs) => Promise<void>
-  sendMessage: (text: string) => Promise<void>
+  sendMessage: (text: string, attachments?: PickedFile[]) => Promise<void>
   interrupt: () => Promise<void>
   setModel: (model: string) => Promise<void>
   reset: () => void
@@ -342,17 +343,47 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     scheduleInitWatchdog(get, set)
   },
 
-  async sendMessage(text) {
+  async sendMessage(text, attachments) {
     const meta = get().meta
     if (!meta) return
+    const atts = attachments ?? []
+    // Build the wire content: plain text, or content blocks when there are
+    // attachments (image → image block, text → inlined, other → path ref).
+    let content: string | unknown[]
+    if (atts.length) {
+      const blocks: unknown[] = []
+      if (text.trim()) blocks.push({ type: 'text', text })
+      for (const a of atts) {
+        if (a.kind === 'image') {
+          blocks.push({
+            type: 'image',
+            source: { type: 'base64', media_type: a.mimeType, data: a.data }
+          })
+        } else if (a.kind === 'text') {
+          blocks.push({
+            type: 'text',
+            text: `\n\n📎 ${a.name}:\n\`\`\`\n${a.data}\n\`\`\``
+          })
+        } else {
+          blocks.push({ type: 'text', text: `\n\n📎 ${a.path}` })
+        }
+      }
+      content = blocks
+    } else {
+      content = text
+    }
+    // Optimistic render: show the typed text plus the attachment names.
+    const displayText = atts.length
+      ? `${text}${atts.map((a) => `\n📎 ${a.name}`).join('')}`
+      : text
     set({
       items: [
         ...get().items,
-        { id: uid(), kind: 'user', text, parentToolUseId: null }
+        { id: uid(), kind: 'user', text: displayText, parentToolUseId: null }
       ],
       status: { ...get().status, running: true }
     })
-    await window.api.sendMessage(meta.sessionId, text)
+    await window.api.sendMessage(meta.sessionId, content)
   },
 
   async interrupt() {

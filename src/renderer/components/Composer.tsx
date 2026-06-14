@@ -1,5 +1,6 @@
 import { useEffect, useState, type FocusEvent, type KeyboardEvent } from 'react'
 import { useSessionStore } from '../store/sessionStore'
+import type { PickedFile } from '../../shared/ipc'
 
 const DEFAULT_MODELS = [
   { id: 'claude-opus-4-8', label: 'Opus 4.8' },
@@ -17,6 +18,7 @@ export default function Composer(): JSX.Element {
   const [text, setText] = useState('')
   const [models, setModels] = useState(DEFAULT_MODELS)
   const [modelOpen, setModelOpen] = useState(false)
+  const [attachments, setAttachments] = useState<PickedFile[]>([])
 
   // Override the built-in model list with the user's configured list (Settings).
   useEffect(() => {
@@ -25,11 +27,22 @@ export default function Composer(): JSX.Element {
     })
   }, [])
 
+  const pickAttachment = async (): Promise<void> => {
+    if (!meta) return
+    const files = await window.api.pickFiles(meta.cwd)
+    if (files.length) setAttachments((prev) => [...prev, ...files])
+  }
+
+  const removeAttachment = (i: number): void =>
+    setAttachments((prev) => prev.filter((_, idx) => idx !== i))
+
   const submit = async (): Promise<void> => {
     const value = text.trim()
-    if (!value) return
+    const atts = attachments
+    if (!value && atts.length === 0) return
     setText('')
-    await sendMessage(value)
+    setAttachments([])
+    await sendMessage(value, atts.length ? atts : undefined)
   }
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -66,7 +79,45 @@ export default function Composer(): JSX.Element {
             }
             className="max-h-40 min-h-[64px] w-full resize-none rounded-xl border border-transparent bg-transparent px-3 py-2 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-white/10 focus:bg-white/[0.025]"
           />
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-1 pt-2">
+              {attachments.map((a, i) => (
+                <span
+                  key={`${a.path}-${i}`}
+                  className="glass-control flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-zinc-300"
+                  title={a.path}
+                >
+                  <span className="text-zinc-500">{a.kind === 'image' ? '🖼' : a.kind === 'text' ? '📄' : '📎'}</span>
+                  <span className="max-w-[12rem] truncate">{a.name}</span>
+                  <button
+                    onClick={() => removeAttachment(i)}
+                    className="text-zinc-500 transition hover:text-red-300"
+                    title="移除"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2 px-1 pt-2">
+            <button
+              type="button"
+              onClick={() => void pickAttachment()}
+              disabled={!meta}
+              className="glass-control flex h-9 w-9 items-center justify-center rounded-xl text-zinc-300 transition hover:bg-white/[0.09] disabled:opacity-40"
+              title="添加附件(从工作目录选择文件)"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7l8.8-8.8a3.5 3.5 0 0 1 5 5L10.4 18a2 2 0 0 1-2.8-2.8l7.7-7.7"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
             <span className="px-2 text-[11px] text-zinc-500">
               <kbd className="font-sans text-zinc-400">Enter</kbd> 发送 ·{' '}
               <kbd className="font-sans text-zinc-400">Shift+Enter</kbd> 换行
@@ -151,7 +202,7 @@ export default function Composer(): JSX.Element {
               )}
               <button
                 onClick={() => void submit()}
-                disabled={!text.trim()}
+                disabled={!text.trim() && attachments.length === 0}
                 className="accent-soft-button h-10 shrink-0 rounded-xl px-5 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 发送

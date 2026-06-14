@@ -153,6 +153,18 @@ export interface MarketplacePlugin {
   marketplace: string
 }
 
+/** A file the user picked to attach. Images carry base64 data; text files
+ *  carry their (size-capped) content; others carry just the path reference. */
+export interface PickedFile {
+  path: string
+  name: string
+  kind: 'image' | 'text' | 'other'
+  mimeType: string
+  /** image: base64 (no data: prefix); text: utf-8 content; other: '' */
+  data: string
+  size: number
+}
+
 /** A model shown in the Composer dropdown (user-editable in Settings). */
 export interface ComposerModel {
   id: string
@@ -181,7 +193,9 @@ export interface HistoryMessage {
 /** Surface exposed on window.api via the preload contextBridge. */
 export interface ForgeApi {
   startSession(opts: StartSessionOptions): Promise<StartSessionResult>
-  sendMessage(sessionId: string, text: string): Promise<void>
+  /** Send a user message. `content` is either a text string or an array of
+   *  content blocks (text + image) when attachments are present. */
+  sendMessage(sessionId: string, content: string | unknown[]): Promise<void>
   interrupt(sessionId: string): Promise<void>
   setModel(sessionId: string, model: string): Promise<void>
   setPermissionMode(sessionId: string, mode: PermissionMode): Promise<void>
@@ -204,6 +218,13 @@ export interface ForgeApi {
   /** Move a running foreground subagent/Bash (by its tool_use_id) to the
    *  background, freeing the main agent's turn. Omit id = background all. */
   backgroundTask(sessionId: string, toolUseId?: string): Promise<boolean>
+
+  /** --- Attachments & file links --- */
+  /** Open a file picker rooted at cwd, read the chosen files, and return them
+   *  (images as base64, text files as content) for attaching to a message. */
+  pickFiles(cwd: string): Promise<PickedFile[]>
+  /** Reveal a file (path resolved against cwd) in the OS file manager. */
+  revealInExplorer(cwd: string, pathStr: string): Promise<boolean>
 
   /** Persist a server to a config file (user/project/local scope). Does NOT touch
    *  the live session — the caller restarts the session to apply. */

@@ -39,7 +39,7 @@ interface ActiveSession {
   id: string
   // deno-lint-ignore no-explicit-any
   query: any
-  push: (text: string) => void
+  push: (content: string | unknown[]) => void
   close: () => void
 }
 
@@ -177,14 +177,14 @@ export class AgentBridge {
     }
   }
 
-  send(sessionId: string, text: string): void {
-    log('bridge', `send session=${sessionId} sessionsKnown=${this.sessions.size} text=${JSON.stringify(text.slice(0, 80))}`)
+  send(sessionId: string, content: string | unknown[]): void {
+    log('bridge', `send session=${sessionId} sessionsKnown=${this.sessions.size} content=${typeof content === 'string' ? JSON.stringify(content.slice(0, 80)) : '(blocks)'}`)
     const s = this.sessions.get(sessionId)
     if (!s) {
       log('bridge', `send FAILED: session not found ${sessionId}`)
       throw new Error(`session not found: ${sessionId}`)
     }
-    s.push(text)
+    s.push(content)
   }
 
   async interrupt(sessionId: string): Promise<void> {
@@ -308,7 +308,7 @@ export class AgentBridge {
 /** Push-controller-backed async iterable for streaming-input mode. */
 function makeInputStream(): {
   iterable: AsyncIterable<SDKUserMessage>
-  push: (text: string) => void
+  push: (content: string | unknown[]) => void
   close: () => void
 } {
   const queue: SDKUserMessage[] = []
@@ -334,13 +334,13 @@ function makeInputStream(): {
 
   return {
     iterable,
-    push(text: string) {
+    push(content: string | unknown[]) {
       if (closed) return
       queue.push({
         type: 'user',
         parent_tool_use_id: null,
-        message: { role: 'user', content: text }
-      })
+        message: { role: 'user', content }
+      } as unknown as SDKUserMessage)
       resolveNext?.()
       resolveNext = null
     },
