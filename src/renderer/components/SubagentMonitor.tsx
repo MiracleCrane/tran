@@ -189,7 +189,7 @@ export default function SubagentMonitor({ onClose }: Props): JSX.Element {
                   <div
                     key={t.taskId}
                     onClick={() => setSelectedId(t.taskId)}
-                    className="group relative w-full cursor-pointer rounded-lg px-2.5 py-2 transition hover:bg-bg-hover"
+                    className="w-full cursor-pointer rounded-lg px-2.5 py-2 transition hover:bg-bg-hover"
                   >
                     <div className="flex items-center gap-2">
                       <span className={`h-2 w-2 shrink-0 rounded-full ${m.dot}`} />
@@ -209,21 +209,21 @@ export default function SubagentMonitor({ onClose }: Props): JSX.Element {
                       {t.toolUses != null && <span>· {t.toolUses} 工具</span>}
                       {t.durationMs != null && <span>· {fmtDuration(t.durationMs)}</span>}
                       {t.lastToolName && <span className="truncate">· {t.lastToolName}</span>}
+                      {t.status === 'running' && !t.isBackgrounded && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void backgroundTask(t.taskId)
+                          }}
+                          className="ml-auto rounded border border-border-subtle bg-bg-elev px-2 py-0.5 text-[10px] text-zinc-300 transition hover:bg-bg-hover hover:text-zinc-100"
+                          title="转入后台,释放主会话以便继续对话"
+                        >
+                          转入后台
+                        </button>
+                      )}
                     </div>
                     {t.summary && t.status !== 'running' && (
                       <div className="mt-1 pl-4 text-[10px] text-zinc-500">{t.summary}</div>
-                    )}
-                    {t.status === 'running' && !t.isBackgrounded && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          void backgroundTask(t.taskId)
-                        }}
-                        className="absolute right-2 top-2 rounded border border-border-subtle bg-bg-elev px-1.5 py-0.5 text-[10px] text-zinc-400 opacity-0 transition hover:bg-bg-hover hover:text-zinc-200 group-hover:opacity-100"
-                        title="转入后台,释放主会话以便继续对话"
-                      >
-                        转入后台
-                      </button>
                     )}
                   </div>
                 )
