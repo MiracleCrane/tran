@@ -51,7 +51,7 @@ export default function Composer(): JSX.Element {
   return (
     <div className="bg-transparent px-6 pb-3 pt-2">
       <div className="mx-auto max-w-5xl">
-        <div className="glass-panel rounded-[18px] p-3">
+        <div className="glass-panel overflow-visible rounded-[18px] p-3">
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -107,7 +107,7 @@ export default function Composer(): JSX.Element {
                   {modelOpen && (
                     <div
                       role="listbox"
-                      className="glass-panel absolute bottom-full right-0 z-30 mb-2 w-48 overflow-hidden rounded-2xl p-1"
+                      className="glass-panel absolute bottom-full right-0 z-50 mb-2 w-48 overflow-hidden rounded-2xl p-1"
                     >
                       {models.map((m) => {
                         const active = m.id === meta.model
