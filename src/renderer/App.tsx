@@ -11,6 +11,7 @@ import McpPanel from './components/McpPanel'
 import ProvidersPanel from './components/ProvidersPanel'
 import SkillsPanel from './components/SkillsPanel'
 import SettingsPanel from './components/SettingsPanel'
+import ErrorBoundary from './components/ErrorBoundary'
 
 export default function App(): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
@@ -46,36 +47,38 @@ export default function App(): JSX.Element {
   if (!meta) return <Onboarding />
 
   return (
-    <div className="flex h-screen bg-bg-base">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        {view === 'mcp' ? (
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <McpPanel />
-          </div>
-        ) : view === 'providers' ? (
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <ProvidersPanel />
-          </div>
-        ) : view === 'skills' ? (
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <SkillsPanel />
-          </div>
-        ) : view === 'settings' ? (
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <SettingsPanel />
-          </div>
-        ) : (
-          <>
+    <ErrorBoundary>
+      <div className="flex h-screen bg-bg-base">
+        <Sidebar />
+        <div className="flex min-w-0 flex-1 flex-col">
+          {view === 'mcp' ? (
             <div className="min-h-0 flex-1 overflow-hidden">
-              <Transcript />
+              <McpPanel />
             </div>
-            <Composer />
-            <StatusBar />
-          </>
-        )}
+          ) : view === 'providers' ? (
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <ProvidersPanel />
+            </div>
+          ) : view === 'skills' ? (
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <SkillsPanel />
+            </div>
+          ) : view === 'settings' ? (
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <SettingsPanel />
+            </div>
+          ) : (
+            <>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <Transcript />
+              </div>
+              <Composer />
+              <StatusBar />
+            </>
+          )}
+        </div>
+        <PermissionModal />
       </div>
-      <PermissionModal />
-    </div>
+    </ErrorBoundary>
   )
 }

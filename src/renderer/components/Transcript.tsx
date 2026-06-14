@@ -65,22 +65,44 @@ function ThinkingBlock({ text }: { text: string }): JSX.Element {
 
 /** Render a list of nodes; assistant nodes pass their tool blocks' child nodes
  *  down to ToolCallCard, which renders them nested. Used at the top level and
- *  recursively inside subagent tool cards. */
-function MessageNodes({ nodes, depth }: { nodes: ItemNode[]; depth: number }): JSX.Element {
+ *  recursively inside subagent tool cards. A `seen` set + depth cap guarantee we
+ *  can't loop forever even if a malformed transcript produced a cycle. */
+const MAX_DEPTH = 16
+function MessageNodes({
+  nodes,
+  depth,
+  seen
+}: {
+  nodes: ItemNode[]
+  depth: number
+  seen: Set<string>
+}): JSX.Element {
+  if (depth > MAX_DEPTH) return <></>
   return (
     <>
-      {nodes.map((n) =>
-        n.item.kind === 'user' ? (
-          <UserMessage key={n.item.id} item={n.item as UserItem} />
-        ) : (
-          <AssistantMessage key={n.item.id} node={n} depth={depth} />
-        )
-      )}
+      {nodes
+        .filter((n) => !seen.has(n.item.id))
+        .map((n) => {
+          const nextSeen = new Set(seen).add(n.item.id)
+          return n.item.kind === 'user' ? (
+            <UserMessage key={n.item.id} item={n.item as UserItem} />
+          ) : (
+            <AssistantMessage key={n.item.id} node={n} depth={depth} seen={nextSeen} />
+          )
+        })}
     </>
   )
 }
 
-function AssistantMessage({ node, depth }: { node: ItemNode; depth: number }): JSX.Element {
+function AssistantMessage({
+  node,
+  depth,
+  seen
+}: {
+  node: ItemNode
+  depth: number
+  seen: Set<string>
+}): JSX.Element {
   const item = node.item as AssistantItem
   return (
     <div className={depth === 0 ? 'max-w-[92%]' : ''}>
@@ -99,7 +121,9 @@ function AssistantMessage({ node, depth }: { node: ItemNode; depth: number }): J
               key={i}
               block={block}
               childNodes={node.childrenByTool.get(block.toolUseId) ?? []}
-              renderNodes={(children) => <MessageNodes nodes={children} depth={depth + 1} />}
+              renderNodes={(children) => (
+                <MessageNodes nodes={children} depth={depth + 1} seen={seen} />
+              )}
             />
           )
         })}
@@ -152,7 +176,7 @@ export default function Transcript(): JSX.Element {
               <span className="font-mono">列出文件并总结这个项目</span>
             </div>
           )}
-          <MessageNodes nodes={roots} depth={0} />
+          <MessageNodes nodes={roots} depth={0} seen={new Set()} />
           {compacting && <div className="text-center text-xs text-zinc-500">正在压缩上下文…</div>}
           {running && (
             <div className="flex items-center gap-2 text-xs text-zinc-500">
