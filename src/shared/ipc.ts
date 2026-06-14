@@ -246,6 +246,10 @@ export interface ForgeApi {
   getPreferences(): Promise<Preferences>
   savePreferences(prefs: Preferences): Promise<Preferences>
 
+  minimizeWindow(): Promise<void>
+  toggleMaximizeWindow(): Promise<void>
+  closeWindow(): Promise<void>
+
   pickDirectory(): Promise<string | null>
   getApiKey(): Promise<string | null>
   setApiKey(key: string): Promise<void>

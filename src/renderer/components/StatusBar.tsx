@@ -33,37 +33,39 @@ export default function StatusBar(): JSX.Element {
 
   return (
     <>
-      <div className="flex items-center gap-4 border-t border-border-subtle bg-bg-panel px-6 py-1.5 text-[11px] text-zinc-500">
-        {runningCount > 0 && (
-          <button
-            onClick={() => setMonitorOpen((o) => !o)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-emerald-950/40 px-2 py-0.5 text-emerald-300 transition hover:bg-emerald-950/70"
-            title="查看子代理"
-          >
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-            {runningCount} 个子代理
-          </button>
-        )}
-        <span className="truncate font-mono" title={meta.cwd}>
-          {meta.cwd}
-        </span>
-        <span className="text-zinc-700">·</span>
-        <span>{modeLabel}</span>
-        {status.turns != null && (
-          <>
-            <span className="text-zinc-700">·</span>
-            <span>{status.turns} 轮</span>
-          </>
-        )}
-        <span className="text-zinc-700">·</span>
-        <span title="输入 / 输出 token">
-          {fmt(status.inputTokens)} / {fmt(status.outputTokens)}
-        </span>
-        <span className="ml-auto tabular-nums">费用 {cost}</span>
-        {status.stopReason && (
-          <span className="text-zinc-600">· 结束: {status.stopReason}</span>
-        )}
-        {status.error && <span className="text-red-400">· {status.error}</span>}
+      <div className="bg-transparent px-6 pb-4">
+        <div className="glass-panel-soft mx-auto flex max-w-5xl items-center gap-4 rounded-2xl px-4 py-2 text-[11px] text-zinc-500">
+          {runningCount > 0 && (
+            <button
+              onClick={() => setMonitorOpen((o) => !o)}
+              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-950/40 px-2 py-0.5 text-emerald-300 transition hover:bg-emerald-950/70"
+              title="查看子代理"
+            >
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+              {runningCount} 个子代理
+            </button>
+          )}
+          <span className="truncate font-mono" title={meta.cwd}>
+            {meta.cwd}
+          </span>
+          <span className="text-zinc-700">·</span>
+          <span>{modeLabel}</span>
+          {status.turns != null && (
+            <>
+              <span className="text-zinc-700">·</span>
+              <span>{status.turns} 轮</span>
+            </>
+          )}
+          <span className="text-zinc-700">·</span>
+          <span title="输入 / 输出 token">
+            {fmt(status.inputTokens)} / {fmt(status.outputTokens)}
+          </span>
+          <span className="ml-auto tabular-nums">费用 {cost}</span>
+          {status.stopReason && (
+            <span className="text-zinc-600">· 结束: {status.stopReason}</span>
+          )}
+          {status.error && <span className="text-red-400">· {status.error}</span>}
+        </div>
       </div>
       {monitorOpen && <SubagentMonitor onClose={() => setMonitorOpen(false)} />}
     </>

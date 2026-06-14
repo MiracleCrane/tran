@@ -58,7 +58,7 @@ export default function Onboarding(): JSX.Element {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-bg-base px-6">
+    <div className="flex h-full items-center justify-center bg-transparent px-6">
       <div className="w-full max-w-lg rounded-2xl border border-border-subtle bg-bg-panel p-8 shadow-2xl">
         <div className="mb-1 text-2xl font-semibold text-zinc-100">Forge</div>
         <div className="mb-6 text-sm text-zinc-400">

@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from 'react'
+import { useEffect, useState, type FocusEvent, type KeyboardEvent } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 
 const DEFAULT_MODELS = [
@@ -16,6 +16,7 @@ export default function Composer(): JSX.Element {
   const setModel = useSessionStore((s) => s.setModel)
   const [text, setText] = useState('')
   const [models, setModels] = useState(DEFAULT_MODELS)
+  const [modelOpen, setModelOpen] = useState(false)
 
   // Override the built-in model list with the user's configured list (Settings).
   useEffect(() => {
@@ -38,10 +39,19 @@ export default function Composer(): JSX.Element {
     }
   }
 
+  const closeModelMenuOnBlur = (e: FocusEvent<HTMLDivElement>): void => {
+    const next = e.relatedTarget
+    if (!(next instanceof Node) || !e.currentTarget.contains(next)) {
+      setModelOpen(false)
+    }
+  }
+
+  const selectedModel = models.find((m) => m.id === meta?.model) ?? null
+
   return (
-    <div className="border-t border-border-subtle bg-bg-panel px-6 py-3">
-      <div className="mx-auto max-w-4xl">
-        <div className="flex items-end gap-2">
+    <div className="bg-transparent px-6 pb-3 pt-2">
+      <div className="mx-auto max-w-5xl">
+        <div className="glass-panel rounded-[18px] p-3">
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -54,42 +64,100 @@ export default function Composer(): JSX.Element {
                   ? 'Claude 正在处理…(可继续发送,消息会排队)'
                   : '给 Claude 发消息…'
             }
-            className="max-h-40 min-h-[44px] flex-1 resize-none rounded-xl border border-border-subtle bg-bg-elev px-3.5 py-2.5 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-accent"
+            className="max-h-40 min-h-[64px] w-full resize-none rounded-xl border border-transparent bg-transparent px-3 py-2 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-white/10 focus:bg-white/[0.025]"
           />
-          {running && (
-            <button
-              onClick={() => void interrupt()}
-              className="h-[44px] shrink-0 rounded-xl border border-red-900/60 bg-red-950/40 px-4 text-sm font-medium text-red-300 hover:bg-red-950/60"
-              title="中断当前处理"
-            >
-              停止
-            </button>
-          )}
-          <button
-            onClick={() => void submit()}
-            disabled={!text.trim()}
-            className="h-[44px] shrink-0 rounded-xl bg-accent px-5 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            发送
-          </button>
-        </div>
-        <div className="mt-2 flex items-center gap-3 text-[11px] text-zinc-600">
-          <span>
-            <kbd className="font-sans">Enter</kbd> 发送 · <kbd className="font-sans">Shift+Enter</kbd> 换行
-          </span>
-          {meta && (
-            <select
-              value={meta.model}
-              onChange={(e) => void setModel(e.target.value)}
-              className="ml-auto rounded border border-border-subtle bg-bg-elev px-2 py-0.5 text-[11px] text-zinc-400 outline-none"
-            >
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          )}
+          <div className="flex flex-wrap items-center gap-2 px-1 pt-2">
+            <span className="px-2 text-[11px] text-zinc-500">
+              <kbd className="font-sans text-zinc-400">Enter</kbd> 发送 ·{' '}
+              <kbd className="font-sans text-zinc-400">Shift+Enter</kbd> 换行
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              {meta && (
+                <div
+                  className="relative"
+                  onBlur={closeModelMenuOnBlur}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setModelOpen(false)
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setModelOpen((open) => !open)}
+                    className="glass-control flex h-10 min-w-36 items-center gap-2 rounded-xl px-3 text-left text-xs text-zinc-200 transition hover:bg-white/[0.09]"
+                    aria-haspopup="listbox"
+                    aria-expanded={modelOpen}
+                  >
+                    <span className="flex-1 truncate">{selectedModel?.label ?? meta.model}</span>
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      className={`shrink-0 text-zinc-500 transition ${modelOpen ? 'rotate-180' : ''}`}
+                    >
+                      <path
+                        d="M6 9l6 6 6-6"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                  {modelOpen && (
+                    <div
+                      role="listbox"
+                      className="glass-panel absolute bottom-full right-0 z-30 mb-2 w-48 overflow-hidden rounded-2xl p-1"
+                    >
+                      {models.map((m) => {
+                        const active = m.id === meta.model
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            role="option"
+                            aria-selected={active}
+                            onClick={() => {
+                              setModelOpen(false)
+                              void setModel(m.id)
+                            }}
+                            className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs transition ${
+                              active
+                                ? 'bg-white/[0.1] text-zinc-100'
+                                : 'text-zinc-400 hover:bg-white/[0.07] hover:text-zinc-200'
+                            }`}
+                          >
+                            <span
+                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                active ? 'bg-accent' : 'bg-transparent'
+                              }`}
+                            />
+                            <span className="truncate">{m.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+              {running && (
+                <button
+                  onClick={() => void interrupt()}
+                  className="h-10 shrink-0 rounded-xl border border-red-900/60 bg-red-950/40 px-4 text-sm font-medium text-red-300 hover:bg-red-950/60"
+                  title="中断当前处理"
+                >
+                  停止
+                </button>
+              )}
+              <button
+                onClick={() => void submit()}
+                disabled={!text.trim()}
+                className="accent-soft-button h-10 shrink-0 rounded-xl px-5 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                发送
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

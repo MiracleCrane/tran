@@ -39,6 +39,12 @@ import type {
 } from '../shared/ipc'
 
 export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBridge {
+  const withWindow = (action: (win: BrowserWindow) => void): void => {
+    const win = getMainWindow()
+    if (!win || win.isDestroyed()) return
+    action(win)
+  }
+
   const send = <T>(channel: string, payload: T): void => {
     const win = getMainWindow()
     if (!win || win.isDestroyed()) {
@@ -139,6 +145,19 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
   ipcMain.handle('forge:savePreferences', async (_e, prefs: Preferences): Promise<Preferences> =>
     savePreferences(prefs)
   )
+
+  ipcMain.handle('forge:minimizeWindow', async (): Promise<void> => {
+    withWindow((win) => win.minimize())
+  })
+  ipcMain.handle('forge:toggleMaximizeWindow', async (): Promise<void> => {
+    withWindow((win) => {
+      if (win.isMaximized()) win.unmaximize()
+      else win.maximize()
+    })
+  })
+  ipcMain.handle('forge:closeWindow', async (): Promise<void> => {
+    withWindow((win) => win.close())
+  })
 
   ipcMain.handle('forge:saveMcpServer', async (_e, args: SaveMcpServerArgs): Promise<void> => {
     saveMcpServer(args)

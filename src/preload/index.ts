@@ -34,6 +34,11 @@ const api: ForgeApi = {
 
   getPreferences: () => ipcRenderer.invoke('forge:getPreferences'),
   savePreferences: (prefs) => ipcRenderer.invoke('forge:savePreferences', prefs),
+
+  minimizeWindow: () => ipcRenderer.invoke('forge:minimizeWindow'),
+  toggleMaximizeWindow: () => ipcRenderer.invoke('forge:toggleMaximizeWindow'),
+  closeWindow: () => ipcRenderer.invoke('forge:closeWindow'),
+
   saveMcpServer: (args) => ipcRenderer.invoke('forge:saveMcpServer', args),
   deleteMcpServer: (args) => ipcRenderer.invoke('forge:deleteMcpServer', args),
 

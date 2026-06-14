@@ -5,17 +5,26 @@ import { seedDefaultIfNeeded } from './providers'
 
 let mainWindow: BrowserWindow | null = null
 
+const WINDOW_ACCENT_COLOR = '#DF765F'
+const WINDOW_BACKGROUND_COLOR = '#00000000'
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 832,
     minWidth: 920,
     minHeight: 600,
-    backgroundColor: '#0e0f13',
+    backgroundColor: WINDOW_BACKGROUND_COLOR,
+    transparent: true,
+    accentColor: process.platform === 'win32' ? WINDOW_ACCENT_COLOR : undefined,
+    vibrancy: process.platform === 'darwin' ? 'under-window' : undefined,
     title: 'Forge',
     show: false,
     autoHideMenuBar: true,
-    titleBarStyle: process.platform === 'win32' ? 'default' : 'hiddenInset',
+    frame: false,
+    hasShadow: false,
+    thickFrame: false,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : undefined,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -26,6 +35,12 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+  if (process.platform === 'win32') {
+    mainWindow.setAccentColor(WINDOW_ACCENT_COLOR)
+    mainWindow.setBackgroundMaterial('none')
+    mainWindow.setBackgroundColor(WINDOW_BACKGROUND_COLOR)
+  }
+
   mainWindow.on('ready-to-show', () => mainWindow?.show())
 
   // Open external links in the system browser, not inside the app.

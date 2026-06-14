@@ -114,7 +114,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
       onClick={() => setOpen((o) => !o)}
       disabled={starting}
       title={current?.path ?? meta?.cwd ?? ''}
-      className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 transition hover:bg-bg-hover/60 hover:text-zinc-200 disabled:opacity-50"
+      className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-50"
     >
       <FolderIcon />
     </button>
@@ -123,7 +123,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
       onClick={() => setOpen((o) => !o)}
       disabled={starting}
       title={current?.path ?? meta?.cwd ?? ''}
-      className="flex w-full items-center gap-2 rounded-lg border border-border-subtle bg-bg-elev px-2.5 py-1.5 text-xs text-zinc-300 transition hover:bg-bg-hover disabled:opacity-50"
+      className="glass-control flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs text-zinc-300 transition hover:bg-white/[0.075] disabled:opacity-50"
     >
       <FolderIcon />
       <span className="flex-1 truncate text-left">{currentLabel}</span>
@@ -139,7 +139,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
           {/* outside-click catcher */}
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div
-            className={`absolute z-50 mt-1 overflow-hidden rounded-lg border border-border-subtle bg-bg-elev shadow-xl ${
+            className={`glass-panel absolute z-50 mt-1 overflow-hidden rounded-2xl shadow-xl ${
               collapsed ? 'left-0 w-56' : 'left-0 right-0'
             }`}
           >
@@ -163,15 +163,15 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
                           else if (e.key === 'Escape') setEditingPath(null)
                         }}
                         onBlur={() => void commitRename(p.path)}
-                        className="m-1 w-[calc(100%-0.5rem)] rounded border border-accent bg-bg-base px-2 py-1 text-xs text-zinc-100 outline-none"
+                        className="m-1 w-[calc(100%-0.5rem)] rounded-lg border border-accent/70 bg-bg-base/80 px-2 py-1 text-xs text-zinc-100 outline-none"
                       />
                     ) : (
                       <button
                         onClick={() => void onSwitch(p.path)}
-                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition ${
+                        className={`flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-xs transition ${
                           isCurrent
-                            ? 'text-zinc-100'
-                            : 'text-zinc-400 hover:bg-bg-hover hover:text-zinc-200'
+                            ? 'bg-white/[0.07] text-zinc-100'
+                            : 'text-zinc-400 hover:bg-white/[0.055] hover:text-zinc-200'
                         }`}
                       >
                         <span
@@ -208,7 +208,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
                                 e.stopPropagation()
                                 setConfirmPath(null)
                               }}
-                              className="rounded bg-bg-base px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-bg-hover"
+                              className="rounded bg-bg-base/80 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-bg-hover"
                             >
                               取消
                             </button>
@@ -221,7 +221,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
                                 setEditingPath(p.path)
                                 setEditText(p.name)
                               }}
-                              className="rounded p-1 text-zinc-500 transition hover:bg-bg-hover hover:text-zinc-200"
+                              className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
                               title="重命名"
                             >
                               <EditIcon />
@@ -231,7 +231,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
                                 e.stopPropagation()
                                 setConfirmPath(p.path)
                               }}
-                              className="rounded p-1 text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
+                              className="rounded-lg p-1 text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
                               title="删除"
                             >
                               <TrashIcon />
@@ -244,10 +244,10 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
                 )
               })}
             </div>
-            <div className="border-t border-border-subtle p-1">
+            <div className="border-t border-white/10 p-1">
               <button
                 onClick={() => void addNew()}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-zinc-400 transition hover:bg-bg-hover hover:text-zinc-200"
+                className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-xs text-zinc-400 transition hover:bg-white/[0.055] hover:text-zinc-200"
               >
                 <PlusIcon /> 添加项目…
               </button>

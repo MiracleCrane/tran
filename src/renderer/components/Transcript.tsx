@@ -4,6 +4,18 @@ import type { AssistantBlock, AssistantItem, UserItem, TranscriptItem, ItemNode 
 import MessageText from './MessageText'
 import ToolCallCard from './ToolCallCard'
 
+const TerminalGlyph = (): JSX.Element => (
+  <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+    <path
+      d="M7 8l4 4-4 4M13 16h4"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
 /** Group the flat `items` into a forest. Top level = items with no
  *  parentToolUseId; an assistant item's tool_use block (id X) owns every item
  *  whose parentToolUseId === X (the forwarded subagent conversation). Recursive
@@ -44,7 +56,7 @@ function buildForest(items: TranscriptItem[]): ItemNode[] {
 function UserMessage({ item }: { item: UserItem }): JSX.Element {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] rounded-2xl rounded-tr-sm border border-border-subtle bg-bg-elev px-4 py-2.5">
+      <div className="max-w-[85%] rounded-[16px] rounded-tr-md border border-white/10 bg-white/[0.065] px-4 py-2.5 shadow-lg shadow-black/10 backdrop-blur">
         <div className="whitespace-pre-wrap break-words text-sm text-zinc-200">{item.text}</div>
       </div>
     </div>
@@ -56,7 +68,7 @@ function ThinkingBlock({ text }: { text: string }): JSX.Element {
   return (
     <details
       open
-      className="my-1.5 rounded-lg border border-border-subtle/50 bg-bg-panel/50 px-3 py-2"
+      className="glass-panel-soft my-1.5 rounded-xl px-3 py-2"
     >
       <summary className="cursor-pointer select-none text-xs font-medium text-zinc-500 hover:text-zinc-400">
         思考过程
@@ -154,11 +166,24 @@ export default function Transcript(): JSX.Element {
   return (
     <div className="relative h-full">
       <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
-        <div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 py-6">
+        <div className="mx-auto flex max-w-5xl flex-col gap-4 px-6 py-6">
           {items.length === 0 && (
-            <div className="mt-10 text-center text-sm text-zinc-600">
-              发送消息开始对话。试试:{' '}
-              <span className="font-mono">列出文件并总结这个项目</span>
+            <div className="flex min-h-[52vh] flex-col items-center justify-center text-center">
+              <div className="glass-panel mb-7 flex h-20 w-20 items-center justify-center rounded-[18px] text-zinc-100 shadow-[0_0_34px_rgba(94,168,255,0.18)]">
+                <TerminalGlyph />
+              </div>
+              <h1 className="text-2xl font-semibold text-zinc-100">发送消息开始对话</h1>
+              <p className="mt-2 text-sm text-zinc-500">我可以帮助你编写代码、分析问题、执行任务</p>
+              <div className="mt-7 flex flex-wrap justify-center gap-3">
+                {['列出文件', '总结项目', '查找代码', '修复问题'].map((label) => (
+                  <span
+                    key={label}
+                    className="glass-control rounded-xl px-4 py-2 text-sm text-zinc-300"
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
           <MessageNodes nodes={roots} depth={0} seen={new Set()} />
@@ -175,7 +200,7 @@ export default function Transcript(): JSX.Element {
       {!stick && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-border-subtle bg-bg-panel px-3 py-1.5 text-xs text-zinc-300 shadow-lg hover:bg-bg-hover"
+          className="glass-control absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full px-3 py-1.5 text-xs text-zinc-300 shadow-lg hover:bg-white/[0.075]"
         >
           ↓ 最新
         </button>

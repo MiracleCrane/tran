@@ -6,13 +6,13 @@ module.exports = {
     extend: {
       colors: {
         bg: {
-          base: '#0e0f13',
-          panel: '#15171c',
-          elev: '#1c1f26',
-          hover: '#232733'
+          base: 'rgba(14, 15, 20, 0.26)',
+          panel: 'rgba(28, 29, 36, 0.34)',
+          elev: 'rgba(48, 48, 58, 0.38)',
+          hover: 'rgba(76, 76, 88, 0.34)'
         },
-        border: { subtle: '#272b34' },
-        accent: '#d97757'
+        border: { subtle: 'rgba(238, 232, 226, 0.16)' },
+        accent: '#df765f'
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],

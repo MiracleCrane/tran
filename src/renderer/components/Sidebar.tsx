@@ -165,12 +165,12 @@ export default function Sidebar(): JSX.Element {
   /* ---------- collapsed: icon rail ---------- */
   if (collapsed) {
     const iconBtn = (on: boolean): string =>
-      `flex h-9 w-9 items-center justify-center rounded-lg transition ${
-        on ? 'bg-bg-hover text-zinc-100' : 'text-zinc-400 hover:bg-bg-hover/60 hover:text-zinc-200'
+      `flex h-9 w-9 items-center justify-center rounded-xl transition ${
+        on ? 'glass-active text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200'
       }`
     return (
-      <div className="flex w-14 shrink-0 flex-col items-center border-r border-border-subtle bg-bg-panel py-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">
+      <div className="glass-sidebar flex w-14 shrink-0 flex-col items-center rounded-[18px] border py-3">
+        <div className="accent-soft-button flex h-8 w-8 items-center justify-center rounded-xl text-sm font-bold text-white">
           F
         </div>
         <div className="mt-2">
@@ -181,7 +181,7 @@ export default function Sidebar(): JSX.Element {
             void newChat()
             setView('chat')
           }}
-          className="mt-2 flex h-9 w-9 items-center justify-center rounded-lg bg-bg-elev text-zinc-300 transition hover:bg-bg-hover"
+          className="accent-soft-button mt-2 flex h-9 w-9 items-center justify-center rounded-xl text-white transition hover:brightness-110"
           title="新建对话"
         >
           <PlusIcon />
@@ -201,18 +201,18 @@ export default function Sidebar(): JSX.Element {
           <SkillsIcon />
         </button>
         <button
-          onClick={() => setView('providers')}
-          className={`mt-1 ${iconBtn(view === 'providers')}`}
-          title="运营商"
-        >
-          <ShieldIcon />
-        </button>
-        <button
           onClick={() => setView('mcp')}
           className={`mt-1 ${iconBtn(view === 'mcp')}`}
           title="MCP 服务器"
         >
           <McpIcon />
+        </button>
+        <button
+          onClick={() => setView('providers')}
+          className={`mt-1 ${iconBtn(view === 'providers')}`}
+          title="运营商"
+        >
+          <ShieldIcon />
         </button>
         <button
           onClick={() => setView('settings')}
@@ -235,21 +235,21 @@ export default function Sidebar(): JSX.Element {
   /* ---------- expanded ---------- */
   const groups = groupSessions(sessions)
   const navCls = (on: boolean): string =>
-    `flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition ${
-      on ? 'bg-bg-hover text-zinc-100' : 'text-zinc-400 hover:bg-bg-hover/60 hover:text-zinc-200'
+    `flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs transition ${
+      on ? 'glass-active text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.055] hover:text-zinc-200'
     }`
 
   return (
-    <div className="flex w-60 shrink-0 flex-col border-r border-border-subtle bg-bg-panel">
+    <div className="glass-sidebar flex w-64 shrink-0 flex-col rounded-[18px] border">
       {/* brand + collapse */}
-      <div className="flex items-center gap-2 px-3 pt-3">
-        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">
+      <div className="flex items-center gap-2 px-4 pt-4">
+        <div className="accent-soft-button flex h-8 w-8 items-center justify-center rounded-xl text-sm font-bold text-white">
           F
         </div>
         <div className="flex-1 text-sm font-semibold text-zinc-100">Forge</div>
         <button
           onClick={toggleSidebar}
-          className="rounded-md p-1 text-zinc-500 transition hover:bg-bg-hover hover:text-zinc-300"
+          className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
           title="收起侧边栏"
         >
           <ChevronIcon collapsed={false} />
@@ -257,21 +257,21 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       {/* project switcher + new chat + provider */}
-      <div className="space-y-2 px-3 pb-2 pt-2">
+      <div className="space-y-2 px-4 pb-3 pt-3">
         <ProjectSwitcher collapsed={false} />
         <button
           onClick={() => {
             void newChat()
             setView('chat')
           }}
-          className="w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition hover:brightness-110"
+          className="accent-soft-button w-full rounded-xl px-3 py-2 text-sm font-medium text-white transition hover:brightness-110"
         >
           + 新建对话
         </button>
         {activeProvider && (
           <button
             onClick={() => setView('providers')}
-            className="flex w-full items-center gap-2 rounded-lg border border-border-subtle bg-bg-elev px-2.5 py-1.5 text-[11px] text-zinc-400 transition hover:bg-bg-hover"
+            className="glass-control flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-[11px] text-zinc-400 transition hover:bg-white/[0.075]"
             title="切换运营商"
           >
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
@@ -282,13 +282,13 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       {/* session list label */}
-      <div className="flex items-center justify-between px-3 py-1">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-600">
+      <div className="flex items-center justify-between px-4 py-1">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500/80">
           最近会话
         </span>
         <button
           onClick={() => void refresh()}
-          className="text-xs text-zinc-500 transition hover:text-zinc-300"
+          className="rounded-md px-1 text-xs text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
           title="刷新"
         >
           ↻
@@ -296,7 +296,7 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       {/* grouped sessions */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         {loading && sessions.length === 0 && (
           <div className="px-2 py-3 text-xs text-zinc-600">加载中…</div>
         )}
@@ -305,7 +305,7 @@ export default function Sidebar(): JSX.Element {
         )}
         {groups.map((g) => (
           <div key={g.label} className="mb-2">
-            <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-zinc-600">
+            <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500/70">
               {g.label}
             </div>
             {g.items.map((s) => {
@@ -324,7 +324,7 @@ export default function Sidebar(): JSX.Element {
                         else if (e.key === 'Escape') setEditingId(null)
                       }}
                       onBlur={commitEdit}
-                      className="w-full rounded-lg border border-accent bg-bg-elev px-2.5 py-2 text-xs text-zinc-100 outline-none"
+                      className="w-full rounded-xl border border-accent/70 bg-bg-elev/80 px-2.5 py-2 text-xs text-zinc-100 outline-none"
                     />
                   ) : (
                     <button
@@ -332,14 +332,14 @@ export default function Sidebar(): JSX.Element {
                         void openSession(s.sessionId)
                         setView('chat')
                       }}
-                      className={`relative w-full rounded-lg px-2.5 py-2 text-left transition ${
+                      className={`relative w-full rounded-xl border px-2.5 py-2 text-left transition ${
                         active
-                          ? 'bg-bg-hover text-zinc-100'
-                          : 'text-zinc-400 hover:bg-bg-hover/60 hover:text-zinc-200'
+                          ? 'glass-active text-zinc-100'
+                          : 'border-transparent text-zinc-400 hover:bg-white/[0.045] hover:text-zinc-200'
                       }`}
                     >
                       {active && (
-                        <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-accent" />
+                        <span className="absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-accent" />
                       )}
                       <div className="truncate text-xs">{s.summary || '(未命名)'}</div>
                       <div className="mt-0.5 text-[10px] text-zinc-600">{relTime(s.lastModified)}</div>
@@ -362,7 +362,7 @@ export default function Sidebar(): JSX.Element {
                           </button>
                           <button
                             onClick={() => setConfirmDeleteId(null)}
-                            className="rounded bg-bg-elev px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-bg-hover"
+                            className="rounded bg-bg-elev/90 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-bg-hover"
                           >
                             取消
                           </button>
@@ -375,7 +375,7 @@ export default function Sidebar(): JSX.Element {
                               setEditingId(s.sessionId)
                               setEditText(s.summary || '')
                             }}
-                            className="rounded p-1 text-zinc-500 transition hover:bg-bg-hover hover:text-zinc-200"
+                            className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
                             title="重命名"
                           >
                             <EditIcon />
@@ -385,7 +385,7 @@ export default function Sidebar(): JSX.Element {
                               e.stopPropagation()
                               setConfirmDeleteId(s.sessionId)
                             }}
-                            className="rounded p-1 text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
+                            className="rounded-lg p-1 text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
                             title="删除"
                           >
                             <TrashIcon />
@@ -402,14 +402,11 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       {/* footer nav */}
-      <div className="border-t border-border-subtle p-2">
+      <div className="px-3 pb-4 pt-2">
+        <div className="glass-panel-soft rounded-2xl p-1.5">
         <button onClick={() => setView(view === 'skills' ? 'chat' : 'skills')} className={navCls(view === 'skills')}>
           <SkillsIcon />
           技能
-        </button>
-        <button onClick={() => setView(view === 'providers' ? 'chat' : 'providers')} className={`mt-1 ${navCls(view === 'providers')}`}>
-          <ShieldIcon />
-          运营商
         </button>
         <button
           onClick={() => setView(view === 'mcp' ? 'chat' : 'mcp')}
@@ -418,6 +415,10 @@ export default function Sidebar(): JSX.Element {
           <McpIcon />
           MCP 服务器
         </button>
+        <button onClick={() => setView(view === 'providers' ? 'chat' : 'providers')} className={`mt-1 ${navCls(view === 'providers')}`}>
+          <ShieldIcon />
+          运营商
+        </button>
         <button
           onClick={() => setView(view === 'settings' ? 'chat' : 'settings')}
           className={`mt-1 ${navCls(view === 'settings')}`}
@@ -425,6 +426,7 @@ export default function Sidebar(): JSX.Element {
           <GearIcon />
           设置
         </button>
+        </div>
       </div>
     </div>
   )
