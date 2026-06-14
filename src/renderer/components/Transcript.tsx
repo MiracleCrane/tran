@@ -12,17 +12,22 @@ function buildForest(items: TranscriptItem[]): ItemNode[] {
   const nodes = new Map<string, ItemNode>()
   const toolOwner = new Map<string, ItemNode>()
   for (const item of items) {
+    if (!item) continue // defensive: skip any malformed/undefined entries
     const node: ItemNode = { item, childrenByTool: new Map() }
     nodes.set(item.id, node)
     if (item.kind === 'assistant') {
       for (const b of item.blocks) {
-        if (b.kind === 'tool') toolOwner.set(b.toolUseId, node)
+        // `b` can be undefined when streamed content_block indices created holes
+        // in the blocks array (interleaved subagent stream events) — skip those.
+        if (b && b.kind === 'tool') toolOwner.set(b.toolUseId, node)
       }
     }
   }
   const roots: ItemNode[] = []
   for (const item of items) {
-    const node = nodes.get(item.id)!
+    if (!item) continue
+    const node = nodes.get(item.id)
+    if (!node) continue
     const pt = item.parentToolUseId
     if (pt && toolOwner.has(pt)) {
       const parent = toolOwner.get(pt)!

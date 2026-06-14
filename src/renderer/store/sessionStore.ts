@@ -81,10 +81,12 @@ function mapTool(
   fn: (b: ToolBlock) => ToolBlock
 ): TranscriptItem[] {
   return items.map((item) => {
-    if (item.kind !== 'assistant') return item
+    if (!item || item.kind !== 'assistant') return item
     let changed = false
     const blocks = item.blocks.map((b) => {
-      if (b.kind === 'tool' && b.toolUseId === toolUseId) {
+      // `b` may be undefined when streamed indices left holes in the blocks
+      // array (interleaved subagent events) — skip those safely.
+      if (b && b.kind === 'tool' && b.toolUseId === toolUseId) {
         changed = true
         return fn(b)
       }
