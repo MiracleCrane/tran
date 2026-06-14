@@ -15,6 +15,7 @@ import type {
 } from '../../shared/ipc'
 import { log } from '../logger'
 import { getActiveProvider } from '../providers'
+import { getPreferences } from '../preferences'
 
 /**
  * The Claude Agent SDK is ESM-only and relies on `import.meta.url` to locate its
@@ -102,9 +103,9 @@ export class AgentBridge {
     opts: StartSessionOptions
   ): Promise<void> {
     const { query } = await loadSdk()
-    // Apply the active API provider: inject its base URL + auth into the spawn
-    // env so switching always takes effect (this overrides any stray shell env).
+    // Apply the active API provider + user preferences as defaults.
     const provider = getActiveProvider()
+    const prefs = getPreferences()
     const env: Record<string, string> = { ...(process.env as Record<string, string>) }
     if (provider) {
       env['ANTHROPIC_BASE_URL'] = provider.baseUrl
@@ -122,12 +123,16 @@ export class AgentBridge {
       // opts.model (synced to the active provider by the renderer) wins; fall
       // back to the provider's own default, then the hard-coded default.
       model: opts.model ?? provider?.model ?? 'claude-opus-4-8',
-      effort: opts.effort ?? 'high',
+      effort: opts.effort ?? prefs.defaultEffort ?? 'high',
       thinking: { type: 'adaptive', display: 'summarized' },
       includePartialMessages: true,
+      // Forward subagent (Task tool) text/thinking into the stream tagged with
+      // parent_tool_use_id, so the renderer can nest the subagent conversation
+      // under its parent tool call.
+      forwardSubagentText: true,
       stderr: (data: string) => log('claude-stderr', data.trimEnd()),
       settingSources: ['user', 'project', 'local'],
-      permissionMode: opts.permissionMode ?? 'default',
+      permissionMode: opts.permissionMode ?? prefs.defaultPermissionMode ?? 'default',
       canUseTool: async (
         toolName: string,
         input: Record<string, unknown>,

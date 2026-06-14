@@ -10,6 +10,7 @@ import PermissionModal from './components/PermissionModal'
 import McpPanel from './components/McpPanel'
 import ProvidersPanel from './components/ProvidersPanel'
 import SkillsPanel from './components/SkillsPanel'
+import SettingsPanel from './components/SettingsPanel'
 
 export default function App(): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
@@ -59,6 +60,10 @@ export default function App(): JSX.Element {
         ) : view === 'skills' ? (
           <div className="min-h-0 flex-1 overflow-hidden">
             <SkillsPanel />
+          </div>
+        ) : view === 'settings' ? (
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <SettingsPanel />
           </div>
         ) : (
           <>

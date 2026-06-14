@@ -1,8 +1,40 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import type { AssistantBlock, AssistantItem, UserItem, TranscriptItem } from '../types'
+import type { AssistantBlock, AssistantItem, UserItem, TranscriptItem, ItemNode } from '../types'
 import MessageText from './MessageText'
 import ToolCallCard from './ToolCallCard'
+
+/** Group the flat `items` into a forest. Top level = items with no
+ *  parentToolUseId; an assistant item's tool_use block (id X) owns every item
+ *  whose parentToolUseId === X (the forwarded subagent conversation). Recursive
+ *  — a subagent's own tool calls can nest further. Order preserved, O(n). */
+function buildForest(items: TranscriptItem[]): ItemNode[] {
+  const nodes = new Map<string, ItemNode>()
+  const toolOwner = new Map<string, ItemNode>()
+  for (const item of items) {
+    const node: ItemNode = { item, childrenByTool: new Map() }
+    nodes.set(item.id, node)
+    if (item.kind === 'assistant') {
+      for (const b of item.blocks) {
+        if (b.kind === 'tool') toolOwner.set(b.toolUseId, node)
+      }
+    }
+  }
+  const roots: ItemNode[] = []
+  for (const item of items) {
+    const node = nodes.get(item.id)!
+    const pt = item.parentToolUseId
+    if (pt && toolOwner.has(pt)) {
+      const parent = toolOwner.get(pt)!
+      const arr = parent.childrenByTool.get(pt) ?? []
+      arr.push(node)
+      parent.childrenByTool.set(pt, arr)
+    } else {
+      roots.push(node)
+    }
+  }
+  return roots
+}
 
 function UserMessage({ item }: { item: UserItem }): JSX.Element {
   return (
@@ -31,9 +63,27 @@ function ThinkingBlock({ text }: { text: string }): JSX.Element {
   )
 }
 
-function AssistantMessage({ item }: { item: AssistantItem }): JSX.Element {
+/** Render a list of nodes; assistant nodes pass their tool blocks' child nodes
+ *  down to ToolCallCard, which renders them nested. Used at the top level and
+ *  recursively inside subagent tool cards. */
+function MessageNodes({ nodes, depth }: { nodes: ItemNode[]; depth: number }): JSX.Element {
   return (
-    <div className="max-w-[92%]">
+    <>
+      {nodes.map((n) =>
+        n.item.kind === 'user' ? (
+          <UserMessage key={n.item.id} item={n.item as UserItem} />
+        ) : (
+          <AssistantMessage key={n.item.id} node={n} depth={depth} />
+        )
+      )}
+    </>
+  )
+}
+
+function AssistantMessage({ node, depth }: { node: ItemNode; depth: number }): JSX.Element {
+  const item = node.item as AssistantItem
+  return (
+    <div className={depth === 0 ? 'max-w-[92%]' : ''}>
       {item.error && (
         <div className="mb-2 rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-1.5 text-xs text-red-300">
           {item.error}
@@ -44,7 +94,14 @@ function AssistantMessage({ item }: { item: AssistantItem }): JSX.Element {
         .map((block, i) => {
           if (block.kind === 'text') return <MessageText key={i}>{block.text}</MessageText>
           if (block.kind === 'thinking') return <ThinkingBlock key={i} text={block.text} />
-          return <ToolCallCard key={i} block={block} />
+          return (
+            <ToolCallCard
+              key={i}
+              block={block}
+              childNodes={node.childrenByTool.get(block.toolUseId) ?? []}
+              renderNodes={(children) => <MessageNodes nodes={children} depth={depth + 1} />}
+            />
+          )
         })}
       {item.streaming && (
         <div className="mt-1 flex items-center gap-1.5 text-xs text-zinc-600">
@@ -54,14 +111,6 @@ function AssistantMessage({ item }: { item: AssistantItem }): JSX.Element {
       )}
     </div>
   )
-}
-
-const MemoUserMessage = memo(UserMessage)
-const MemoAssistantMessage = memo(AssistantMessage)
-
-function renderItem(item: TranscriptItem): JSX.Element {
-  if (item.kind === 'user') return <MemoUserMessage key={item.id} item={item} />
-  return <MemoAssistantMessage key={item.id} item={item} />
 }
 
 export default function Transcript(): JSX.Element {
@@ -91,6 +140,8 @@ export default function Transcript(): JSX.Element {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }
 
+  const roots = useMemo(() => buildForest(items), [items])
+
   return (
     <div className="relative h-full">
       <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
@@ -101,7 +152,7 @@ export default function Transcript(): JSX.Element {
               <span className="font-mono">列出文件并总结这个项目</span>
             </div>
           )}
-          {items.map(renderItem)}
+          <MessageNodes nodes={roots} depth={0} />
           {compacting && <div className="text-center text-xs text-zinc-500">正在压缩上下文…</div>}
           {running && (
             <div className="flex items-center gap-2 text-xs text-zinc-500">

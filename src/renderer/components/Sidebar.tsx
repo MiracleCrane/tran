@@ -110,6 +110,17 @@ const SkillsIcon = (): JSX.Element => (
     <path d="M18.5 14.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
   </svg>
 )
+const GearIcon = (): JSX.Element => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+    <path
+      d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
 
 export default function Sidebar(): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
@@ -202,6 +213,13 @@ export default function Sidebar(): JSX.Element {
           title="MCP 服务器"
         >
           <McpIcon />
+        </button>
+        <button
+          onClick={() => setView('settings')}
+          className={`mt-1 ${iconBtn(view === 'settings')}`}
+          title="设置"
+        >
+          <GearIcon />
         </button>
         <button
           onClick={toggleSidebar}
@@ -399,6 +417,13 @@ export default function Sidebar(): JSX.Element {
         >
           <McpIcon />
           MCP 服务器
+        </button>
+        <button
+          onClick={() => setView(view === 'settings' ? 'chat' : 'settings')}
+          className={`mt-1 ${navCls(view === 'settings')}`}
+        >
+          <GearIcon />
+          设置
         </button>
       </div>
     </div>

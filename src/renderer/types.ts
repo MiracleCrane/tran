@@ -42,6 +42,15 @@ export interface AssistantItem {
 }
 export type TranscriptItem = UserItem | AssistantItem
 
+/** A transcript item plus its nested children (the subagent conversation under
+ *  each of its tool_use blocks, linked by parent_tool_use_id). The Transcript
+ *  builds a forest of these from the flat `items` list and renders recursively. */
+export interface ItemNode {
+  item: TranscriptItem
+  /** toolUseId → child nodes (only assistant items with tool blocks use this). */
+  childrenByTool: Map<string, ItemNode[]>
+}
+
 export interface SessionMeta {
   /** The bridge handle id — this is what every IPC call must target. */
   sessionId: string

@@ -27,6 +27,9 @@ const api: ForgeApi = {
   listSkills: (sessionId) => ipcRenderer.invoke('forge:listSkills', sessionId),
   listMarketplacePlugins: () => ipcRenderer.invoke('forge:listMarketplacePlugins'),
   translateTexts: (texts) => ipcRenderer.invoke('forge:translateTexts', texts),
+
+  getPreferences: () => ipcRenderer.invoke('forge:getPreferences'),
+  savePreferences: (prefs) => ipcRenderer.invoke('forge:savePreferences', prefs),
   saveMcpServer: (args) => ipcRenderer.invoke('forge:saveMcpServer', args),
   deleteMcpServer: (args) => ipcRenderer.invoke('forge:deleteMcpServer', args),
 

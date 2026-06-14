@@ -3,7 +3,7 @@ import { create } from 'zustand'
 /** Which top-level view the main column shows. Separate from sessionStore so
  *  session state and UI navigation don't entangle. Add settings, diffs, etc.
  *  here as the app grows. */
-export type View = 'chat' | 'mcp' | 'providers' | 'skills'
+export type View = 'chat' | 'mcp' | 'providers' | 'skills' | 'settings'
 
 interface UiStore {
   view: View

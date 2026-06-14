@@ -19,6 +19,7 @@ import {
 } from './projects'
 import { listMarketplacePlugins } from './marketplace'
 import { translateTexts } from './translate'
+import { getPreferences, savePreferences } from './preferences'
 import { log } from './logger'
 import type {
   StartSessionOptions,
@@ -33,7 +34,8 @@ import type {
   Provider,
   Project,
   SkillInfo,
-  MarketplacePlugin
+  MarketplacePlugin,
+  Preferences
 } from '../shared/ipc'
 
 export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBridge {
@@ -124,6 +126,11 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
 
   ipcMain.handle('forge:translateTexts', async (_e, texts: string[]): Promise<string[]> =>
     translateTexts(texts)
+  )
+
+  ipcMain.handle('forge:getPreferences', async (): Promise<Preferences> => getPreferences())
+  ipcMain.handle('forge:savePreferences', async (_e, prefs: Preferences): Promise<Preferences> =>
+    savePreferences(prefs)
   )
 
   ipcMain.handle('forge:saveMcpServer', async (_e, args: SaveMcpServerArgs): Promise<void> => {

@@ -1,7 +1,7 @@
 import { app, safeStorage } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { Provider, Project } from '../shared/ipc'
+import type { Provider, Project, EffortLevel, PermissionMode, ComposerModel } from '../shared/ipc'
 
 interface PersistedSettings {
   /** base64 of safeStorage-encrypted bytes */
@@ -16,6 +16,10 @@ interface PersistedSettings {
   projects?: Project[]
   /** Last-used project path (auto-entered on app start). */
   lastProjectPath?: string
+  /** Preferences managed by the Settings panel. */
+  defaultEffort?: EffortLevel
+  defaultPermissionMode?: PermissionMode
+  composerModels?: ComposerModel[]
 }
 
 let cache: PersistedSettings | null = null

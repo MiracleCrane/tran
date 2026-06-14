@@ -1,7 +1,7 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useEffect, useState, type KeyboardEvent } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 
-const MODELS = [
+const DEFAULT_MODELS = [
   { id: 'claude-opus-4-8', label: 'Opus 4.8' },
   { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5' }
@@ -15,6 +15,14 @@ export default function Composer(): JSX.Element {
   const interrupt = useSessionStore((s) => s.interrupt)
   const setModel = useSessionStore((s) => s.setModel)
   const [text, setText] = useState('')
+  const [models, setModels] = useState(DEFAULT_MODELS)
+
+  // Override the built-in model list with the user's configured list (Settings).
+  useEffect(() => {
+    void window.api.getPreferences().then((p) => {
+      if (p.composerModels && p.composerModels.length) setModels(p.composerModels)
+    })
+  }, [])
 
   const submit = async (): Promise<void> => {
     const value = text.trim()
@@ -75,7 +83,7 @@ export default function Composer(): JSX.Element {
               onChange={(e) => void setModel(e.target.value)}
               className="ml-auto rounded border border-border-subtle bg-bg-elev px-2 py-0.5 text-[11px] text-zinc-400 outline-none"
             >
-              {MODELS.map((m) => (
+              {models.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
                 </option>

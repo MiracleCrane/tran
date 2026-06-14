@@ -289,11 +289,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // Pre-register synchronously: bridgeSessionId is added to the bridge's map
     // before claude.exe finishes spawning, so the UI never locks on init.
     const newId = uid()
+    const permissionMode =
+      (await window.api.getPreferences().catch(() => null))?.defaultPermissionMode ?? 'default'
     const opts: StartSessionOptions = {
       cwd: args.cwd,
       ...(args.apiKey ? { apiKey: args.apiKey } : {}),
       ...(args.model ? { model: args.model } : {}),
-      permissionMode: 'default',
+      permissionMode,
       bridgeSessionId: newId
     }
     await window.api.startSession(opts)
@@ -302,7 +304,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         sessionId: newId,
         cwd: args.cwd,
         model: args.model ?? 'claude-opus-4-8',
-        permissionMode: 'default',
+        permissionMode,
         tools: []
       },
       items: [],

@@ -153,6 +153,22 @@ export interface MarketplacePlugin {
   marketplace: string
 }
 
+/** A model shown in the Composer dropdown (user-editable in Settings). */
+export interface ComposerModel {
+  id: string
+  label: string
+}
+
+/** Misc app preferences managed by the Settings panel. */
+export interface Preferences {
+  /** Default effort for new sessions (AgentBridge fallback). */
+  defaultEffort?: EffortLevel
+  /** Default permission mode for new sessions. */
+  defaultPermissionMode?: PermissionMode
+  /** Models shown in the Composer dropdown; empty/undefined = built-in list. */
+  composerModels?: ComposerModel[]
+}
+
 /** A user/assistant message from a past session transcript (for the sidebar resume view). */
 export interface HistoryMessage {
   type: 'user' | 'assistant'
@@ -219,6 +235,10 @@ export interface ForgeApi {
   /** Batch-translate texts EN→ZH via the active provider's /v1/messages. Returns
    *  one translation per input (empty string for any that failed). */
   translateTexts(texts: string[]): Promise<string[]>
+
+  /** --- Preferences (Settings panel) --- */
+  getPreferences(): Promise<Preferences>
+  savePreferences(prefs: Preferences): Promise<Preferences>
 
   pickDirectory(): Promise<string | null>
   getApiKey(): Promise<string | null>
