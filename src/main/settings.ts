@@ -1,12 +1,21 @@
 import { app, safeStorage } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import type { Provider, Project } from '../shared/ipc'
 
 interface PersistedSettings {
   /** base64 of safeStorage-encrypted bytes */
   apiKeyEnc?: string
   /** plaintext fallback when safeStorage is unavailable */
   apiKeyPlain?: string
+  /** Saved API providers (client-side only). The active one is applied at spawn. */
+  providers?: Provider[]
+  /** id of the active provider; null/undefined = none active. */
+  activeProviderId?: string | null
+  /** Saved working directories shown in the sidebar project switcher. */
+  projects?: Project[]
+  /** Last-used project path (auto-entered on app start). */
+  lastProjectPath?: string
 }
 
 let cache: PersistedSettings | null = null
@@ -33,6 +42,16 @@ function save(s: PersistedSettings): void {
   } catch {
     /* best-effort persistence */
   }
+}
+
+/** Read the full persisted settings (cached). Used by providers.ts. */
+export function loadSettings(): PersistedSettings {
+  return load()
+}
+
+/** Write the full persisted settings (updates the cache). Used by providers.ts. */
+export function saveSettings(s: PersistedSettings): void {
+  save(s)
 }
 
 export function getApiKey(): string | null {

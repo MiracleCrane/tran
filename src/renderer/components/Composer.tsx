@@ -41,10 +41,10 @@ export default function Composer(): JSX.Element {
             rows={2}
             placeholder={
               starting
-                ? 'Starting session…'
+                ? '正在启动会话…'
                 : running
-                  ? 'Claude is working… (press Stop to interrupt)'
-                  : 'Message Claude…'
+                  ? 'Claude 正在处理…(点击「停止」可中断)'
+                  : '给 Claude 发消息…'
             }
             className="max-h-40 min-h-[44px] flex-1 resize-none rounded-xl border border-border-subtle bg-bg-elev px-3.5 py-2.5 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-accent"
           />
@@ -53,7 +53,7 @@ export default function Composer(): JSX.Element {
               onClick={() => void interrupt()}
               className="h-[44px] shrink-0 rounded-xl border border-red-900/60 bg-red-950/40 px-4 text-sm font-medium text-red-300 hover:bg-red-950/60"
             >
-              Stop
+              停止
             </button>
           ) : (
             <button
@@ -61,13 +61,13 @@ export default function Composer(): JSX.Element {
               disabled={!text.trim()}
               className="h-[44px] shrink-0 rounded-xl bg-accent px-5 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Send
+              发送
             </button>
           )}
         </div>
         <div className="mt-2 flex items-center gap-3 text-[11px] text-zinc-600">
           <span>
-            <kbd className="font-sans">Enter</kbd> to send · <kbd className="font-sans">Shift+Enter</kbd> newline
+            <kbd className="font-sans">Enter</kbd> 发送 · <kbd className="font-sans">Shift+Enter</kbd> 换行
           </span>
           {meta && (
             <select

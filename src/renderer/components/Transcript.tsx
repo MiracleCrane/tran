@@ -22,7 +22,7 @@ function ThinkingBlock({ text }: { text: string }): JSX.Element {
       className="my-1.5 rounded-lg border border-border-subtle/50 bg-bg-panel/50 px-3 py-2"
     >
       <summary className="cursor-pointer select-none text-xs font-medium text-zinc-500 hover:text-zinc-400">
-        reasoning
+        思考过程
       </summary>
       <div className="mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-zinc-500">
         {text}
@@ -49,7 +49,7 @@ function AssistantMessage({ item }: { item: AssistantItem }): JSX.Element {
       {item.streaming && (
         <div className="mt-1 flex items-center gap-1.5 text-xs text-zinc-600">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-          streaming…
+          输出中…
         </div>
       )}
     </div>
@@ -97,16 +97,16 @@ export default function Transcript(): JSX.Element {
         <div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 py-6">
           {items.length === 0 && (
             <div className="mt-10 text-center text-sm text-zinc-600">
-              Send a message to start. Try:{' '}
-              <span className="font-mono">list the files and summarize the project</span>
+              发送消息开始对话。试试:{' '}
+              <span className="font-mono">列出文件并总结这个项目</span>
             </div>
           )}
           {items.map(renderItem)}
-          {compacting && <div className="text-center text-xs text-zinc-500">Compacting context…</div>}
+          {compacting && <div className="text-center text-xs text-zinc-500">正在压缩上下文…</div>}
           {running && (
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-              Claude is working…
+              Claude 正在处理…
             </div>
           )}
           <div ref={bottomRef} />

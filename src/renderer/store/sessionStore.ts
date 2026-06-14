@@ -18,6 +18,9 @@ import type {
 
 interface SessionStore {
   starting: boolean
+  /** True once the startup check (auto-enter last project) has finished. The App
+   *  waits on this before showing Onboarding vs the main UI, to avoid a flash. */
+  bootstrapped: boolean
   meta: SessionMeta | null
   items: TranscriptItem[]
   status: SessionStatus
@@ -35,10 +38,26 @@ interface SessionStore {
   setModel: (model: string) => Promise<void>
   reset: () => void
 
+  /** On app start: auto-enter the last-used project if any, else leave meta null
+   *  so Onboarding shows. Sets bootstrapped regardless. */
+  bootstrap: () => Promise<void>
+  /** Switch the active working directory (project): close the current session and
+   *  start a fresh one in the new cwd (history is per-cwd in the sidebar). */
+  switchProject: (path: string) => Promise<void>
+
   /** Sidebar actions */
   refreshSessions: () => Promise<void>
   newChat: () => Promise<void>
   openSession: (sdkSessionId: string) => Promise<void>
+  renameSession: (sessionId: string, title: string) => Promise<void>
+  deleteSession: (sessionId: string) => Promise<void>
+  /** Close the current session and re-spawn it (resuming when possible) so that
+   *  config-file changes — e.g. MCP servers — get reloaded. History is restored
+   *  from the transcript JSONL, so the conversation is preserved. */
+  restartSession: () => Promise<void>
+  /** Switch the active API provider: writes Claude's settings.json + restarts
+   *  the session (resume) so the new provider's env/model take effect. */
+  switchProvider: (id: string) => Promise<void>
 
   ingestAgentEvent: (e: AgentEvent) => void
   addPermissionRequest: (r: PermissionRequestPayload) => void
@@ -248,7 +267,7 @@ function scheduleInitWatchdog(
         starting: false,
         status: {
           ...s.status,
-          error: 'Session init timed out — the API backend may be slow or down. Try New chat.'
+          error: '会话初始化超时 — 后端可能响应较慢或不可用。请尝试新建对话。'
         }
       }))
     }
@@ -257,6 +276,7 @@ function scheduleInitWatchdog(
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
   starting: false,
+  bootstrapped: false,
   meta: null,
   items: [],
   status: emptyStatus,
@@ -323,6 +343,41 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ starting: false, meta: null, items: [], status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null })
   },
 
+  async bootstrap() {
+    try {
+      const proj = await window.api.getStartupProject()
+      if (proj) {
+        const provider = await window.api.getActiveProvider()
+        await get().startSession({ cwd: proj.path, model: provider?.model })
+      }
+    } finally {
+      set({ bootstrapped: true })
+    }
+  },
+
+  async switchProject(path: string) {
+    if (get().starting) return
+    const oldMeta = get().meta
+    await window.api.setLastProject(path)
+    const provider = await window.api.getActiveProvider()
+    const model = provider?.model ?? 'claude-opus-4-8'
+    const newId = uid()
+    // Switch the UI to the new project instantly; close the old session and
+    // spawn a fresh one in the new cwd.
+    set({
+      starting: true,
+      items: [],
+      status: { running: false },
+      currentStreamingMsgId: null,
+      meta: { sessionId: newId, cwd: path, model, permissionMode: 'default', tools: [] }
+    })
+    if (oldMeta?.sessionId) await window.api.closeSession(oldMeta.sessionId).catch(() => {})
+    await window.api.startSession({ cwd: path, model, bridgeSessionId: newId })
+    set({ starting: false })
+    void get().refreshSessions()
+    scheduleInitWatchdog(get, set)
+  },
+
   async refreshSessions() {
     const meta = get().meta
     if (!meta) return
@@ -387,6 +442,86 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     await window.api.startSession({ cwd, model, resume: sdkSessionId, bridgeSessionId: newId })
     set({ starting: false })
     scheduleInitWatchdog(get, set)
+  },
+
+  /** Close the current session and re-spawn it (resuming when possible) so that
+   *  config-file changes — e.g. MCP servers — get reloaded. History is restored
+   *  from the transcript JSONL, so the conversation is preserved. */
+  async renameSession(sessionId: string, title: string) {
+    const meta = get().meta
+    if (!meta) return
+    const trimmed = title.trim()
+    if (!trimmed) return
+    try {
+      await window.api.renameSession(sessionId, trimmed, meta.cwd)
+    } catch {
+      /* ignore — the list will still show the old summary */
+    }
+    set((s) => ({
+      sessions: s.sessions.map((x) =>
+        x.sessionId === sessionId ? { ...x, summary: trimmed } : x
+      )
+    }))
+  },
+
+  async deleteSession(sessionId: string) {
+    const meta = get().meta
+    if (!meta) return
+    try {
+      await window.api.deleteSession(sessionId, meta.cwd)
+    } catch {
+      /* ignore */
+    }
+    set((s) => ({ sessions: s.sessions.filter((x) => x.sessionId !== sessionId) }))
+    // Deleted the active conversation → start fresh.
+    if (meta.sdkSessionId === sessionId) {
+      await get().newChat()
+    }
+  },
+
+  async restartSession() {
+    const meta = get().meta
+    if (!meta || get().starting) return
+    const { cwd, model, permissionMode, sdkSessionId } = meta
+    const oldSessionId = meta.sessionId
+    const newId = uid()
+    set({ starting: true, status: { running: false }, currentStreamingMsgId: null })
+    // Rebuild the transcript from history so the resumed session shows the same
+    // conversation. If we never got an sdkSessionId (init hadn't landed), fall
+    // back to a fresh session.
+    let items: TranscriptItem[] = []
+    if (sdkSessionId) {
+      try {
+        const history = await window.api.getSessionMessages(sdkSessionId, cwd)
+        items = historyToItems(history)
+      } catch {
+        items = get().items
+      }
+    }
+    set({
+      items,
+      currentStreamingMsgId: null,
+      meta: { sessionId: newId, sdkSessionId, cwd, model, permissionMode, tools: [] }
+    })
+    await window.api.closeSession(oldSessionId).catch(() => {})
+    await window.api.startSession(
+      sdkSessionId
+        ? { cwd, model, resume: sdkSessionId, bridgeSessionId: newId }
+        : { cwd, model, bridgeSessionId: newId }
+    )
+    set({ starting: false })
+    scheduleInitWatchdog(get, set)
+  },
+
+  async switchProvider(id) {
+    if (get().starting) return
+    await window.api.setActiveProvider(id)
+    // Keep meta.model in sync with the newly-active provider so the resumed
+    // session spawns with that model (the bridge trusts opts.model).
+    const provider = await window.api.getActiveProvider()
+    const meta = get().meta
+    if (meta && provider) set({ meta: { ...meta, model: provider.model } })
+    await get().restartSession()
   },
 
   ingestAgentEvent(e) {

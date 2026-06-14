@@ -57,11 +57,11 @@ const STATUS_META: Record<
   ToolBlock['status'],
   { label: string; dot: string; text: string }
 > = {
-  pending: { label: 'queued', dot: 'bg-amber-400', text: 'text-amber-400' },
-  running: { label: 'running', dot: 'bg-blue-400 animate-pulse', text: 'text-blue-400' },
-  done: { label: 'done', dot: 'bg-green-500', text: 'text-green-500' },
-  error: { label: 'error', dot: 'bg-red-500', text: 'text-red-400' },
-  denied: { label: 'denied', dot: 'bg-orange-500', text: 'text-orange-400' }
+  pending: { label: '排队中', dot: 'bg-amber-400', text: 'text-amber-400' },
+  running: { label: '运行中', dot: 'bg-blue-400 animate-pulse', text: 'text-blue-400' },
+  done: { label: '完成', dot: 'bg-green-500', text: 'text-green-500' },
+  error: { label: '出错', dot: 'bg-red-500', text: 'text-red-400' },
+  denied: { label: '已拒绝', dot: 'bg-orange-500', text: 'text-orange-400' }
 }
 
 export default function ToolCallCard({ block }: { block: ToolBlock }): JSX.Element {
@@ -104,7 +104,7 @@ export default function ToolCallCard({ block }: { block: ToolBlock }): JSX.Eleme
           {block.name !== 'Bash' && block.input != null && (
             <details className="mb-2">
               <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300">
-                input
+                输入
               </summary>
               <pre className="mt-1 overflow-auto rounded bg-[#0b0c10] p-2.5 text-xs text-zinc-400">
                 {JSON.stringify(block.input, null, 2)}
@@ -119,10 +119,10 @@ export default function ToolCallCard({ block }: { block: ToolBlock }): JSX.Eleme
           {resultText && <DiffView text={resultText} />}
 
           {!resultText && block.status === 'running' && (
-            <div className="text-xs text-zinc-600">Waiting for output…</div>
+            <div className="text-xs text-zinc-600">等待输出…</div>
           )}
           {!resultText && block.status === 'pending' && (
-            <div className="text-xs text-zinc-600">Queued — awaiting approval or turn.</div>
+            <div className="text-xs text-zinc-600">排队中 — 等待批准或轮到执行。</div>
           )}
         </div>
       )}

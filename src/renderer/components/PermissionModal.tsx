@@ -24,11 +24,11 @@ export default function PermissionModal(): JSX.Element | null {
       <div className="w-full max-w-lg rounded-2xl border border-border-subtle bg-bg-panel p-6 shadow-2xl">
         <div className="mb-1 flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-          <h2 className="text-base font-semibold text-zinc-100">Permission request</h2>
+          <h2 className="text-base font-semibold text-zinc-100">权限请求</h2>
         </div>
         <p className="mb-4 text-sm text-zinc-400">
-          Claude wants to use <span className="font-mono text-zinc-200">{req.toolName}</span>
-          {req.agentID ? <span className="text-zinc-500"> (in subagent)</span> : null}.
+          Claude 想要使用 <span className="font-mono text-zinc-200">{req.toolName}</span>
+          {req.agentID ? <span className="text-zinc-500">(在子代理中)</span> : null}。
         </p>
 
         {req.decisionReason && (
@@ -49,7 +49,7 @@ export default function PermissionModal(): JSX.Element | null {
         <input
           value={denyReason}
           onChange={(e) => setDenyReason(e.target.value)}
-          placeholder="Reason for denying (optional)"
+          placeholder="拒绝原因(可选)"
           className="mb-4 w-full rounded-lg border border-border-subtle bg-bg-elev px-3 py-2 text-xs text-zinc-300 outline-none focus:border-accent"
         />
 
@@ -58,13 +58,13 @@ export default function PermissionModal(): JSX.Element | null {
             onClick={deny}
             className="rounded-lg border border-border-subtle bg-bg-elev px-4 py-2 text-sm text-zinc-300 hover:bg-bg-hover"
           >
-            Deny
+            拒绝
           </button>
           <button
             onClick={allow}
             className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-white hover:brightness-110"
           >
-            Allow
+            允许
           </button>
         </div>
       </div>

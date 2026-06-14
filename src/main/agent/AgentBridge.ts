@@ -2,14 +2,19 @@ import type {
   SDKMessage,
   SDKUserMessage,
   PermissionResult,
-  PermissionUpdate
+  PermissionUpdate,
+  McpServerStatus,
+  SlashCommand
 } from '@anthropic-ai/claude-agent-sdk'
 import type {
   StartSessionOptions,
   PermissionRequestPayload,
-  PermissionResponsePayload
+  PermissionResponsePayload,
+  McpServerEntry,
+  SkillInfo
 } from '../../shared/ipc'
 import { log } from '../logger'
+import { getActiveProvider } from '../providers'
 
 /**
  * The Claude Agent SDK is ESM-only and relies on `import.meta.url` to locate its
@@ -97,10 +102,26 @@ export class AgentBridge {
     opts: StartSessionOptions
   ): Promise<void> {
     const { query } = await loadSdk()
+    // Apply the active API provider: inject its base URL + auth into the spawn
+    // env so switching always takes effect (this overrides any stray shell env).
+    const provider = getActiveProvider()
+    const env: Record<string, string> = { ...(process.env as Record<string, string>) }
+    if (provider) {
+      env['ANTHROPIC_BASE_URL'] = provider.baseUrl
+      if (provider.authType === 'apikey') {
+        env['ANTHROPIC_API_KEY'] = provider.token
+        delete env['ANTHROPIC_AUTH_TOKEN']
+      } else {
+        env['ANTHROPIC_AUTH_TOKEN'] = provider.token
+        delete env['ANTHROPIC_API_KEY']
+      }
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const options: any = {
       cwd: opts.cwd,
-      model: opts.model ?? 'claude-opus-4-8',
+      // opts.model (synced to the active provider by the renderer) wins; fall
+      // back to the provider's own default, then the hard-coded default.
+      model: opts.model ?? provider?.model ?? 'claude-opus-4-8',
       effort: opts.effort ?? 'high',
       thinking: { type: 'adaptive', display: 'summarized' },
       includePartialMessages: true,
@@ -112,7 +133,7 @@ export class AgentBridge {
         input: Record<string, unknown>,
         ctx: CanUseToolCtx
       ) => this.handlePermission(toolName, input, ctx),
-      env: { ...process.env, ...(opts.apiKey ? { ANTHROPIC_API_KEY: opts.apiKey } : {}) },
+      env,
       ...(opts.resume ? { resume: opts.resume } : {})
     }
     const q = query({ prompt: stream.iterable, options })
@@ -189,6 +210,51 @@ export class AgentBridge {
     s.close()
     s.query?.close?.()
     this.sessions.delete(sessionId)
+  }
+
+  /**
+   * List every MCP server the active session knows about, with live connection
+   * status. The query handle isn't ready until claude.exe finishes spawning, so
+   * we briefly await it — the renderer's IPC call blocks during that window.
+   */
+  async listMcpServers(sessionId: string): Promise<McpServerEntry[]> {
+    const q = await this.awaitQuery(sessionId)
+    const status = (await q.mcpServerStatus()) as McpServerStatus[]
+    return status.map(toEntry)
+  }
+
+  /** Enable/disable an MCP server by name (persists to settings). */
+  async toggleMcpServer(sessionId: string, name: string, enabled: boolean): Promise<void> {
+    const q = await this.awaitQuery(sessionId)
+    await q.toggleMcpServer(name, enabled)
+  }
+
+  /** Skills available to the session (the SDK surfaces skills as slash commands). */
+  async listSkills(sessionId: string): Promise<SkillInfo[]> {
+    const q = await this.awaitQuery(sessionId)
+    const cmds = (await q.supportedCommands()) as SlashCommand[]
+    return cmds.map((c) => ({
+      name: c.name,
+      description: c.description,
+      argumentHint: c.argumentHint || undefined,
+      aliases: c.aliases
+    }))
+  }
+
+  /**
+   * Resolve the live query handle for a session, waiting up to ~5s for claude.exe
+   * to finish spawning. Throws if the session is unknown or never becomes ready.
+   */
+  private async awaitQuery(sessionId: string): Promise<NonNullable<ActiveSession['query']>> {
+    if (!this.sessions.has(sessionId)) {
+      throw new Error('没有活跃的会话。请先开始一个对话,再管理 MCP 服务器。')
+    }
+    for (let i = 0; i < 50; i++) {
+      const q = this.sessions.get(sessionId)?.query
+      if (q) return q
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    throw new Error('会话仍在启动中,请稍后重试。')
   }
 
   private handlePermission(
@@ -283,4 +349,20 @@ function cryptoId(): string {
   const g = globalThis as { crypto?: { randomUUID?: () => string } }
   if (g.crypto?.randomUUID) return g.crypto.randomUUID()
   return 'sess-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
+
+/** Trim an SDK McpServerStatus down to the serializable shape the renderer uses. */
+function toEntry(s: McpServerStatus): McpServerEntry {
+  // Pass the raw config through verbatim (only defaulting `type`) so advanced
+  // keys (timeout, alwaysLoad, tools policy, …) survive for faithful JSON view/edit.
+  const cfg = s.config as Record<string, unknown> | undefined
+  return {
+    name: s.name,
+    status: s.status,
+    scope: s.scope,
+    serverInfo: s.serverInfo,
+    error: s.error,
+    tools: (s.tools ?? []).map((t) => ({ name: t.name, description: t.description })),
+    config: cfg ? { ...cfg, type: (cfg['type'] as string | undefined) ?? 'stdio' } : undefined
+  }
 }

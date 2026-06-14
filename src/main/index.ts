@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
+import { seedDefaultIfNeeded } from './providers'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -43,6 +44,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  seedDefaultIfNeeded()
   registerIpc(() => mainWindow)
   createWindow()
 

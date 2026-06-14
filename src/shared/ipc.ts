@@ -55,6 +55,104 @@ export interface SessionListItem {
   gitBranch?: string
 }
 
+/** Connection state of an MCP server, as reported by the Claude Agent SDK. */
+export type McpServerStatusKind = 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled'
+
+/** A renderer-facing view of one MCP server. Mirrors the SDK's McpServerStatus,
+ *  trimmed to the serializable fields the panel needs. */
+export interface McpServerEntry {
+  name: string
+  status: McpServerStatusKind
+  /** Where it was configured: project (.mcp.json), user, local, … */
+  scope?: string
+  /** Reported by the server once connected. */
+  serverInfo?: { name: string; version: string }
+  error?: string
+  tools?: { name: string; description?: string }[]
+  config?: {
+    type: string
+    command?: string
+    args?: string[]
+    env?: Record<string, string>
+    url?: string
+    headers?: Record<string, string>
+    /** Advanced/extra keys the form doesn't surface (timeout, alwaysLoad, …),
+     *  carried through so the raw-JSON view/edit is faithful. */
+    [key: string]: unknown
+  }
+}
+
+/** Config-file scope for persisting an MCP server (matches `claude mcp -s`). */
+export type McpScope = 'user' | 'project' | 'local'
+
+/** Serializable MCP server config as written to the config files. */
+export type McpServerConfigInput =
+  | { type: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
+  | { type: 'sse' | 'http'; url: string; headers?: Record<string, string> }
+
+export interface SaveMcpServerArgs {
+  cwd: string
+  scope: McpScope
+  name: string
+  config: McpServerConfigInput
+}
+
+export interface DeleteMcpServerArgs {
+  cwd: string
+  scope: McpScope
+  name: string
+}
+
+/** How a provider's token is sent to the API. */
+export type ProviderAuthType = 'bearer' | 'apikey'
+
+/** A saved API provider. The active one is applied at every claude.exe spawn
+ *  (env injection) and also written into Claude's native settings.json on switch. */
+export interface Provider {
+  id: string
+  /** Display label, e.g. "智谱代理" / "Anthropic 官方". */
+  name: string
+  /** ANTHROPIC_BASE_URL. */
+  baseUrl: string
+  /** Auth credential (PROXY_MANAGED / sk-ant-… / custom). */
+  token: string
+  /** bearer → ANTHROPIC_AUTH_TOKEN (Authorization: Bearer); apikey → ANTHROPIC_API_KEY (x-api-key). */
+  authType: ProviderAuthType
+  /** Default model passed to the session (options.model). */
+  model: string
+}
+
+/** A saved working directory ("project"). The sidebar's top switcher lists these;
+ *  each has its own session history (scoped by cwd). */
+export interface Project {
+  /** Absolute path — also the unique key. */
+  path: string
+  /** Display name (folder name by default, user-renameable). */
+  name: string
+  addedAt: number
+}
+
+/** A skill available to the session (returned by the SDK's supportedCommands(),
+ *  which lists skills as slash commands). */
+export interface SkillInfo {
+  name: string
+  description: string
+  argumentHint?: string
+  aliases?: string[]
+}
+
+/** A plugin/skill entry from a local marketplace catalog (browse-only). */
+export interface MarketplacePlugin {
+  name: string
+  description: string
+  author?: string
+  category?: string
+  homepage?: string
+  sourceUrl?: string
+  /** Marketplace this came from (e.g. "claude-plugins-official"). */
+  marketplace: string
+}
+
 /** A user/assistant message from a past session transcript (for the sidebar resume view). */
 export interface HistoryMessage {
   type: 'user' | 'assistant'
@@ -74,6 +172,53 @@ export interface ForgeApi {
   closeSession(sessionId: string): Promise<void>
   listSessions(cwd: string): Promise<SessionListItem[]>
   getSessionMessages(sessionId: string, cwd: string): Promise<HistoryMessage[]>
+  /** Rename a past session (appends a custom title). */
+  renameSession(sessionId: string, title: string, cwd: string): Promise<void>
+  /** Delete a session's transcript file. */
+  deleteSession(sessionId: string, cwd: string): Promise<void>
+
+  /** List every MCP server the active session knows about (settings-file +
+   *  dynamically added), with live connection status. Requires an active session. */
+  listMcpServers(sessionId: string): Promise<McpServerEntry[]>
+  /** Enable/disable an MCP server by name. Persists to settings (same as `claude mcp`). */
+  toggleMcpServer(sessionId: string, name: string, enabled: boolean): Promise<void>
+
+  /** Persist a server to a config file (user/project/local scope). Does NOT touch
+   *  the live session — the caller restarts the session to apply. */
+  saveMcpServer(args: SaveMcpServerArgs): Promise<void>
+  /** Remove a server from its config file. */
+  deleteMcpServer(args: DeleteMcpServerArgs): Promise<void>
+
+  /** --- Providers (multi-operator API switching) --- */
+  listProviders(): Promise<Provider[]>
+  getActiveProvider(): Promise<Provider | null>
+  /** Create or update a provider (upsert by id). Returns the updated list. */
+  saveProvider(provider: Provider): Promise<Provider[]>
+  /** Remove a provider by id. Returns the updated list. */
+  deleteProvider(id: string): Promise<Provider[]>
+  /** Make a provider active: writes its params into Claude's settings.json + sets
+   *  activeProviderId. Caller restarts the session to apply. */
+  setActiveProvider(id: string): Promise<void>
+
+  /** --- Projects (saved working directories) --- */
+  listProjects(): Promise<Project[]>
+  /** Add a directory (idempotent) and mark it last-used. Returns the list. */
+  addProject(path: string, name?: string): Promise<Project[]>
+  removeProject(path: string): Promise<Project[]>
+  renameProject(path: string, name: string): Promise<Project[]>
+  setLastProject(path: string): Promise<void>
+  /** The project to auto-enter on app start (last-used, else first, else null). */
+  getStartupProject(): Promise<Project | null>
+
+  /** --- Skills --- */
+  /** Skills available to the active session (via supportedCommands). */
+  listSkills(sessionId: string): Promise<SkillInfo[]>
+  /** Browse the local plugin marketplace catalogs (read-only). */
+  listMarketplacePlugins(): Promise<MarketplacePlugin[]>
+
+  /** Batch-translate texts EN→ZH via the active provider's /v1/messages. Returns
+   *  one translation per input (empty string for any that failed). */
+  translateTexts(texts: string[]): Promise<string[]>
 
   pickDirectory(): Promise<string | null>
   getApiKey(): Promise<string | null>
