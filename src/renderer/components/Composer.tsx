@@ -26,7 +26,7 @@ export default function Composer(): JSX.Element {
 
   const submit = async (): Promise<void> => {
     const value = text.trim()
-    if (!value || running) return
+    if (!value) return
     setText('')
     await sendMessage(value)
   }
@@ -51,27 +51,27 @@ export default function Composer(): JSX.Element {
               starting
                 ? '正在启动会话…'
                 : running
-                  ? 'Claude 正在处理…(点击「停止」可中断)'
+                  ? 'Claude 正在处理…(可继续发送,消息会排队)'
                   : '给 Claude 发消息…'
             }
             className="max-h-40 min-h-[44px] flex-1 resize-none rounded-xl border border-border-subtle bg-bg-elev px-3.5 py-2.5 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-accent"
           />
-          {running ? (
+          {running && (
             <button
               onClick={() => void interrupt()}
               className="h-[44px] shrink-0 rounded-xl border border-red-900/60 bg-red-950/40 px-4 text-sm font-medium text-red-300 hover:bg-red-950/60"
+              title="中断当前处理"
             >
               停止
             </button>
-          ) : (
-            <button
-              onClick={() => void submit()}
-              disabled={!text.trim()}
-              className="h-[44px] shrink-0 rounded-xl bg-accent px-5 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              发送
-            </button>
           )}
+          <button
+            onClick={() => void submit()}
+            disabled={!text.trim()}
+            className="h-[44px] shrink-0 rounded-xl bg-accent px-5 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            发送
+          </button>
         </div>
         <div className="mt-2 flex items-center gap-3 text-[11px] text-zinc-600">
           <span>
