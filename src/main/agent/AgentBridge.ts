@@ -126,10 +126,6 @@ export class AgentBridge {
       effort: opts.effort ?? prefs.defaultEffort ?? 'high',
       thinking: { type: 'adaptive', display: 'summarized' },
       includePartialMessages: true,
-      // Forward subagent (Task tool) text/thinking into the stream tagged with
-      // parent_tool_use_id, so the renderer can nest the subagent conversation
-      // under its parent tool call.
-      forwardSubagentText: true,
       stderr: (data: string) => log('claude-stderr', data.trimEnd()),
       settingSources: ['user', 'project', 'local'],
       permissionMode: opts.permissionMode ?? prefs.defaultPermissionMode ?? 'default',

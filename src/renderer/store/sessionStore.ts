@@ -13,7 +13,9 @@ import type {
   SessionMeta,
   SessionStatus,
   PermissionRequestPayload,
-  StartArgs
+  StartArgs,
+  SubagentTask,
+  SubagentStatus
 } from '../types'
 
 interface SessionStore {
@@ -31,6 +33,8 @@ interface SessionStore {
   /** Past sessions for the sidebar (same cwd). */
   sessions: SessionListItem[]
   sessionsLoading: boolean
+  /** Task-tool subagents for the StatusBar monitor (kept out of the transcript). */
+  tasks: SubagentTask[]
 
   startSession: (args: StartArgs) => Promise<void>
   sendMessage: (text: string) => Promise<void>
@@ -200,7 +204,7 @@ function applyStreamEvent(
 
 /** Convert a past session's transcript messages into renderable items, pairing
  *  each tool_use with its tool_result by id. */
-function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
+export function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
   const items: TranscriptItem[] = []
   for (const m of messages) {
     if (m.type === 'assistant') {
@@ -286,6 +290,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   currentStreamingMsgId: null,
   sessions: [],
   sessionsLoading: false,
+  tasks: [],
 
   async startSession(args) {
     // Pre-register synchronously: bridgeSessionId is added to the bridge's map
@@ -310,6 +315,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         tools: []
       },
       items: [],
+      tasks: [],
       status: { running: false },
       currentStreamingMsgId: null
     })
@@ -344,7 +350,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   reset() {
-    set({ starting: false, meta: null, items: [], status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null })
+    set({ starting: false, meta: null, items: [], tasks: [], status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null })
   },
 
   async bootstrap() {
@@ -371,6 +377,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({
       starting: true,
       items: [],
+      tasks: [],
       status: { running: false },
       currentStreamingMsgId: null,
       meta: { sessionId: newId, cwd: path, model, permissionMode: 'default', tools: [] }
@@ -405,6 +412,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({
       starting: true,
       items: [],
+      tasks: [],
       status: { running: false },
       currentStreamingMsgId: null,
       meta: { sessionId: newId, cwd, model, permissionMode, tools: [] }
@@ -433,6 +441,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // Switch UI instantly to the resumed session (history rendered, unlocked).
     set({
       items: historyToItems(history),
+      tasks: [],
       meta: {
         sessionId: newId,
         sdkSessionId,
@@ -504,6 +513,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
     set({
       items,
+      tasks: [],
       currentStreamingMsgId: null,
       meta: { sessionId: newId, sdkSessionId, cwd, model, permissionMode, tools: [] }
     })
@@ -573,6 +583,95 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               status: 'denied',
               errorMessage: d.message
             }))
+          }))
+        } else if (subtype === 'task_started') {
+          const t = msg as unknown as {
+            task_id: string
+            tool_use_id?: string
+            description: string
+            subagent_type?: string
+          }
+          const task: SubagentTask = {
+            taskId: t.task_id,
+            description: t.description,
+            subagentType: t.subagent_type,
+            toolUseId: t.tool_use_id,
+            status: 'running'
+          }
+          set((s) => ({
+            tasks: s.tasks.some((x) => x.taskId === t.task_id)
+              ? s.tasks.map((x) => (x.taskId === t.task_id ? { ...x, ...task } : x))
+              : [...s.tasks, task]
+          }))
+        } else if (subtype === 'task_progress') {
+          const t = msg as unknown as {
+            task_id: string
+            description?: string
+            subagent_type?: string
+            usage?: { total_tokens: number; tool_uses: number; duration_ms: number }
+            last_tool_name?: string
+            summary?: string
+          }
+          set((s) => ({
+            tasks: s.tasks.map((x) =>
+              x.taskId === t.task_id
+                ? {
+                    ...x,
+                    description: t.description ?? x.description,
+                    subagentType: t.subagent_type ?? x.subagentType,
+                    tokens: t.usage?.total_tokens ?? x.tokens,
+                    toolUses: t.usage?.tool_uses ?? x.toolUses,
+                    durationMs: t.usage?.duration_ms ?? x.durationMs,
+                    lastToolName: t.last_tool_name ?? x.lastToolName,
+                    summary: t.summary ?? x.summary
+                  }
+                : x
+            )
+          }))
+        } else if (subtype === 'task_updated') {
+          const t = msg as unknown as {
+            task_id: string
+            patch: { status?: string; description?: string; error?: string }
+          }
+          const mappedStatus: SubagentStatus | undefined = t.patch.status
+            ? t.patch.status === 'completed' || t.patch.status === 'failed'
+              ? t.patch.status
+              : t.patch.status === 'killed'
+                ? 'stopped'
+                : undefined
+            : undefined
+          set((s) => ({
+            tasks: s.tasks.map((x) =>
+              x.taskId === t.task_id
+                ? {
+                    ...x,
+                    description: t.patch.description ?? x.description,
+                    error: t.patch.error ?? x.error,
+                    status: mappedStatus ?? x.status
+                  }
+                : x
+            )
+          }))
+        } else if (subtype === 'task_notification') {
+          const t = msg as unknown as {
+            task_id: string
+            status: 'completed' | 'failed' | 'stopped'
+            summary?: string
+            usage?: { total_tokens: number; tool_uses: number; duration_ms: number }
+          }
+          set((s) => ({
+            tasks: s.tasks.map((x) =>
+              x.taskId === t.task_id
+                ? {
+                    ...x,
+                    status: t.status,
+                    summary: t.summary ?? x.summary,
+                    tokens: t.usage?.total_tokens ?? x.tokens,
+                    toolUses: t.usage?.tool_uses ?? x.toolUses,
+                    durationMs: t.usage?.duration_ms ?? x.durationMs
+                  }
+                : x
+            )
           }))
         }
         break

@@ -192,6 +192,8 @@ export interface ForgeApi {
   renameSession(sessionId: string, title: string, cwd: string): Promise<void>
   /** Delete a session's transcript file. */
   deleteSession(sessionId: string, cwd: string): Promise<void>
+  /** Read a subagent's own conversation transcript (for the monitor popover). */
+  getSubagentMessages(sessionId: string, agentId: string, cwd: string): Promise<HistoryMessage[]>
 
   /** List every MCP server the active session knows about (settings-file +
    *  dynamically added), with live connection status. Requires an active session. */

@@ -20,6 +20,8 @@ const api: ForgeApi = {
   renameSession: (sessionId, title, cwd) =>
     ipcRenderer.invoke('forge:renameSession', sessionId, title, cwd),
   deleteSession: (sessionId, cwd) => ipcRenderer.invoke('forge:deleteSession', sessionId, cwd),
+  getSubagentMessages: (sessionId, agentId, cwd) =>
+    ipcRenderer.invoke('forge:getSubagentMessages', sessionId, agentId, cwd),
   listMcpServers: (sessionId) => ipcRenderer.invoke('forge:listMcpServers', sessionId),
   toggleMcpServer: (sessionId, name, enabled) =>
     ipcRenderer.invoke('forge:toggleMcpServer', sessionId, name, enabled),

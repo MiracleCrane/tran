@@ -51,6 +51,25 @@ export interface ItemNode {
   childrenByTool: Map<string, ItemNode[]>
 }
 
+/** A Task-tool subagent, tracked from SDK task_* system messages and surfaced
+ *  in the StatusBar subagent monitor (kept out of the main transcript). */
+export type SubagentStatus = 'running' | 'completed' | 'failed' | 'stopped'
+
+export interface SubagentTask {
+  taskId: string
+  description: string
+  subagentType?: string
+  status: SubagentStatus
+  toolUseId?: string
+  /** Latest progress snapshot from task_progress/task_notification. */
+  tokens?: number
+  toolUses?: number
+  durationMs?: number
+  lastToolName?: string
+  summary?: string
+  error?: string
+}
+
 export interface SessionMeta {
   /** The bridge handle id — this is what every IPC call must target. */
   sessionId: string

@@ -68,10 +68,8 @@ function ThinkingBlock({ text }: { text: string }): JSX.Element {
   )
 }
 
-/** Render a list of nodes; assistant nodes pass their tool blocks' child nodes
- *  down to ToolCallCard, which renders them nested. Used at the top level and
- *  recursively inside subagent tool cards. A `seen` set + depth cap guarantee we
- *  can't loop forever even if a malformed transcript produced a cycle. */
+/** Render a list of nodes. `seen` + depth cap stay as a safety net even though
+ *  subagent content no longer nests here (it's monitored separately now). */
 const MAX_DEPTH = 16
 function MessageNodes({
   nodes,
@@ -87,27 +85,18 @@ function MessageNodes({
     <>
       {nodes
         .filter((n) => !seen.has(n.item.id))
-        .map((n) => {
-          const nextSeen = new Set(seen).add(n.item.id)
-          return n.item.kind === 'user' ? (
+        .map((n) =>
+          n.item.kind === 'user' ? (
             <UserMessage key={n.item.id} item={n.item as UserItem} />
           ) : (
-            <AssistantMessage key={n.item.id} node={n} depth={depth} seen={nextSeen} />
+            <AssistantMessage key={n.item.id} node={n} depth={depth} />
           )
-        })}
+        )}
     </>
   )
 }
 
-function AssistantMessage({
-  node,
-  depth,
-  seen
-}: {
-  node: ItemNode
-  depth: number
-  seen: Set<string>
-}): JSX.Element {
+function AssistantMessage({ node, depth }: { node: ItemNode; depth: number }): JSX.Element {
   const item = node.item as AssistantItem
   return (
     <div className={depth === 0 ? 'max-w-[92%]' : ''}>
@@ -121,16 +110,7 @@ function AssistantMessage({
         .map((block, i) => {
           if (block.kind === 'text') return <MessageText key={i}>{block.text}</MessageText>
           if (block.kind === 'thinking') return <ThinkingBlock key={i} text={block.text} />
-          return (
-            <ToolCallCard
-              key={i}
-              block={block}
-              childNodes={node.childrenByTool.get(block.toolUseId) ?? []}
-              renderNodes={(children) => (
-                <MessageNodes nodes={children} depth={depth + 1} seen={seen} />
-              )}
-            />
-          )
+          return <ToolCallCard key={i} block={block} />
         })}
       {item.streaming && (
         <div className="mt-1 flex items-center gap-1.5 text-xs text-zinc-600">

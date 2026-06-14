@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ToolBlock, ItemNode } from '../types'
+import type { ToolBlock } from '../types'
 import DiffView from './DiffView'
 
 function normalizeResult(result: unknown): string {
@@ -64,27 +64,13 @@ const STATUS_META: Record<
   denied: { label: '已拒绝', dot: 'bg-orange-500', text: 'text-orange-400' }
 }
 
-interface Props {
-  block: ToolBlock
-  /** Nested subagent conversation under this tool call (Task/Agent). */
-  childNodes: ItemNode[]
-  /** Renders nested nodes — passed in to avoid a circular import. */
-  renderNodes: (nodes: ItemNode[]) => JSX.Element
-}
-
-export default function ToolCallCard({ block, childNodes, renderNodes }: Props): JSX.Element {
+export default function ToolCallCard({ block }: { block: ToolBlock }): JSX.Element {
   const [collapsed, setCollapsed] = useState(false)
-  const [subOpen, setSubOpen] = useState(false)
   const meta = STATUS_META[block.status]
   const summary = summaryForTool(block.name, block.input)
   const resultText = normalizeResult(block.result)
   const inputText =
     block.name === 'Bash' ? ((block.input as { command?: string })?.command ?? '') : ''
-  const hasSub = childNodes.length > 0
-  const subLabel =
-    block.name === 'Task' || block.name === 'Agent'
-      ? ((block.input as { description?: string })?.description ?? '')
-      : ''
 
   return (
     <div className="my-1.5 overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
@@ -135,27 +121,6 @@ export default function ToolCallCard({ block, childNodes, renderNodes }: Props):
           )}
           {!resultText && block.status === 'pending' && (
             <div className="text-xs text-zinc-600">排队中 — 等待批准或轮到执行。</div>
-          )}
-
-          {/* Nested subagent conversation (Task/Agent tool). Collapsible so the
-              main transcript isn't flooded; expand to see the subagent's work. */}
-          {hasSub && (
-            <div className="mt-2 overflow-hidden rounded-lg border border-border-subtle/60 bg-bg-base/40">
-              <button
-                onClick={() => setSubOpen((o) => !o)}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-zinc-500 transition hover:bg-bg-hover hover:text-zinc-300"
-              >
-                <span className="shrink-0">{subOpen ? '▾' : '▸'}</span>
-                <span className="font-medium">子代理对话</span>
-                <span className="text-zinc-600">· {childNodes.length} 条</span>
-                {subLabel && <span className="truncate text-zinc-600">· {subLabel}</span>}
-              </button>
-              {subOpen && (
-                <div className="space-y-3 border-t border-border-subtle/60 px-3 py-2.5">
-                  {renderNodes(childNodes)}
-                </div>
-              )}
-            </div>
           )}
         </div>
       )}

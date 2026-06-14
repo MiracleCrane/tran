@@ -213,6 +213,20 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
     }
   )
 
+  ipcMain.handle(
+    'forge:getSubagentMessages',
+    async (_e, sessionId: string, agentId: string, cwd: string): Promise<HistoryMessage[]> => {
+      try {
+        const { getSubagentMessages } = await import('@anthropic-ai/claude-agent-sdk')
+        const msgs = await getSubagentMessages(sessionId, agentId, { dir: cwd, limit: 500 })
+        return msgs as unknown as HistoryMessage[]
+      } catch (err) {
+        log('ipc', `getSubagentMessages failed: ${err instanceof Error ? err.message : String(err)}`)
+        return []
+      }
+    }
+  )
+
   ipcMain.handle('forge:pickDirectory', async (): Promise<string | null> => {
     const res = await dialog.showOpenDialog({ properties: ['openDirectory'] })
     if (res.canceled || !res.filePaths.length) return null
