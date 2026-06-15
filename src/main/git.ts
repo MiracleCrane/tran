@@ -18,7 +18,10 @@ function runGit(cwd: string, args: string[], timeout = 10_000): Promise<{ stdout
     child.on('close', (code) => {
       clearTimeout(timer)
       if (code === 0) resolve({ stdout: out.trim(), stderr: err.trim() })
-      else reject(new Error(`git ${args.join(' ')} failed (${code}): ${err}`))
+      else {
+        const details = [err.trim(), out.trim()].filter(Boolean).join('\n')
+        reject(new Error(`git ${args.join(' ')} failed (${code}): ${details}`))
+      }
     })
     child.on('error', (e) => {
       clearTimeout(timer)
@@ -159,6 +162,13 @@ export async function add(cwd: string, paths?: string[]): Promise<void> {
 
 /** git commit with message. */
 export async function commit(cwd: string, message: string): Promise<void> {
+  const status = await getStatus(cwd)
+  if (status.conflicts.length > 0) {
+    throw new Error('存在冲突文件，请先解决冲突后再提交。')
+  }
+  if (status.staged.length === 0) {
+    throw new Error('没有已暂存的改动，请先暂存要提交的文件。')
+  }
   await runGit(cwd, ['commit', '-m', message])
 }
 
