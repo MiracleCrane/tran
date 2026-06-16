@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { UserAttachment } from '../types'
 
 /** Which top-level view the main column shows. Separate from sessionStore so
  *  session state and UI navigation don't entangle. Add settings, diffs, etc.
@@ -13,6 +14,9 @@ interface UiStore {
   /** Footer tool nav (skills/mcp/providers/translate/settings) collapsed. */
   navCollapsed: boolean
   toggleNav: () => void
+  attachmentPreview: UserAttachment | null
+  openAttachmentPreview: (attachment: UserAttachment) => void
+  closeAttachmentPreview: () => void
 }
 
 export const useUiStore = create<UiStore>((set) => ({
@@ -21,5 +25,8 @@ export const useUiStore = create<UiStore>((set) => ({
   sidebarCollapsed: false,
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   navCollapsed: false,
-  toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed }))
+  toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
+  attachmentPreview: null,
+  openAttachmentPreview: (attachment) => set({ attachmentPreview: { ...attachment } }),
+  closeAttachmentPreview: () => set({ attachmentPreview: null })
 }))

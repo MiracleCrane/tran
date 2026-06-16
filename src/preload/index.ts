@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   ForgeApi,
   AgentEvent,
@@ -9,6 +9,15 @@ import type {
   GitStatus
 } from '../shared/ipc'
 
+function getPathForFile(file: File): string {
+  const legacyPath = (file as File & { path?: string }).path ?? ''
+  try {
+    return webUtils.getPathForFile(file) || legacyPath
+  } catch {
+    return legacyPath
+  }
+}
+
 const api: ForgeApi = {
   startSession: (opts) => ipcRenderer.invoke('forge:startSession', opts),
   sendMessage: (sessionId, content) => ipcRenderer.invoke('forge:sendMessage', sessionId, content),
@@ -17,7 +26,7 @@ const api: ForgeApi = {
   setPermissionMode: (sessionId, mode) =>
     ipcRenderer.invoke('forge:setPermissionMode', sessionId, mode),
   closeSession: (sessionId) => ipcRenderer.invoke('forge:closeSession', sessionId),
-  listSessions: (cwd) => ipcRenderer.invoke('forge:listSessions', cwd),
+  listSessions: (cwd, opts) => ipcRenderer.invoke('forge:listSessions', cwd, opts),
   getSessionMessages: (sessionId, cwd) =>
     ipcRenderer.invoke('forge:getSessionMessages', sessionId, cwd),
   renameSession: (sessionId, title, cwd) =>
@@ -32,6 +41,8 @@ const api: ForgeApi = {
     ipcRenderer.invoke('forge:backgroundTask', sessionId, toolUseId),
 
   pickFiles: (cwd) => ipcRenderer.invoke('forge:pickFiles', cwd),
+  readFiles: (cwd, paths) => ipcRenderer.invoke('forge:readFiles', cwd, paths),
+  getPathForFile,
   revealInExplorer: (cwd, pathStr) => ipcRenderer.invoke('forge:revealInExplorer', cwd, pathStr),
 
   listSkills: (sessionId) => ipcRenderer.invoke('forge:listSkills', sessionId),

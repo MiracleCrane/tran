@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { GitBranchInfo, GitCommit, GitStatus } from '../../shared/ipc'
 import DiffView from './DiffView'
@@ -87,7 +87,106 @@ function formatTime(ts: number): string {
 }
 
 type Drawer = 'branches' | 'commit' | 'log' | 'stash' | 'output' | null
+type OpenDrawer = Exclude<Drawer, null>
 type FileKind = 'staged' | 'unstaged' | 'untracked' | 'conflict'
+const DRAWER_CLOSE_CLEAR_MS = 760
+const DRAWER_CONTENT_FADE_MS = 110
+const GIT_LOG_LIMIT = 30
+export const CLOSE_GIT_DRAWER_EVENT = 'forge:close-git-drawer'
+
+export function requestCloseGitDrawer(): void {
+  window.dispatchEvent(new Event(CLOSE_GIT_DRAWER_EVENT))
+}
+
+function emptyGitStatus(): GitStatus {
+  return {
+    staged: [],
+    unstaged: [],
+    untracked: [],
+    conflicts: [],
+    clean: true,
+    ahead: null,
+    behind: null
+  }
+}
+
+interface GitLogCacheEntry {
+  commits: GitCommit[]
+  loadedAt: number
+}
+
+interface GitToolbarCacheEntry {
+  branch: string | null
+  status: GitStatus
+  branches: GitBranchInfo[]
+  checked: boolean
+  loadedAt: number
+}
+
+const gitLogCache = new Map<string, GitLogCacheEntry>()
+const gitToolbarCache = new Map<string, GitToolbarCacheEntry>()
+
+function cloneGitStatus(status: GitStatus): GitStatus {
+  return {
+    ...status,
+    staged: [...status.staged],
+    unstaged: [...status.unstaged],
+    untracked: [...status.untracked],
+    conflicts: [...status.conflicts]
+  }
+}
+
+function cloneGitBranches(branches: GitBranchInfo[]): GitBranchInfo[] {
+  return branches.map((branch) => ({ ...branch }))
+}
+
+function getCachedGitToolbar(cwd: string): GitToolbarCacheEntry | null {
+  const cached = gitToolbarCache.get(cwd)
+  if (!cached) return null
+  return {
+    branch: cached.branch,
+    status: cloneGitStatus(cached.status),
+    branches: cloneGitBranches(cached.branches),
+    checked: cached.checked,
+    loadedAt: cached.loadedAt
+  }
+}
+
+function setCachedGitToolbar(
+  cwd: string,
+  branch: string | null,
+  status: GitStatus,
+  branches: GitBranchInfo[],
+  checked = true
+): void {
+  gitToolbarCache.set(cwd, {
+    branch,
+    status: cloneGitStatus(status),
+    branches: cloneGitBranches(branches),
+    checked,
+    loadedAt: Date.now()
+  })
+}
+
+function gitLogCacheKey(cwd: string, branch: string, limit: number): string {
+  return `${cwd}\n${branch}\n${limit}`
+}
+
+function getCachedGitLog(cwd: string, branch: string | null, limit: number): GitCommit[] | null {
+  if (!branch) return null
+  return gitLogCache.get(gitLogCacheKey(cwd, branch, limit))?.commits ?? null
+}
+
+function setCachedGitLog(cwd: string, branch: string | null, limit: number, commits: GitCommit[]): void {
+  if (!branch) return
+  gitLogCache.set(gitLogCacheKey(cwd, branch, limit), { commits, loadedAt: Date.now() })
+}
+
+function invalidateGitLogCache(cwd: string): void {
+  for (const key of gitLogCache.keys()) {
+    if (key.startsWith(`${cwd}\n`)) gitLogCache.delete(key)
+  }
+}
 
 const KIND_STYLE: Record<FileKind, { dot: string; text: string; label: string }> = {
   staged: { dot: 'bg-yellow-500', text: 'text-amber-200', label: '已暂存' },
@@ -142,21 +241,43 @@ function FileRow({
   )
 }
 
+function DrawerLoading({ label }: { label: string }): JSX.Element {
+  return (
+    <div className="flex min-h-16 items-center justify-center gap-2 text-[11px] text-zinc-500">
+      <span className="git-loading-dot" />
+      <span className="git-loading-dot [animation-delay:90ms]" />
+      <span className="git-loading-dot [animation-delay:180ms]" />
+      <span>{label}</span>
+    </div>
+  )
+}
+
 export default function GitToolbar(): JSX.Element {
   // '' when there's no active project; every git call is guarded by
   // `if (!cwd)` / `if (!branch)` so the empty string never reaches git.
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
-  const [branch, setBranch] = useState<string | null>(null)
-  const [status, setStatus] = useState<GitStatus>({
-    staged: [], unstaged: [], untracked: [], conflicts: [], clean: true, ahead: null, behind: null
-  })
-  const [branches, setBranches] = useState<GitBranchInfo[]>([])
+  const cachedGitToolbar = cwd ? getCachedGitToolbar(cwd) : null
+  const [branch, setBranch] = useState<string | null>(cachedGitToolbar?.branch ?? null)
+  const [gitChecked, setGitChecked] = useState(cachedGitToolbar?.checked ?? false)
+  const [status, setStatus] = useState<GitStatus>(cachedGitToolbar?.status ?? emptyGitStatus())
+  const [branches, setBranches] = useState<GitBranchInfo[]>(cachedGitToolbar?.branches ?? [])
   const [commits, setCommits] = useState<GitCommit[]>([])
   const [stashList, setStashList] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const [drawer, setDrawer] = useState<Drawer>(null)
+  const [renderedDrawer, setRenderedDrawer] = useState<OpenDrawer | null>(null)
+  const renderedDrawerRef = useRef<OpenDrawer | null>(null)
+  const drawerOpenRef = useRef(false)
+  const drawerShellRef = useRef<HTMLDivElement | null>(null)
+  const drawerContentRef = useRef<HTMLDivElement | null>(null)
+  const drawerHeightRafRef = useRef<number | null>(null)
+  const drawerLoadSeqRef = useRef<Partial<Record<OpenDrawer, number>>>({})
+  const mountedRef = useRef(true)
+  const [drawerContentSwitching, setDrawerContentSwitching] = useState(false)
+  const [drawerHeight, setDrawerHeight] = useState<number | null>(null)
+  const [drawerLoading, setDrawerLoading] = useState<Partial<Record<OpenDrawer, boolean>>>({})
   const [commitMsg, setCommitMsg] = useState('')
   const [newBranchName, setNewBranchName] = useState('')
   const [pushUpstream, setPushUpstream] = useState(false)
@@ -182,17 +303,143 @@ export default function GitToolbar(): JSX.Element {
     onConfirm: () => void
   } | null>(null)
 
+  const cancelDrawerHeightFrame = (): void => {
+    if (drawerHeightRafRef.current !== null) {
+      window.cancelAnimationFrame(drawerHeightRafRef.current)
+      drawerHeightRafRef.current = null
+    }
+  }
+
+  const lockDrawerVisibleHeight = (): void => {
+    const shell = drawerShellRef.current
+    if (!shell) return
+    setDrawerHeight(Math.ceil(shell.offsetHeight || shell.getBoundingClientRect().height))
+  }
+
+  const measureDrawerTargetHeight = (): number | null => {
+    const shell = drawerShellRef.current
+    const content = drawerContentRef.current
+    if (!shell || !content) return null
+
+    const contentHeight = Math.ceil(content.scrollHeight || content.offsetHeight || content.getBoundingClientRect().height)
+    const shellStyle = window.getComputedStyle(shell)
+    const borderHeight =
+      Number.parseFloat(shellStyle.borderTopWidth) + Number.parseFloat(shellStyle.borderBottomWidth)
+    const measuredHeight = contentHeight + Math.ceil(borderHeight)
+    const maxHeight = Number.parseFloat(shellStyle.maxHeight)
+    return Number.isFinite(maxHeight) ? Math.min(measuredHeight, maxHeight) : measuredHeight
+  }
+
+  const animateDrawerHeightToContent = (): void => {
+    const shell = drawerShellRef.current
+    const targetHeight = measureDrawerTargetHeight()
+    if (!shell || targetHeight === null) return
+
+    const currentHeight = Math.ceil(shell.offsetHeight || shell.getBoundingClientRect().height)
+    cancelDrawerHeightFrame()
+    setDrawerHeight(currentHeight)
+    drawerHeightRafRef.current = window.requestAnimationFrame(() => {
+      drawerHeightRafRef.current = window.requestAnimationFrame(() => {
+        drawerHeightRafRef.current = null
+        setDrawerHeight(targetHeight)
+      })
+    })
+  }
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      cancelDrawerHeightFrame()
+    }
+  }, [])
+
+  useEffect(() => {
+    const closeDrawer = (): void => setDrawer(null)
+    window.addEventListener(CLOSE_GIT_DRAWER_EVENT, closeDrawer)
+    return () => window.removeEventListener(CLOSE_GIT_DRAWER_EVENT, closeDrawer)
+  }, [])
+
   // Refresh branch + status + branches whenever cwd changes. Also closes any
   // open drawer so stale drawer contents from the previous project don't leak.
   useEffect(() => {
     setDrawer(null)
     setDiffView(null)
-    if (!cwd) return
+    if (!cwd) {
+      setBranch(null)
+      setStatus(emptyGitStatus())
+      setBranches([])
+      setGitChecked(true)
+      return
+    }
+    const cached = getCachedGitToolbar(cwd)
+    if (cached) {
+      setBranch(cached.branch)
+      setStatus(cached.status)
+      setBranches(cached.branches)
+      setGitChecked(cached.checked)
+    } else {
+      setGitChecked(false)
+      setBranch(null)
+      setStatus(emptyGitStatus())
+      setBranches([])
+    }
     void refresh()
   }, [cwd])
 
+  useEffect(() => {
+    renderedDrawerRef.current = renderedDrawer
+  }, [renderedDrawer])
+
+  useEffect(() => {
+    if (drawer) {
+      const wasOpen = drawerOpenRef.current
+      drawerOpenRef.current = true
+      const current = renderedDrawerRef.current
+      if (wasOpen && current && current !== drawer) {
+        lockDrawerVisibleHeight()
+        setDrawerContentSwitching(true)
+        const timeout = window.setTimeout(() => {
+          setRenderedDrawer(drawer)
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => setDrawerContentSwitching(false))
+          })
+        }, DRAWER_CONTENT_FADE_MS)
+        return () => window.clearTimeout(timeout)
+      }
+      setRenderedDrawer(drawer)
+      setDrawerContentSwitching(false)
+      return
+    }
+
+    drawerOpenRef.current = false
+    setDrawerContentSwitching(false)
+    const timeout = window.setTimeout(() => setRenderedDrawer(null), DRAWER_CLOSE_CLEAR_MS)
+    return () => window.clearTimeout(timeout)
+  }, [drawer])
+
+  useEffect(() => {
+    const el = drawerContentRef.current
+    if (!el || !renderedDrawer) {
+      setDrawerHeight(null)
+      return
+    }
+
+    animateDrawerHeightToContent()
+
+    const observer = new ResizeObserver(() => animateDrawerHeightToContent())
+    observer.observe(el)
+    return () => {
+      cancelDrawerHeightFrame()
+      observer.disconnect()
+    }
+  }, [renderedDrawer])
+
   const refresh = async (): Promise<void> => {
-    if (!cwd) return
+    if (!cwd) {
+      setGitChecked(true)
+      return
+    }
     try {
       const [b, s, bl] = await Promise.all([
         window.api.gitGetCurrentBranch(cwd),
@@ -202,18 +449,29 @@ export default function GitToolbar(): JSX.Element {
       setBranch(b)
       setStatus(s)
       setBranches(bl)
+      setCachedGitToolbar(cwd, b, s, bl)
     } catch {
       setBranch(null)
+      setStatus(emptyGitStatus())
+      setBranches([])
+      setCachedGitToolbar(cwd, null, emptyGitStatus(), [])
+    } finally {
+      setGitChecked(true)
     }
   }
 
   /** Run a git action, then refresh. If it returns {stdout,stderr}, surface the
    *  text in the output drawer so the user sees push/pull/fetch results. */
-  const runGitAction = async (fn: () => Promise<unknown>, label: string): Promise<void> => {
+  const runGitAction = async (
+    fn: () => Promise<unknown>,
+    label: string,
+    opts: { invalidateLog?: boolean } = {}
+  ): Promise<void> => {
     setLoading(true)
     setError(null)
     try {
       const res = await fn()
+      if (opts.invalidateLog) invalidateGitLogCache(cwd)
       if (res && typeof res === 'object' && ('stdout' in res || 'stderr' in res)) {
         const { stdout, stderr } = res as { stdout: string; stderr: string }
         const text = [stdout, stderr].filter(Boolean).join('\n').trim()
@@ -230,21 +488,89 @@ export default function GitToolbar(): JSX.Element {
     }
   }
 
-  const toggleDrawer = async (next: Exclude<Drawer, null>): Promise<void> => {
+  const setDrawerBusy = (name: OpenDrawer, busy: boolean): void => {
+    setDrawerLoading((prev) => {
+      const next = { ...prev }
+      if (busy) next[name] = true
+      else delete next[name]
+      return next
+    })
+  }
+
+  const afterDrawerPaint = (fn: () => void): void => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(fn)
+    })
+  }
+
+  const loadDrawerData = (next: OpenDrawer): void => {
+    if (!cwd) return
+
+    if (next === 'log') {
+      const seq = (drawerLoadSeqRef.current.log ?? 0) + 1
+      drawerLoadSeqRef.current.log = seq
+      const logBranch = branch
+      const cachedCommits = getCachedGitLog(cwd, logBranch, GIT_LOG_LIMIT)
+      if (cachedCommits) {
+        setCommits(cachedCommits)
+        setDrawerBusy('log', false)
+        afterDrawerPaint(() => animateDrawerHeightToContent())
+        return
+      }
+      setCommits([])
+      setDrawerBusy('log', true)
+      afterDrawerPaint(() => {
+        void (async () => {
+          try {
+            const data = await window.api.gitLog(cwd, GIT_LOG_LIMIT)
+            if (mountedRef.current && drawerLoadSeqRef.current.log === seq) {
+              setCachedGitLog(cwd, logBranch, GIT_LOG_LIMIT, data)
+              lockDrawerVisibleHeight()
+              setCommits(data)
+            }
+          } catch {
+            if (mountedRef.current && drawerLoadSeqRef.current.log === seq) {
+              lockDrawerVisibleHeight()
+              setCommits([])
+            }
+          } finally {
+            if (mountedRef.current && drawerLoadSeqRef.current.log === seq) setDrawerBusy('log', false)
+          }
+        })()
+      })
+    } else if (next === 'stash') {
+      const seq = (drawerLoadSeqRef.current.stash ?? 0) + 1
+      drawerLoadSeqRef.current.stash = seq
+      setStashList([])
+      setDrawerBusy('stash', true)
+      afterDrawerPaint(() => {
+        void (async () => {
+          try {
+            const res = await window.api.gitStash(cwd, 'list')
+            if (mountedRef.current && drawerLoadSeqRef.current.stash === seq) {
+              lockDrawerVisibleHeight()
+              setStashList(res.split('\n').filter(Boolean))
+            }
+          } catch {
+            if (mountedRef.current && drawerLoadSeqRef.current.stash === seq) {
+              lockDrawerVisibleHeight()
+              setStashList([])
+            }
+          } finally {
+            if (mountedRef.current && drawerLoadSeqRef.current.stash === seq) setDrawerBusy('stash', false)
+          }
+        })()
+      })
+    }
+  }
+
+  const toggleDrawer = (next: OpenDrawer): void => {
     if (drawer === next) {
       setDrawer(null)
       return
     }
-    // Lazy-load drawer data on open.
-    if (next === 'log' && cwd) {
-      try { setCommits(await window.api.gitLog(cwd, 30)) } catch { setCommits([]) }
-    } else if (next === 'stash' && cwd) {
-      try {
-        const res = await window.api.gitStash(cwd, 'list')
-        setStashList(res.split('\n').filter(Boolean))
-      } catch { setStashList([]) }
-    }
     setDrawer(next)
+    loadDrawerData(next)
   }
 
   const loadDiff = async (paths: string[], staged: boolean, note?: string): Promise<void> => {
@@ -272,11 +598,21 @@ export default function GitToolbar(): JSX.Element {
       await window.api.gitCommit(cwd, msg)
       setCommitMsg('')
       setDiffView(null)
-    }, '提交')
+    }, '提交', { invalidateLog: true })
   }
 
   // If not a git repo, render nothing.
-  if (!branch) return <></>
+  if (!branch) {
+    if (gitChecked) return <></>
+    return (
+      <div className="border-b border-white/[0.06]">
+        <div className="flex h-9 items-center gap-2 px-3 text-[11px] text-zinc-500">
+          <BranchIcon />
+          <span className="font-medium">Git 状态加载中...</span>
+        </div>
+      </div>
+    )
+  }
 
   const btnCls =
     'flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-medium text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-40'
@@ -284,9 +620,11 @@ export default function GitToolbar(): JSX.Element {
   const dirty = !status.clean
   const totalChanges = status.staged.length + status.unstaged.length + status.untracked.length + status.conflicts.length
   const activeBtn = (d: Drawer): string => (drawer === d ? 'bg-white/[0.08] text-zinc-100' : '')
+  const drawerShellOverflow = renderedDrawer === 'branches' ? 'overflow-hidden' : 'overflow-y-auto'
+  const drawerShellMaxHeight = renderedDrawer === 'branches' ? 'max-h-none' : 'max-h-[46vh]'
 
   return (
-    <div className="border-b border-white/[0.06]">
+    <div className="relative z-30 shrink-0 border-b border-white/[0.06]">
       {/* --- toolbar row --- */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 text-zinc-400">
         {/* Branch + ahead/behind */}
@@ -316,7 +654,7 @@ export default function GitToolbar(): JSX.Element {
         <button onClick={() => runGitAction(() => window.api.gitFetch(cwd), '拉取(fetch)')} disabled={loading} className={btnCls} title="拉取远端信息(不合并)">
           <FetchIcon />
         </button>
-        <button onClick={() => runGitAction(() => window.api.gitPull(cwd), '拉取')} disabled={loading} className={btnCls} title="拉取并合并">
+        <button onClick={() => runGitAction(() => window.api.gitPull(cwd), '拉取', { invalidateLog: true })} disabled={loading} className={btnCls} title="拉取并合并">
           <PullIcon /> 拉取
         </button>
         <button onClick={() => runGitAction(() => window.api.gitPush(cwd), '推送')} disabled={loading} className={btnCls} title="推送">
@@ -378,16 +716,29 @@ export default function GitToolbar(): JSX.Element {
       </div>
 
       {/* --- drawer area (one at a time) --- */}
-      <Collapse open={!!drawer}>
-        <div className="max-h-[46vh] overflow-y-auto border-t border-white/[0.06] px-3 py-2.5 text-zinc-300">
+      <Collapse
+        open={!!drawer}
+        className={`absolute left-0 right-0 top-full z-40 shadow-[0_24px_60px_rgba(0,0,0,0.28)] ${
+          drawer ? 'pointer-events-auto' : 'pointer-events-none'
+        }`}
+      >
+        <div
+          ref={drawerShellRef}
+          className={`git-drawer-shell ${drawerShellMaxHeight} ${drawerShellOverflow} border-b border-t border-t-white/[0.06] border-b-white/[0.18] bg-[#090a0e]/[0.98] text-zinc-300 shadow-[0_18px_44px_rgba(0,0,0,0.24)]`}
+          style={drawerHeight === null ? undefined : { height: drawerHeight }}
+        >
+          <div
+            ref={drawerContentRef}
+            className={`git-drawer-content px-3 py-2.5 ${drawerContentSwitching ? 'is-switching' : ''}`}
+          >
           {/* Branches drawer */}
-          {drawer === 'branches' && (
-            <div className="flex flex-col gap-2">
+          {renderedDrawer === 'branches' && (
+            <div className="git-branches-drawer flex min-h-0 flex-col gap-2">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500/80">切换分支</span>
                 <button onClick={() => setDrawer(null)} className="text-zinc-600 hover:text-zinc-300"><CloseIcon /></button>
               </div>
-              <div className="max-h-44 overflow-y-auto">
+              <div className="git-stable-scroll min-h-0 flex-1 overflow-y-auto pr-1">
                 {branches.map((b) => (
                   <div
                     key={b.name}
@@ -423,7 +774,7 @@ export default function GitToolbar(): JSX.Element {
                 ))}
               </div>
               {/* Create branch */}
-              <div className="mt-1 flex items-center gap-2 border-t border-white/[0.06] pt-2">
+              <div className="flex shrink-0 items-center gap-2 border-t border-white/[0.06] pb-0.5 pt-2">
                 <input
                   value={newBranchName}
                   onChange={(e) => setNewBranchName(e.target.value)}
@@ -443,7 +794,7 @@ export default function GitToolbar(): JSX.Element {
           )}
 
           {/* Commit drawer: staging management + per-file diff + commit input */}
-          {drawer === 'commit' && (
+          {renderedDrawer === 'commit' && (
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500/80">
@@ -558,13 +909,15 @@ export default function GitToolbar(): JSX.Element {
           )}
 
           {/* Log drawer */}
-          {drawer === 'log' && (
+          {renderedDrawer === 'log' && (
             <div className="flex flex-col gap-1">
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500/80">提交历史</span>
                 <button onClick={() => setDrawer(null)} className="text-zinc-600 hover:text-zinc-300"><CloseIcon /></button>
               </div>
-              {commits.length === 0 ? (
+              {drawerLoading.log ? (
+                <DrawerLoading label="提交历史加载中..." />
+              ) : commits.length === 0 ? (
                 <div className="py-4 text-center text-[11px] text-zinc-600">暂无提交</div>
               ) : (
                 commits.map((c) => (
@@ -580,7 +933,7 @@ export default function GitToolbar(): JSX.Element {
                         message: `用 git revert 撤销提交 ${c.shortHash}?\n「${c.message}」\n这会创建一个反向的新提交。`,
                         confirmLabel: '撤销',
                         danger: true,
-                        onConfirm: () => { const hash = c.hash; setConfirm(null); void runGitAction(() => window.api.gitRevert(cwd, hash), '撤销提交').then(() => setDrawer(null)) }
+                        onConfirm: () => { const hash = c.hash; setConfirm(null); void runGitAction(() => window.api.gitRevert(cwd, hash), '撤销提交', { invalidateLog: true }).then(() => setDrawer(null)) }
                       })}
                       disabled={loading}
                       className="shrink-0 rounded p-0.5 text-zinc-600 opacity-0 transition hover:text-amber-400 group-hover:opacity-100 disabled:opacity-30"
@@ -595,7 +948,7 @@ export default function GitToolbar(): JSX.Element {
           )}
 
           {/* Stash drawer */}
-          {drawer === 'stash' && (
+          {renderedDrawer === 'stash' && (
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500/80">储藏</span>
@@ -618,8 +971,10 @@ export default function GitToolbar(): JSX.Element {
                   ↩ 恢复最近
                 </button>
               </div>
-              <div className="max-h-40 overflow-y-auto">
-                {stashList.length === 0 ? (
+              <div className="git-stable-scroll max-h-40 overflow-y-auto">
+                {drawerLoading.stash ? (
+                  <DrawerLoading label="储藏列表加载中..." />
+                ) : stashList.length === 0 ? (
                   <div className="py-3 text-center text-[11px] text-zinc-600">暂无储藏</div>
                 ) : (
                   stashList.map((s, i) => (
@@ -633,17 +988,18 @@ export default function GitToolbar(): JSX.Element {
           )}
 
           {/* Output drawer */}
-          {drawer === 'output' && (
+          {renderedDrawer === 'output' && (
             <div className="flex flex-col gap-1">
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500/80">{output?.cmd} 输出</span>
                 <button onClick={() => setDrawer(null)} className="text-zinc-600 hover:text-zinc-300"><CloseIcon /></button>
               </div>
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-[#0b0c10] p-2.5 text-[11px] leading-relaxed text-zinc-300">
+              <pre className="git-stable-scroll max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-[#0b0c10] p-2.5 text-[11px] leading-relaxed text-zinc-300">
                 {output?.text || '(无输出)'}
               </pre>
             </div>
           )}
+          </div>
         </div>
       </Collapse>
 

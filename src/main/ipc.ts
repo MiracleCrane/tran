@@ -1,6 +1,6 @@
 import { ipcMain, dialog, shell, type BrowserWindow } from 'electron'
-import { readFileSync, statSync, existsSync } from 'node:fs'
-import { basename } from 'node:path'
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { basename, extname, resolve } from 'node:path'
 import { AgentBridge } from './agent/AgentBridge'
 import { getApiKey, setApiKey } from './settings'
 import { saveMcpServer, deleteMcpServer } from './mcpConfig'
@@ -31,6 +31,7 @@ import type {
   PermissionRequestPayload,
   PermissionResponsePayload,
   SessionListItem,
+  SessionListOptions,
   StartSessionResult,
   HistoryMessage,
   SaveMcpServerArgs,
@@ -41,6 +42,7 @@ import type {
   MarketplacePlugin,
   Preferences,
   PickedFile,
+  PickedDirectoryEntry,
   TranslateConfig,
   TranslateTestResult
 } from '../shared/ipc'
@@ -61,6 +63,86 @@ const MIME: Record<string, string> = {
   bmp: 'image/bmp'
 }
 const MAX_TEXT_INLINE = 512 * 1024 // inline at most 512KB of a text file
+const MAX_DIRECTORY_ENTRIES = 300
+
+function readDirectoryEntries(path: string): { entries: PickedDirectoryEntry[]; truncated: boolean } {
+  const entries: PickedDirectoryEntry[] = []
+  const dirents = readdirSync(path, { withFileTypes: true })
+  for (const dirent of dirents) {
+    const childPath = resolve(path, dirent.name)
+    try {
+      const stat = statSync(childPath)
+      entries.push({
+        name: dirent.name,
+        path: childPath,
+        kind: stat.isDirectory() ? 'directory' : 'file',
+        size: stat.isDirectory() ? 0 : stat.size,
+        modifiedAt: stat.mtimeMs
+      })
+    } catch {
+      /* skip entries we cannot stat */
+    }
+  }
+  entries.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1
+    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+  })
+  return {
+    entries: entries.slice(0, MAX_DIRECTORY_ENTRIES),
+    truncated: entries.length > MAX_DIRECTORY_ENTRIES
+  }
+}
+
+function readPickedFiles(cwd: string, paths: string[], source: string): PickedFile[] {
+  const out: PickedFile[] = []
+  for (const rawPath of paths) {
+    try {
+      const p = resolve(cwd, rawPath)
+      const stat = statSync(p)
+      if (stat.isDirectory()) {
+        const { entries, truncated } = readDirectoryEntries(p)
+        out.push({
+          path: p,
+          name: basename(p),
+          kind: 'directory',
+          mimeType: 'application/x-directory',
+          data: '',
+          size: 0,
+          entries,
+          entriesTruncated: truncated
+        })
+        continue
+      }
+      if (!stat.isFile()) {
+        log('ipc', `${source} skip ${p}: not a file or directory`)
+        continue
+      }
+      const ext = extname(p).slice(1).toLowerCase()
+      const kind: PickedFile['kind'] = IMAGE_EXTS.has(ext)
+        ? 'image'
+        : TEXT_EXTS.has(ext)
+          ? 'text'
+          : 'other'
+      let data = ''
+      if (kind === 'image') {
+        data = readFileSync(p).toString('base64')
+      } else if (kind === 'text') {
+        data = readFileSync(p).toString('utf-8').slice(0, MAX_TEXT_INLINE)
+      }
+      out.push({
+        path: p,
+        name: basename(p),
+        kind,
+        mimeType: MIME[ext] ?? 'application/octet-stream',
+        data,
+        size: stat.size
+      })
+    } catch (e) {
+      log('ipc', `${source} skip ${rawPath}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  return out
+}
 
 export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBridge {
   const withWindow = (action: (win: BrowserWindow) => void): void => {
@@ -155,42 +237,24 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
       properties: ['openFile', 'multiSelections']
     })
     if (res.canceled || !res.filePaths.length) return []
-    const out: PickedFile[] = []
-    for (const p of res.filePaths) {
-      try {
-        const stat = statSync(p)
-        const ext = (p.split('.').pop() ?? '').toLowerCase()
-        const kind: PickedFile['kind'] = IMAGE_EXTS.has(ext)
-          ? 'image'
-          : TEXT_EXTS.has(ext)
-            ? 'text'
-            : 'other'
-        const buf = readFileSync(p)
-        const data =
-          kind === 'image'
-            ? buf.toString('base64')
-            : kind === 'text'
-              ? buf.toString('utf-8').slice(0, MAX_TEXT_INLINE)
-              : ''
-        out.push({
-          path: p,
-          name: basename(p),
-          kind,
-          mimeType: MIME[ext] ?? 'application/octet-stream',
-          data,
-          size: stat.size
-        })
-      } catch (e) {
-        log('ipc', `pickFiles skip ${p}: ${e instanceof Error ? e.message : String(e)}`)
-      }
-    }
-    return out
+    return readPickedFiles(cwd, res.filePaths, 'pickFiles')
+  })
+
+  ipcMain.handle('forge:readFiles', async (_e, cwd: string, paths: string[]): Promise<PickedFile[]> => {
+    const filePaths = Array.isArray(paths)
+      ? paths.filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+      : []
+    return readPickedFiles(cwd, filePaths, 'readFiles')
   })
 
   ipcMain.handle('forge:revealInExplorer', async (_e, cwd: string, pathStr: string): Promise<boolean> => {
     const { resolve } = await import('node:path')
     const resolved = resolve(cwd, pathStr)
     if (!existsSync(resolved)) return false
+    if (statSync(resolved).isDirectory()) {
+      await shell.openPath(resolved)
+      return true
+    }
     shell.showItemInFolder(resolved)
     return true
   })
@@ -279,10 +343,12 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
     getStartupProject()
   )
 
-  ipcMain.handle('forge:listSessions', async (_e, cwd: string): Promise<SessionListItem[]> => {
+  ipcMain.handle('forge:listSessions', async (_e, cwd: string, opts?: SessionListOptions): Promise<SessionListItem[]> => {
     try {
       const { listSessions } = await import('@anthropic-ai/claude-agent-sdk')
-      const sessions = await listSessions({ dir: cwd, limit: 50 })
+      const limit = opts?.limit && opts.limit > 0 ? opts.limit : 50
+      const offset = opts?.offset && opts.offset > 0 ? opts.offset : 0
+      const sessions = await listSessions({ dir: cwd, limit, offset })
       return sessions.map((s) => ({
         sessionId: s.sessionId,
         summary: s.summary,

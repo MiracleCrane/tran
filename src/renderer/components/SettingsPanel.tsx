@@ -59,6 +59,7 @@ export default function SettingsPanel(): JSX.Element {
   const [effort, setEffort] = useState<EffortLevel>('high')
   const [permMode, setPermMode] = useState<PermissionMode>('default')
   const [models, setModels] = useState<ComposerModel[]>([])
+  const [vulkan, setVulkan] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState(false)
@@ -71,9 +72,23 @@ export default function SettingsPanel(): JSX.Element {
       setEffort(p.defaultEffort ?? 'high')
       setPermMode(p.defaultPermissionMode ?? 'default')
       setModels(p.composerModels ?? [])
+      setVulkan(!!p.vulkanBackend)
       setLoaded(true)
     })
   }, [])
+
+  /** Vulkan toggle applies immediately (it only takes effect after restart, so
+   *  no point waiting for the Save button). Persists just this field. */
+  const toggleVulkan = async (next: boolean): Promise<void> => {
+    setVulkan(next)
+    try {
+      await window.api.savePreferences({ vulkanBackend: next })
+      setSavedAt(true)
+      setTimeout(() => setSavedAt(false), 1500)
+    } catch {
+      setVulkan(!next) // revert on failure
+    }
+  }
 
   const save = async (): Promise<void> => {
     setSaving(true)
@@ -134,24 +149,6 @@ export default function SettingsPanel(): JSX.Element {
               step={5}
               display={`${appearance.motionSpeed}%`}
               onChange={(value) => updateAppearance('motionSpeed', value)}
-            />
-            <RangeControl
-              label="玻璃不透明度"
-              value={appearance.glassOpacity}
-              min={65}
-              max={100}
-              step={1}
-              display={`${appearance.glassOpacity}%`}
-              onChange={(value) => updateAppearance('glassOpacity', value)}
-            />
-            <RangeControl
-              label="雾化程度"
-              value={appearance.frost}
-              min={0}
-              max={100}
-              step={1}
-              display={`${appearance.frost}%`}
-              onChange={(value) => updateAppearance('frost', value)}
             />
           </div>
         </section>
@@ -222,6 +219,29 @@ export default function SettingsPanel(): JSX.Element {
           </button>
           {savedAt && <span className="text-xs text-emerald-400">已保存</span>}
         </div>
+
+        <section className="glass-panel-soft rounded-2xl p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <label className="text-xs text-zinc-500">Vulkan GPU 合成后端(实验)</label>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                让 Chromium 的合成走 ANGLE Vulkan 后端(默认 D3D11)。某些显卡上更流畅,某些驱动上可能闪烁或不稳。更改需重启生效,默认关闭。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void toggleVulkan(!vulkan)}
+              aria-pressed={vulkan}
+              className={`relative h-6 w-11 shrink-0 rounded-full transition ${vulkan ? 'bg-accent' : 'bg-zinc-700'}`}
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                  vulkan ? 'left-[22px]' : 'left-0.5'
+                }`}
+              />
+            </button>
+          </div>
+        </section>
 
         <p className="text-[11px] leading-relaxed text-zinc-600">
           effort 与权限模式对**新建对话**生效(当前会话不变);模型列表保存后立即更新 Composer 下拉。

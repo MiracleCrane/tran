@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import type { ToolBlock } from '../types'
 import DiffView from './DiffView'
 
@@ -64,15 +64,15 @@ const STATUS_META: Record<
   denied: { label: '已拒绝', dot: 'bg-orange-500', text: 'text-orange-400' }
 }
 
-export default function ToolCallCard({ block }: { block: ToolBlock }): JSX.Element {
+const ToolCallCard = memo(function ToolCallCard({ block }: { block: ToolBlock }): JSX.Element {
   // Collapsed by default — tool details (read text, inputs, diffs) stay folded
   // out of the conversation until clicked, so the transcript isn't cluttered.
   const [collapsed, setCollapsed] = useState(true)
   const meta = STATUS_META[block.status]
   const summary = summaryForTool(block.name, block.input)
-  const resultText = normalizeResult(block.result)
+  const resultText = collapsed ? '' : normalizeResult(block.result)
   const inputText =
-    block.name === 'Bash' ? ((block.input as { command?: string })?.command ?? '') : ''
+    !collapsed && block.name === 'Bash' ? ((block.input as { command?: string })?.command ?? '') : ''
 
   return (
     <div className="my-1.5 overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
@@ -128,4 +128,6 @@ export default function ToolCallCard({ block }: { block: ToolBlock }): JSX.Eleme
       )}
     </div>
   )
-}
+})
+
+export default ToolCallCard

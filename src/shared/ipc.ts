@@ -55,6 +55,11 @@ export interface SessionListItem {
   gitBranch?: string
 }
 
+export interface SessionListOptions {
+  limit?: number
+  offset?: number
+}
+
 /** Connection state of an MCP server, as reported by the Claude Agent SDK. */
 export type McpServerStatusKind = 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled'
 
@@ -153,16 +158,27 @@ export interface MarketplacePlugin {
   marketplace: string
 }
 
+export interface PickedDirectoryEntry {
+  name: string
+  path: string
+  kind: 'file' | 'directory'
+  size: number
+  modifiedAt: number
+}
+
 /** A file the user picked to attach. Images carry base64 data; text files
- *  carry their (size-capped) content; others carry just the path reference. */
+ *  carry their (size-capped) content; directories carry a shallow entry list;
+ *  others carry just the path reference. */
 export interface PickedFile {
   path: string
   name: string
-  kind: 'image' | 'text' | 'other'
+  kind: 'image' | 'text' | 'other' | 'directory'
   mimeType: string
-  /** image: base64 (no data: prefix); text: utf-8 content; other: '' */
+  /** image: base64 (no data: prefix); text: utf-8 content; other/directory: '' */
   data: string
   size: number
+  entries?: PickedDirectoryEntry[]
+  entriesTruncated?: boolean
 }
 
 /** A model shown in the Composer dropdown (user-editable in Settings). */
@@ -179,6 +195,10 @@ export interface Preferences {
   defaultPermissionMode?: PermissionMode
   /** Models shown in the Composer dropdown; empty/undefined = built-in list. */
   composerModels?: ComposerModel[]
+  /** Experimental: route Chromium's compositing through the ANGLE Vulkan
+   *  backend on Windows (default D3D11). Off by default; requires restart and
+   *  is higher-variance across GPU drivers. */
+  vulkanBackend?: boolean
 }
 
 /** Which engine translateTexts() routes to. 'llm' = active provider's
@@ -253,7 +273,7 @@ export interface ForgeApi {
   setModel(sessionId: string, model: string): Promise<void>
   setPermissionMode(sessionId: string, mode: PermissionMode): Promise<void>
   closeSession(sessionId: string): Promise<void>
-  listSessions(cwd: string): Promise<SessionListItem[]>
+  listSessions(cwd: string, opts?: SessionListOptions): Promise<SessionListItem[]>
   getSessionMessages(sessionId: string, cwd: string): Promise<HistoryMessage[]>
   /** Rename a past session (appends a custom title). */
   renameSession(sessionId: string, title: string, cwd: string): Promise<void>
@@ -276,6 +296,10 @@ export interface ForgeApi {
   /** Open a file picker rooted at cwd, read the chosen files, and return them
    *  (images as base64, text files as content) for attaching to a message. */
   pickFiles(cwd: string): Promise<PickedFile[]>
+  /** Read files that were dropped into the renderer. */
+  readFiles(cwd: string, paths: string[]): Promise<PickedFile[]>
+  /** Resolve an Electron-backed DOM File to its native filesystem path. */
+  getPathForFile(file: File): string
   /** Reveal a file (path resolved against cwd) in the OS file manager. */
   revealInExplorer(cwd: string, pathStr: string): Promise<boolean>
 

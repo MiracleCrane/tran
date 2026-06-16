@@ -1,10 +1,12 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Collapse from './Collapse'
 
 export interface DisclosureOption {
   value: string
   label: string
 }
+
+const DISCLOSURE_CLOSE_ELEVATION_MS = 560
 
 /** A selector whose OWN frame enlarges in place — the trigger and the option
  *  list live in one glass-panel-soft frame; opening it grows that same frame
@@ -30,8 +32,34 @@ export default function DisclosureSelect({
   placement?: 'bottom' | 'top'
 }): JSX.Element {
   const [open, setOpen] = useState(false)
+  const [elevated, setElevated] = useState(false)
+  const elevationTimerRef = useRef<number | null>(null)
   const current = options.find((o) => o.value === value)
   const label = current?.label ?? value
+
+  useEffect(() => {
+    if (elevationTimerRef.current !== null) {
+      window.clearTimeout(elevationTimerRef.current)
+      elevationTimerRef.current = null
+    }
+
+    if (open) {
+      setElevated(true)
+      return
+    }
+
+    elevationTimerRef.current = window.setTimeout(() => {
+      elevationTimerRef.current = null
+      setElevated(false)
+    }, DISCLOSURE_CLOSE_ELEVATION_MS)
+
+    return () => {
+      if (elevationTimerRef.current !== null) {
+        window.clearTimeout(elevationTimerRef.current)
+        elevationTimerRef.current = null
+      }
+    }
+  }, [open])
 
   const optionsList = (
     <Collapse open={open}>
@@ -71,7 +99,7 @@ export default function DisclosureSelect({
           itself growing, not a second frame appearing. */}
       <div
         className={`glass-panel-soft absolute inset-x-0 rounded-2xl p-1.5 ${
-          open ? 'z-[60]' : 'z-50'
+          elevated ? 'z-[60]' : 'z-50'
         } ${placement === 'top' ? 'bottom-0' : 'top-0'}`}
       >
         {placement === 'top' ? optionsList : null}

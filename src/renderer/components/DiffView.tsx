@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, memo, useState } from 'react'
 
 type Mode = 'unified' | 'split'
 
@@ -60,7 +60,7 @@ function toSplitRows(lines: string[]): Row[] {
   return rows
 }
 
-export default function DiffView({ text }: { text: string }): JSX.Element {
+const DiffView = memo(function DiffView({ text }: { text: string }): JSX.Element {
   const lines = text.split('\n')
   const looksLikeDiff = lines.some(
     (l) => l.startsWith('+') || l.startsWith('-') || l.startsWith('@@')
@@ -148,4 +148,6 @@ export default function DiffView({ text }: { text: string }): JSX.Element {
       )}
     </div>
   )
-}
+})
+
+export default DiffView

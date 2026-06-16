@@ -20,6 +20,8 @@ interface PersistedSettings {
   defaultEffort?: EffortLevel
   defaultPermissionMode?: PermissionMode
   composerModels?: ComposerModel[]
+  /** Experimental Windows-only GPU toggle (ANGLE Vulkan backend). */
+  vulkanBackend?: boolean
   /** --- Translate engine config (Translate panel) --- */
   /** Which engine translateTexts() routes to. */
   translateEngine?: TranslateEngine

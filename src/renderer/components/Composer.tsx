@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { PickedFile, EffortLevel } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
@@ -30,6 +30,9 @@ export default function Composer(): JSX.Element {
   const [text, setText] = useState('')
   const [models, setModels] = useState(DEFAULT_MODELS)
   const [attachments, setAttachments] = useState<PickedFile[]>([])
+  const dragDepth = useRef(0)
+  const [dragActive, setDragActive] = useState(false)
+  const [dropError, setDropError] = useState<string | null>(null)
 
   // Override the built-in model list with the user's configured list (Settings).
   useEffect(() => {
@@ -40,12 +43,72 @@ export default function Composer(): JSX.Element {
 
   const pickAttachment = async (): Promise<void> => {
     if (!meta) return
+    setDropError(null)
     const files = await window.api.pickFiles(meta.cwd)
     if (files.length) setAttachments((prev) => [...prev, ...files])
   }
 
   const removeAttachment = (i: number): void =>
     setAttachments((prev) => prev.filter((_, idx) => idx !== i))
+
+  const hasFileDrag = (e: DragEvent<HTMLElement>): boolean =>
+    Array.from(e.dataTransfer.types).includes('Files')
+
+  const onDragEnter = (e: DragEvent<HTMLDivElement>): void => {
+    if (!hasFileDrag(e)) return
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = meta ? 'copy' : 'none'
+    dragDepth.current += 1
+    if (meta) {
+      setDropError(null)
+      setDragActive(true)
+    }
+  }
+
+  const onDragOver = (e: DragEvent<HTMLDivElement>): void => {
+    if (!hasFileDrag(e)) return
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = meta ? 'copy' : 'none'
+  }
+
+  const onDragLeave = (e: DragEvent<HTMLDivElement>): void => {
+    if (!hasFileDrag(e)) return
+    e.preventDefault()
+    e.stopPropagation()
+    dragDepth.current = Math.max(0, dragDepth.current - 1)
+    if (dragDepth.current === 0) setDragActive(false)
+  }
+
+  const onDrop = async (e: DragEvent<HTMLDivElement>): Promise<void> => {
+    if (!hasFileDrag(e)) return
+    e.preventDefault()
+    e.stopPropagation()
+    dragDepth.current = 0
+    setDragActive(false)
+    setDropError(null)
+    if (!meta) return
+
+    const paths = Array.from(
+      new Set(
+        Array.from(e.dataTransfer.files)
+          .map((file) => window.api.getPathForFile(file))
+          .filter((path) => path.length > 0)
+      )
+    )
+
+    if (!paths.length) {
+      setDropError('无法读取拖入文件路径')
+      return
+    }
+
+    const files = await window.api.readFiles(meta.cwd, paths)
+    if (files.length) setAttachments((prev) => [...prev, ...files])
+    if (files.length < paths.length) {
+      setDropError(`有 ${paths.length - files.length} 个文件无法引用`)
+    }
+  }
 
   const submit = async (): Promise<void> => {
     const value = text.trim()
@@ -81,7 +144,15 @@ export default function Composer(): JSX.Element {
             ))}
           </div>
         )}
-        <div className="glass-panel overflow-visible rounded-[18px] p-3">
+        <div
+          className={`glass-panel overflow-visible rounded-[18px] p-3 transition ${
+            dragActive ? 'border-accent/60 bg-white/[0.035] shadow-[0_0_0_1px_rgba(223,118,95,0.28)]' : ''
+          }`}
+          onDragEnter={onDragEnter}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={(e) => void onDrop(e)}
+        >
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -116,6 +187,9 @@ export default function Composer(): JSX.Element {
                 </span>
               ))}
             </div>
+          )}
+          {dropError && (
+            <div className="px-1 pt-2 text-[11px] text-orange-300">{dropError}</div>
           )}
           <div className="flex flex-wrap items-center gap-2 px-1 pt-2">
             <button
@@ -183,6 +257,22 @@ export default function Composer(): JSX.Element {
               </button>
             </div>
           </div>
+          {dragActive && (
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-[18px] border border-dashed border-accent/70 bg-black/55 backdrop-blur-sm">
+              <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm font-medium text-zinc-100 shadow-lg">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="shrink-0 text-accent">
+                  <path
+                    d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7l8.8-8.8a3.5 3.5 0 0 1 5 5L10.4 18a2 2 0 0 1-2.8-2.8l7.7-7.7"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span>松开以引用文件</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

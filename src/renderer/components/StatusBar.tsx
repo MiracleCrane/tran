@@ -20,16 +20,25 @@ const PERMISSION_MODE_LABEL: Record<string, string> = {
 }
 
 export default function StatusBar(): JSX.Element {
+  // Narrow selectors: subscribe to the exact primitives rendered, not the whole
+  // `status`/`tasks` objects. Each line re-renders only when its value actually
+  // changes (a number/string), not on every store update during a stream.
   const meta = useSessionStore((s) => s.meta)
-  const status = useSessionStore((s) => s.status)
-  const tasks = useSessionStore((s) => s.tasks)
+  const costUsd = useSessionStore((s) => s.status.costUsd)
+  const turns = useSessionStore((s) => s.status.turns)
+  const inputTokens = useSessionStore((s) => s.status.inputTokens)
+  const outputTokens = useSessionStore((s) => s.status.outputTokens)
+  const stopReason = useSessionStore((s) => s.status.stopReason)
+  const error = useSessionStore((s) => s.status.error)
+  const runningCount = useSessionStore(
+    (s) => s.tasks.filter((t) => t.status === 'running').length
+  )
   const [monitorOpen, setMonitorOpen] = useState(false)
 
   if (!meta) return <div />
 
-  const cost = status.costUsd != null ? `$${status.costUsd.toFixed(4)}` : '—'
+  const cost = costUsd != null ? `$${costUsd.toFixed(4)}` : '—'
   const modeLabel = PERMISSION_MODE_LABEL[meta.permissionMode] ?? meta.permissionMode
-  const runningCount = tasks.filter((t) => t.status === 'running').length
 
   return (
     <>
@@ -50,21 +59,21 @@ export default function StatusBar(): JSX.Element {
           </span>
           <span className="text-zinc-700">·</span>
           <span>{modeLabel}</span>
-          {status.turns != null && (
+          {turns != null && (
             <>
               <span className="text-zinc-700">·</span>
-              <span>{status.turns} 轮</span>
+              <span>{turns} 轮</span>
             </>
           )}
           <span className="text-zinc-700">·</span>
           <span title="输入 / 输出 token">
-            {fmt(status.inputTokens)} / {fmt(status.outputTokens)}
+            {fmt(inputTokens)} / {fmt(outputTokens)}
           </span>
           <span className="ml-auto tabular-nums">费用 {cost}</span>
-          {status.stopReason && (
-            <span className="text-zinc-600">· 结束: {status.stopReason}</span>
+          {stopReason && (
+            <span className="text-zinc-600">· 结束: {stopReason}</span>
           )}
-          {status.error && <span className="text-red-400">· {status.error}</span>}
+          {error && <span className="text-red-400">· {error}</span>}
         </div>
       </div>
       {monitorOpen && <SubagentMonitor onClose={() => setMonitorOpen(false)} />}

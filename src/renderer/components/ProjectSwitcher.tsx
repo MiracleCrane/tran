@@ -124,7 +124,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
       onClick={() => setOpen((o) => !o)}
       disabled={starting}
       title={current?.path ?? meta?.cwd ?? ''}
-      className="flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100 disabled:opacity-50"
+      className="flex h-8 w-full items-center gap-2 rounded-xl px-2.5 text-[11px] text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100 disabled:opacity-50"
     >
       <FolderIcon />
       <span className="flex-1 truncate text-left">{currentLabel}</span>
@@ -138,7 +138,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   // too narrow for in-place expand).
   const listContent = (
     <>
-      <div className="max-h-72 overflow-y-auto">
+      <div className="max-h-60 overflow-y-auto">
         {projects.length === 0 && (
           <div className="px-3 py-2 text-xs text-zinc-600">还没有项目</div>
         )}
@@ -149,7 +149,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
           return (
             <div
               key={p.path}
-              className="group relative px-1 transition-all duration-[360ms] ease-spring"
+              className="group relative transition-all duration-[360ms] ease-spring"
               style={{
                 transitionDelay: open ? `${i * 40}ms` : '0ms',
                 opacity: open ? 1 : 0,
@@ -166,12 +166,12 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
                     else if (e.key === 'Escape') setEditingPath(null)
                   }}
                   onBlur={() => void commitRename(p.path)}
-                  className="m-1 w-[calc(100%-0.5rem)] rounded-lg border border-accent/70 bg-bg-base/80 px-2 py-1 text-xs text-zinc-100 outline-none"
+                  className="my-0.5 h-8 w-full rounded-xl border border-accent/70 bg-bg-base/80 px-2.5 text-[11px] text-zinc-100 outline-none"
                 />
               ) : (
                 <button
                   onClick={() => void onSwitch(p.path)}
-                  className={`flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-xs transition ${
+                  className={`flex min-h-8 w-full items-center gap-2 rounded-xl px-2.5 py-1 text-left text-[11px] transition ${
                     isCurrent
                       ? 'glass-active text-zinc-100'
                       : 'text-zinc-400 hover:bg-white/[0.055] hover:text-zinc-200'
@@ -247,7 +247,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
           )
         })}
       </div>
-      <div className="mt-0.5 border-t border-white/[0.06] px-1 pt-0.5">
+      <div className="mt-0.5 border-t border-white/[0.06] pt-0.5">
         <button
           onClick={() => void addNew()}
           style={{
@@ -255,7 +255,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
             opacity: open ? 1 : 0,
             transform: open ? 'translateY(0)' : 'translateY(-6px)'
           }}
-          className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-xs text-zinc-400 transition-all duration-[360ms] ease-spring hover:bg-white/[0.055] hover:text-zinc-200"
+          className="flex min-h-8 w-full items-center gap-2 rounded-xl px-2.5 py-1 text-left text-[11px] text-zinc-400 transition-all duration-[360ms] ease-spring hover:bg-white/[0.055] hover:text-zinc-200"
         >
           <PlusIcon /> 添加项目…
         </button>
@@ -295,7 +295,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
       {open && <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />}
       <div className="invisible" aria-hidden>
         <div className="glass-panel-soft rounded-2xl p-1.5">
-          <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+          <div className="flex h-8 items-center gap-2 px-2.5 text-[11px]">
             <span className="w-[15px]" />
             <span className="flex-1 truncate">{currentLabel}</span>
           </div>

@@ -1,4 +1,4 @@
-import type { PermissionRequestPayload } from '../shared/ipc'
+import type { PickedDirectoryEntry, PermissionRequestPayload } from '../shared/ipc'
 
 export type ToolStatus = 'pending' | 'running' | 'done' | 'error' | 'denied'
 
@@ -29,9 +29,17 @@ export type AssistantBlock = TextBlock | ThinkingBlock | ToolBlock
  *  preview). */
 export interface UserAttachment {
   name: string
-  kind: 'image' | 'text' | 'other'
+  kind: 'image' | 'text' | 'other' | 'directory'
+  path?: string
+  mimeType?: string
+  size?: number
   /** For images: a data: URL to render the preview. */
   dataUrl?: string
+  /** For text files: the inlined file contents read by the main process. */
+  text?: string
+  /** For directories: a shallow file list read by the main process. */
+  entries?: PickedDirectoryEntry[]
+  entriesTruncated?: boolean
 }
 
 export interface UserItem {

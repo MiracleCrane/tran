@@ -6,7 +6,8 @@ import type {
   SessionListItem,
   HistoryMessage,
   PickedFile,
-  EffortLevel
+  EffortLevel,
+  PermissionMode
 } from '../../shared/ipc'
 import type {
   TranscriptItem,
@@ -21,6 +22,16 @@ import type {
   UserAttachment,
   PendingMessage
 } from '../types'
+import { pickedFileToUserAttachment } from '../utils/attachments'
+
+/** A buffered `content_block_delta` waiting to be folded into the store in a
+ *  single batched update (one per animation frame). See streamBatcher.ts. */
+export interface StreamDeltaBatch {
+  sessionId: string
+  fallbackId: string
+  parent: string | null
+  event: Record<string, unknown>
+}
 
 interface SessionStore {
   starting: boolean
@@ -37,18 +48,21 @@ interface SessionStore {
   /** Past sessions for the sidebar (same cwd). */
   sessions: SessionListItem[]
   sessionsLoading: boolean
+  sessionsHasMore: boolean
   /** Task-tool subagents for the StatusBar monitor (kept out of the transcript). */
   tasks: SubagentTask[]
   /** Messages sent while the agent was busy — hover above the Composer and drop
    *  into the transcript one-per-turn-end (result). */
   pendingQueue: PendingMessage[]
+  /** UI-selected model/effort differs from the live bridge process. Apply it
+   *  lazily right before the next user message so changing controls is inert. */
+  sessionConfigDirty: boolean
 
   startSession: (args: StartArgs) => Promise<void>
   sendMessage: (text: string, attachments?: PickedFile[]) => Promise<void>
   interrupt: () => Promise<void>
-  /** Current thinking-depth (effort). Set at session start from the default in
-   *  Settings, swappable live via Composer (applied by restarting the session
-   *  — the SDK has no runtime effort swap, unlike model). */
+  /** Current thinking-depth (effort). Composer changes stay local until the
+   *  next user message, when the bridge is silently resumed with new options. */
   effort: EffortLevel
   setEffort: (effort: EffortLevel) => Promise<void>
   setModel: (model: string) => Promise<void>
@@ -63,8 +77,11 @@ interface SessionStore {
 
   /** Sidebar actions */
   refreshSessions: () => Promise<void>
+  loadMoreSessions: () => Promise<void>
   newChat: () => Promise<void>
   openSession: (sdkSessionId: string) => Promise<void>
+  prefetchSessionHistory: (sdkSessionId: string) => Promise<void>
+  pruneSessionHistoryCache: (visibleSessionIds: string[]) => void
   renameSession: (sessionId: string, title: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   /** Move a running subagent to the background (frees the main agent's turn). */
@@ -78,6 +95,11 @@ interface SessionStore {
   switchProvider: (id: string) => Promise<void>
 
   ingestAgentEvent: (e: AgentEvent) => void
+  /** Fold a batch of buffered `content_block_delta` events into the store in a
+   *  SINGLE update — the hot path for streaming, invoked ≤1× per animation frame
+   *  by streamBatcher. Only the streaming assistant item gets a new reference;
+   *  every other item keeps its reference so memoized rows skip re-rendering. */
+  applyStreamBatch: (batch: StreamDeltaBatch[]) => void
   addPermissionRequest: (r: PermissionRequestPayload) => void
   respondPermission: (
     toolUseID: string,
@@ -87,6 +109,88 @@ interface SessionStore {
 }
 
 const emptyStatus: SessionStatus = { running: false }
+const SESSION_PAGE_SIZE = 24
+let startupBootstrapPromise: Promise<void> | null = null
+let openSessionRequestSeq = 0
+
+interface SessionHistoryCacheEntry {
+  items?: TranscriptItem[]
+  promise?: Promise<TranscriptItem[]>
+  lastTouched: number
+}
+
+const sessionHistoryCache = new Map<string, SessionHistoryCacheEntry>()
+
+function sessionHistoryCacheKey(cwd: string, sdkSessionId: string): string {
+  return `${cwd}\n${sdkSessionId}`
+}
+
+function cloneTranscriptItems(items: TranscriptItem[]): TranscriptItem[] {
+  return items.map((item) => {
+    if (item.kind === 'user') {
+      return {
+        ...item,
+        ...(item.attachments ? { attachments: item.attachments.map((a) => ({ ...a })) } : {})
+      }
+    }
+    return {
+      ...item,
+      blocks: item.blocks.map((block) => ({ ...block }))
+    }
+  })
+}
+
+function getCachedSessionHistory(cwd: string, sdkSessionId: string): TranscriptItem[] | null {
+  const entry = sessionHistoryCache.get(sessionHistoryCacheKey(cwd, sdkSessionId))
+  if (!entry?.items) return null
+  entry.lastTouched = Date.now()
+  return cloneTranscriptItems(entry.items)
+}
+
+function loadSessionHistory(cwd: string, sdkSessionId: string): Promise<TranscriptItem[]> {
+  const key = sessionHistoryCacheKey(cwd, sdkSessionId)
+  const cached = sessionHistoryCache.get(key)
+  if (cached?.items) {
+    cached.lastTouched = Date.now()
+    return Promise.resolve(cloneTranscriptItems(cached.items))
+  }
+  if (cached?.promise) {
+    cached.lastTouched = Date.now()
+    return cached.promise.then(cloneTranscriptItems)
+  }
+
+  let promise: Promise<TranscriptItem[]>
+  promise = window.api
+    .getSessionMessages(sdkSessionId, cwd)
+    .then(historyToItems)
+    .catch(() => [] as TranscriptItem[])
+    .then((items) => {
+      const current = sessionHistoryCache.get(key)
+      if (current?.promise === promise) {
+        sessionHistoryCache.set(key, {
+          items: cloneTranscriptItems(items),
+          lastTouched: Date.now()
+        })
+      }
+      return items
+    })
+
+  sessionHistoryCache.set(key, { promise, lastTouched: Date.now() })
+  return promise.then(cloneTranscriptItems)
+}
+
+function deleteSessionHistoryCache(cwd: string, sdkSessionId: string): void {
+  sessionHistoryCache.delete(sessionHistoryCacheKey(cwd, sdkSessionId))
+}
+
+function pruneSessionHistoryCacheForCwd(cwd: string, retainedSessionIds: Set<string>): void {
+  for (const key of sessionHistoryCache.keys()) {
+    const [cacheCwd, sdkSessionId] = key.split('\n')
+    if (cacheCwd === cwd && !retainedSessionIds.has(sdkSessionId)) {
+      sessionHistoryCache.delete(key)
+    }
+  }
+}
 
 function uid(): string {
   return crypto.randomUUID()
@@ -325,48 +429,98 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   currentStreamingMsgId: null,
   sessions: [],
   sessionsLoading: false,
+  sessionsHasMore: false,
   tasks: [], pendingQueue: [],
+  sessionConfigDirty: false,
 
   async startSession(args) {
+    if (get().starting) return
+    set({ starting: true })
     // Pre-register synchronously: bridgeSessionId is added to the bridge's map
     // before claude.exe finishes spawning, so the UI never locks on init.
-    const newId = uid()
-    const prefs = await window.api.getPreferences().catch(() => null)
-    const permissionMode = prefs?.defaultPermissionMode ?? 'default'
-    const effort = prefs?.defaultEffort ?? 'high'
-    const opts: StartSessionOptions = {
-      cwd: args.cwd,
-      ...(args.apiKey ? { apiKey: args.apiKey } : {}),
-      ...(args.model ? { model: args.model } : {}),
-      effort,
-      permissionMode,
-      bridgeSessionId: newId
-    }
-    await window.api.startSession(opts)
-    set({
-      effort,
-      meta: {
-        sessionId: newId,
+    try {
+      const newId = uid()
+      const prefs = await window.api.getPreferences().catch(() => null)
+      const permissionMode = prefs?.defaultPermissionMode ?? 'default'
+      const effort = prefs?.defaultEffort ?? 'high'
+      const opts: StartSessionOptions = {
         cwd: args.cwd,
-        model: args.model ?? 'claude-opus-4-8',
+        ...(args.apiKey ? { apiKey: args.apiKey } : {}),
+        ...(args.model ? { model: args.model } : {}),
+        effort,
         permissionMode,
-        tools: []
-      },
-      items: [],
-      tasks: [], pendingQueue: [],
-      status: { running: false },
-      currentStreamingMsgId: null
-    })
-    void get().refreshSessions()
-    scheduleInitWatchdog(get, set)
+        bridgeSessionId: newId
+      }
+      await window.api.startSession(opts)
+      set({
+        starting: false,
+        effort,
+        meta: {
+          sessionId: newId,
+          cwd: args.cwd,
+          model: args.model ?? 'claude-opus-4-8',
+          permissionMode,
+          tools: []
+        },
+        items: [],
+        tasks: [], pendingQueue: [],
+        sessionConfigDirty: false,
+        status: { running: false },
+        currentStreamingMsgId: null
+      })
+      void get().refreshSessions()
+      scheduleInitWatchdog(get, set)
+    } catch (err) {
+      set({ starting: false })
+      throw err
+    }
   },
 
   async sendMessage(text, attachments) {
-    const meta = get().meta
+    let meta = get().meta
     if (!meta) return
     const value = text.trim()
     const atts = attachments ?? []
     if (!value && atts.length === 0) return
+
+    if (get().sessionConfigDirty && !get().starting && !get().status.running) {
+      const oldMeta = meta
+      const oldSessionId = oldMeta.sessionId
+      const newId = uid()
+      const nextMeta: SessionMeta = { ...oldMeta, sessionId: newId, tools: [] }
+
+      set({
+        meta: nextMeta,
+        currentStreamingMsgId: null,
+        pendingPermissions: []
+      })
+
+      try {
+        await window.api.startSession({
+          cwd: oldMeta.cwd,
+          model: oldMeta.model,
+          effort: get().effort,
+          permissionMode: oldMeta.permissionMode as PermissionMode,
+          ...(oldMeta.sdkSessionId ? { resume: oldMeta.sdkSessionId } : {}),
+          bridgeSessionId: newId
+        })
+        await window.api.closeSession(oldSessionId).catch(() => {})
+        set({ sessionConfigDirty: false })
+        meta = get().meta
+        if (!meta) return
+      } catch (error: unknown) {
+        set((s) => ({
+          meta: oldMeta,
+          status: {
+            ...s.status,
+            error: error instanceof Error ? error.message : String(error)
+          }
+        }))
+        return
+      }
+    }
+
+    if (meta.sdkSessionId) deleteSessionHistoryCache(meta.cwd, meta.sdkSessionId)
     // Build the wire content: plain text, or content blocks when there are
     // attachments (image → image block, text → inlined, other → path ref).
     let content: string | unknown[]
@@ -393,11 +547,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       content = value
     }
     const displayAttachments: UserAttachment[] | undefined = atts.length
-      ? atts.map((a) =>
-          a.kind === 'image'
-            ? { name: a.name, kind: 'image', dataUrl: `data:${a.mimeType};base64,${a.data}` }
-            : { name: a.name, kind: a.kind }
-        )
+      ? atts.map(pickedFileToUserAttachment)
       : undefined
     const attProps = displayAttachments ? { attachments: displayAttachments } : {}
 
@@ -428,24 +578,32 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   async setModel(model) {
     const meta = get().meta
     if (!meta) return
-    await window.api.setModel(meta.sessionId, model)
-    set({ meta: { ...meta, model } })
+    if (meta.model === model) return
+    set({ meta: { ...meta, model }, sessionConfigDirty: true })
   },
 
   reset() {
-    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null })
+    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false })
   },
 
   async bootstrap() {
-    try {
-      const proj = await window.api.getStartupProject()
-      if (proj) {
-        const provider = await window.api.getActiveProvider()
-        await get().startSession({ cwd: proj.path, model: provider?.model })
+    if (get().bootstrapped || get().meta) return
+    if (startupBootstrapPromise) return startupBootstrapPromise
+
+    startupBootstrapPromise = (async () => {
+      try {
+        const proj = await window.api.getStartupProject()
+        if (proj) {
+          const provider = await window.api.getActiveProvider()
+          await get().startSession({ cwd: proj.path, model: provider?.model })
+        }
+      } finally {
+        set({ bootstrapped: true })
+        startupBootstrapPromise = null
       }
-    } finally {
-      set({ bootstrapped: true })
-    }
+    })()
+
+    return startupBootstrapPromise
   },
 
   async switchProject(path: string) {
@@ -461,6 +619,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       starting: true,
       items: [],
       tasks: [], pendingQueue: [],
+      sessionConfigDirty: false,
+      sessions: [],
+      sessionsHasMore: false,
       status: { running: false },
       currentStreamingMsgId: null,
       meta: { sessionId: newId, cwd: path, model, permissionMode: 'default', tools: [] }
@@ -477,11 +638,51 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (!meta) return
     set({ sessionsLoading: true })
     try {
-      const sessions = await window.api.listSessions(meta.cwd)
-      set({ sessions })
+      const sessions = await window.api.listSessions(meta.cwd, {
+        limit: SESSION_PAGE_SIZE,
+        offset: 0
+      })
+      set({ sessions, sessionsHasMore: sessions.length === SESSION_PAGE_SIZE })
     } finally {
       set({ sessionsLoading: false })
     }
+  },
+
+  async loadMoreSessions() {
+    const meta = get().meta
+    const state = get()
+    if (!meta || state.sessionsLoading || !state.sessionsHasMore) return
+    set({ sessionsLoading: true })
+    try {
+      const page = await window.api.listSessions(meta.cwd, {
+        limit: SESSION_PAGE_SIZE,
+        offset: state.sessions.length
+      })
+      set((s) => {
+        const seen = new Set(s.sessions.map((session) => session.sessionId))
+        const next = page.filter((session) => !seen.has(session.sessionId))
+        return {
+          sessions: [...s.sessions, ...next],
+          sessionsHasMore: page.length === SESSION_PAGE_SIZE
+        }
+      })
+    } finally {
+      set({ sessionsLoading: false })
+    }
+  },
+
+  async prefetchSessionHistory(sdkSessionId: string) {
+    const meta = get().meta
+    if (!meta || meta.sdkSessionId === sdkSessionId) return
+    await loadSessionHistory(meta.cwd, sdkSessionId)
+  },
+
+  pruneSessionHistoryCache(visibleSessionIds: string[]) {
+    const meta = get().meta
+    if (!meta) return
+    const retained = new Set(visibleSessionIds)
+    if (meta.sdkSessionId) retained.add(meta.sdkSessionId)
+    pruneSessionHistoryCacheForCwd(meta.cwd, retained)
   },
 
   async newChat() {
@@ -496,6 +697,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       starting: true,
       items: [],
       tasks: [], pendingQueue: [],
+      sessionConfigDirty: false,
       status: { running: false },
       currentStreamingMsgId: null,
       meta: { sessionId: newId, cwd, model, permissionMode, tools: [] }
@@ -509,22 +711,25 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   async openSession(sdkSessionId: string) {
     const meta = get().meta
-    if (!meta || get().starting) return
+    if (!meta) return
     if (meta.sdkSessionId === sdkSessionId) return
     const { cwd, model, permissionMode } = meta
     const oldSessionId = meta.sessionId
     const newId = uid()
-    set({ starting: true, status: { running: false }, currentStreamingMsgId: null })
-    let history: HistoryMessage[] = []
-    try {
-      history = await window.api.getSessionMessages(sdkSessionId, cwd)
-    } catch {
-      history = []
-    }
-    // Switch UI instantly to the resumed session (history rendered, unlocked).
+    const requestSeq = ++openSessionRequestSeq
+    const cachedItems = getCachedSessionHistory(cwd, sdkSessionId)
+    const isLatestRequest = (): boolean =>
+      openSessionRequestSeq === requestSeq && get().meta?.sessionId === newId
+
+    // Switch the selected session immediately; history and bridge resume happen
+    // below and stale requests are ignored if the user clicks another session.
     set({
-      items: historyToItems(history),
+      starting: true,
+      items: cachedItems ?? [],
       tasks: [], pendingQueue: [],
+      sessionConfigDirty: false,
+      status: { running: false },
+      currentStreamingMsgId: null,
       meta: {
         sessionId: newId,
         sdkSessionId,
@@ -534,9 +739,53 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         tools: []
       }
     })
-    await window.api.closeSession(oldSessionId).catch(() => {})
-    await window.api.startSession({ cwd, model, effort: get().effort, resume: sdkSessionId, bridgeSessionId: newId })
+
+    const historyPromise = cachedItems
+      ? Promise.resolve(cachedItems)
+      : loadSessionHistory(cwd, sdkSessionId)
+
+    const startPromise = (async (): Promise<{ started: boolean; error?: unknown }> => {
+      try {
+        await window.api.closeSession(oldSessionId).catch(() => {})
+        if (!isLatestRequest()) return { started: false }
+        await window.api.startSession({
+          cwd,
+          model,
+          effort: get().effort,
+          resume: sdkSessionId,
+          bridgeSessionId: newId
+        })
+        return { started: true }
+      } catch (error: unknown) {
+        return { started: false, error }
+      }
+    })()
+
+    const items = await historyPromise
+    if (isLatestRequest()) {
+      set({ items })
+    }
+
+    const startResult = await startPromise
+    if (!isLatestRequest()) {
+      if (startResult.started) await window.api.closeSession(newId).catch(() => {})
+      return
+    }
+    if (startResult.error) {
+      const e = startResult.error
+      if (!isLatestRequest()) return
+      set((s) => ({
+        starting: false,
+        status: {
+          ...s.status,
+          running: false,
+          error: e instanceof Error ? e.message : String(e)
+        }
+      }))
+      return
+    }
     set({ starting: false })
+
     scheduleInitWatchdog(get, set)
   },
 
@@ -568,6 +817,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     } catch {
       /* ignore */
     }
+    deleteSessionHistoryCache(meta.cwd, sessionId)
     set((s) => ({ sessions: s.sessions.filter((x) => x.sessionId !== sessionId) }))
     // Deleted the active conversation → start fresh.
     if (meta.sdkSessionId === sessionId) {
@@ -613,6 +863,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({
       items,
       tasks: [], pendingQueue: [],
+      sessionConfigDirty: false,
       currentStreamingMsgId: null,
       meta: { sessionId: newId, sdkSessionId, cwd, model, permissionMode, tools: [] }
     })
@@ -627,12 +878,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   async setEffort(effort) {
-    // The SDK exposes no runtime effort swap (unlike model's query.setModel),
-    // so applying a new thinking depth means restarting the agent. History is
-    // resumed, so the conversation itself is preserved.
-    if (get().starting) return
-    set({ effort })
-    await get().restartSession()
+    if (get().effort === effort) return
+    set((s) => ({ effort, sessionConfigDirty: s.meta ? true : s.sessionConfigDirty }))
   },
 
   async switchProvider(id) {
@@ -647,6 +894,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   ingestAgentEvent(e) {
+    if (get().meta?.sessionId !== e.sessionId) return
+
     if (e.type === 'agent:ended') {
       set((s) => ({
         status: { ...s.status, running: false, error: e.error ?? s.status.error }
@@ -674,7 +923,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               sessionId: s.meta?.sessionId ?? m.session_id,
               sdkSessionId: m.session_id,
               cwd: m.cwd,
-              model: m.model,
+              model: s.sessionConfigDirty ? (s.meta?.model ?? m.model) : m.model,
               permissionMode: m.permissionMode,
               tools: m.tools
             },
@@ -991,6 +1240,33 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         // hook_*, task_* etc. are intentionally ignored in the MVP.
         break
     }
+  },
+
+  applyStreamBatch(batch) {
+    if (batch.length === 0) return
+    const activeSessionId = get().meta?.sessionId
+    if (!activeSessionId) return
+    const activeBatch = batch.filter((b) => b.sessionId === activeSessionId)
+    if (activeBatch.length === 0) return
+    // One set() per frame: fold every buffered delta through applyStreamEvent
+    // in sequence. content_block_delta's branch returns unchanged items by
+    // reference (only the streaming item is rebuilt), so after the loop the
+    // final `items` array has exactly one new reference — the streaming message.
+    set((s) => {
+      let items = s.items
+      let currentStreamingMsgId = s.currentStreamingMsgId
+      for (const b of activeBatch) {
+        const res = applyStreamEvent(
+          { items, currentStreamingMsgId },
+          b.fallbackId,
+          b.parent,
+          b.event
+        )
+        items = res.items
+        currentStreamingMsgId = res.currentStreamingMsgId
+      }
+      return { items, currentStreamingMsgId }
+    })
   },
 
   addPermissionRequest(r) {

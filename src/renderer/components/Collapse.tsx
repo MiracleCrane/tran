@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 /** Height-only collapse via `grid-rows 0fr↔1fr` (no max-height guessing). The
  *  inner overflow-hidden clips children mid-tween. Always mounted, so BOTH
@@ -17,7 +17,7 @@ export default function Collapse({
   const previousOpen = useRef(open)
   const [motion, setMotion] = useState<'opening' | 'closing' | null>(null)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (previousOpen.current === open) return
 
     setMotion(open ? 'opening' : 'closing')

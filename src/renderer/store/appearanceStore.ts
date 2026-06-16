@@ -3,14 +3,10 @@ import { create } from 'zustand'
 
 export interface AppearanceSettings {
   motionSpeed: number
-  glassOpacity: number
-  frost: number
 }
 
 export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
-  motionSpeed: 100,
-  glassOpacity: 92,
-  frost: 70
+  motionSpeed: 100
 }
 
 const STORAGE_KEY = 'forge.appearance.v1'
@@ -19,19 +15,13 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
-function mix(min: number, max: number, amount: number): number {
-  return min + (max - min) * amount
-}
-
 function cssNumber(value: number): string {
   return value.toFixed(3)
 }
 
 function normalizeSettings(value: Partial<AppearanceSettings> | null | undefined): AppearanceSettings {
   return {
-    motionSpeed: clamp(Number(value?.motionSpeed ?? DEFAULT_APPEARANCE_SETTINGS.motionSpeed), 70, 150),
-    glassOpacity: clamp(Number(value?.glassOpacity ?? DEFAULT_APPEARANCE_SETTINGS.glassOpacity), 65, 100),
-    frost: clamp(Number(value?.frost ?? DEFAULT_APPEARANCE_SETTINGS.frost), 0, 100)
+    motionSpeed: clamp(Number(value?.motionSpeed ?? DEFAULT_APPEARANCE_SETTINGS.motionSpeed), 70, 150)
   }
 }
 
@@ -57,9 +47,6 @@ export function applyAppearanceSettings(settings: AppearanceSettings): void {
   const root = document.documentElement
   const normalized = normalizeSettings(settings)
   const durationFactor = 100 / normalized.motionSpeed
-  const opacity = (normalized.glassOpacity - 65) / 35
-  const blur = 14 + normalized.frost * 0.257
-  const ambientOpacity = 0.18 + normalized.frost * 0.00257
 
   root.style.setProperty('--motion-collapse-open', `${Math.round(550 * durationFactor)}ms`)
   root.style.setProperty('--motion-collapse-close', `${Math.round(480 * durationFactor)}ms`)
@@ -67,23 +54,24 @@ export function applyAppearanceSettings(settings: AppearanceSettings): void {
   root.style.setProperty('--motion-sidebar-content-open', `${Math.round(410 * durationFactor)}ms`)
   root.style.setProperty('--motion-sidebar-content-close', `${Math.round(320 * durationFactor)}ms`)
   root.style.setProperty('--motion-sidebar-content-delay', `${Math.round(50 * durationFactor)}ms`)
-  root.style.setProperty('--glass-shell-alpha', cssNumber(mix(0.74, 0.98, opacity)))
-  root.style.setProperty('--glass-sidebar-alpha', cssNumber(mix(0.7, 0.95, opacity)))
-  root.style.setProperty('--glass-main-alpha', cssNumber(mix(0.72, 0.96, opacity)))
-  root.style.setProperty('--glass-panel-alpha', cssNumber(mix(0.54, 0.88, opacity)))
-  root.style.setProperty('--glass-soft-alpha', cssNumber(mix(0.4, 0.76, opacity)))
-  root.style.setProperty('--glass-control-alpha', cssNumber(mix(0.34, 0.7, opacity)))
-  root.style.setProperty('--glass-active-alpha', cssNumber(mix(0.46, 0.8, opacity)))
-  root.style.setProperty('--glass-frost-strong-alpha', cssNumber(mix(0.72, 0.98, opacity)))
-  root.style.setProperty('--glass-frost-panel-alpha', cssNumber(mix(0.62, 0.94, opacity)))
-  root.style.setProperty('--glass-frost-soft-alpha', cssNumber(mix(0.5, 0.84, opacity)))
-  root.style.setProperty('--glass-frost-control-alpha', cssNumber(mix(0.44, 0.76, opacity)))
-  root.style.setProperty('--glass-lens-strong', cssNumber(mix(0.9, 1, opacity)))
-  root.style.setProperty('--glass-lens-panel', cssNumber(mix(0.78, 0.98, opacity)))
-  root.style.setProperty('--glass-lens-soft', cssNumber(mix(0.68, 0.96, opacity)))
-  root.style.setProperty('--glass-lens-control', cssNumber(mix(0.58, 0.93, opacity)))
-  root.style.setProperty('--glass-window-blur', `${blur.toFixed(1)}px`)
-  root.style.setProperty('--glass-ambient-opacity', ambientOpacity.toFixed(3))
+
+  root.style.setProperty('--glass-shell-alpha', cssNumber(1))
+  root.style.setProperty('--glass-sidebar-alpha', cssNumber(0.988))
+  root.style.setProperty('--glass-main-alpha', cssNumber(0.992))
+  root.style.setProperty('--glass-panel-alpha', cssNumber(0.94))
+  root.style.setProperty('--glass-soft-alpha', cssNumber(0.885))
+  root.style.setProperty('--glass-control-alpha', cssNumber(0.84))
+  root.style.setProperty('--glass-active-alpha', cssNumber(0.88))
+  root.style.setProperty('--glass-frost-strong-alpha', cssNumber(0.992))
+  root.style.setProperty('--glass-frost-panel-alpha', cssNumber(0.972))
+  root.style.setProperty('--glass-frost-soft-alpha', cssNumber(0.928))
+  root.style.setProperty('--glass-frost-control-alpha', cssNumber(0.872))
+  root.style.setProperty('--glass-lens-strong', cssNumber(0.997))
+  root.style.setProperty('--glass-lens-panel', cssNumber(0.982))
+  root.style.setProperty('--glass-lens-soft', cssNumber(0.948))
+  root.style.setProperty('--glass-lens-control', cssNumber(0.91))
+  root.style.setProperty('--glass-window-blur', '0px')
+  root.style.setProperty('--glass-ambient-opacity', '0.48')
 }
 
 interface AppearanceStore {
@@ -118,5 +106,5 @@ export function useApplyAppearanceSettings(): void {
 
   useEffect(() => {
     applyAppearanceSettings(settings)
-  }, [settings.motionSpeed, settings.glassOpacity, settings.frost])
+  }, [settings.motionSpeed])
 }

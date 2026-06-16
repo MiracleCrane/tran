@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore, type View } from '../store/uiStore'
 import Collapse from './Collapse'
@@ -18,6 +18,11 @@ function relTime(ts: number): string {
 
 const DAY = 86_400_000
 const GROUP_ORDER = ['今天', '昨天', '本周', '更早'] as const
+const SIDEBAR_MOTION_MS = 560
+const SESSION_CACHE_IDLE_RELEASE_MS = 5_000
+const SESSION_PREFETCH_RESUME_MS = 180
+const SESSION_PREFETCH_FAST_SCROLL_PX_PER_MS = 1.15
+const SESSION_LOAD_MORE_THRESHOLD_PX = 180
 
 function bucketOf(ts: number): string {
   const now = new Date()
@@ -151,9 +156,13 @@ export default function Sidebar(): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
   const sessions = useSessionStore((s) => s.sessions)
   const loading = useSessionStore((s) => s.sessionsLoading)
+  const sessionsHasMore = useSessionStore((s) => s.sessionsHasMore)
   const refresh = useSessionStore((s) => s.refreshSessions)
+  const loadMoreSessions = useSessionStore((s) => s.loadMoreSessions)
   const newChat = useSessionStore((s) => s.newChat)
   const openSession = useSessionStore((s) => s.openSession)
+  const prefetchSessionHistory = useSessionStore((s) => s.prefetchSessionHistory)
+  const pruneSessionHistoryCache = useSessionStore((s) => s.pruneSessionHistoryCache)
   const renameSession = useSessionStore((s) => s.renameSession)
   const deleteSession = useSessionStore((s) => s.deleteSession)
   const view = useUiStore((s) => s.view)
@@ -167,6 +176,18 @@ export default function Sidebar(): JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [sidebarContentReady, setSidebarContentReady] = useState(true)
+  const sidebarReadyFrameRef = useRef<number | null>(null)
+  const sidebarMotionTimeoutRef = useRef<number | null>(null)
+  const sessionListRef = useRef<HTMLDivElement | null>(null)
+  const visibleSessionIdsRef = useRef<Set<string>>(new Set())
+  const pendingSessionPrefetchRef = useRef<Set<string>>(new Set())
+  const prefetchPausedRef = useRef(false)
+  const prefetchResumeTimeoutRef = useRef<number | null>(null)
+  const lastSessionScrollRef = useRef({ top: 0, time: 0 })
+  const sessionCacheReleaseTimeoutRef = useRef<number | null>(null)
+  const firstSidebarPaintRef = useRef(true)
+  const preparedSidebarMotionRef = useRef(false)
 
   useEffect(() => {
     void refresh()
@@ -178,6 +199,147 @@ export default function Sidebar(): JSX.Element {
     void window.api.getActiveProvider().then(setActiveProvider)
   }, [meta?.sessionId])
 
+  const clearSidebarMotionTimers = (): void => {
+    if (sidebarReadyFrameRef.current !== null) {
+      window.cancelAnimationFrame(sidebarReadyFrameRef.current)
+      sidebarReadyFrameRef.current = null
+    }
+    if (sidebarMotionTimeoutRef.current !== null) {
+      window.clearTimeout(sidebarMotionTimeoutRef.current)
+      sidebarMotionTimeoutRef.current = null
+    }
+  }
+
+  const prepareSidebarMotion = (): void => {
+    clearSidebarMotionTimers()
+    document.documentElement.classList.add('sidebar-motion')
+    setSidebarContentReady(false)
+    sidebarReadyFrameRef.current = window.requestAnimationFrame(() => {
+      sidebarReadyFrameRef.current = window.requestAnimationFrame(() => {
+        sidebarReadyFrameRef.current = null
+        setSidebarContentReady(true)
+      })
+    })
+    sidebarMotionTimeoutRef.current = window.setTimeout(() => {
+      sidebarMotionTimeoutRef.current = null
+      document.documentElement.classList.remove('sidebar-motion')
+    }, SIDEBAR_MOTION_MS)
+  }
+
+  const handleToggleSidebar = (): void => {
+    preparedSidebarMotionRef.current = true
+    prepareSidebarMotion()
+    toggleSidebar()
+  }
+
+  const clearSessionCacheReleaseTimer = (): void => {
+    if (sessionCacheReleaseTimeoutRef.current !== null) {
+      window.clearTimeout(sessionCacheReleaseTimeoutRef.current)
+      sessionCacheReleaseTimeoutRef.current = null
+    }
+  }
+
+  const releaseInvisibleSessionCache = (): void => {
+    sessionCacheReleaseTimeoutRef.current = null
+    pruneSessionHistoryCache([...visibleSessionIdsRef.current])
+  }
+
+  const scheduleSessionCacheRelease = (): void => {
+    clearSessionCacheReleaseTimer()
+    sessionCacheReleaseTimeoutRef.current = window.setTimeout(
+      releaseInvisibleSessionCache,
+      SESSION_CACHE_IDLE_RELEASE_MS
+    )
+  }
+
+  const clearPrefetchResumeTimer = (): void => {
+    if (prefetchResumeTimeoutRef.current !== null) {
+      window.clearTimeout(prefetchResumeTimeoutRef.current)
+      prefetchResumeTimeoutRef.current = null
+    }
+  }
+
+  const warmSessionWhenAllowed = (sessionId: string): void => {
+    visibleSessionIdsRef.current.add(sessionId)
+    if (prefetchPausedRef.current) {
+      pendingSessionPrefetchRef.current.add(sessionId)
+      return
+    }
+    void prefetchSessionHistory(sessionId)
+  }
+
+  const flushPendingSessionPrefetch = (): void => {
+    prefetchPausedRef.current = false
+    const ids = new Set(visibleSessionIdsRef.current)
+    pendingSessionPrefetchRef.current.clear()
+    for (const sessionId of ids) {
+      void prefetchSessionHistory(sessionId)
+    }
+  }
+
+  const pauseSessionPrefetch = (): void => {
+    prefetchPausedRef.current = true
+    clearPrefetchResumeTimer()
+    prefetchResumeTimeoutRef.current = window.setTimeout(() => {
+      prefetchResumeTimeoutRef.current = null
+      flushPendingSessionPrefetch()
+    }, SESSION_PREFETCH_RESUME_MS)
+  }
+
+  const maybeLoadMoreSessions = (): void => {
+    const root = sessionListRef.current
+    if (!root || loading || !sessionsHasMore) return
+    const distanceToBottom = root.scrollHeight - root.scrollTop - root.clientHeight
+    if (distanceToBottom <= SESSION_LOAD_MORE_THRESHOLD_PX) {
+      void loadMoreSessions()
+    }
+  }
+
+  const handleSessionListScroll = (): void => {
+    const root = sessionListRef.current
+    if (!root) return
+
+    scheduleSessionCacheRelease()
+    maybeLoadMoreSessions()
+
+    const now = window.performance.now()
+    const previous = lastSessionScrollRef.current
+    const elapsed = Math.max(now - previous.time, 1)
+    const speed = Math.abs(root.scrollTop - previous.top) / elapsed
+    lastSessionScrollRef.current = { top: root.scrollTop, time: now }
+
+    if (speed >= SESSION_PREFETCH_FAST_SCROLL_PX_PER_MS) {
+      pauseSessionPrefetch()
+    } else if (prefetchPausedRef.current) {
+      clearPrefetchResumeTimer()
+      prefetchResumeTimeoutRef.current = window.setTimeout(() => {
+        prefetchResumeTimeoutRef.current = null
+        flushPendingSessionPrefetch()
+      }, SESSION_PREFETCH_RESUME_MS)
+    }
+  }
+
+  useEffect(() => {
+    if (firstSidebarPaintRef.current) {
+      firstSidebarPaintRef.current = false
+      return
+    }
+    if (preparedSidebarMotionRef.current) {
+      preparedSidebarMotionRef.current = false
+      return
+    }
+    prepareSidebarMotion()
+  }, [collapsed])
+
+  useEffect(() => {
+    return () => {
+      clearSidebarMotionTimers()
+      clearSessionCacheReleaseTimer()
+      clearPrefetchResumeTimer()
+      document.documentElement.classList.remove('sidebar-motion')
+    }
+  }, [])
+
   const commitEdit = (): void => {
     if (editingId && editText.trim()) void renameSession(editingId, editText)
     setEditingId(null)
@@ -186,6 +348,57 @@ export default function Sidebar(): JSX.Element {
     setConfirmDeleteId(null)
     void deleteSession(id)
   }
+
+  const sessionGroups = useMemo(() => groupSessions(sessions), [sessions])
+
+  useEffect(() => {
+    visibleSessionIdsRef.current.clear()
+    pendingSessionPrefetchRef.current.clear()
+    prefetchPausedRef.current = false
+    clearSessionCacheReleaseTimer()
+    clearPrefetchResumeTimer()
+
+    if (collapsed || !meta) return
+
+    const root = sessionListRef.current
+    if (!root) return
+    lastSessionScrollRef.current = { top: root.scrollTop, time: window.performance.now() }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const sessionId = (entry.target as HTMLElement).dataset.sessionId
+          if (!sessionId) continue
+          if (entry.isIntersecting) warmSessionWhenAllowed(sessionId)
+          else visibleSessionIdsRef.current.delete(sessionId)
+        }
+      },
+      { root, rootMargin: '96px 0px', threshold: 0.01 }
+    )
+
+    const rows = Array.from(root.querySelectorAll<HTMLElement>('[data-session-id]'))
+    for (const row of rows) observer.observe(row)
+
+    const frame = window.requestAnimationFrame(() => {
+      const rootRect = root.getBoundingClientRect()
+      const top = rootRect.top - 96
+      const bottom = rootRect.bottom + 96
+      for (const row of rows) {
+        const sessionId = row.dataset.sessionId
+        if (!sessionId) continue
+        const rect = row.getBoundingClientRect()
+        if (rect.bottom >= top && rect.top <= bottom) warmSessionWhenAllowed(sessionId)
+      }
+      maybeLoadMoreSessions()
+    })
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      observer.disconnect()
+      clearSessionCacheReleaseTimer()
+      clearPrefetchResumeTimer()
+    }
+  }, [collapsed, meta?.cwd, sessionGroups, prefetchSessionHistory])
 
   if (!meta) return <></>
 
@@ -198,7 +411,7 @@ export default function Sidebar(): JSX.Element {
     return (
       <div key="sidebar-collapsed" className="sidebar-collapse glass-sidebar flex w-14 shrink-0 flex-col items-center rounded-[18px] border py-3">
         <button
-          onClick={toggleSidebar}
+          onClick={handleToggleSidebar}
           className={iconBtn(false)}
           title="展开侧边栏"
         >
@@ -208,7 +421,11 @@ export default function Sidebar(): JSX.Element {
           F
         </div>
         <div className="mt-2">
-          <ProjectSwitcher collapsed />
+          {sidebarContentReady ? (
+            <ProjectSwitcher collapsed />
+          ) : (
+            <div className="h-9 w-9 rounded-xl bg-white/[0.035]" />
+          )}
         </div>
         <button
           onClick={() => {
@@ -267,11 +484,17 @@ export default function Sidebar(): JSX.Element {
   }
 
   /* ---------- expanded ---------- */
-  const groups = groupSessions(sessions)
+  const groups = sessionGroups
   const navCls = (on: boolean): string =>
-    `flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs transition ${
-      on ? 'glass-active text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.055] hover:text-zinc-200'
+    `sidebar-tool-tab flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs ${
+      on ? 'is-active glass-active text-zinc-100' : 'text-zinc-400'
     }`
+
+  const handleSidebarPointerGlow = (event: PointerEvent<HTMLButtonElement>): void => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    event.currentTarget.style.setProperty('--tab-x', `${event.clientX - rect.left}px`)
+    event.currentTarget.style.setProperty('--tab-y', `${event.clientY - rect.top}px`)
+  }
 
   return (
     <div key="sidebar-expanded" className="sidebar-expand glass-sidebar flex w-64 shrink-0 flex-col rounded-[18px] border">
@@ -282,8 +505,8 @@ export default function Sidebar(): JSX.Element {
         </div>
         <div className="flex-1 text-sm font-semibold text-zinc-100">Forge</div>
         <button
-          onClick={toggleSidebar}
-          className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
+          onClick={handleToggleSidebar}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
           title="收起侧边栏"
         >
           <ChevronIcon collapsed={false} />
@@ -291,27 +514,29 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       {/* project switcher + new chat + provider */}
-      <div className="space-y-2 px-4 pb-3 pt-3">
+      <div
+        className={`sidebar-deferred-content space-y-3 px-4 pb-4 pt-3.5 ${
+          sidebarContentReady ? 'is-ready' : ''
+        }`}
+      >
+        {sidebarContentReady ? (
+          <>
         <ProjectSwitcher collapsed={false} />
         <button
           onClick={() => {
             void newChat()
             setView('chat')
           }}
-          className="accent-soft-button w-full rounded-xl px-3 py-2 text-sm font-medium text-white transition hover:brightness-110"
+          className="accent-soft-button flex h-10 w-full items-center justify-center gap-2 rounded-[14px] px-3 text-sm font-medium text-white transition hover:brightness-110"
         >
           + 新建对话
         </button>
-        {activeProvider && (
-          <button
-            onClick={() => setView('providers')}
-            className="glass-control flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-[11px] text-zinc-400 transition hover:bg-white/[0.075]"
-            title="切换运营商"
-          >
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-            <span className="truncate">{activeProvider.name || activeProvider.baseUrl}</span>
-            <span className="ml-auto shrink-0 font-mono text-zinc-500">{activeProvider.model}</span>
-          </button>
+          </>
+        ) : (
+          <>
+            <div className="h-8 rounded-xl bg-white/[0.035]" />
+            <div className="h-10 rounded-[14px] bg-white/[0.04]" />
+          </>
         )}
       </div>
 
@@ -330,7 +555,13 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       {/* grouped sessions */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+      <div
+        ref={sessionListRef}
+        onScroll={handleSessionListScroll}
+        className={`sidebar-deferred-content min-h-0 flex-1 overflow-y-auto px-3 pb-3 ${
+          sidebarContentReady ? 'is-ready' : ''
+        }`}
+      >
         {loading && sessions.length === 0 && (
           <div className="px-2 py-3 text-xs text-zinc-600">加载中…</div>
         )}
@@ -349,6 +580,7 @@ export default function Sidebar(): JSX.Element {
               return (
                 <div
                   key={s.sessionId}
+                  data-session-id={s.sessionId}
                   className="group relative [content-visibility:auto] [contain-intrinsic-size:auto_44px]"
                 >
                   {editing ? (
@@ -369,10 +601,12 @@ export default function Sidebar(): JSX.Element {
                         void openSession(s.sessionId)
                         setView('chat')
                       }}
-                      className={`relative w-full rounded-xl border px-2.5 py-2 text-left transition ${
+                      onPointerEnter={handleSidebarPointerGlow}
+                      onPointerMove={handleSidebarPointerGlow}
+                      className={`sidebar-session-row relative w-full rounded-xl border px-2.5 py-2 text-left ${
                         active
-                          ? 'glass-active text-zinc-100'
-                          : 'border-transparent text-zinc-400 hover:bg-white/[0.045] hover:text-zinc-200'
+                          ? 'is-active glass-active text-zinc-100'
+                          : 'border-transparent text-zinc-400'
                       }`}
                     >
                       {active && (
@@ -436,10 +670,22 @@ export default function Sidebar(): JSX.Element {
             })}
           </div>
         ))}
+        {sessions.length > 0 && (sessionsHasMore || loading) && (
+          <div className="px-2 py-3 text-center text-[11px] text-zinc-600">
+            {loading ? '加载更多会话中...' : '继续下滑加载更多'}
+          </div>
+        )}
       </div>
 
       {/* footer nav — collapsible tool tabs */}
-      <div className="px-3 pb-4 pt-2">
+      <div
+        className={`sidebar-deferred-content px-3 pb-4 pt-2 ${
+          sidebarContentReady ? 'is-ready' : ''
+        }`}
+      >
+        {!sidebarContentReady ? (
+          <div className="glass-panel-soft h-12 rounded-2xl p-1.5" />
+        ) : (
         <div className="glass-panel-soft rounded-2xl p-1.5">
           <button
             onClick={toggleNav}
@@ -468,12 +714,14 @@ export default function Sidebar(): JSX.Element {
                   <button
                     key={item.view}
                     onClick={() => setView(on ? 'chat' : item.view)}
-                    className={`${navCls(on)} ${i > 0 ? 'mt-1' : ''} transition-all duration-[440ms] ease-spring`}
+                    onPointerEnter={handleSidebarPointerGlow}
+                    onPointerMove={handleSidebarPointerGlow}
+                    className={`${navCls(on)} ${i > 0 ? 'mt-1' : ''}`}
                     style={{
-                      transitionDelay: navCollapsed ? '0ms' : `${i * 55}ms`,
+                      '--sidebar-tab-stagger': navCollapsed ? '0ms' : `${i * 55}ms`,
                       opacity: navCollapsed ? 0 : 1,
                       transform: navCollapsed ? 'translateY(-6px)' : 'translateY(0)'
-                    }}
+                    } as CSSProperties}
                   >
                     <item.icon />
                     {item.label}
@@ -483,6 +731,7 @@ export default function Sidebar(): JSX.Element {
             </div>
           </Collapse>
         </div>
+        )}
       </div>
     </div>
   )
