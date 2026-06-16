@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSessionStore } from './store/sessionStore'
 import { useUiStore, type View } from './store/uiStore'
 import Onboarding from './components/Onboarding'
@@ -6,6 +6,8 @@ import Sidebar from './components/Sidebar'
 import Transcript from './components/Transcript'
 import Composer from './components/Composer'
 import StatusBar from './components/StatusBar'
+import RuntimeStatusStrip from './components/RuntimeStatusStrip'
+import ErrorDiagnosticPanel from './components/ErrorDiagnosticPanel'
 import GitToolbar, { requestCloseGitDrawer } from './components/GitToolbar'
 import AttachmentPreviewPane from './components/AttachmentPreviewPane'
 import PermissionModal from './components/PermissionModal'
@@ -14,7 +16,10 @@ import ProvidersPanel from './components/ProvidersPanel'
 import SkillsPanel from './components/SkillsPanel'
 import SettingsPanel from './components/SettingsPanel'
 import TranslatePanel from './components/TranslatePanel'
+import HelpPanel from './components/HelpPanel'
+import WslHealthPanel from './components/WslHealthPanel'
 import ErrorBoundary from './components/ErrorBoundary'
+import ClosePromptDialog from './components/ClosePromptDialog'
 import { useApplyAppearanceSettings } from './store/appearanceStore'
 import { pushAgentEvent, flushAgentEvents } from './store/streamBatcher'
 
@@ -22,6 +27,8 @@ const VIEW_SWAP_DELAY_MS = 90
 const CHAT_SWAP_CLEAR_MS = 220
 const SCROLLBAR_IDLE_MS = 1800
 const PREVIEW_CLOSE_MS = 720
+const CHAT_TOPBAR_COLLAPSED_KEY = 'forge.chatTopbarCollapsed.v1'
+const CHAT_TOPBAR_LAYOUT_MOTION_MS = 520
 
 const SCROLL_REVEAL_KEYS = new Set([
   'ArrowUp',
@@ -53,6 +60,14 @@ function eventTargetsScrollableArea(target: EventTarget | null): boolean {
     element = element.parentElement
   }
   return false
+}
+
+function readChatTopbarCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(CHAT_TOPBAR_COLLAPSED_KEY) === 'true'
+  } catch {
+    return false
+  }
 }
 
 function WindowTitlebar(): JSX.Element {
@@ -94,7 +109,115 @@ function WindowTitlebar(): JSX.Element {
   )
 }
 
-function MainViewContent({ view }: { view: View }): JSX.Element {
+function ChatTopbarToggle({
+  collapsed,
+  onClick,
+  tabIndex
+}: {
+  collapsed: boolean
+  onClick: () => void
+  tabIndex?: number
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="chat-topbar-toggle"
+      aria-label={collapsed ? '展开 Git 和 Provider 顶栏' : '折叠 Git 和 Provider 顶栏'}
+      title={collapsed ? '展开 Git 和 Provider 顶栏' : '折叠 Git 和 Provider 顶栏'}
+      onClick={onClick}
+      tabIndex={tabIndex}
+    >
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill="none"
+        className="chat-topbar-toggle-chevron"
+        aria-hidden="true"
+      >
+        <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
+  )
+}
+
+function ChatTopbar({
+  collapsed,
+  onToggle
+}: {
+  collapsed: boolean
+  onToggle: (expandDelta?: number) => void
+}): JSX.Element {
+  const [allowOverflow, setAllowOverflow] = useState(!collapsed)
+  const shellRef = useRef<HTMLDivElement | null>(null)
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (collapsed) {
+      setAllowOverflow(false)
+      return
+    }
+
+    const timeout = window.setTimeout(() => setAllowOverflow(true), 440)
+    return () => window.clearTimeout(timeout)
+  }, [collapsed])
+
+  const measureExpandDelta = (): number => {
+    if (!collapsed) return 0
+    const shell = shellRef.current
+    const content = contentRef.current
+    const body = bodyRef.current
+    if (!shell || !content || !body) return 0
+
+    const currentHeight = Math.ceil(shell.getBoundingClientRect().height)
+    const expandedHeight = Math.ceil(
+      Math.max(content.scrollHeight, body.scrollHeight, body.getBoundingClientRect().height)
+    )
+    return Math.max(0, expandedHeight - currentHeight)
+  }
+
+  const toggle = (): void => {
+    if (!collapsed) requestCloseGitDrawer()
+    onToggle(measureExpandDelta())
+  }
+
+  return (
+    <div ref={shellRef} className={`chat-topbar-shell shrink-0 ${collapsed ? 'is-collapsed' : ''}`}>
+      <div className="chat-topbar-collapsed-handle" aria-hidden={!collapsed}>
+        <ChatTopbarToggle collapsed={collapsed} onClick={toggle} tabIndex={collapsed ? 0 : -1} />
+      </div>
+      <div
+        ref={contentRef}
+        className={`chat-topbar-content ${allowOverflow ? 'is-overflow-visible' : ''}`}
+        aria-hidden={collapsed}
+      >
+        <div ref={bodyRef} className="chat-topbar-body">
+          <RuntimeStatusStrip />
+          <GitToolbar cornerAction={<ChatTopbarToggle collapsed={false} onClick={toggle} />} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MainViewContent({
+  view,
+  chatTopbarCollapsed,
+  chatTopbarLayoutMotion,
+  chatTopbarScrollReserve,
+  chatTopbarScrollReserveVersion,
+  onTranscriptAtBottomChange,
+  onToggleChatTopbar
+}: {
+  view: View
+  chatTopbarCollapsed: boolean
+  chatTopbarLayoutMotion: boolean
+  chatTopbarScrollReserve: number
+  chatTopbarScrollReserveVersion: number
+  onTranscriptAtBottomChange: (atBottom: boolean) => void
+  onToggleChatTopbar: (expandDelta?: number) => void
+}): JSX.Element {
   if (view === 'mcp') {
     return (
       <div className="min-h-0 flex-1 overflow-hidden">
@@ -135,13 +258,35 @@ function MainViewContent({ view }: { view: View }): JSX.Element {
     )
   }
 
+  if (view === 'help') {
+    return (
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <HelpPanel />
+      </div>
+    )
+  }
+
+  if (view === 'wslHealth') {
+    return (
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <WslHealthPanel />
+      </div>
+    )
+  }
+
   return (
     <>
-      <GitToolbar />
+      <ChatTopbar collapsed={chatTopbarCollapsed} onToggle={onToggleChatTopbar} />
       <div className="min-h-0 flex-1 overflow-hidden" onPointerDownCapture={requestCloseGitDrawer}>
-        <Transcript />
+        <Transcript
+          layoutTransitioning={chatTopbarLayoutMotion}
+          bottomReserve={chatTopbarScrollReserve}
+          bottomReserveVersion={chatTopbarScrollReserveVersion}
+          onAtBottomChange={onTranscriptAtBottomChange}
+        />
       </div>
       <Composer />
+      <ErrorDiagnosticPanel />
       <StatusBar />
     </>
   )
@@ -155,6 +300,7 @@ export default function App(): JSX.Element {
   const bootstrap = useSessionStore((s) => s.bootstrap)
   const addPerm = useSessionStore((s) => s.addPermissionRequest)
   const view = useUiStore((s) => s.view)
+  const setView = useUiStore((s) => s.setView)
   const attachmentPreview = useUiStore((s) => s.attachmentPreview)
   const previewOpen = !!attachmentPreview
   const closeAttachmentPreview = useUiStore((s) => s.closeAttachmentPreview)
@@ -165,10 +311,98 @@ export default function App(): JSX.Element {
   const [chatSwitching, setChatSwitching] = useState(false)
   const [previewMounted, setPreviewMounted] = useState(previewOpen)
   const [previewClosing, setPreviewClosing] = useState(false)
+  const [chatTopbarCollapsed, setChatTopbarCollapsed] = useState(readChatTopbarCollapsed)
+  const [chatTopbarLayoutMotion, setChatTopbarLayoutMotion] = useState(false)
+  const [chatTopbarScrollReserve, setChatTopbarScrollReserve] = useState(0)
+  const [chatTopbarScrollReserveVersion, setChatTopbarScrollReserveVersion] = useState(0)
+  const [closePromptOpen, setClosePromptOpen] = useState(false)
+  const chatTopbarCollapsedRef = useRef(chatTopbarCollapsed)
+  const transcriptAtBottomRef = useRef(true)
+  const gitTopbarAutoExpandedCwdRef = useRef<string | null>(null)
+  const chatTopbarLayoutMotionTimeoutRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    chatTopbarCollapsedRef.current = chatTopbarCollapsed
+    window.localStorage.setItem(CHAT_TOPBAR_COLLAPSED_KEY, String(chatTopbarCollapsed))
+  }, [chatTopbarCollapsed])
+
+  const beginChatTopbarLayoutMotion = (clearScrollReserve = false): void => {
+    setChatTopbarLayoutMotion(true)
+    if (chatTopbarLayoutMotionTimeoutRef.current !== null) {
+      window.clearTimeout(chatTopbarLayoutMotionTimeoutRef.current)
+    }
+    chatTopbarLayoutMotionTimeoutRef.current = window.setTimeout(() => {
+      chatTopbarLayoutMotionTimeoutRef.current = null
+      setChatTopbarLayoutMotion(false)
+      if (clearScrollReserve) setChatTopbarScrollReserve(0)
+    }, CHAT_TOPBAR_LAYOUT_MOTION_MS)
+  }
+
+  const expandChatTopbarAfterPreScroll = (): void => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => setChatTopbarCollapsed(false))
+    })
+  }
+
+  const toggleChatTopbar = (expandDelta = 0): void => {
+    const expanding = chatTopbarCollapsedRef.current
+    const reserveHeight = expanding && transcriptAtBottomRef.current ? Math.ceil(expandDelta) : 0
+
+    if (reserveHeight > 0) {
+      setChatTopbarScrollReserve(reserveHeight)
+      setChatTopbarScrollReserveVersion((version) => version + 1)
+      beginChatTopbarLayoutMotion(true)
+      expandChatTopbarAfterPreScroll()
+      return
+    }
+
+    beginChatTopbarLayoutMotion()
+    setChatTopbarCollapsed((collapsed) => !collapsed)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (chatTopbarLayoutMotionTimeoutRef.current !== null) {
+        window.clearTimeout(chatTopbarLayoutMotionTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const cwd = meta?.cwd
+    if (!cwd || gitTopbarAutoExpandedCwdRef.current === cwd) return
+
+    let alive = true
+    void window.api.isGitRepo(cwd).then((isRepo) => {
+      if (!alive || !isRepo) return
+      gitTopbarAutoExpandedCwdRef.current = cwd
+      if (chatTopbarCollapsedRef.current) beginChatTopbarLayoutMotion()
+      setChatTopbarCollapsed(false)
+    }).catch(() => {
+      if (alive) gitTopbarAutoExpandedCwdRef.current = cwd
+    })
+
+    return () => {
+      alive = false
+    }
+  }, [meta?.cwd])
 
   useEffect(() => {
     void bootstrap()
   }, [bootstrap])
+
+  useEffect(() => {
+    const enforceWslSupport = (): void => {
+      void window.api.getPreferences().then((prefs) => {
+        if (!prefs.wslSupportEnabled && useUiStore.getState().view === 'wslHealth') {
+          setView('settings')
+        }
+      })
+    }
+    enforceWslSupport()
+    window.addEventListener('forge:wsl-support-changed', enforceWslSupport)
+    return () => window.removeEventListener('forge:wsl-support-changed', enforceWslSupport)
+  }, [setView])
 
   useEffect(() => {
     let timeout: number | null = null
@@ -292,6 +526,10 @@ export default function App(): JSX.Element {
     }
   }, [addPerm])
 
+  useEffect(() => {
+    const off = window.api.onClosePrompt(() => setClosePromptOpen(true))
+    return off
+  }, [])
   if (!bootstrapped) {
     return (
       <div className="app-shell flex h-screen flex-col overflow-hidden">
@@ -323,7 +561,7 @@ export default function App(): JSX.Element {
       <div className="app-shell flex h-screen flex-col overflow-hidden text-zinc-200">
         <WindowTitlebar />
         <div
-          className={`workspace-shell min-h-0 flex-1 p-4 pt-4 ${
+          className={`workspace-shell min-h-0 flex-1 p-4 ${
             previewOpen ? 'has-preview' : ''
           } ${previewClosing ? 'is-preview-closing' : ''}`}
         >
@@ -342,10 +580,30 @@ export default function App(): JSX.Element {
                     chatSwitching ? 'is-switching' : ''
                   }`}
                 >
-                  <MainViewContent view={displayView} />
+                  <MainViewContent
+                    view={displayView}
+                    chatTopbarCollapsed={chatTopbarCollapsed}
+                    chatTopbarLayoutMotion={chatTopbarLayoutMotion}
+                    chatTopbarScrollReserve={chatTopbarScrollReserve}
+                    chatTopbarScrollReserveVersion={chatTopbarScrollReserveVersion}
+                    onTranscriptAtBottomChange={(atBottom) => {
+                      transcriptAtBottomRef.current = atBottom
+                    }}
+                    onToggleChatTopbar={toggleChatTopbar}
+                  />
                 </div>
               ) : (
-                <MainViewContent view={displayView} />
+                <MainViewContent
+                  view={displayView}
+                  chatTopbarCollapsed={chatTopbarCollapsed}
+                  chatTopbarLayoutMotion={chatTopbarLayoutMotion}
+                  chatTopbarScrollReserve={chatTopbarScrollReserve}
+                  chatTopbarScrollReserveVersion={chatTopbarScrollReserveVersion}
+                  onTranscriptAtBottomChange={(atBottom) => {
+                    transcriptAtBottomRef.current = atBottom
+                  }}
+                  onToggleChatTopbar={toggleChatTopbar}
+                />
               )}
             </div>
           </div>
@@ -353,6 +611,7 @@ export default function App(): JSX.Element {
             {(previewOpen || previewMounted) && <AttachmentPreviewPane />}
           </div>
           <PermissionModal />
+          <ClosePromptDialog open={closePromptOpen} onClose={() => setClosePromptOpen(false)} />
         </div>
       </div>
     </ErrorBoundary>

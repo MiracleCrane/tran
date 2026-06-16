@@ -1,15 +1,16 @@
 import { useState } from 'react'
-import type { Provider, ProviderAuthType } from '../../shared/ipc'
+import type { ClaudeExecutionBackend, Provider, ProviderAuthType } from '../../shared/ipc'
 
 interface Props {
   /** Provider being edited, or a blank one for add mode. */
   provider: Provider
   isEdit: boolean
+  backend?: ClaudeExecutionBackend
   onClose: () => void
   onSaved: () => void
 }
 
-export default function ProviderFormModal({ provider, isEdit, onClose, onSaved }: Props): JSX.Element {
+export default function ProviderFormModal({ provider, isEdit, backend, onClose, onSaved }: Props): JSX.Element {
   const [name, setName] = useState(provider.name)
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl)
   const [token, setToken] = useState(provider.token)
@@ -21,18 +22,24 @@ export default function ProviderFormModal({ provider, isEdit, onClose, onSaved }
 
   const submit = async (): Promise<void> => {
     setError(null)
-    if (!baseUrl.trim()) return setError('请填写 API 地址(baseUrl)。')
+    if (!baseUrl.trim()) {
+      setError('请填写 API 地址(Base URL)。')
+      return
+    }
+
     const finalProvider: Provider = {
       id: provider.id,
       name: name.trim() || baseUrl.trim(),
       baseUrl: baseUrl.trim(),
-      token: token,
+      token,
       authType,
       model: model.trim() || 'claude-opus-4-8'
     }
+
     setSaving(true)
     try {
-      await window.api.saveProvider(finalProvider)
+      if (backend) await window.api.saveProviderForBackend(backend, finalProvider)
+      else await window.api.saveProvider(finalProvider)
       onSaved()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -101,8 +108,8 @@ export default function ProviderFormModal({ provider, isEdit, onClose, onSaved }
         </div>
         <p className="mt-1 text-[11px] text-zinc-600">
           {authType === 'bearer'
-            ? 'Bearer Token → 以 Authorization: Bearer 发送(ANTHROPIC_AUTH_TOKEN)。'
-            : 'API Key → 以 x-api-key 发送(ANTHROPIC_API_KEY)。'}
+            ? 'Bearer Token 会通过 ANTHROPIC_AUTH_TOKEN 发送。'
+            : 'API Key 会通过 ANTHROPIC_API_KEY 发送。'}
         </p>
 
         <div className="mt-3">
@@ -120,11 +127,11 @@ export default function ProviderFormModal({ provider, isEdit, onClose, onSaved }
             type={showToken ? 'text' : 'password'}
             value={token}
             onChange={(e) => setToken(e.target.value)}
-            placeholder={authType === 'bearer' ? 'PROXY_MANAGED / Bearer …' : 'sk-ant-…'}
+            placeholder={authType === 'bearer' ? 'PROXY_MANAGED / Bearer token' : 'sk-ant-...'}
             className={`${inputCls} font-mono`}
           />
           <p className="mt-1 text-[11px] text-zinc-600">
-            走本地代理时可填 <code className="text-zinc-500">PROXY_MANAGED</code>(由代理注入真实密钥)。
+            走本地代理时可填 <code className="text-zinc-500">PROXY_MANAGED</code>。
           </p>
         </div>
 
@@ -135,7 +142,7 @@ export default function ProviderFormModal({ provider, isEdit, onClose, onSaved }
         )}
 
         <p className="mt-4 text-[11px] text-zinc-600">
-          保存只写入客户端;切换为该运营商时才会把地址和密钥写回 Claude 的配置。
+          保存活动运营商会同步写入当前后端的 Claude 配置；非活动运营商会在切换时写入。
         </p>
 
         <div className="mt-4 flex justify-end gap-2">
@@ -150,7 +157,7 @@ export default function ProviderFormModal({ provider, isEdit, onClose, onSaved }
             disabled={saving}
             className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {saving ? '保存中…' : '保存'}
+            {saving ? '保存中...' : '保存'}
           </button>
         </div>
       </div>

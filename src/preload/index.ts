@@ -27,11 +27,12 @@ const api: ForgeApi = {
     ipcRenderer.invoke('forge:setPermissionMode', sessionId, mode),
   closeSession: (sessionId) => ipcRenderer.invoke('forge:closeSession', sessionId),
   listSessions: (cwd, opts) => ipcRenderer.invoke('forge:listSessions', cwd, opts),
-  getSessionMessages: (sessionId, cwd) =>
-    ipcRenderer.invoke('forge:getSessionMessages', sessionId, cwd),
-  renameSession: (sessionId, title, cwd) =>
-    ipcRenderer.invoke('forge:renameSession', sessionId, title, cwd),
-  deleteSession: (sessionId, cwd) => ipcRenderer.invoke('forge:deleteSession', sessionId, cwd),
+  getSessionMessages: (sessionId, cwd, backend) =>
+    ipcRenderer.invoke('forge:getSessionMessages', sessionId, cwd, backend),
+  renameSession: (sessionId, title, cwd, backend) =>
+    ipcRenderer.invoke('forge:renameSession', sessionId, title, cwd, backend),
+  deleteSession: (sessionId, cwd, backend) =>
+    ipcRenderer.invoke('forge:deleteSession', sessionId, cwd, backend),
   getSubagentMessages: (sessionId, agentId, cwd) =>
     ipcRenderer.invoke('forge:getSubagentMessages', sessionId, agentId, cwd),
   listMcpServers: (sessionId) => ipcRenderer.invoke('forge:listMcpServers', sessionId),
@@ -56,19 +57,42 @@ const api: ForgeApi = {
 
   getPreferences: () => ipcRenderer.invoke('forge:getPreferences'),
   savePreferences: (prefs) => ipcRenderer.invoke('forge:savePreferences', prefs),
+  getRuntimeStatus: (cwd, model) => ipcRenderer.invoke('forge:getRuntimeStatus', cwd, model),
+  runWslHealthCheck: (cwd) => ipcRenderer.invoke('forge:runWslHealthCheck', cwd),
+  repairWslEnvironment: (cwd) => ipcRenderer.invoke('forge:repairWslEnvironment', cwd),
+  getDiagnosticLog: () => ipcRenderer.invoke('forge:getDiagnosticLog'),
+  exportSettings: (appearance) => ipcRenderer.invoke('forge:exportSettings', appearance),
+  importSettings: (backup) => ipcRenderer.invoke('forge:importSettings', backup),
 
   minimizeWindow: () => ipcRenderer.invoke('forge:minimizeWindow'),
   toggleMaximizeWindow: () => ipcRenderer.invoke('forge:toggleMaximizeWindow'),
   closeWindow: () => ipcRenderer.invoke('forge:closeWindow'),
+
+  resolveClose: (decision) => ipcRenderer.invoke('forge:resolveClose', decision),
+  showWindow: () => ipcRenderer.invoke('forge:showWindow'),
+  onClosePrompt: (cb) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('forge:show-close-prompt', listener)
+    return () => ipcRenderer.removeListener('forge:show-close-prompt', listener)
+  },
 
   saveMcpServer: (args) => ipcRenderer.invoke('forge:saveMcpServer', args),
   deleteMcpServer: (args) => ipcRenderer.invoke('forge:deleteMcpServer', args),
 
   listProviders: () => ipcRenderer.invoke('forge:listProviders'),
   getActiveProvider: () => ipcRenderer.invoke('forge:getActiveProvider'),
+  getProviderProfiles: () => ipcRenderer.invoke('forge:getProviderProfiles'),
   saveProvider: (provider) => ipcRenderer.invoke('forge:saveProvider', provider),
+  saveProviderForBackend: (backend, provider) =>
+    ipcRenderer.invoke('forge:saveProviderForBackend', backend, provider),
   deleteProvider: (id) => ipcRenderer.invoke('forge:deleteProvider', id),
+  deleteProviderForBackend: (backend, id) =>
+    ipcRenderer.invoke('forge:deleteProviderForBackend', backend, id),
   setActiveProvider: (id) => ipcRenderer.invoke('forge:setActiveProvider', id),
+  setActiveProviderForBackend: (backend, id) =>
+    ipcRenderer.invoke('forge:setActiveProviderForBackend', backend, id),
+  saveComposerModelsForBackend: (backend, models) =>
+    ipcRenderer.invoke('forge:saveComposerModelsForBackend', backend, models),
 
   listProjects: () => ipcRenderer.invoke('forge:listProjects'),
   addProject: (path, name) => ipcRenderer.invoke('forge:addProject', path, name),

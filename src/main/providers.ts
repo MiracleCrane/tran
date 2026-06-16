@@ -3,25 +3,73 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { loadSettings, saveSettings } from './settings'
+import {
+  composerModelsForBackend,
+  currentBackend,
+  saveComposerModelsForBackend as persistComposerModelsForBackend
+} from './preferences'
 import { log } from './logger'
-import type { Provider, ProviderAuthType } from '../shared/ipc'
+import { readWslClaudeSettings, writeWslClaudeSettings } from './wslConfig'
+import type {
+  ClaudeExecutionBackend,
+  ComposerModel,
+  Provider,
+  ProviderAuthType,
+  ProviderProfile,
+  ProviderProfiles
+} from '../shared/ipc'
+
+type PersistedSettings = ReturnType<typeof loadSettings>
+type ProviderBackend = ClaudeExecutionBackend
 
 /**
  * Multi-provider API switching.
  *
- * Claude natively reads one API config from ~/.claude/settings.json's `env`
- * (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY). We keep many
- * providers client-side (forge-settings.json) and, on switch, write the chosen
- * one back into that native env — so it becomes "the one" Claude uses. Forge
- * also injects the active provider at every claude.exe spawn (AgentBridge), so
- * switching always takes effect regardless of stray shell env.
+ * Forge keeps provider lists client-side, then applies the active provider to
+ * Claude's native settings.json and to each spawned Claude process. Windows and
+ * WSL backends intentionally have separate provider lists and active IDs, so a
+ * WSL switch does not overwrite the Windows Claude profile.
  */
+
+function currentProviderBackend(): ProviderBackend {
+  return currentBackend()
+}
+
+function normalizeProviderBackend(backend: ProviderBackend): ProviderBackend {
+  return backend === 'wsl' && process.platform === 'win32' ? 'wsl' : 'windows'
+}
+
+function providerList(s: PersistedSettings, backend: ProviderBackend): Provider[] {
+  return backend === 'wsl' ? (s.wslProviders ?? []) : (s.providers ?? [])
+}
+
+function setProviderList(s: PersistedSettings, backend: ProviderBackend, list: Provider[]): void {
+  if (backend === 'wsl') s.wslProviders = list
+  else s.providers = list
+}
+
+function activeProviderId(s: PersistedSettings, backend: ProviderBackend): string | null | undefined {
+  return backend === 'wsl' ? s.wslActiveProviderId : s.activeProviderId
+}
+
+function setActiveProviderId(
+  s: PersistedSettings,
+  backend: ProviderBackend,
+  id: string | null
+): void {
+  if (backend === 'wsl') s.wslActiveProviderId = id
+  else s.activeProviderId = id
+}
+
+function backendLabel(backend: ProviderBackend): string {
+  return backend === 'wsl' ? 'WSL' : 'Windows'
+}
 
 function claudeSettingsPath(): string {
   return join(homedir(), '.claude', 'settings.json')
 }
 
-function readClaudeSettings(): Record<string, unknown> {
+function readWindowsClaudeSettings(): Record<string, unknown> {
   try {
     return JSON.parse(readFileSync(claudeSettingsPath(), 'utf8')) as Record<string, unknown>
   } catch {
@@ -29,7 +77,7 @@ function readClaudeSettings(): Record<string, unknown> {
   }
 }
 
-function writeClaudeSettings(data: Record<string, unknown>): void {
+function writeWindowsClaudeSettings(data: Record<string, unknown>): void {
   const p = claudeSettingsPath()
   try {
     mkdirSync(dirname(p), { recursive: true })
@@ -39,43 +87,158 @@ function writeClaudeSettings(data: Record<string, unknown>): void {
   }
 }
 
+function readClaudeSettings(backend: ProviderBackend): Record<string, unknown> {
+  return backend === 'wsl' ? readWslClaudeSettings() : readWindowsClaudeSettings()
+}
+
+function writeClaudeSettings(backend: ProviderBackend, data: Record<string, unknown>): void {
+  if (backend === 'wsl') writeWslClaudeSettings(data)
+  else writeWindowsClaudeSettings(data)
+}
+
+function envFromSettings(backend: ProviderBackend): Record<string, string> {
+  const root = readClaudeSettings(backend)
+  return (root['env'] && typeof root['env'] === 'object' ? root['env'] : {}) as Record<string, string>
+}
+
+function modelFromEnv(env: Record<string, string>): string {
+  return (
+    env['ANTHROPIC_DEFAULT_OPUS_MODEL_NAME'] ||
+    env['ANTHROPIC_DEFAULT_OPUS_MODEL'] ||
+    env['ANTHROPIC_MODEL'] ||
+    'claude-opus-4-8'
+  )
+}
+
+function createSeedProvider(backend: ProviderBackend): Provider {
+  const env = envFromSettings(backend)
+  const pe = backend === 'windows' ? process.env as Record<string, string | undefined> : {}
+  const baseUrl = env['ANTHROPIC_BASE_URL'] || pe['ANTHROPIC_BASE_URL'] || ''
+  const token =
+    env['ANTHROPIC_AUTH_TOKEN'] ||
+    env['ANTHROPIC_API_KEY'] ||
+    pe['ANTHROPIC_AUTH_TOKEN'] ||
+    pe['ANTHROPIC_API_KEY'] ||
+    ''
+  const authType: ProviderAuthType =
+    env['ANTHROPIC_API_KEY'] || pe['ANTHROPIC_API_KEY'] ? 'apikey' : 'bearer'
+
+  return {
+    id: randomUUID(),
+    name: backend === 'wsl' ? 'WSL 默认' : '默认',
+    baseUrl: baseUrl || 'https://api.anthropic.com',
+    token: token || '',
+    authType,
+    model: modelFromEnv(env)
+  }
+}
+
+function seedDefaultForBackend(s: PersistedSettings, backend: ProviderBackend): boolean {
+  if (providerList(s, backend).length) return false
+  const provider = createSeedProvider(backend)
+  setProviderList(s, backend, [provider])
+  setActiveProviderId(s, backend, provider.id)
+  log('providers', `seeded ${backendLabel(backend)} default provider: ${provider.baseUrl} (${provider.authType})`)
+  return true
+}
+
+function settingsForBackend(backend: ProviderBackend): PersistedSettings {
+  const s = loadSettings()
+  if (seedDefaultForBackend(s, backend)) saveSettings(s)
+  return s
+}
+
 export function listProviders(): Provider[] {
-  return loadSettings().providers ?? []
+  const backend = currentProviderBackend()
+  return [...providerList(settingsForBackend(backend), backend)]
+}
+
+export function getProviderProfile(backend: ProviderBackend): ProviderProfile {
+  const normalized = normalizeProviderBackend(backend)
+  const s = settingsForBackend(normalized)
+  return {
+    backend: normalized,
+    providers: [...providerList(s, normalized)],
+    activeProviderId: activeProviderId(s, normalized) ?? null,
+    composerModels: composerModelsForBackend(s, normalized)
+  }
+}
+
+export function getProviderProfiles(): ProviderProfiles {
+  return {
+    activeBackend: currentProviderBackend(),
+    profiles: [getProviderProfile('windows'), getProviderProfile('wsl')]
+  }
 }
 
 export function getActiveProvider(): Provider | null {
-  const s = loadSettings()
-  if (!s.providers?.length) return null
-  return s.providers.find((p) => p.id === s.activeProviderId) ?? null
+  const backend = currentProviderBackend()
+  const s = settingsForBackend(backend)
+  const list = providerList(s, backend)
+  if (!list.length) return null
+  return list.find((p) => p.id === activeProviderId(s, backend)) ?? null
 }
 
 export function saveProvider(p: Provider): Provider[] {
-  const s = loadSettings()
-  const list = s.providers ? [...s.providers] : []
+  const backend = currentProviderBackend()
+  const s = settingsForBackend(backend)
+  const list = [...providerList(s, backend)]
   const idx = list.findIndex((x) => x.id === p.id)
   if (idx >= 0) list[idx] = p
   else list.push(p)
-  s.providers = list
+  setProviderList(s, backend, list)
   saveSettings(s)
+
+  if (p.id === activeProviderId(s, backend)) applyToClaudeConfig(p, backend)
   return list
+}
+
+export function saveProviderForBackend(backend: ProviderBackend, p: Provider): ProviderProfile {
+  const normalized = normalizeProviderBackend(backend)
+  const s = settingsForBackend(normalized)
+  const list = [...providerList(s, normalized)]
+  const idx = list.findIndex((x) => x.id === p.id)
+  if (idx >= 0) list[idx] = p
+  else list.push(p)
+  setProviderList(s, normalized, list)
+  saveSettings(s)
+
+  if (p.id === activeProviderId(s, normalized)) applyToClaudeConfig(p, normalized)
+  return getProviderProfile(normalized)
 }
 
 export function deleteProvider(id: string): Provider[] {
-  const s = loadSettings()
-  const list = (s.providers ?? []).filter((p) => p.id !== id)
-  if (s.activeProviderId === id) {
-    s.activeProviderId = list[0]?.id ?? null
+  const backend = currentProviderBackend()
+  const s = settingsForBackend(backend)
+  const list = providerList(s, backend).filter((p) => p.id !== id)
+  if (activeProviderId(s, backend) === id) {
+    setActiveProviderId(s, backend, list[0]?.id ?? null)
   }
-  s.providers = list
+  setProviderList(s, backend, list)
   saveSettings(s)
   return list
 }
 
-/** Write a provider's connection params into Claude's native settings.json env.
- *  Only ANTHROPIC_BASE_URL + the one auth key are touched; everything else
- *  (includeCoAuthoredBy, model mappings, …) is preserved. */
-function applyToClaudeConfig(p: Provider): void {
-  const root = readClaudeSettings()
+export function deleteProviderForBackend(backend: ProviderBackend, id: string): ProviderProfile {
+  const normalized = normalizeProviderBackend(backend)
+  const s = settingsForBackend(normalized)
+  const list = providerList(s, normalized).filter((p) => p.id !== id)
+  const removedActive = activeProviderId(s, normalized) === id
+  if (removedActive) setActiveProviderId(s, normalized, list[0]?.id ?? null)
+  setProviderList(s, normalized, list)
+  saveSettings(s)
+  const nextActive = list.find((p) => p.id === activeProviderId(s, normalized))
+  if (removedActive && nextActive) applyToClaudeConfig(nextActive, normalized)
+  return getProviderProfile(normalized)
+}
+
+/**
+ * Write a provider's connection params into the selected backend's native
+ * settings.json env. Only ANTHROPIC_BASE_URL plus the active auth key are
+ * touched; model mappings, MCP servers, and other settings are preserved.
+ */
+function applyToClaudeConfig(p: Provider, backend: ProviderBackend): void {
+  const root = readClaudeSettings(backend)
   const env = (root['env'] && typeof root['env'] === 'object'
     ? root['env']
     : {}) as Record<string, string>
@@ -88,49 +251,49 @@ function applyToClaudeConfig(p: Provider): void {
     delete env['ANTHROPIC_API_KEY']
   }
   root['env'] = env
-  writeClaudeSettings(root)
+  writeClaudeSettings(backend, root)
 }
 
 export function setActiveProvider(id: string): void {
-  const s = loadSettings()
-  const p = (s.providers ?? []).find((x) => x.id === id)
+  const backend = currentProviderBackend()
+  const s = settingsForBackend(backend)
+  const p = providerList(s, backend).find((x) => x.id === id)
   if (!p) throw new Error('运营商不存在')
-  s.activeProviderId = id
+  setActiveProviderId(s, backend, id)
   saveSettings(s)
-  applyToClaudeConfig(p)
-  log('providers', `active provider → "${p.name}" (${p.baseUrl}, ${p.authType})`)
+  applyToClaudeConfig(p, backend)
+  log('providers', `active ${backendLabel(backend)} provider -> "${p.name}" (${p.baseUrl}, ${p.authType})`)
 }
 
-/** On first run, seed a "默认" provider from whatever Claude is currently
- *  configured with (settings.json env, falling back to process.env). */
+export function setActiveProviderForBackend(backend: ProviderBackend, id: string): ProviderProfile {
+  const normalized = normalizeProviderBackend(backend)
+  const s = settingsForBackend(normalized)
+  const p = providerList(s, normalized).find((x) => x.id === id)
+  if (!p) throw new Error('provider not found')
+  setActiveProviderId(s, normalized, id)
+  saveSettings(s)
+  applyToClaudeConfig(p, normalized)
+  log('providers', `active ${backendLabel(normalized)} provider -> "${p.name}" (${p.baseUrl}, ${p.authType})`)
+  return getProviderProfile(normalized)
+}
+
+export function saveComposerModelsProfile(
+  backend: ProviderBackend,
+  models: ComposerModel[]
+): ProviderProfile {
+  const normalized = normalizeProviderBackend(backend)
+  persistComposerModelsForBackend(normalized, models)
+  return getProviderProfile(normalized)
+}
+
+/**
+ * On first run, seed a Windows default provider from the existing Claude config.
+ * WSL providers are seeded lazily when the user switches the app to WSL mode.
+ */
 export function seedDefaultIfNeeded(): void {
   const s = loadSettings()
-  if (s.providers && s.providers.length) return
-
-  const env = (readClaudeSettings()['env'] ?? {}) as Record<string, string>
-  const pe = process.env as Record<string, string | undefined>
-  const baseUrl = env['ANTHROPIC_BASE_URL'] || pe['ANTHROPIC_BASE_URL'] || ''
-  const token =
-    env['ANTHROPIC_AUTH_TOKEN'] ||
-    env['ANTHROPIC_API_KEY'] ||
-    pe['ANTHROPIC_AUTH_TOKEN'] ||
-    pe['ANTHROPIC_API_KEY'] ||
-    ''
-  const authType: ProviderAuthType =
-    env['ANTHROPIC_API_KEY'] || pe['ANTHROPIC_API_KEY'] ? 'apikey' : 'bearer'
-
-  const provider: Provider = {
-    id: randomUUID(),
-    name: '默认',
-    baseUrl: baseUrl || 'https://api.anthropic.com',
-    token: token || '',
-    authType,
-    model: 'claude-opus-4-8'
-  }
-  s.providers = [provider]
-  s.activeProviderId = provider.id
-  saveSettings(s)
-  log('providers', `seeded default provider: ${provider.baseUrl} (${authType})`)
+  const changed = seedDefaultForBackend(s, 'windows')
+  if (changed) saveSettings(s)
 }
 
 /** Build a blank provider (for the add form). */

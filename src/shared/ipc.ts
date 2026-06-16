@@ -53,11 +53,13 @@ export interface SessionListItem {
   lastModified: number
   cwd?: string
   gitBranch?: string
+  runtimeBackend?: ClaudeExecutionBackend
 }
 
 export interface SessionListOptions {
   limit?: number
   offset?: number
+  backend?: ClaudeExecutionBackend | 'all'
 }
 
 /** Connection state of an MCP server, as reported by the Claude Agent SDK. */
@@ -187,18 +189,82 @@ export interface ComposerModel {
   label: string
 }
 
+export type ClaudeExecutionBackend = 'windows' | 'wsl'
+
 /** Misc app preferences managed by the Settings panel. */
 export interface Preferences {
   /** Default effort for new sessions (AgentBridge fallback). */
   defaultEffort?: EffortLevel
   /** Default permission mode for new sessions. */
   defaultPermissionMode?: PermissionMode
+  /** Which Claude runtime/history backend Forge should use. */
+  claudeExecutionBackend?: ClaudeExecutionBackend
+  /** Whether WSL-specific UI and backend capabilities are exposed. */
+  wslSupportEnabled?: boolean
   /** Models shown in the Composer dropdown; empty/undefined = built-in list. */
   composerModels?: ComposerModel[]
   /** Experimental: route Chromium's compositing through the ANGLE Vulkan
    *  backend on Windows (default D3D11). Off by default; requires restart and
    *  is higher-variance across GPU drivers. */
   vulkanBackend?: boolean
+  /** Close window → hide to system tray instead of quitting. Persisted after
+   *  the user picks once on first close; editable in Settings afterwards. */
+  minimizeToTray?: boolean
+  /** Show OS native notifications when a session ends while the window is
+   *  inactive (default true). */
+  nativeNotifications?: boolean
+  /** When false, Forge re-shows the close prompt (minimize vs. quit) on every
+   *  window close. Default false = always ask until the user picks. */
+  closePromptDismissed?: boolean
+}
+
+export interface ProviderProfile {
+  backend: ClaudeExecutionBackend
+  providers: Provider[]
+  activeProviderId: string | null
+  composerModels?: ComposerModel[]
+}
+
+export interface ProviderProfiles {
+  activeBackend: ClaudeExecutionBackend
+  profiles: ProviderProfile[]
+}
+
+export interface RuntimeStatus {
+  backend: ClaudeExecutionBackend
+  provider: Provider | null
+  model: string
+  claudeCodeVersion?: string
+  claudeCodePath?: string
+  versionError?: string
+  wslDistro?: string
+  checkedAt: number
+}
+
+export type HealthCheckState = 'pass' | 'warn' | 'fail'
+
+export interface HealthCheckItem {
+  id: string
+  label: string
+  state: HealthCheckState
+  detail: string
+  fixable?: boolean
+}
+
+export interface WslHealthReport {
+  checkedAt: number
+  cwd: string
+  cwdWsl?: string
+  defaultDistro?: string
+  checks: HealthCheckItem[]
+  diagnostics: string
+}
+
+export interface SettingsBackup {
+  version: 1
+  exportedAt: string
+  settings: Record<string, unknown>
+  appearance?: Record<string, unknown>
 }
 
 /** Which engine translateTexts() routes to. 'llm' = active provider's
@@ -274,11 +340,20 @@ export interface ForgeApi {
   setPermissionMode(sessionId: string, mode: PermissionMode): Promise<void>
   closeSession(sessionId: string): Promise<void>
   listSessions(cwd: string, opts?: SessionListOptions): Promise<SessionListItem[]>
-  getSessionMessages(sessionId: string, cwd: string): Promise<HistoryMessage[]>
+  getSessionMessages(
+    sessionId: string,
+    cwd: string,
+    backend?: ClaudeExecutionBackend
+  ): Promise<HistoryMessage[]>
   /** Rename a past session (appends a custom title). */
-  renameSession(sessionId: string, title: string, cwd: string): Promise<void>
+  renameSession(
+    sessionId: string,
+    title: string,
+    cwd: string,
+    backend?: ClaudeExecutionBackend
+  ): Promise<void>
   /** Delete a session's transcript file. */
-  deleteSession(sessionId: string, cwd: string): Promise<void>
+  deleteSession(sessionId: string, cwd: string, backend?: ClaudeExecutionBackend): Promise<void>
   /** Read a subagent's own conversation transcript (for the monitor popover). */
   getSubagentMessages(sessionId: string, agentId: string, cwd: string): Promise<HistoryMessage[]>
 
@@ -309,16 +384,25 @@ export interface ForgeApi {
   /** Remove a server from its config file. */
   deleteMcpServer(args: DeleteMcpServerArgs): Promise<void>
 
-  /** --- Providers (multi-operator API switching) --- */
+  /** --- Providers (multi-operator API switching for the current Claude backend) --- */
   listProviders(): Promise<Provider[]>
   getActiveProvider(): Promise<Provider | null>
+  getProviderProfiles(): Promise<ProviderProfiles>
   /** Create or update a provider (upsert by id). Returns the updated list. */
   saveProvider(provider: Provider): Promise<Provider[]>
+  saveProviderForBackend(backend: ClaudeExecutionBackend, provider: Provider): Promise<ProviderProfile>
   /** Remove a provider by id. Returns the updated list. */
   deleteProvider(id: string): Promise<Provider[]>
-  /** Make a provider active: writes its params into Claude's settings.json + sets
-   *  activeProviderId. Caller restarts the session to apply. */
+  deleteProviderForBackend(backend: ClaudeExecutionBackend, id: string): Promise<ProviderProfile>
+  /** Make a provider active: writes its params into the current backend's
+   *  Claude settings.json + sets that backend's active provider id. Caller
+   *  restarts the session to apply. */
   setActiveProvider(id: string): Promise<void>
+  setActiveProviderForBackend(backend: ClaudeExecutionBackend, id: string): Promise<ProviderProfile>
+  saveComposerModelsForBackend(
+    backend: ClaudeExecutionBackend,
+    models: ComposerModel[]
+  ): Promise<ProviderProfile>
 
   /** --- Projects (saved working directories) --- */
   listProjects(): Promise<Project[]>
@@ -351,10 +435,25 @@ export interface ForgeApi {
   /** --- Preferences (Settings panel) --- */
   getPreferences(): Promise<Preferences>
   savePreferences(prefs: Preferences): Promise<Preferences>
+  getRuntimeStatus(cwd?: string, model?: string): Promise<RuntimeStatus>
+  runWslHealthCheck(cwd: string): Promise<WslHealthReport>
+  repairWslEnvironment(cwd: string): Promise<WslHealthReport>
+  getDiagnosticLog(): Promise<string>
+  exportSettings(appearance?: Record<string, unknown>): Promise<SettingsBackup>
+  importSettings(backup: SettingsBackup): Promise<void>
 
   minimizeWindow(): Promise<void>
   toggleMaximizeWindow(): Promise<void>
   closeWindow(): Promise<void>
+
+  /** --- System tray & native notifications --- */
+  /** User's answer to the first-close prompt. `minimize` = hide to tray,
+   *  `remember` = persist the choice so the prompt never shows again. */
+  resolveClose(decision: { minimize: boolean; remember: boolean }): Promise<void>
+  /** Restore and focus the main window (e.g. from tray or a notification click). */
+  showWindow(): Promise<void>
+  /** Subscribe to the first-close prompt request (main → renderer). */
+  onClosePrompt(cb: () => void): () => void
 
   pickDirectory(): Promise<string | null>
   getApiKey(): Promise<string | null>

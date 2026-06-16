@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import type { PickedFile, EffortLevel } from '../../shared/ipc'
+import type { ComposerModel, PickedFile, EffortLevel, Provider, SkillInfo } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
 
-const DEFAULT_MODELS = [
+const DEFAULT_MODELS: ComposerModel[] = [
   { id: 'claude-opus-4-8', label: 'Opus 4.8' },
   { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5' }
@@ -16,6 +16,92 @@ const EFFORTS: { id: EffortLevel; label: string }[] = [
   { id: 'xhigh', label: '很高' },
   { id: 'max', label: '最大' }
 ]
+
+type PromptTemplate = { command: string; label: string; text: string }
+type SlashCommandSource = 'template' | 'skill'
+
+interface SlashContext {
+  start: number
+  end: number
+  query: string
+}
+
+interface SlashCommandItem {
+  id: string
+  name: string
+  label: string
+  description: string
+  source: SlashCommandSource
+  insertText: string
+  argumentHint?: string
+  aliases?: string[]
+}
+
+const PROMPT_TEMPLATES: PromptTemplate[] = [
+  { command: 'fix', label: '修复问题', text: '请定位并修复这个问题，完成后运行相关验证。' },
+  { command: 'review', label: '代码审查', text: '请按 code review 方式检查当前改动，优先指出 bug、风险和缺失测试。' },
+  { command: 'summary', label: '总结项目', text: '请快速梳理这个项目的结构、运行方式和关键模块。' },
+  { command: 'test', label: '补测试', text: '请为当前改动补充最小但有效的测试，并说明覆盖点。' }
+]
+
+const SLASH_COMMAND_MAX_HEIGHT = 276
+const SLASH_COMMAND_HEADER_HEIGHT = 34
+const SLASH_COMMAND_ROW_HEIGHT = 48
+const TEMPLATE_PANEL_MAX_HEIGHT = 232
+const TEMPLATE_PANEL_HEADER_HEIGHT = 34
+const TEMPLATE_PANEL_ROW_HEIGHT = 42
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function roughAttachmentTokens(files: PickedFile[]): number {
+  const textChars = files.reduce((sum, file) => sum + (file.kind === 'text' ? file.data.length : 0), 0)
+  return Math.ceil(textChars / 4)
+}
+
+function normalizeSlashName(name: string): string {
+  return name.replace(/^\/+/, '').trim()
+}
+
+function getSlashContext(value: string, caret: number): SlashContext | null {
+  const beforeCaret = value.slice(0, caret)
+  const match = beforeCaret.match(/(?:^|\s)\/([^\s/]*)$/)
+  if (!match) return null
+  const query = match[1] ?? ''
+  return {
+    start: caret - query.length - 1,
+    end: caret,
+    query
+  }
+}
+
+function modelLabel(id: string): string {
+  return DEFAULT_MODELS.find((m) => m.id === id)?.label ?? id
+}
+
+function providerModels(providers: Provider[]): ComposerModel[] {
+  return providers
+    .map((provider) => provider.model.trim())
+    .filter(Boolean)
+    .map((id) => ({ id, label: modelLabel(id) }))
+}
+
+function mergeModels(...groups: ComposerModel[][]): ComposerModel[] {
+  const seen = new Set<string>()
+  const merged: ComposerModel[] = []
+  for (const group of groups) {
+    for (const model of group) {
+      const id = model.id.trim()
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      merged.push({ id, label: model.label.trim() || modelLabel(id) })
+    }
+  }
+  return merged
+}
 
 export default function Composer(): JSX.Element {
   const running = useSessionStore((s) => s.status.running)
@@ -30,16 +116,186 @@ export default function Composer(): JSX.Element {
   const [text, setText] = useState('')
   const [models, setModels] = useState(DEFAULT_MODELS)
   const [attachments, setAttachments] = useState<PickedFile[]>([])
+  const [showTemplates, setShowTemplates] = useState(false)
+  const [includeProjectContext, setIncludeProjectContext] = useState(true)
+  const [slashSkills, setSlashSkills] = useState<SkillInfo[]>([])
+  const [slashLoading, setSlashLoading] = useState(false)
+  const [slashError, setSlashError] = useState<string | null>(null)
+  const [slashContext, setSlashContext] = useState<SlashContext | null>(null)
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const slashListRef = useRef<HTMLDivElement | null>(null)
   const dragDepth = useRef(0)
   const [dragActive, setDragActive] = useState(false)
   const [dropError, setDropError] = useState<string | null>(null)
 
-  // Override the built-in model list with the user's configured list (Settings).
+  // Model options follow the current backend: preferences are stored per
+  // Windows/WSL backend, and providers are already backend-aware.
   useEffect(() => {
-    void window.api.getPreferences().then((p) => {
-      if (p.composerModels && p.composerModels.length) setModels(p.composerModels)
+    let alive = true
+
+    const refreshModels = async (): Promise<void> => {
+      const [prefs, providers] = await Promise.all([
+        window.api.getPreferences(),
+        window.api.listProviders()
+      ])
+      if (!alive) return
+      const configured = prefs.composerModels?.length ? prefs.composerModels : DEFAULT_MODELS
+      const selected = meta?.model ? [{ id: meta.model, label: modelLabel(meta.model) }] : []
+      setModels(mergeModels(configured, providerModels(providers), selected))
+    }
+
+    void refreshModels()
+    const onModelsChanged = (): void => {
+      void refreshModels()
+    }
+    window.addEventListener('forge:provider-changed', onModelsChanged)
+    window.addEventListener('forge:model-options-changed', onModelsChanged)
+    return () => {
+      alive = false
+      window.removeEventListener('forge:provider-changed', onModelsChanged)
+      window.removeEventListener('forge:model-options-changed', onModelsChanged)
+    }
+  }, [meta?.model])
+
+  useEffect(() => {
+    let alive = true
+    setSlashSkills([])
+    setSlashError(null)
+    if (!meta?.sessionId || starting) {
+      setSlashLoading(false)
+      return
+    }
+
+    setSlashLoading(true)
+    void window.api.listSkills(meta.sessionId).then((skills) => {
+      if (!alive) return
+      setSlashSkills(skills)
+    }).catch((e: unknown) => {
+      if (!alive) return
+      setSlashError(e instanceof Error ? e.message : String(e))
+    }).finally(() => {
+      if (alive) setSlashLoading(false)
     })
-  }, [])
+
+    return () => {
+      alive = false
+    }
+  }, [meta?.sessionId, starting])
+
+  const slashCommands = useMemo<SlashCommandItem[]>(() => {
+    const templateCommands = PROMPT_TEMPLATES.map((template) => ({
+      id: `template:${template.command}`,
+      name: template.command,
+      label: template.label,
+      description: template.text,
+      source: 'template' as const,
+      insertText: template.text
+    }))
+
+    const skillCommands = slashSkills.reduce<SlashCommandItem[]>((commands, skill) => {
+      const name = normalizeSlashName(skill.name)
+      if (!name) return commands
+      const aliases = skill.aliases?.map(normalizeSlashName).filter(Boolean)
+      commands.push({
+        id: `skill:${name}`,
+        name,
+        label: skill.argumentHint ? `/${name} ${skill.argumentHint}` : `/${name}`,
+        description: skill.description,
+        source: 'skill',
+        insertText: `/${name} `,
+        argumentHint: skill.argumentHint,
+        aliases
+      })
+      return commands
+    }, [])
+
+    return [...templateCommands, ...skillCommands]
+  }, [slashSkills])
+
+  const slashFilteredCommands = useMemo(() => {
+    const query = (slashContext?.query ?? '').trim().toLowerCase()
+    if (!query) return slashCommands
+    return slashCommands.filter((command) => {
+      const targets = [
+        command.name,
+        command.label,
+        command.description,
+        ...(command.aliases ?? [])
+      ].map((value) => value.toLowerCase())
+      return targets.some((target) => target.includes(query))
+    })
+  }, [slashCommands, slashContext?.query])
+
+  const slashMenuOpen = slashContext !== null
+  const slashPanelHeight = slashMenuOpen
+    ? Math.min(
+        SLASH_COMMAND_MAX_HEIGHT,
+        SLASH_COMMAND_HEADER_HEIGHT + Math.max(slashFilteredCommands.length, 1) * SLASH_COMMAND_ROW_HEIGHT + 8
+      )
+    : 0
+  const templatePanelHeight = showTemplates
+    ? Math.min(
+        TEMPLATE_PANEL_MAX_HEIGHT,
+        TEMPLATE_PANEL_HEADER_HEIGHT + PROMPT_TEMPLATES.length * TEMPLATE_PANEL_ROW_HEIGHT + 8
+      )
+    : 0
+  const activeSlashCommand = slashFilteredCommands[slashSelectedIndex]
+
+  useEffect(() => {
+    setSlashSelectedIndex(0)
+  }, [slashContext?.query])
+
+  useEffect(() => {
+    setSlashSelectedIndex((index) => {
+      if (slashFilteredCommands.length === 0) return 0
+      return Math.min(index, slashFilteredCommands.length - 1)
+    })
+  }, [slashFilteredCommands.length])
+
+  useEffect(() => {
+    const root = slashListRef.current
+    if (!root || !slashMenuOpen) return
+    const item = root.querySelector<HTMLElement>(`[data-slash-index="${slashSelectedIndex}"]`)
+    item?.scrollIntoView({ block: 'nearest' })
+  }, [slashMenuOpen, slashSelectedIndex])
+
+  const updateSlashContext = (value: string, caret: number): void => {
+    const nextContext = getSlashContext(value, caret)
+    setSlashContext(nextContext)
+    if (nextContext) setShowTemplates(false)
+  }
+
+  const refreshSlashContextFromTextarea = (): void => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    updateSlashContext(textarea.value, textarea.selectionStart)
+  }
+
+  const applySlashCommand = (command: SlashCommandItem): void => {
+    if (!slashContext) return
+    const before = text.slice(0, slashContext.start)
+    const after = text.slice(slashContext.end)
+    const trailingSpace = after && !/^\s/.test(after) ? ' ' : ''
+    const nextText = `${before}${command.insertText}${trailingSpace}${after}`
+    const nextCaret = before.length + command.insertText.length + trailingSpace.length
+
+    setText(nextText)
+    setSlashContext(null)
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+      textareaRef.current?.setSelectionRange(nextCaret, nextCaret)
+    })
+  }
+
+  const applyPromptTemplate = (template: PromptTemplate): void => {
+    setText((current) => (current.trim() ? `${current.trim()}\n\n${template.text}` : template.text))
+    setShowTemplates(false)
+    setSlashContext(null)
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+    })
+  }
 
   const pickAttachment = async (): Promise<void> => {
     if (!meta) return
@@ -114,12 +370,49 @@ export default function Composer(): JSX.Element {
     const value = text.trim()
     const atts = attachments
     if (!value && atts.length === 0) return
+    const finalText =
+      includeProjectContext && meta && value
+        ? `Project context: ${meta.cwd}\n\n${value}`
+        : value
     setText('')
+    setSlashContext(null)
     setAttachments([])
-    await sendMessage(value, atts.length ? atts : undefined)
+    await sendMessage(finalText, atts.length ? atts : undefined)
   }
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (slashMenuOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSlashSelectedIndex((index) => (
+          slashFilteredCommands.length ? (index + 1) % slashFilteredCommands.length : 0
+        ))
+        return
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSlashSelectedIndex((index) => (
+          slashFilteredCommands.length
+            ? (index - 1 + slashFilteredCommands.length) % slashFilteredCommands.length
+            : 0
+        ))
+        return
+      }
+
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSlashContext(null)
+        return
+      }
+
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        if (activeSlashCommand) applySlashCommand(activeSlashCommand)
+        return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       void submit()
@@ -145,7 +438,7 @@ export default function Composer(): JSX.Element {
           </div>
         )}
         <div
-          className={`glass-panel overflow-visible rounded-[18px] p-3 transition ${
+          className={`glass-panel composer-panel rounded-[18px] p-3 transition ${
             dragActive ? 'border-accent/60 bg-white/[0.035] shadow-[0_0_0_1px_rgba(223,118,95,0.28)]' : ''
           }`}
           onDragEnter={onDragEnter}
@@ -153,10 +446,93 @@ export default function Composer(): JSX.Element {
           onDragLeave={onDragLeave}
           onDrop={(e) => void onDrop(e)}
         >
+          <div
+            className={`slash-command-reveal ${slashMenuOpen ? 'is-open' : ''}`}
+            style={{ height: slashPanelHeight }}
+          >
+            <div className="slash-command-panel">
+              <div className="flex items-center justify-between px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500/80">
+                <span>快捷命令</span>
+                {slashContext && <span className="font-mono text-zinc-600">/{slashContext.query}</span>}
+              </div>
+              <div ref={slashListRef} className="slash-command-list git-stable-scroll">
+                {slashLoading && slashFilteredCommands.length === 0 ? (
+                  <div className="px-2 py-2 text-xs text-zinc-500">命令加载中…</div>
+                ) : slashError && slashFilteredCommands.length === 0 ? (
+                  <div className="px-2 py-2 text-xs text-red-300">{slashError}</div>
+                ) : slashFilteredCommands.length === 0 ? (
+                  <div className="px-2 py-2 text-xs text-zinc-500">没有匹配命令</div>
+                ) : (
+                  slashFilteredCommands.map((command, index) => (
+                    <button
+                      key={command.id}
+                      type="button"
+                      data-slash-index={index}
+                      onMouseDown={(event) => {
+                        event.preventDefault()
+                        applySlashCommand(command)
+                      }}
+                      className={`slash-command-item ${index === slashSelectedIndex ? 'is-active' : ''}`}
+                      aria-selected={index === slashSelectedIndex}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="truncate font-mono text-[12px] text-zinc-200">/{command.name}</span>
+                          {command.argumentHint && (
+                            <span className="truncate font-mono text-[10px] text-zinc-600">{command.argumentHint}</span>
+                          )}
+                          <span className="shrink-0 rounded bg-white/[0.055] px-1.5 py-0.5 text-[9px] text-zinc-500">
+                            {command.source === 'skill' ? 'Skill' : '模板'}
+                          </span>
+                        </span>
+                        <span className="mt-0.5 block truncate text-[11px] text-zinc-500">
+                          {command.source === 'template' ? command.label : command.description}
+                        </span>
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+          <div
+            className={`template-panel-reveal ${showTemplates ? 'is-open' : ''}`}
+            style={{ height: templatePanelHeight }}
+          >
+            <div className="template-panel">
+              <div className="flex items-center justify-between px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500/80">
+                <span>Prompt 模板</span>
+                <span className="text-zinc-600">{PROMPT_TEMPLATES.length} 个</span>
+              </div>
+              <div className="template-panel-list git-stable-scroll">
+                {PROMPT_TEMPLATES.map((template) => (
+                  <button
+                    key={template.label}
+                    type="button"
+                    onClick={() => applyPromptTemplate(template)}
+                    className="template-panel-item"
+                  >
+                    <span className="font-medium text-zinc-200">{template.label}</span>
+                    <span className="mt-0.5 block truncate text-[11px] text-zinc-500">{template.text}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
           <textarea
+            ref={textareaRef}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value)
+              updateSlashContext(e.target.value, e.target.selectionStart)
+            }}
             onKeyDown={onKey}
+            onKeyUp={(e) => {
+              if (['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(e.key)) return
+              refreshSlashContextFromTextarea()
+            }}
+            onClick={refreshSlashContextFromTextarea}
+            onSelect={refreshSlashContextFromTextarea}
             rows={2}
             placeholder={
               starting
@@ -188,6 +564,12 @@ export default function Composer(): JSX.Element {
               ))}
             </div>
           )}
+          {attachments.length > 0 && (
+            <div className="px-1 pt-1 text-[11px] text-zinc-600">
+              附件 {attachments.length} 个 / {formatBytes(attachments.reduce((sum, file) => sum + file.size, 0))}
+              {roughAttachmentTokens(attachments) > 0 && ` / 约 ${roughAttachmentTokens(attachments).toLocaleString()} tokens`}
+            </div>
+          )}
           {dropError && (
             <div className="px-1 pt-2 text-[11px] text-orange-300">{dropError}</div>
           )}
@@ -208,6 +590,16 @@ export default function Composer(): JSX.Element {
                   strokeLinejoin="round"
                 />
               </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIncludeProjectContext((enabled) => !enabled)}
+              className={`glass-control composer-context-toggle flex h-9 items-center justify-center rounded-xl px-2 text-xs transition ${
+                includeProjectContext ? 'is-on' : 'is-off'
+              }`}
+              title="项目上下文开关"
+            >
+              上下文
             </button>
             <span className="px-2 text-[11px] text-zinc-500">
               <kbd className="font-sans text-zinc-400">Enter</kbd> 发送 ·{' '}
@@ -254,6 +646,19 @@ export default function Composer(): JSX.Element {
                 className="accent-soft-button h-10 shrink-0 rounded-xl px-5 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 发送
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSlashContext(null)
+                  setShowTemplates((open) => !open)
+                }}
+                className={`glass-control composer-template-button flex h-10 items-center justify-center rounded-xl px-3 text-xs text-zinc-300 transition ${
+                  showTemplates ? 'is-open' : ''
+                }`}
+                title="Prompt 模板"
+              >
+                模板
               </button>
             </div>
           </div>

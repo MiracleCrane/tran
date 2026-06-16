@@ -4,7 +4,15 @@ import type { UserAttachment } from '../types'
 /** Which top-level view the main column shows. Separate from sessionStore so
  *  session state and UI navigation don't entangle. Add settings, diffs, etc.
  *  here as the app grows. */
-export type View = 'chat' | 'mcp' | 'providers' | 'skills' | 'translate' | 'settings'
+export type View =
+  | 'chat'
+  | 'mcp'
+  | 'providers'
+  | 'skills'
+  | 'translate'
+  | 'settings'
+  | 'wslHealth'
+  | 'help'
 
 interface UiStore {
   view: View

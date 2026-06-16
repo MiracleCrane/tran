@@ -8,8 +8,19 @@ import {
 import { registerIpc } from './ipc'
 import { log } from './logger'
 import { seedDefaultIfNeeded } from './providers'
+import { loadSettings, saveSettings } from './settings'
+import { createTray, type ForgeTray } from './tray'
 
 let mainWindow: BrowserWindow | null = null
+let forgeTray: ForgeTray | null = null
+/** Bypass flag: when true the window-close handler lets the app exit instead of
+ *  hiding to tray. Set by tray "Quit" and before-quit so a true quit isn't
+ *  intercepted. */
+let isQuitting = false
+/** One-shot bypass for a single close: set by the resolve-close (quit) IPC so
+ *  its `win.close()` isn't re-intercepted. Reset right after so a subsequent
+ *  close (e.g. after the window is shown again from tray) honors the prompt. */
+let skipNextCloseIntercept = false
 
 const WINDOW_BACKGROUND_COLOR = '#05060A'
 const WINDOW_FRAME_COLOR = WINDOW_BACKGROUND_COLOR
@@ -18,6 +29,32 @@ const RENDERER_DIAGNOSTICS =
 
 if (!app.isPackaged) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env['FORGE_REMOTE_DEBUG_PORT'] ?? '9223')
+}
+
+function isSameDocumentNavigation(currentUrl: string, nextUrl: string): boolean {
+  try {
+    const current = new URL(currentUrl)
+    const next = new URL(nextUrl)
+    return (
+      current.origin === next.origin &&
+      current.pathname === next.pathname &&
+      current.search === next.search
+    )
+  } catch {
+    return false
+  }
+}
+
+function shouldOpenExternalNavigation(currentUrl: string, nextUrl: string): boolean {
+  try {
+    const current = new URL(currentUrl)
+    const next = new URL(nextUrl)
+    if (!['http:', 'https:', 'mailto:'].includes(next.protocol)) return false
+    if (next.protocol !== 'mailto:' && next.origin === current.origin) return false
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Read the experimental Vulkan-compositor toggle from the persisted settings
@@ -62,6 +99,30 @@ function createWindow(): void {
   mainWindow.on('unresponsive', () => log('window', 'main window became unresponsive'))
   mainWindow.on('responsive', () => log('window', 'main window became responsive'))
 
+  // Intercept the window close: either hide to tray or prompt on first close.
+  // A true quit (tray "退出" / before-quit) sets isQuitting; the resolve-close
+  // (quit) IPC sets skipNextCloseIntercept for a single bypass.
+  mainWindow.on('close', (event) => {
+    if (isQuitting || skipNextCloseIntercept) {
+      skipNextCloseIntercept = false
+      return
+    }
+    const s = loadSettings()
+    if (s.closePromptDismissed) {
+      // User already chose: hide to tray if enabled, else fall through to quit.
+      if (s.minimizeToTray) {
+        event.preventDefault()
+        mainWindow?.hide()
+        forgeTray?.setTooltip('Forge — 后台运行中')
+      }
+      return
+    }
+    // First close: prevent and ask the renderer how the user wants to proceed.
+    event.preventDefault()
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('forge:show-close-prompt')
+  })
+
   if (process.platform === 'win32') {
     mainWindow.setAccentColor(WINDOW_FRAME_COLOR)
     mainWindow.setBackgroundColor(WINDOW_BACKGROUND_COLOR)
@@ -77,6 +138,18 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const currentUrl = mainWindow?.webContents.getURL() ?? ''
+    if (!currentUrl || url === currentUrl || isSameDocumentNavigation(currentUrl, url)) return
+
+    event.preventDefault()
+    if (shouldOpenExternalNavigation(currentUrl, url)) {
+      void shell.openExternal(url)
+    } else {
+      log('renderer', `blocked in-app navigation: ${url}`)
+    }
   })
 
   if (RENDERER_DIAGNOSTICS) {
@@ -130,12 +203,43 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   seedDefaultIfNeeded()
-  registerIpc(() => mainWindow)
+  // Tray is created after the window; pass a getter so registerIpc's closures
+  // pick up the live tray (used for tooltip updates on session end).
+  registerIpc(
+    () => mainWindow,
+    () => isQuitting,
+    (v) => {
+      isQuitting = v
+    },
+    () => forgeTray,
+    () => {
+      // One-shot bypass for the next close (the resolve-close "quit" path).
+      skipNextCloseIntercept = true
+    }
+  )
   createWindow()
+  forgeTray = createTray(
+    () => mainWindow,
+    () => {
+      isQuitting = true
+      app.quit()
+    }
+  )
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('before-quit', () => {
+  isQuitting = true
+})
+
+// When the window is actually destroyed, tear down the tray so no icon lingers.
+app.on('window-all-closed', () => {
+  forgeTray?.destroy()
+  forgeTray = null
+  if (process.platform !== 'darwin') app.quit()
 })
 
 app.on('gpu-info-update', () => {
@@ -144,8 +248,4 @@ app.on('gpu-info-update', () => {
     hardwareAcceleration: app.isHardwareAccelerationEnabled(),
     features: app.getGPUFeatureStatus()
   })
-})
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
 })

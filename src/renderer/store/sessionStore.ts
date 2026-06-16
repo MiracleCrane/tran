@@ -7,7 +7,8 @@ import type {
   HistoryMessage,
   PickedFile,
   EffortLevel,
-  PermissionMode
+  PermissionMode,
+  ClaudeExecutionBackend
 } from '../../shared/ipc'
 import type {
   TranscriptItem,
@@ -79,11 +80,11 @@ interface SessionStore {
   refreshSessions: () => Promise<void>
   loadMoreSessions: () => Promise<void>
   newChat: () => Promise<void>
-  openSession: (sdkSessionId: string) => Promise<void>
-  prefetchSessionHistory: (sdkSessionId: string) => Promise<void>
+  openSession: (sdkSessionId: string, backend?: ClaudeExecutionBackend) => Promise<void>
+  prefetchSessionHistory: (sdkSessionId: string, backend?: ClaudeExecutionBackend) => Promise<void>
   pruneSessionHistoryCache: (visibleSessionIds: string[]) => void
-  renameSession: (sessionId: string, title: string) => Promise<void>
-  deleteSession: (sessionId: string) => Promise<void>
+  renameSession: (sessionId: string, title: string, backend?: ClaudeExecutionBackend) => Promise<void>
+  deleteSession: (sessionId: string, backend?: ClaudeExecutionBackend) => Promise<void>
   /** Move a running subagent to the background (frees the main agent's turn). */
   backgroundTask: (taskId: string) => Promise<void>
   /** Close the current session and re-spawn it (resuming when possible) so that
@@ -93,6 +94,8 @@ interface SessionStore {
   /** Switch the active API provider: writes Claude's settings.json + restarts
    *  the session (resume) so the new provider's env/model take effect. */
   switchProvider: (id: string) => Promise<void>
+  /** Re-open the current project after changing the Claude execution backend. */
+  reloadForBackendSwitch: () => Promise<void>
 
   ingestAgentEvent: (e: AgentEvent) => void
   /** Fold a batch of buffered `content_block_delta` events into the store in a
@@ -121,8 +124,12 @@ interface SessionHistoryCacheEntry {
 
 const sessionHistoryCache = new Map<string, SessionHistoryCacheEntry>()
 
-function sessionHistoryCacheKey(cwd: string, sdkSessionId: string): string {
-  return `${cwd}\n${sdkSessionId}`
+function sessionHistoryCacheKey(
+  cwd: string,
+  sdkSessionId: string,
+  backend: ClaudeExecutionBackend | 'current' = 'current'
+): string {
+  return `${backend}\n${cwd}\n${sdkSessionId}`
 }
 
 function cloneTranscriptItems(items: TranscriptItem[]): TranscriptItem[] {
@@ -140,15 +147,23 @@ function cloneTranscriptItems(items: TranscriptItem[]): TranscriptItem[] {
   })
 }
 
-function getCachedSessionHistory(cwd: string, sdkSessionId: string): TranscriptItem[] | null {
-  const entry = sessionHistoryCache.get(sessionHistoryCacheKey(cwd, sdkSessionId))
+function getCachedSessionHistory(
+  cwd: string,
+  sdkSessionId: string,
+  backend?: ClaudeExecutionBackend
+): TranscriptItem[] | null {
+  const entry = sessionHistoryCache.get(sessionHistoryCacheKey(cwd, sdkSessionId, backend ?? 'current'))
   if (!entry?.items) return null
   entry.lastTouched = Date.now()
   return cloneTranscriptItems(entry.items)
 }
 
-function loadSessionHistory(cwd: string, sdkSessionId: string): Promise<TranscriptItem[]> {
-  const key = sessionHistoryCacheKey(cwd, sdkSessionId)
+function loadSessionHistory(
+  cwd: string,
+  sdkSessionId: string,
+  backend?: ClaudeExecutionBackend
+): Promise<TranscriptItem[]> {
+  const key = sessionHistoryCacheKey(cwd, sdkSessionId, backend ?? 'current')
   const cached = sessionHistoryCache.get(key)
   if (cached?.items) {
     cached.lastTouched = Date.now()
@@ -161,7 +176,7 @@ function loadSessionHistory(cwd: string, sdkSessionId: string): Promise<Transcri
 
   let promise: Promise<TranscriptItem[]>
   promise = window.api
-    .getSessionMessages(sdkSessionId, cwd)
+    .getSessionMessages(sdkSessionId, cwd, backend)
     .then(historyToItems)
     .catch(() => [] as TranscriptItem[])
     .then((items) => {
@@ -179,13 +194,17 @@ function loadSessionHistory(cwd: string, sdkSessionId: string): Promise<Transcri
   return promise.then(cloneTranscriptItems)
 }
 
-function deleteSessionHistoryCache(cwd: string, sdkSessionId: string): void {
-  sessionHistoryCache.delete(sessionHistoryCacheKey(cwd, sdkSessionId))
+function deleteSessionHistoryCache(
+  cwd: string,
+  sdkSessionId: string,
+  backend?: ClaudeExecutionBackend
+): void {
+  sessionHistoryCache.delete(sessionHistoryCacheKey(cwd, sdkSessionId, backend ?? 'current'))
 }
 
 function pruneSessionHistoryCacheForCwd(cwd: string, retainedSessionIds: Set<string>): void {
   for (const key of sessionHistoryCache.keys()) {
-    const [cacheCwd, sdkSessionId] = key.split('\n')
+    const [, cacheCwd, sdkSessionId] = key.split('\n')
     if (cacheCwd === cwd && !retainedSessionIds.has(sdkSessionId)) {
       sessionHistoryCache.delete(key)
     }
@@ -639,10 +658,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       window.api.getActiveProvider()
     ])
     const model = provider?.model ?? oldMeta?.model ?? 'claude-opus-4-8'
+    set((s) => (
+      s.meta?.sessionId === newId
+        ? { meta: { ...s.meta, model }, sessionConfigDirty: false }
+        : {}
+    ))
     if (oldMeta?.sessionId) await window.api.closeSession(oldMeta.sessionId).catch(() => {})
     await window.api.startSession({ cwd: path, model, effort: get().effort, bridgeSessionId: newId })
     set({ starting: false })
-    void get().refreshSessions()
+    await get().refreshSessions()
     scheduleInitWatchdog(get, set)
   },
 
@@ -651,9 +675,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (!meta) return
     set({ sessionsLoading: true })
     try {
+      const prefs = await window.api.getPreferences().catch(() => null)
       const sessions = await window.api.listSessions(meta.cwd, {
         limit: SESSION_PAGE_SIZE,
-        offset: 0
+        offset: 0,
+        backend: prefs?.wslSupportEnabled ? 'all' : 'windows'
       })
       set({ sessions, sessionsHasMore: sessions.length === SESSION_PAGE_SIZE })
     } finally {
@@ -667,9 +693,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (!meta || state.sessionsLoading || !state.sessionsHasMore) return
     set({ sessionsLoading: true })
     try {
+      const prefs = await window.api.getPreferences().catch(() => null)
       const page = await window.api.listSessions(meta.cwd, {
         limit: SESSION_PAGE_SIZE,
-        offset: state.sessions.length
+        offset: state.sessions.length,
+        backend: prefs?.wslSupportEnabled ? 'all' : 'windows'
       })
       set((s) => {
         const seen = new Set(s.sessions.map((session) => session.sessionId))
@@ -684,10 +712,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  async prefetchSessionHistory(sdkSessionId: string) {
+  async prefetchSessionHistory(sdkSessionId: string, backend?: ClaudeExecutionBackend) {
     const meta = get().meta
     if (!meta || meta.sdkSessionId === sdkSessionId) return
-    await loadSessionHistory(meta.cwd, sdkSessionId)
+    await loadSessionHistory(meta.cwd, sdkSessionId, backend)
   },
 
   pruneSessionHistoryCache(visibleSessionIds: string[]) {
@@ -722,7 +750,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     scheduleInitWatchdog(get, set)
   },
 
-  async openSession(sdkSessionId: string) {
+  async openSession(sdkSessionId: string, backend?: ClaudeExecutionBackend) {
     const meta = get().meta
     if (!meta) return
     if (meta.sdkSessionId === sdkSessionId) return
@@ -730,7 +758,27 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const oldSessionId = meta.sessionId
     const newId = uid()
     const requestSeq = ++openSessionRequestSeq
-    const cachedItems = getCachedSessionHistory(cwd, sdkSessionId)
+    const prefs = await window.api.getPreferences().catch(() => null)
+    const currentBackend: ClaudeExecutionBackend =
+      prefs?.claudeExecutionBackend === 'wsl' ? 'wsl' : 'windows'
+    const targetBackend = backend ?? currentBackend
+    if (targetBackend === 'wsl' && !prefs?.wslSupportEnabled) {
+      set((s) => ({
+        status: {
+          ...s.status,
+          error: 'WSL support is disabled. Enable WSL support in Settings first.'
+        }
+      }))
+      return
+    }
+    if (targetBackend !== currentBackend) {
+      await window.api.savePreferences({ claudeExecutionBackend: targetBackend })
+      window.dispatchEvent(new Event('forge:provider-changed'))
+      window.dispatchEvent(new Event('forge:model-options-changed'))
+    }
+    const provider = await window.api.getActiveProvider().catch(() => null)
+    const nextModel = provider?.model ?? model
+    const cachedItems = getCachedSessionHistory(cwd, sdkSessionId, targetBackend)
     const isLatestRequest = (): boolean =>
       openSessionRequestSeq === requestSeq && get().meta?.sessionId === newId
 
@@ -747,7 +795,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         sessionId: newId,
         sdkSessionId,
         cwd,
-        model,
+        model: nextModel,
         permissionMode,
         tools: []
       }
@@ -755,7 +803,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     const historyPromise = cachedItems
       ? Promise.resolve(cachedItems)
-      : loadSessionHistory(cwd, sdkSessionId)
+      : loadSessionHistory(cwd, sdkSessionId, targetBackend)
 
     const startPromise = (async (): Promise<{ started: boolean; error?: unknown }> => {
       try {
@@ -763,7 +811,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         if (!isLatestRequest()) return { started: false }
         await window.api.startSession({
           cwd,
-          model,
+          model: nextModel,
           effort: get().effort,
           resume: sdkSessionId,
           bridgeSessionId: newId
@@ -805,13 +853,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   /** Close the current session and re-spawn it (resuming when possible) so that
    *  config-file changes — e.g. MCP servers — get reloaded. History is restored
    *  from the transcript JSONL, so the conversation is preserved. */
-  async renameSession(sessionId: string, title: string) {
+  async renameSession(sessionId: string, title: string, backend?: ClaudeExecutionBackend) {
     const meta = get().meta
     if (!meta) return
     const trimmed = title.trim()
     if (!trimmed) return
     try {
-      await window.api.renameSession(sessionId, trimmed, meta.cwd)
+      await window.api.renameSession(sessionId, trimmed, meta.cwd, backend)
     } catch {
       /* ignore — the list will still show the old summary */
     }
@@ -822,15 +870,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }))
   },
 
-  async deleteSession(sessionId: string) {
+  async deleteSession(sessionId: string, backend?: ClaudeExecutionBackend) {
     const meta = get().meta
     if (!meta) return
     try {
-      await window.api.deleteSession(sessionId, meta.cwd)
+      await window.api.deleteSession(sessionId, meta.cwd, backend)
     } catch {
       /* ignore */
     }
-    deleteSessionHistoryCache(meta.cwd, sessionId)
+    deleteSessionHistoryCache(meta.cwd, sessionId, backend)
     set((s) => ({ sessions: s.sessions.filter((x) => x.sessionId !== sessionId) }))
     // Deleted the active conversation → start fresh.
     if (meta.sdkSessionId === sessionId) {
@@ -904,6 +952,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const meta = get().meta
     if (meta && provider) set({ meta: { ...meta, model: provider.model } })
     await get().restartSession()
+  },
+
+  async reloadForBackendSwitch() {
+    sessionHistoryCache.clear()
+    const meta = get().meta
+    set({ sessions: [], sessionsHasMore: false })
+    if (!meta || get().starting) return
+    await get().switchProject(meta.cwd)
   },
 
   ingestAgentEvent(e) {

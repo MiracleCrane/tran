@@ -1,6 +1,6 @@
 {
   "name": "forge",
-  "version": "0.2.5",
+  "version": "1.0.0",
   "description": "A desktop client for Claude Agent on Windows",
   "main": "./out/main/index.js",
   "author": "",
@@ -47,7 +47,8 @@
     },
     "asar": false,
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "artifactName": "${productName}-${version}-setup.${ext}"
     },
     "nsis": {
       "oneClick": false,

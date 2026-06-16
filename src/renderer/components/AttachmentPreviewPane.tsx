@@ -8,52 +8,8 @@ import MessageText from './MessageText'
 
 type TextMode = 'rendered' | 'source'
 
-const MAX_HIGHLIGHT_CHARS = 180_000
 const CLOSE_ANIMATION_MS = 720
 const CONTENT_SWAP_FADE_MS = 120
-
-const LANGUAGE_BY_EXT: Record<string, string> = {
-  bash: 'bash',
-  c: 'c',
-  cc: 'cpp',
-  cjs: 'javascript',
-  cpp: 'cpp',
-  css: 'css',
-  csv: 'csv',
-  env: 'ini',
-  go: 'go',
-  h: 'cpp',
-  hpp: 'cpp',
-  htm: 'html',
-  html: 'html',
-  ini: 'ini',
-  java: 'java',
-  js: 'javascript',
-  json: 'json',
-  jsx: 'jsx',
-  less: 'less',
-  log: 'plaintext',
-  markdown: 'markdown',
-  md: 'markdown',
-  mdx: 'markdown',
-  mjs: 'javascript',
-  php: 'php',
-  py: 'python',
-  rb: 'ruby',
-  rs: 'rust',
-  scss: 'scss',
-  sh: 'bash',
-  sql: 'sql',
-  svelte: 'svelte',
-  toml: 'toml',
-  ts: 'typescript',
-  tsx: 'tsx',
-  txt: 'plaintext',
-  vue: 'vue',
-  xml: 'xml',
-  yaml: 'yaml',
-  yml: 'yaml'
-}
 
 const BackIcon = (): JSX.Element => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -95,10 +51,6 @@ function isMarkdownAttachment(attachment: UserAttachment): boolean {
   return /^(md|markdown|mdx)$/.test(extensionOf(attachment.name)) || attachment.mimeType === 'text/markdown'
 }
 
-function sourceLanguageFor(attachment: UserAttachment): string {
-  return LANGUAGE_BY_EXT[extensionOf(attachment.name)] ?? 'plaintext'
-}
-
 function displayTextFor(attachment: UserAttachment): string {
   const text = attachment.text ?? ''
   if (extensionOf(attachment.name) !== 'json') return text
@@ -107,12 +59,6 @@ function displayTextFor(attachment: UserAttachment): string {
   } catch {
     return text
   }
-}
-
-function fencedCode(text: string, language: string): string {
-  const longestRun = Math.max(2, ...Array.from(text.matchAll(/`+/g), (match) => match[0].length))
-  const fence = '`'.repeat(Math.max(3, longestRun + 1))
-  return `${fence}${language}\n${text || '(empty file)'}\n${fence}`
 }
 
 function attachmentKey(attachment: UserAttachment | null): string {
@@ -130,20 +76,9 @@ function fileMeta(attachment: UserAttachment): string {
 
 function SourceView({ attachment }: { attachment: UserAttachment }): JSX.Element {
   const text = displayTextFor(attachment)
-  const language = sourceLanguageFor(attachment)
-
-  if (text.length > MAX_HIGHLIGHT_CHARS) {
-    return (
-      <pre className="min-h-full whitespace-pre-wrap break-words rounded-xl border border-white/[0.08] bg-black/20 p-3 font-mono text-[12px] leading-relaxed text-zinc-300">
-        {text || '(empty file)'}
-      </pre>
-    )
-  }
 
   return (
-    <div className="rounded-xl border border-white/[0.08] bg-black/10 p-3">
-      <MessageText>{fencedCode(text, language)}</MessageText>
-    </div>
+    <pre className="m-0 min-h-full w-full whitespace-pre-wrap break-words bg-transparent px-2 py-1 font-mono text-[12.5px] leading-[1.55] text-zinc-300">{text || '(empty file)'}</pre>
   )
 }
 
@@ -332,7 +267,7 @@ export default function AttachmentPreviewPane(): JSX.Element | null {
         </button>
       </div>
 
-      <div className={`attachment-preview-content min-h-0 flex-1 overflow-auto p-3 ${contentSwitching ? 'is-switching' : ''}`}>
+      <div className={`attachment-preview-content min-h-0 flex-1 overflow-auto p-2 ${contentSwitching ? 'is-switching' : ''}`}>
         {canPreviewImage && (
           <div className="flex min-h-full items-center justify-center">
             <img
@@ -354,11 +289,11 @@ export default function AttachmentPreviewPane(): JSX.Element | null {
         {canPreviewText && (
           <div className="min-h-full">
             {isMarkdown && (
-              <div className="mb-3 inline-flex rounded-xl border border-white/[0.08] bg-white/[0.035] p-1 text-xs">
+              <div className="mb-2 inline-flex rounded-lg border border-white/[0.08] bg-white/[0.035] p-0.5 text-xs">
                 <button
                   type="button"
                   onClick={() => setMode('rendered')}
-                  className={`rounded-lg px-2.5 py-1 transition ${
+                  className={`rounded-md px-2 py-0.5 transition ${
                     mode === 'rendered' ? 'bg-white/[0.1] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
                   }`}
                 >
@@ -367,7 +302,7 @@ export default function AttachmentPreviewPane(): JSX.Element | null {
                 <button
                   type="button"
                   onClick={() => setMode('source')}
-                  className={`rounded-lg px-2.5 py-1 transition ${
+                  className={`rounded-md px-2 py-0.5 transition ${
                     mode === 'source' ? 'bg-white/[0.1] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
                   }`}
                 >
@@ -376,7 +311,7 @@ export default function AttachmentPreviewPane(): JSX.Element | null {
               </div>
             )}
             {isMarkdown && mode === 'rendered' ? (
-              <div className="prose-forge rounded-xl border border-white/[0.08] bg-black/10 p-3">
+              <div className="px-2 py-1">
                 <MessageText>{renderCurrent.text ?? ''}</MessageText>
               </div>
             ) : (

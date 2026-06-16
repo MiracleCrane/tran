@@ -1,7 +1,15 @@
 import { app, safeStorage } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { Provider, Project, EffortLevel, PermissionMode, ComposerModel, TranslateEngine } from '../shared/ipc'
+import type {
+  Provider,
+  Project,
+  EffortLevel,
+  PermissionMode,
+  ComposerModel,
+  ClaudeExecutionBackend,
+  TranslateEngine
+} from '../shared/ipc'
 
 interface PersistedSettings {
   /** base64 of safeStorage-encrypted bytes */
@@ -12,6 +20,10 @@ interface PersistedSettings {
   providers?: Provider[]
   /** id of the active provider; null/undefined = none active. */
   activeProviderId?: string | null
+  /** Saved API providers used when the Claude runtime backend is WSL. */
+  wslProviders?: Provider[]
+  /** id of the active WSL provider; null/undefined = none active. */
+  wslActiveProviderId?: string | null
   /** Saved working directories shown in the sidebar project switcher. */
   projects?: Project[]
   /** Last-used project path (auto-entered on app start). */
@@ -19,9 +31,23 @@ interface PersistedSettings {
   /** Preferences managed by the Settings panel. */
   defaultEffort?: EffortLevel
   defaultPermissionMode?: PermissionMode
+  /** Gate for all WSL-facing UI and WSL backend features. */
+  wslSupportEnabled?: boolean
+  claudeExecutionBackend?: ClaudeExecutionBackend
+  /** Composer model list used by the Windows Claude backend. */
   composerModels?: ComposerModel[]
+  /** Composer model list used by the WSL Claude backend. */
+  wslComposerModels?: ComposerModel[]
   /** Experimental Windows-only GPU toggle (ANGLE Vulkan backend). */
   vulkanBackend?: boolean
+  /** Close window → hide to system tray instead of quitting (persisted after
+   *  the user picks once on first close). */
+  minimizeToTray?: boolean
+  /** User has already answered the first-close prompt (don't ask again). */
+  closePromptDismissed?: boolean
+  /** Show OS native notifications when a session ends while window is inactive
+   *  (default true). */
+  nativeNotifications?: boolean
   /** --- Translate engine config (Translate panel) --- */
   /** Which engine translateTexts() routes to. */
   translateEngine?: TranslateEngine
@@ -67,6 +93,14 @@ export function loadSettings(): PersistedSettings {
 /** Write the full persisted settings (updates the cache). Used by providers.ts. */
 export function saveSettings(s: PersistedSettings): void {
   save(s)
+}
+
+export function getSettingsSnapshot(): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(load())) as Record<string, unknown>
+}
+
+export function replaceSettingsSnapshot(snapshot: Record<string, unknown>): void {
+  save({ ...snapshot } as PersistedSettings)
 }
 
 export function getApiKey(): string | null {

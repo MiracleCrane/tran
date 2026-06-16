@@ -195,6 +195,10 @@ const KIND_STYLE: Record<FileKind, { dot: string; text: string; label: string }>
   conflict: { dot: 'bg-red-500', text: 'text-red-200', label: '冲突' }
 }
 
+interface GitToolbarProps {
+  cornerAction?: JSX.Element
+}
+
 /** A single file row inside the commit drawer: status dot + name (click → diff)
  *  + a stage/unstage action. */
 function FileRow({
@@ -252,7 +256,7 @@ function DrawerLoading({ label }: { label: string }): JSX.Element {
   )
 }
 
-export default function GitToolbar(): JSX.Element {
+export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.Element {
   // '' when there's no active project; every git call is guarded by
   // `if (!cwd)` / `if (!branch)` so the empty string never reaches git.
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
@@ -603,13 +607,22 @@ export default function GitToolbar(): JSX.Element {
 
   // If not a git repo, render nothing.
   if (!branch) {
-    if (gitChecked) return <></>
+    if (gitChecked) {
+      if (!cornerAction) return <></>
+      return (
+        <div className="relative z-30 shrink-0 border-b border-white/[0.06]">
+          <div className="h-5" aria-hidden="true" />
+          <div className="git-toolbar-corner-action">{cornerAction}</div>
+        </div>
+      )
+    }
     return (
-      <div className="border-b border-white/[0.06]">
-        <div className="flex h-9 items-center gap-2 px-3 text-[11px] text-zinc-500">
+      <div className="relative z-30 shrink-0 border-b border-white/[0.06]">
+        <div className="flex h-9 items-center gap-2 px-3 pr-12 text-[11px] text-zinc-500">
           <BranchIcon />
           <span className="font-medium">Git 状态加载中...</span>
         </div>
+        {cornerAction && <div className="git-toolbar-corner-action">{cornerAction}</div>}
       </div>
     )
   }
@@ -626,7 +639,7 @@ export default function GitToolbar(): JSX.Element {
   return (
     <div className="relative z-30 shrink-0 border-b border-white/[0.06]">
       {/* --- toolbar row --- */}
-      <div className="flex items-center gap-1.5 px-3 py-1.5 text-zinc-400">
+      <div className="flex items-center gap-1.5 px-3 py-1.5 pr-12 text-zinc-400">
         {/* Branch + ahead/behind */}
         <button
           onClick={() => toggleDrawer('branches')}
@@ -714,6 +727,7 @@ export default function GitToolbar(): JSX.Element {
           </span>
         )}
       </div>
+      {cornerAction && <div className="git-toolbar-corner-action">{cornerAction}</div>}
 
       {/* --- drawer area (one at a time) --- */}
       <Collapse

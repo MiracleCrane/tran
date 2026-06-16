@@ -16,6 +16,7 @@ import type {
 import { log } from '../logger'
 import { getActiveProvider } from '../providers'
 import { getPreferences } from '../preferences'
+import { spawnClaudeViaWsl } from '../wslClaude'
 
 /**
  * The Claude Agent SDK is ESM-only and relies on `import.meta.url` to locate its
@@ -106,6 +107,10 @@ export class AgentBridge {
     // Apply the active API provider + user preferences as defaults.
     const provider = getActiveProvider()
     const prefs = getPreferences()
+    const useWslClaude =
+      prefs.wslSupportEnabled === true &&
+      prefs.claudeExecutionBackend === 'wsl' &&
+      process.platform === 'win32'
     const env: Record<string, string> = { ...(process.env as Record<string, string>) }
     if (provider) {
       env['ANTHROPIC_BASE_URL'] = provider.baseUrl
@@ -135,6 +140,7 @@ export class AgentBridge {
         ctx: CanUseToolCtx
       ) => this.handlePermission(toolName, input, ctx),
       env,
+      ...(useWslClaude ? { spawnClaudeCodeProcess: spawnClaudeViaWsl } : {}),
       ...(opts.resume ? { resume: opts.resume } : {})
     }
     const q = query({ prompt: stream.iterable, options })

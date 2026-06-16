@@ -1,15 +1,20 @@
-import { ipcMain, dialog, shell, type BrowserWindow } from 'electron'
+import { ipcMain, dialog, shell, Notification, type BrowserWindow } from 'electron'
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
 import { basename, extname, resolve } from 'node:path'
 import { AgentBridge } from './agent/AgentBridge'
-import { getApiKey, setApiKey } from './settings'
+import { getApiKey, setApiKey, loadSettings, saveSettings } from './settings'
 import { saveMcpServer, deleteMcpServer } from './mcpConfig'
 import {
   listProviders,
   getActiveProvider,
   saveProvider,
   deleteProvider,
-  setActiveProvider
+  setActiveProvider,
+  getProviderProfiles,
+  saveProviderForBackend,
+  deleteProviderForBackend,
+  setActiveProviderForBackend,
+  saveComposerModelsProfile
 } from './providers'
 import {
   listProjects,
@@ -23,6 +28,22 @@ import { listMarketplacePlugins } from './marketplace'
 import { translateTexts } from './translate'
 import { getTranslateConfig, saveTranslateConfig, testTranslate } from './translateConfig'
 import { getPreferences, savePreferences } from './preferences'
+import {
+  exportSettings,
+  getDiagnosticLog,
+  getRuntimeStatus,
+  importSettings,
+  repairWslEnvironment,
+  runWslHealthCheck
+} from './runtimeDiagnostics'
+import { fromWslPath } from './wslClaude'
+import {
+  deleteWslSession,
+  getWslSessionMessages,
+  getWslSubagentMessages,
+  listWslSessions,
+  renameWslSession
+} from './wslHistory'
 import * as gitModule from './git'
 import { log } from './logger'
 import type {
@@ -44,8 +65,16 @@ import type {
   PickedFile,
   PickedDirectoryEntry,
   TranslateConfig,
-  TranslateTestResult
+  TranslateTestResult,
+  ClaudeExecutionBackend,
+  ProviderProfile,
+  ProviderProfiles,
+  RuntimeStatus,
+  SettingsBackup,
+  WslHealthReport,
+  ComposerModel
 } from '../shared/ipc'
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
 const TEXT_EXTS = new Set([
@@ -64,6 +93,25 @@ const MIME: Record<string, string> = {
 }
 const MAX_TEXT_INLINE = 512 * 1024 // inline at most 512KB of a text file
 const MAX_DIRECTORY_ENTRIES = 300
+
+function currentClaudeBackend(): ClaudeExecutionBackend {
+  return process.platform === 'win32' && getPreferences().claudeExecutionBackend === 'wsl'
+    ? 'wsl'
+    : 'windows'
+}
+
+function useWslClaudeBackend(backend: ClaudeExecutionBackend = currentClaudeBackend()): boolean {
+  return process.platform === 'win32' && backend === 'wsl'
+}
+
+function normalizeAgentMessageForRenderer(message: SDKMessage): SDKMessage {
+  if (!useWslClaudeBackend() || message.type !== 'system') return message
+  const cwd = (message as { cwd?: unknown }).cwd
+  if (typeof cwd !== 'string') return message
+  const normalized = fromWslPath(cwd)
+  if (!normalized || normalized === cwd) return message
+  return { ...(message as unknown as Record<string, unknown>), cwd: normalized } as SDKMessage
+}
 
 function readDirectoryEntries(path: string): { entries: PickedDirectoryEntry[]; truncated: boolean } {
   const entries: PickedDirectoryEntry[] = []
@@ -144,7 +192,13 @@ function readPickedFiles(cwd: string, paths: string[], source: string): PickedFi
   return out
 }
 
-export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBridge {
+export function registerIpc(
+  getMainWindow: () => BrowserWindow | null,
+  getIsQuitting: () => boolean = () => false,
+  setIsQuitting: (v: boolean) => void = () => undefined,
+  getForgeTray: () => { setTooltip?: (text: string) => void } | null = () => null,
+  armSkipNextCloseIntercept: () => void = () => undefined
+): AgentBridge {
   const withWindow = (action: (win: BrowserWindow) => void): void => {
     const win = getMainWindow()
     if (!win || win.isDestroyed()) return
@@ -168,12 +222,41 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
 
   const bridge = new AgentBridge({
     onMessage: (sessionId, message) => {
-      const event: AgentEvent = { type: 'agent:message', sessionId, message }
+      const event: AgentEvent = {
+        type: 'agent:message',
+        sessionId,
+        message: normalizeAgentMessageForRenderer(message)
+      }
       send('forge:agent-event', event)
     },
     onEnded: (sessionId, error) => {
       const event: AgentEvent = { type: 'agent:ended', sessionId, error }
       send('forge:agent-event', event)
+
+      // Native notification when a session ends and the window isn't focused,
+      // so the user is alerted to long-running tasks completing in the background.
+      const s = loadSettings()
+      const notify = s.nativeNotifications !== false // default on
+      if (notify && Notification.isSupported()) {
+        const win = getMainWindow()
+        const inactive = !win || win.isDestroyed() || !win.isFocused()
+        if (inactive) {
+          const n = new Notification({
+            title: error ? 'Forge · 会话出错' : 'Forge · 会话完成',
+            body: error ? `任务异常结束：${error}` : 'Agent 已完成当前任务',
+            silent: false
+          })
+          n.on('click', () => {
+            const w = getMainWindow()
+            if (!w || w.isDestroyed()) return
+            if (!w.isVisible()) w.show()
+            if (w.isMinimized()) w.restore()
+            w.focus()
+          })
+          n.show()
+        }
+      }
+      getForgeTray()?.setTooltip?.('Forge')
     },
     onPermissionRequest: (req: PermissionRequestPayload) => {
       send('forge:permission-request', req)
@@ -183,6 +266,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
   ipcMain.handle('forge:startSession', async (_e, opts: StartSessionOptions): Promise<StartSessionResult> => {
     log('ipc', `startSession cwd=${opts.cwd} model=${opts.model ?? 'default'}`)
     const sessionId = await bridge.start(opts)
+    getForgeTray()?.setTooltip?.('Forge · 运行中…')
     return { sessionId }
   })
 
@@ -293,6 +377,29 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
   ipcMain.handle('forge:savePreferences', async (_e, prefs: Preferences): Promise<Preferences> =>
     savePreferences(prefs)
   )
+  ipcMain.handle(
+    'forge:getRuntimeStatus',
+    async (_e, cwd?: string, model?: string): Promise<RuntimeStatus> =>
+      getRuntimeStatus(cwd, model)
+  )
+  ipcMain.handle(
+    'forge:runWslHealthCheck',
+    async (_e, cwd: string): Promise<WslHealthReport> => runWslHealthCheck(cwd)
+  )
+  ipcMain.handle(
+    'forge:repairWslEnvironment',
+    async (_e, cwd: string): Promise<WslHealthReport> => repairWslEnvironment(cwd)
+  )
+  ipcMain.handle('forge:getDiagnosticLog', async (): Promise<string> => getDiagnosticLog())
+  ipcMain.handle(
+    'forge:exportSettings',
+    async (_e, appearance?: Record<string, unknown>): Promise<SettingsBackup> =>
+      exportSettings(appearance)
+  )
+  ipcMain.handle(
+    'forge:importSettings',
+    async (_e, backup: SettingsBackup): Promise<void> => importSettings(backup)
+  )
 
   ipcMain.handle('forge:minimizeWindow', async (): Promise<void> => {
     withWindow((win) => win.minimize())
@@ -307,6 +414,39 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
     withWindow((win) => win.close())
   })
 
+  // --- System tray & native notifications ---
+  ipcMain.handle(
+    'forge:resolveClose',
+    async (_e, decision: { minimize: boolean; remember: boolean }): Promise<void> => {
+      if (decision.remember) {
+        const s = loadSettings()
+        s.minimizeToTray = decision.minimize
+        s.closePromptDismissed = true
+        saveSettings(s)
+      }
+      const win = getMainWindow()
+      if (!win || win.isDestroyed()) return
+      if (decision.minimize) {
+        win.hide()
+        getForgeTray()?.setTooltip?.('Forge — 后台运行中')
+      } else {
+        // Bypass the close-intercept for THIS close only so the app actually
+        // quits. Using a one-shot (not the sticky isQuitting flag) so a future
+        // close after re-show still honors the prompt setting.
+        armSkipNextCloseIntercept()
+        win.close()
+      }
+    }
+  )
+
+  ipcMain.handle('forge:showWindow', async (): Promise<void> => {
+    const win = getMainWindow()
+    if (!win || win.isDestroyed()) return
+    if (!win.isVisible()) win.show()
+    if (win.isMinimized()) win.restore()
+    win.focus()
+  })
+
   ipcMain.handle('forge:saveMcpServer', async (_e, args: SaveMcpServerArgs): Promise<void> => {
     saveMcpServer(args)
   })
@@ -317,14 +457,39 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
 
   ipcMain.handle('forge:listProviders', async (): Promise<Provider[]> => listProviders())
   ipcMain.handle('forge:getActiveProvider', async (): Promise<Provider | null> => getActiveProvider())
+  ipcMain.handle('forge:getProviderProfiles', async (): Promise<ProviderProfiles> =>
+    getProviderProfiles()
+  )
   ipcMain.handle('forge:saveProvider', async (_e, p: Provider): Promise<Provider[]> => saveProvider(p))
+  ipcMain.handle(
+    'forge:saveProviderForBackend',
+    async (_e, backend: ClaudeExecutionBackend, p: Provider): Promise<ProviderProfile> =>
+      saveProviderForBackend(backend, p)
+  )
   ipcMain.handle('forge:deleteProvider', async (_e, id: string): Promise<Provider[]> =>
     deleteProvider(id)
+  )
+  ipcMain.handle(
+    'forge:deleteProviderForBackend',
+    async (_e, backend: ClaudeExecutionBackend, id: string): Promise<ProviderProfile> =>
+      deleteProviderForBackend(backend, id)
   )
   ipcMain.handle('forge:setActiveProvider', async (_e, id: string): Promise<void> => {
     log('ipc', `setActiveProvider id=${id}`)
     setActiveProvider(id)
   })
+  ipcMain.handle(
+    'forge:setActiveProviderForBackend',
+    async (_e, backend: ClaudeExecutionBackend, id: string): Promise<ProviderProfile> => {
+      log('ipc', `setActiveProvider backend=${backend} id=${id}`)
+      return setActiveProviderForBackend(backend, id)
+    }
+  )
+  ipcMain.handle(
+    'forge:saveComposerModelsForBackend',
+    async (_e, backend: ClaudeExecutionBackend, models: ComposerModel[]): Promise<ProviderProfile> =>
+      saveComposerModelsProfile(backend, models)
+  )
 
   ipcMain.handle('forge:listProjects', async (): Promise<Project[]> => listProjects())
   ipcMain.handle('forge:addProject', async (_e, path: string, name?: string): Promise<Project[]> =>
@@ -344,26 +509,69 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
   )
 
   ipcMain.handle('forge:listSessions', async (_e, cwd: string, opts?: SessionListOptions): Promise<SessionListItem[]> => {
-    try {
+    const limit = opts?.limit && opts.limit > 0 ? opts.limit : 50
+    const offset = opts?.offset && opts.offset > 0 ? opts.offset : 0
+    const wslSupportEnabled = getPreferences().wslSupportEnabled === true
+    const requestedBackend =
+      !wslSupportEnabled && (opts?.backend === 'wsl' || opts?.backend === 'all')
+        ? 'windows'
+        : opts?.backend ?? currentClaudeBackend()
+
+    const readWindowsSessions = async (readLimit: number, readOffset: number): Promise<SessionListItem[]> => {
       const { listSessions } = await import('@anthropic-ai/claude-agent-sdk')
-      const limit = opts?.limit && opts.limit > 0 ? opts.limit : 50
-      const offset = opts?.offset && opts.offset > 0 ? opts.offset : 0
-      const sessions = await listSessions({ dir: cwd, limit, offset })
+      const sessions = await listSessions({ dir: cwd, limit: readLimit, offset: readOffset })
       return sessions.map((s) => ({
         sessionId: s.sessionId,
         summary: s.summary,
         lastModified: s.lastModified,
         cwd: s.cwd ?? undefined,
-        gitBranch: s.gitBranch ?? undefined
+        gitBranch: s.gitBranch ?? undefined,
+        runtimeBackend: 'windows' as const
       }))
+    }
+
+    const readWslSessions = async (readLimit: number, readOffset: number): Promise<SessionListItem[]> => {
+      if (process.platform !== 'win32') return []
+      const sessions = await listWslSessions(cwd, { limit: readLimit, offset: readOffset })
+      return sessions.map((session) => ({ ...session, runtimeBackend: 'wsl' as const }))
+    }
+
+    try {
+      if (requestedBackend === 'all') {
+        const readLimit = offset + limit
+        const [windowsSessions, wslSessions] = await Promise.all([
+          readWindowsSessions(readLimit, 0).catch((err) => {
+            log('ipc', `list Windows sessions failed: ${err instanceof Error ? err.message : String(err)}`)
+            return [] as SessionListItem[]
+          }),
+          readWslSessions(readLimit, 0).catch((err) => {
+            log('ipc', `list WSL sessions failed: ${err instanceof Error ? err.message : String(err)}`)
+            return [] as SessionListItem[]
+          })
+        ])
+        return [...windowsSessions, ...wslSessions]
+          .sort((a, b) => b.lastModified - a.lastModified)
+          .slice(offset, offset + limit)
+      }
+
+      if (useWslClaudeBackend(requestedBackend)) return await readWslSessions(limit, offset)
+      return await readWindowsSessions(limit, offset)
     } catch (err) {
       console.error('[forge] listSessions failed:', err)
       return []
     }
   })
 
-  ipcMain.handle('forge:getSessionMessages', async (_e, sessionId: string, cwd: string): Promise<HistoryMessage[]> => {
+  ipcMain.handle('forge:getSessionMessages', async (
+    _e,
+    sessionId: string,
+    cwd: string,
+    backend?: ClaudeExecutionBackend
+  ): Promise<HistoryMessage[]> => {
     try {
+      if (useWslClaudeBackend(backend ?? currentClaudeBackend())) {
+        return await getWslSessionMessages(sessionId, cwd)
+      }
       const { getSessionMessages } = await import('@anthropic-ai/claude-agent-sdk')
       const msgs = await getSessionMessages(sessionId, { dir: cwd, limit: 500 })
       return msgs as unknown as HistoryMessage[]
@@ -375,7 +583,17 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
 
   ipcMain.handle(
     'forge:renameSession',
-    async (_e, sessionId: string, title: string, cwd: string): Promise<void> => {
+    async (
+      _e,
+      sessionId: string,
+      title: string,
+      cwd: string,
+      backend?: ClaudeExecutionBackend
+    ): Promise<void> => {
+      if (useWslClaudeBackend(backend ?? currentClaudeBackend())) {
+        await renameWslSession(sessionId, title, cwd)
+        return
+      }
       const { renameSession } = await import('@anthropic-ai/claude-agent-sdk')
       await renameSession(sessionId, title, { dir: cwd })
     }
@@ -383,7 +601,16 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
 
   ipcMain.handle(
     'forge:deleteSession',
-    async (_e, sessionId: string, cwd: string): Promise<void> => {
+    async (
+      _e,
+      sessionId: string,
+      cwd: string,
+      backend?: ClaudeExecutionBackend
+    ): Promise<void> => {
+      if (useWslClaudeBackend(backend ?? currentClaudeBackend())) {
+        await deleteWslSession(sessionId, cwd)
+        return
+      }
       const { deleteSession } = await import('@anthropic-ai/claude-agent-sdk')
       await deleteSession(sessionId, { dir: cwd })
     }
@@ -393,6 +620,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): AgentBri
     'forge:getSubagentMessages',
     async (_e, sessionId: string, agentId: string, cwd: string): Promise<HistoryMessage[]> => {
       try {
+        if (useWslClaudeBackend()) return await getWslSubagentMessages(sessionId, agentId, cwd)
         const { getSubagentMessages } = await import('@anthropic-ai/claude-agent-sdk')
         const msgs = await getSubagentMessages(sessionId, agentId, { dir: cwd, limit: 500 })
         return msgs as unknown as HistoryMessage[]

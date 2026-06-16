@@ -9,6 +9,14 @@ import ToolCallCard from './ToolCallCard'
 const INITIAL_HIGHLIGHT_DELAY_MS = 420
 const SCROLL_HIGHLIGHT_RESUME_MS = 180
 const FOLLOW_OUTPUT_LOCK_MS = 1200
+const TOPBAR_RESERVE_NEAR_BOTTOM_THRESHOLD_PX = 120
+
+interface TranscriptProps {
+  layoutTransitioning?: boolean
+  bottomReserve?: number
+  bottomReserveVersion?: number
+  onAtBottomChange?: (atBottom: boolean) => void
+}
 
 const TerminalGlyph = (): JSX.Element => (
   <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
@@ -179,7 +187,12 @@ const AssistantMessage = memo(function AssistantMessage({
   )
 })
 
-export default function Transcript(): JSX.Element {
+export default function Transcript({
+  layoutTransitioning = false,
+  bottomReserve = 0,
+  bottomReserveVersion = 0,
+  onAtBottomChange
+}: TranscriptProps): JSX.Element {
   const items = useSessionStore((s) => s.items)
   const sessionKey = useSessionStore((s) => s.meta?.sessionId ?? '')
   const running = useSessionStore((s) => s.status.running)
@@ -189,17 +202,130 @@ export default function Transcript(): JSX.Element {
   const highlightTimeoutRef = useRef<number | null>(null)
   const deferHighlightRef = useRef(true)
   const followOutputLockedUntilRef = useRef(0)
+  const layoutTransitioningRef = useRef(layoutTransitioning)
+  const restoreBottomAfterLayoutRef = useRef(false)
+  const bottomReserveScrollFrameRef = useRef<number | null>(null)
+  const bottomReserveRestoreFrameRef = useRef<number | null>(null)
+  const restoreBottomAfterReserveRef = useRef(false)
+  const atBottomRef = useRef(true)
+  const reserveEligibleRef = useRef(true)
   // "stick to bottom": Virtuoso reports this via atBottomStateChange. While at
   // the bottom, followOutput pins to the newest content; scroll up to read and
   // it stops following until the ↓ button returns you.
   const [atBottom, setAtBottom] = useState(true)
   const [deferHighlight, setDeferHighlight] = useState(true)
+  const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null)
 
   const roots = useMemo(() => buildForest(items), [items])
 
   useEffect(() => {
     deferHighlightRef.current = deferHighlight
   }, [deferHighlight])
+
+  const setReserveEligible = (eligible: boolean, force = false): void => {
+    if (!force && reserveEligibleRef.current === eligible) return
+    reserveEligibleRef.current = eligible
+    onAtBottomChange?.(eligible)
+  }
+
+  const setPinnedAtBottom = (nextAtBottom: boolean): void => {
+    atBottomRef.current = nextAtBottom
+    setAtBottom(nextAtBottom)
+  }
+
+  const refreshReserveEligibleFromScroller = (element: HTMLElement | null = scrollElement): void => {
+    if (!element) return
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
+    setReserveEligible(distanceFromBottom <= TOPBAR_RESERVE_NEAR_BOTTOM_THRESHOLD_PX)
+  }
+
+  const cancelBottomReserveScrollFrame = (): void => {
+    if (bottomReserveScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(bottomReserveScrollFrameRef.current)
+      bottomReserveScrollFrameRef.current = null
+    }
+  }
+
+  const cancelBottomReserveRestoreFrame = (): void => {
+    if (bottomReserveRestoreFrameRef.current !== null) {
+      window.cancelAnimationFrame(bottomReserveRestoreFrameRef.current)
+      bottomReserveRestoreFrameRef.current = null
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      cancelBottomReserveScrollFrame()
+      cancelBottomReserveRestoreFrame()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!scrollElement) return
+
+    const updateReserveEligibility = (): void => {
+      refreshReserveEligibleFromScroller(scrollElement)
+    }
+
+    updateReserveEligibility()
+    scrollElement.addEventListener('scroll', updateReserveEligibility, { passive: true })
+    return () => {
+      scrollElement.removeEventListener('scroll', updateReserveEligibility)
+    }
+  }, [scrollElement])
+
+  useEffect(() => {
+    layoutTransitioningRef.current = layoutTransitioning
+
+    if (layoutTransitioning) {
+      followOutputLockedUntilRef.current = window.performance.now() + FOLLOW_OUTPUT_LOCK_MS
+      if (atBottom && bottomReserve <= 0) {
+        restoreBottomAfterLayoutRef.current = true
+        setPinnedAtBottom(false)
+      }
+      return
+    }
+
+    if (!restoreBottomAfterLayoutRef.current) return
+    restoreBottomAfterLayoutRef.current = false
+
+    window.requestAnimationFrame(() => {
+      virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
+      setReserveEligible(true, true)
+      setPinnedAtBottom(true)
+    })
+  }, [atBottom, bottomReserve, layoutTransitioning])
+
+  useEffect(() => {
+    cancelBottomReserveScrollFrame()
+    if (bottomReserve <= 0 || bottomReserveVersion <= 0 || !reserveEligibleRef.current) return
+
+    followOutputLockedUntilRef.current = window.performance.now() + FOLLOW_OUTPUT_LOCK_MS
+    restoreBottomAfterLayoutRef.current = false
+    restoreBottomAfterReserveRef.current = true
+    setPinnedAtBottom(false)
+    bottomReserveScrollFrameRef.current = window.requestAnimationFrame(() => {
+      bottomReserveScrollFrameRef.current = window.requestAnimationFrame(() => {
+        bottomReserveScrollFrameRef.current = null
+        virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
+      })
+    })
+  }, [bottomReserve, bottomReserveVersion])
+
+  useEffect(() => {
+    cancelBottomReserveRestoreFrame()
+    if (bottomReserve > 0 || !restoreBottomAfterReserveRef.current) return
+
+    restoreBottomAfterReserveRef.current = false
+    bottomReserveRestoreFrameRef.current = window.requestAnimationFrame(() => {
+      bottomReserveRestoreFrameRef.current = window.requestAnimationFrame(() => {
+        bottomReserveRestoreFrameRef.current = null
+        virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'smooth' })
+        setReserveEligible(true, true)
+        setPinnedAtBottom(true)
+      })
+    })
+  }, [bottomReserve])
 
   const clearHighlightTimer = (): void => {
     if (highlightTimeoutRef.current !== null) {
@@ -230,12 +356,27 @@ export default function Transcript(): JSX.Element {
 
   const shouldFollowOutput = (isAtBottom: boolean): 'auto' | false => {
     if (!isAtBottom) return false
+    if (layoutTransitioningRef.current) return false
     if (window.performance.now() < followOutputLockedUntilRef.current) return false
     return 'auto'
   }
 
+  const handleAtBottomStateChange = (nextAtBottom: boolean): void => {
+    if (nextAtBottom) setReserveEligible(true)
+    if (layoutTransitioningRef.current) {
+      if (!nextAtBottom) setPinnedAtBottom(false)
+      return
+    }
+    setPinnedAtBottom(nextAtBottom)
+  }
+
   useEffect(() => {
-    setAtBottom(true)
+    cancelBottomReserveScrollFrame()
+    cancelBottomReserveRestoreFrame()
+    restoreBottomAfterLayoutRef.current = false
+    restoreBottomAfterReserveRef.current = false
+    setReserveEligible(true, true)
+    setPinnedAtBottom(true)
     setDeferHighlight(true)
     resumeHighlightAfter(INITIAL_HIGHLIGHT_DELAY_MS)
 
@@ -296,7 +437,7 @@ export default function Transcript(): JSX.Element {
       onPointerDownCapture={lockFollowOutput}
       onWheelCapture={(event) => {
         lockFollowOutput()
-        if (event.deltaY < 0) setAtBottom(false)
+        if (event.deltaY < 0) setPinnedAtBottom(false)
       }}
     >
       <Virtuoso
@@ -304,6 +445,10 @@ export default function Transcript(): JSX.Element {
         data={roots}
         initialTopMostItemIndex={{ index: Math.max(roots.length - 1, 0), align: 'end' }}
         computeItemKey={(_, node) => node.item.id}
+        scrollerRef={(element) => {
+          const nextElement = element instanceof HTMLElement ? element : null
+          setScrollElement((current) => (current === nextElement ? current : nextElement))
+        }}
         isScrolling={handleTranscriptScrolling}
         itemContent={(_, node) => (
           // Per-row wrapper preserves the centered, padded column the old single
@@ -312,7 +457,7 @@ export default function Transcript(): JSX.Element {
         )}
         followOutput={shouldFollowOutput}
         atBottomThreshold={2}
-        atBottomStateChange={setAtBottom}
+        atBottomStateChange={handleAtBottomStateChange}
         className="transcript-scroll h-full"
         components={{
           Footer: () => (
@@ -324,17 +469,20 @@ export default function Transcript(): JSX.Element {
                   Claude 正在处理…
                 </div>
               )}
+              {bottomReserve > 0 && <div aria-hidden="true" style={{ height: bottomReserve }} />}
             </div>
           )
         }}
       />
-      {!atBottom && (
-        <button
-          onClick={() => virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' })}
-          className="glass-control absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full px-3 py-1.5 text-xs text-zinc-300 shadow-lg hover:bg-white/[0.075]"
-        >
-          ↓ 最新
-        </button>
+      {!layoutTransitioning && !atBottom && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+          <button
+            onClick={() => virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' })}
+            className="glass-control rounded-full px-3 py-1.5 text-xs text-zinc-300 shadow-lg hover:bg-white/[0.075]"
+          >
+            ↓ 最新
+          </button>
+        </div>
       )}
     </div>
   )

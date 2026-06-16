@@ -1,6 +1,17 @@
-import { useEffect, useState } from 'react'
-import type { Preferences, ComposerModel, EffortLevel, PermissionMode } from '../../shared/ipc'
-import { useAppearanceStore } from '../store/appearanceStore'
+import { useEffect, useRef, useState } from 'react'
+import type {
+  ComposerModel,
+  EffortLevel,
+  PermissionMode,
+  ClaudeExecutionBackend,
+  SettingsBackup
+} from '../../shared/ipc'
+import {
+  MOTION_SPEED_MAX,
+  MOTION_SPEED_MIN,
+  MOTION_SPEED_STEP,
+  useAppearanceStore
+} from '../store/appearanceStore'
 import DisclosureSelect from './DisclosureSelect'
 
 const EFFORTS: { id: EffortLevel; label: string }[] = [
@@ -55,14 +66,53 @@ function RangeControl({
   )
 }
 
+function ToggleControl({
+  label,
+  description,
+  checked,
+  onChange
+}: {
+  label: string
+  description?: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+}): JSX.Element {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <div className="text-xs text-zinc-500">{label}</div>
+        {description && <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">{description}</p>}
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange(!checked)}
+        aria-pressed={checked}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition ${checked ? 'bg-accent' : 'bg-zinc-700'}`}
+      >
+        <span
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+            checked ? 'left-[22px]' : 'left-0.5'
+          }`}
+        />
+      </button>
+    </div>
+  )
+}
+
 export default function SettingsPanel(): JSX.Element {
   const [effort, setEffort] = useState<EffortLevel>('high')
   const [permMode, setPermMode] = useState<PermissionMode>('default')
   const [models, setModels] = useState<ComposerModel[]>([])
   const [vulkan, setVulkan] = useState(false)
+  const [claudeBackend, setClaudeBackend] = useState<ClaudeExecutionBackend>('windows')
+  const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
+  const [minimizeToTray, setMinimizeToTray] = useState(false)
+  const [nativeNotifications, setNativeNotifications] = useState(true)
+  const [askOnClose, setAskOnClose] = useState(true)
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState(false)
+  const importInputRef = useRef<HTMLInputElement | null>(null)
   const appearance = useAppearanceStore((s) => s.settings)
   const updateAppearance = useAppearanceStore((s) => s.updateSetting)
   const resetAppearance = useAppearanceStore((s) => s.reset)
@@ -73,6 +123,11 @@ export default function SettingsPanel(): JSX.Element {
       setPermMode(p.defaultPermissionMode ?? 'default')
       setModels(p.composerModels ?? [])
       setVulkan(!!p.vulkanBackend)
+      setClaudeBackend(p.claudeExecutionBackend ?? 'windows')
+      setWslSupportEnabled(!!p.wslSupportEnabled)
+      setMinimizeToTray(!!p.minimizeToTray)
+      setNativeNotifications(p.nativeNotifications !== false)
+      setAskOnClose(!p.closePromptDismissed)
       setLoaded(true)
     })
   }, [])
@@ -90,6 +145,68 @@ export default function SettingsPanel(): JSX.Element {
     }
   }
 
+  /** Minimize-to-tray applies immediately (controls the window-close behavior). */
+  const toggleMinimizeToTray = async (next: boolean): Promise<void> => {
+    setMinimizeToTray(next)
+    try {
+      await window.api.savePreferences({ minimizeToTray: next })
+      setSavedAt(true)
+      setTimeout(() => setSavedAt(false), 1500)
+    } catch {
+      setMinimizeToTray(!next)
+    }
+  }
+
+  /** Native notification toggle applies immediately. */
+  const toggleNativeNotifications = async (next: boolean): Promise<void> => {
+    setNativeNotifications(next)
+    try {
+      await window.api.savePreferences({ nativeNotifications: next })
+      setSavedAt(true)
+      setTimeout(() => setSavedAt(false), 1500)
+    } catch {
+      setNativeNotifications(!next)
+    }
+  }
+
+  /** "每次关闭都询问" toggle. askOnClose=true (default) re-shows the close
+   *  prompt on every close; askOnClose=false dismisses it permanently and the
+   *  app follows the minimizeToTray setting instead. */
+  const toggleAskOnClose = async (next: boolean): Promise<void> => {
+    setAskOnClose(next)
+    try {
+      await window.api.savePreferences({ closePromptDismissed: !next })
+      setSavedAt(true)
+      setTimeout(() => setSavedAt(false), 1500)
+    } catch {
+      setAskOnClose(!next)
+    }
+  }
+
+  const toggleWslSupport = async (enabled: boolean): Promise<void> => {
+    if (enabled === wslSupportEnabled) return
+    const previousSupport = wslSupportEnabled
+    const previousBackend = claudeBackend
+    setWslSupportEnabled(enabled)
+    if (!enabled) setClaudeBackend('windows')
+    try {
+      const prefs = await window.api.savePreferences({
+        wslSupportEnabled: enabled,
+        ...(enabled ? {} : { claudeExecutionBackend: 'windows' as const })
+      })
+      setModels(prefs.composerModels ?? [])
+      setClaudeBackend(prefs.claudeExecutionBackend ?? 'windows')
+      window.dispatchEvent(new Event('forge:provider-changed'))
+      window.dispatchEvent(new Event('forge:model-options-changed'))
+      window.dispatchEvent(new Event('forge:wsl-support-changed'))
+      setSavedAt(true)
+      setTimeout(() => setSavedAt(false), 1500)
+    } catch {
+      setWslSupportEnabled(previousSupport)
+      setClaudeBackend(previousBackend)
+    }
+  }
+
   const save = async (): Promise<void> => {
     setSaving(true)
     try {
@@ -102,6 +219,7 @@ export default function SettingsPanel(): JSX.Element {
         composerModels: cleanModels
       })
       setModels(cleanModels)
+      window.dispatchEvent(new Event('forge:model-options-changed'))
       setSavedAt(true)
       setTimeout(() => setSavedAt(false), 1500)
     } finally {
@@ -113,6 +231,56 @@ export default function SettingsPanel(): JSX.Element {
   const updateModel = (i: number, patch: Partial<ComposerModel>): void =>
     setModels((m) => m.map((x, idx) => (idx === i ? { ...x, ...patch } : x)))
   const removeModel = (i: number): void => setModels((m) => m.filter((_, idx) => idx !== i))
+  const backendLabel = claudeBackend === 'wsl' ? 'WSL' : 'Windows'
+
+  const reloadPreferenceState = async (): Promise<void> => {
+    const p = await window.api.getPreferences()
+    setEffort(p.defaultEffort ?? 'high')
+    setPermMode(p.defaultPermissionMode ?? 'default')
+    setModels(p.composerModels ?? [])
+    setVulkan(!!p.vulkanBackend)
+    setClaudeBackend(p.claudeExecutionBackend ?? 'windows')
+    setWslSupportEnabled(!!p.wslSupportEnabled)
+    setMinimizeToTray(!!p.minimizeToTray)
+    setNativeNotifications(p.nativeNotifications !== false)
+    setAskOnClose(!p.closePromptDismissed)
+  }
+
+  // When the close-prompt dialog confirms "don't ask again", the persisted
+  // closePromptDismissed changes behind our back - re-sync the toggles.
+  useEffect(() => {
+    const handler = (): void => {
+      void reloadPreferenceState()
+    }
+    window.addEventListener('forge:close-prefs-changed', handler)
+    return () => window.removeEventListener('forge:close-prefs-changed', handler)
+  }, [])
+
+  const exportSettings = async (): Promise<void> => {
+    const backup = await window.api.exportSettings(appearance as unknown as Record<string, unknown>)
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `forge-settings-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const importSettingsFile = async (file: File): Promise<void> => {
+    const parsed = JSON.parse(await file.text()) as SettingsBackup
+    await window.api.importSettings(parsed)
+    if (parsed.appearance) {
+      const next = parsed.appearance as Partial<typeof appearance>
+      if (typeof next.motionSpeed === 'number') updateAppearance('motionSpeed', next.motionSpeed)
+      if (typeof next.glassGlow === 'boolean') updateAppearance('glassGlow', next.glassGlow)
+    }
+    await reloadPreferenceState()
+    window.dispatchEvent(new Event('forge:provider-changed'))
+    window.dispatchEvent(new Event('forge:model-options-changed'))
+    setSavedAt(true)
+    setTimeout(() => setSavedAt(false), 1500)
+  }
 
   const inputCls =
     'w-full rounded-lg border border-border-subtle bg-bg-elev px-3 py-2 text-sm text-zinc-200 outline-none focus:border-accent'
@@ -141,12 +309,18 @@ export default function SettingsPanel(): JSX.Element {
             </button>
           </div>
           <div className="space-y-4">
+            <ToggleControl
+              label="玻璃泛光"
+              description="控制玻璃组件的外发光、边缘高光和环境泛光。"
+              checked={appearance.glassGlow}
+              onChange={(checked) => updateAppearance('glassGlow', checked)}
+            />
             <RangeControl
               label="动画速度"
               value={appearance.motionSpeed}
-              min={70}
-              max={150}
-              step={5}
+              min={MOTION_SPEED_MIN}
+              max={MOTION_SPEED_MAX}
+              step={MOTION_SPEED_STEP}
               display={`${appearance.motionSpeed}%`}
               onChange={(value) => updateAppearance('motionSpeed', value)}
             />
@@ -173,9 +347,20 @@ export default function SettingsPanel(): JSX.Element {
           />
         </section>
 
+        <section className="glass-panel-soft rounded-2xl p-4">
+          <ToggleControl
+            label="WSL 支持"
+            description="开启后才显示 WSL 会话信息、WSL Provider Profile、WSL 健康检查，并允许打开 WSL 历史时自动切换后端。关闭后界面回到纯 Windows 模式。"
+            checked={wslSupportEnabled}
+            onChange={(checked) => void toggleWslSupport(checked)}
+          />
+        </section>
+
         <section>
           <div className="mb-1.5 flex items-center justify-between">
-            <label className="text-xs text-zinc-500">Composer 模型列表(留空用内置)</label>
+            <label className="text-xs text-zinc-500">
+              Composer 模型列表({backendLabel}, 留空用内置)
+            </label>
             <button onClick={addModel} className="text-xs text-accent hover:underline">
               + 添加
             </button>
@@ -219,6 +404,68 @@ export default function SettingsPanel(): JSX.Element {
           </button>
           {savedAt && <span className="text-xs text-emerald-400">已保存</span>}
         </div>
+
+        <section className="glass-panel-soft rounded-2xl p-4">
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold text-zinc-200">设置导入 / 导出</h2>
+            <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+              备份 Forge 设置、Provider 配置、模型列表和外观设置。
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void exportSettings()}
+              className="rounded-lg border border-border-subtle bg-bg-elev px-3 py-2 text-xs text-zinc-300 transition hover:bg-bg-hover"
+            >
+              导出设置
+            </button>
+            <button
+              type="button"
+              onClick={() => importInputRef.current?.click()}
+              className="rounded-lg border border-border-subtle bg-bg-elev px-3 py-2 text-xs text-zinc-300 transition hover:bg-bg-hover"
+            >
+              导入设置
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                event.currentTarget.value = ''
+                if (file) void importSettingsFile(file)
+              }}
+            />
+          </div>
+        </section>
+
+        <section className="glass-panel-soft rounded-2xl p-4">
+          <div className="mb-4">
+            <h2 className="text-sm font-semibold text-zinc-200">系统</h2>
+          </div>
+          <div className="space-y-4">
+            <ToggleControl
+              label="最小化到系统托盘"
+              description="关闭窗口时最小化到托盘而非退出应用。点击托盘图标可恢复窗口。"
+              checked={minimizeToTray}
+              onChange={(checked) => void toggleMinimizeToTray(checked)}
+            />
+            <ToggleControl
+              label="会话完成通知"
+              description="当 Agent 完成任务且窗口不在前台时,显示系统原生通知。"
+              checked={nativeNotifications}
+              onChange={(checked) => void toggleNativeNotifications(checked)}
+            />
+            <ToggleControl
+              label="每次关闭都询问"
+              description="关闭窗口时每次弹出「最小化到托盘 / 直接退出」选择框。关闭后直接按上面的设置执行,不再询问。"
+              checked={askOnClose}
+              onChange={(checked) => void toggleAskOnClose(checked)}
+            />
+          </div>
+        </section>
 
         <section className="glass-panel-soft rounded-2xl p-4">
           <div className="flex items-start justify-between gap-3">

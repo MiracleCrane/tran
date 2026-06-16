@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { Project } from '../../shared/ipc'
 import Collapse from './Collapse'
@@ -51,6 +51,8 @@ const ChevronIcon = ({ up }: { up: boolean }): JSX.Element => (
   </svg>
 )
 
+const PROJECT_SWITCHER_CLOSE_ELEVATION_MS = 560
+
 export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
   const switchProject = useSessionStore((s) => s.switchProject)
@@ -59,9 +61,11 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
 
   const [projects, setProjects] = useState<Project[]>([])
   const [open, setOpen] = useState(false)
+  const [elevated, setElevated] = useState(false)
   const [editingPath, setEditingPath] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [confirmPath, setConfirmPath] = useState<string | null>(null)
+  const elevationTimerRef = useRef<number | null>(null)
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -74,6 +78,30 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   useEffect(() => {
     void refresh()
   }, [refresh, meta?.cwd])
+
+  useEffect(() => {
+    if (elevationTimerRef.current !== null) {
+      window.clearTimeout(elevationTimerRef.current)
+      elevationTimerRef.current = null
+    }
+
+    if (open) {
+      setElevated(true)
+      return
+    }
+
+    elevationTimerRef.current = window.setTimeout(() => {
+      elevationTimerRef.current = null
+      setElevated(false)
+    }, PROJECT_SWITCHER_CLOSE_ELEVATION_MS)
+
+    return () => {
+      if (elevationTimerRef.current !== null) {
+        window.clearTimeout(elevationTimerRef.current)
+        elevationTimerRef.current = null
+      }
+    }
+  }, [open])
 
   const current = projects.find((p) => p.path === meta?.cwd) ?? null
   const currentLabel =
@@ -249,13 +277,14 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
       </div>
       <div className="mt-0.5 border-t border-white/[0.06] pt-0.5">
         <button
+          type="button"
           onClick={() => void addNew()}
           style={{
             transitionDelay: open ? `${projects.length * 40}ms` : '0ms',
             opacity: open ? 1 : 0,
             transform: open ? 'translateY(0)' : 'translateY(-6px)'
           }}
-          className="flex min-h-8 w-full items-center gap-2 rounded-xl px-2.5 py-1 text-left text-[11px] text-zinc-400 transition-all duration-[360ms] ease-spring hover:bg-white/[0.055] hover:text-zinc-200"
+          className="project-add-button flex min-h-8 w-full items-center gap-2 rounded-xl px-2.5 py-1 text-left text-[11px] text-zinc-300 transition-all duration-[360ms] ease-spring hover:text-zinc-100"
         >
           <PlusIcon /> 添加项目…
         </button>
@@ -267,14 +296,22 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   // so the list floats beside the icon instead.
   if (collapsed) {
     return (
-      <div className="relative">
+      <div className={`project-switcher-root relative ${elevated ? 'is-elevated' : ''}`}>
         {trigger}
         {open && <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />}
         <Collapse
           open={open}
-          className={`absolute left-0 top-full z-50 mt-1 w-56 ${open ? '' : 'pointer-events-none'}`}
+          className={`absolute left-0 top-full mt-1 w-56 ${
+            elevated ? 'z-[70]' : 'z-50'
+          } ${open ? '' : 'pointer-events-none'}`}
         >
-          <div className="glass-panel-soft rounded-2xl p-1.5">{listContent}</div>
+          <div
+            className="glass-panel-soft project-switcher-panel rounded-2xl p-1.5"
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            {listContent}
+          </div>
         </Collapse>
       </div>
     )
@@ -285,8 +322,14 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   // overlaps the session list instead of shoving it. A placeholder reserves
   // the trigger's footprint in the flow.
   return (
-    <div className="relative">
-      <div className="glass-panel-soft absolute inset-x-0 top-0 z-50 rounded-2xl p-1.5">
+    <div className={`project-switcher-root relative ${elevated ? 'is-elevated' : ''}`}>
+      <div
+        className={`glass-panel-soft project-switcher-panel absolute inset-x-0 top-0 rounded-2xl p-1.5 ${
+          elevated ? 'z-[70]' : 'z-50'
+        }`}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         {trigger}
         <Collapse open={open}>
           <div className="pt-0.5">{listContent}</div>
