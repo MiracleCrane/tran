@@ -1,11 +1,14 @@
+import { app } from 'electron'
+import { arch, hostname, platform, release } from 'node:os'
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { currentBackend } from './preferences'
+import { currentBackend, getPreferences } from './preferences'
 import { getProviderProfile } from './providers'
 import { getSettingsSnapshot, replaceSettingsSnapshot } from './settings'
 import { toWslPath } from './wslClaude'
 import type {
+  DiagnosticReportOptions,
   HealthCheckItem,
   RuntimeStatus,
   RuntimeStatusOptions,
@@ -391,6 +394,109 @@ export function getDiagnosticLog(): string {
   if (!existsSync(path)) return 'No Forge main log found.'
   const lines = readFileSync(path, 'utf8').split(/\r?\n/)
   return lines.slice(-220).join('\n').trim()
+}
+
+function isSecretKey(key: string): boolean {
+  return /(^|[_-])(token|secret|password)([_-]|$)/i.test(key) ||
+    /api[_-]?key/i.test(key) ||
+    /(keyEnc|keyPlain|secretEnc|secretPlain)$/i.test(key)
+}
+
+function redactSecrets(value: unknown, key = ''): unknown {
+  if (isSecretKey(key)) return '[redacted]'
+  if (Array.isArray(value)) return value.map((item) => redactSecrets(item))
+  if (!value || typeof value !== 'object') return value
+  const out: Record<string, unknown> = {}
+  for (const [childKey, childValue] of Object.entries(value)) {
+    out[childKey] = redactSecrets(childValue, childKey)
+  }
+  return out
+}
+
+function jsonBlock(value: unknown): string {
+  return `\n\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\`\n`
+}
+
+function textBlock(value: string): string {
+  return `\n\`\`\`text\n${value || '(empty)'}\n\`\`\`\n`
+}
+
+function providerSummary(): unknown {
+  return (['windows', 'wsl'] as const).map((backend) => {
+    const profile = getProviderProfile(backend)
+    return {
+      backend,
+      activeProviderId: profile.activeProviderId,
+      providers: profile.providers.map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        baseUrl: provider.baseUrl,
+        authType: provider.authType,
+        model: provider.model,
+        token: provider.token ? '[redacted]' : ''
+      })),
+      composerModels: profile.composerModels ?? []
+    }
+  })
+}
+
+export async function buildDiagnosticReport(
+  options: DiagnosticReportOptions = {}
+): Promise<string> {
+  const prefs = getPreferences()
+  const runtime = await getRuntimeStatus(options.cwd, undefined, { refreshProbe: true })
+  const shouldRunWsl =
+    process.platform === 'win32' &&
+    !!options.cwd &&
+    (prefs.wslSupportEnabled === true || runtime.backend === 'wsl')
+  const wslHealth = shouldRunWsl && options.cwd ? runWslHealthCheck(options.cwd) : null
+  const settings = redactSecrets(getSettingsSnapshot())
+  const diagnosticLog = getDiagnosticLog()
+
+  return [
+    '# Forge Diagnostic Report',
+    '',
+    `Generated: ${new Date().toISOString()}`,
+    '',
+    '## App',
+    jsonBlock({
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      userData: app.getPath('userData'),
+      cwd: process.cwd()
+    }),
+    '## System',
+    jsonBlock({
+      platform: platform(),
+      release: release(),
+      arch: arch(),
+      hostname: hostname(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node
+    }),
+    '## Current Project',
+    jsonBlock({
+      cwd: options.cwd ?? null,
+      cwdWsl: options.cwd ? toWslPath(options.cwd) : null
+    }),
+    '## Preferences',
+    jsonBlock(redactSecrets(prefs)),
+    '## Appearance',
+    jsonBlock(redactSecrets(options.appearance ?? null)),
+    '## Runtime Status',
+    jsonBlock(redactSecrets(runtime)),
+    '## Provider Profiles',
+    jsonBlock(providerSummary()),
+    '## Settings Snapshot',
+    jsonBlock(settings),
+    '## WSL Health',
+    wslHealth ? jsonBlock(wslHealth) : 'Not run.',
+    '',
+    '## Recent Main Log',
+    textBlock(diagnosticLog),
+    ''
+  ].join('\n')
 }
 
 export function exportSettings(appearance?: Record<string, unknown>): SettingsBackup {

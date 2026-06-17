@@ -6,7 +6,8 @@ import type {
   PermissionResponsePayload,
   GitBranchInfo,
   GitCommit,
-  GitStatus
+  GitStatus,
+  UpdateCheckResult
 } from '../shared/ipc'
 
 function getPathForFile(file: File): string {
@@ -62,6 +63,10 @@ const api: ForgeApi = {
   runWslHealthCheck: (cwd) => ipcRenderer.invoke('forge:runWslHealthCheck', cwd),
   repairWslEnvironment: (cwd) => ipcRenderer.invoke('forge:repairWslEnvironment', cwd),
   getDiagnosticLog: () => ipcRenderer.invoke('forge:getDiagnosticLog'),
+  checkForUpdates: () => ipcRenderer.invoke('forge:checkForUpdates'),
+  downloadAndInstallUpdate: (assetUrl) =>
+    ipcRenderer.invoke('forge:downloadAndInstallUpdate', assetUrl),
+  exportDiagnosticReport: (options) => ipcRenderer.invoke('forge:exportDiagnosticReport', options),
   exportSettings: (appearance) => ipcRenderer.invoke('forge:exportSettings', appearance),
   importSettings: (backup) => ipcRenderer.invoke('forge:importSettings', backup),
 
@@ -75,6 +80,12 @@ const api: ForgeApi = {
     const listener = (): void => cb()
     ipcRenderer.on('forge:show-close-prompt', listener)
     return () => ipcRenderer.removeListener('forge:show-close-prompt', listener)
+  },
+  onUpdateAvailable: (cb) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: UpdateCheckResult): void =>
+      cb(payload)
+    ipcRenderer.on('forge:update-available', listener)
+    return () => ipcRenderer.removeListener('forge:update-available', listener)
   },
 
   saveMcpServer: (args) => ipcRenderer.invoke('forge:saveMcpServer', args),

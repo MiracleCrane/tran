@@ -20,8 +20,10 @@ import HelpPanel from './components/HelpPanel'
 import WslHealthPanel from './components/WslHealthPanel'
 import ErrorBoundary from './components/ErrorBoundary'
 import ClosePromptDialog from './components/ClosePromptDialog'
+import UpdateAvailableDialog from './components/UpdateAvailableDialog'
 import { useApplyAppearanceSettings } from './store/appearanceStore'
 import { pushAgentEvent, flushAgentEvents } from './store/streamBatcher'
+import type { UpdateCheckResult } from '../shared/ipc'
 
 const VIEW_SWAP_DELAY_MS = 90
 const CHAT_SWAP_CLEAR_MS = 220
@@ -316,6 +318,7 @@ export default function App(): JSX.Element {
   const [chatTopbarScrollReserve, setChatTopbarScrollReserve] = useState(0)
   const [chatTopbarScrollReserveVersion, setChatTopbarScrollReserveVersion] = useState(0)
   const [closePromptOpen, setClosePromptOpen] = useState(false)
+  const [availableUpdate, setAvailableUpdate] = useState<UpdateCheckResult | null>(null)
   const chatTopbarCollapsedRef = useRef(chatTopbarCollapsed)
   const transcriptAtBottomRef = useRef(true)
   const gitTopbarAutoExpandedCwdRef = useRef<string | null>(null)
@@ -530,6 +533,11 @@ export default function App(): JSX.Element {
     const off = window.api.onClosePrompt(() => setClosePromptOpen(true))
     return off
   }, [])
+
+  useEffect(() => {
+    const off = window.api.onUpdateAvailable((info) => setAvailableUpdate(info))
+    return off
+  }, [])
   if (!bootstrapped) {
     return (
       <div className="app-shell flex h-screen flex-col overflow-hidden">
@@ -551,6 +559,10 @@ export default function App(): JSX.Element {
           <div className="min-h-0 flex-1">
             <Onboarding />
           </div>
+          <UpdateAvailableDialog
+            info={availableUpdate}
+            onClose={() => setAvailableUpdate(null)}
+          />
         </div>
       </ErrorBoundary>
     )
@@ -612,6 +624,10 @@ export default function App(): JSX.Element {
           </div>
           <PermissionModal />
           <ClosePromptDialog open={closePromptOpen} onClose={() => setClosePromptOpen(false)} />
+          <UpdateAvailableDialog
+            info={availableUpdate}
+            onClose={() => setAvailableUpdate(null)}
+          />
         </div>
       </div>
     </ErrorBoundary>

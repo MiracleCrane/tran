@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, Notification, shell } from 'electron'
 import { join } from 'node:path'
 import {
   configureWindowsGpuBackend,
@@ -10,6 +10,8 @@ import { log } from './logger'
 import { seedDefaultIfNeeded } from './providers'
 import { loadSettings, saveSettings } from './settings'
 import { createTray, type ForgeTray } from './tray'
+import { checkForUpdates } from './updater'
+import type { UpdateCheckResult } from '../shared/ipc'
 
 let mainWindow: BrowserWindow | null = null
 let forgeTray: ForgeTray | null = null
@@ -26,6 +28,7 @@ const WINDOW_BACKGROUND_COLOR = '#05060A'
 const WINDOW_FRAME_COLOR = WINDOW_BACKGROUND_COLOR
 const RENDERER_DIAGNOSTICS =
   !app.isPackaged || process.env['FORGE_RENDER_DIAGNOSTICS'] === '1'
+const AUTO_UPDATE_CHECK_DELAY_MS = 3500
 
 if (!app.isPackaged) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env['FORGE_REMOTE_DEBUG_PORT'] ?? '9223')
@@ -55,6 +58,42 @@ function shouldOpenExternalNavigation(currentUrl: string, nextUrl: string): bool
   } catch {
     return false
   }
+}
+
+function notifyRendererUpdateAvailable(info: UpdateCheckResult): void {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return
+  win.webContents.send('forge:update-available', info)
+
+  if (!app.isPackaged || !Notification.isSupported()) return
+  const notification = new Notification({
+    title: 'Forge 有可用更新',
+    body: `发现 ${info.latestVersion ?? '新版本'}，点击查看发布页。`,
+    silent: false
+  })
+  notification.on('click', () => {
+    if (info.releaseUrl) void shell.openExternal(info.releaseUrl)
+    const current = mainWindow
+    if (!current || current.isDestroyed()) return
+    if (!current.isVisible()) current.show()
+    if (current.isMinimized()) current.restore()
+    current.focus()
+  })
+  notification.show()
+}
+
+function scheduleAutoUpdateCheck(): void {
+  const timer = setTimeout(() => {
+    void checkForUpdates().then((info) => {
+      if (info.error) {
+        log('updater', `check failed: ${info.error}`)
+        return
+      }
+      log('updater', `current=${info.currentVersion} latest=${info.latestVersion ?? '(unknown)'}`)
+      if (info.updateAvailable) notifyRendererUpdateAvailable(info)
+    })
+  }, AUTO_UPDATE_CHECK_DELAY_MS)
+  timer.unref?.()
 }
 
 /** Read the experimental Vulkan-compositor toggle from the persisted settings
@@ -132,6 +171,7 @@ function createWindow(): void {
     mainWindow?.show()
     const readyTimer = setTimeout(markGpuBackendWindowReady, vulkanBackend ? 4000 : 0)
     readyTimer.unref?.()
+    scheduleAutoUpdateCheck()
   })
 
   // Open external links in the system browser, not inside the app.

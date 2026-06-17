@@ -1,5 +1,5 @@
 import { ipcMain, dialog, shell, Notification, type BrowserWindow } from 'electron'
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync } from 'node:fs'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
 import { AgentBridge } from './agent/AgentBridge'
 import { getApiKey, setApiKey, loadSettings, saveSettings } from './settings'
@@ -33,9 +33,11 @@ import {
   getDiagnosticLog,
   getRuntimeStatus,
   importSettings,
+  buildDiagnosticReport,
   repairWslEnvironment,
   runWslHealthCheck
 } from './runtimeDiagnostics'
+import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { fromWslPath, getDefaultWslDistro, getWslHome, toWslPath, toWslUncPath } from './wslClaude'
 import {
   deleteWslSession,
@@ -73,7 +75,11 @@ import type {
   SettingsBackup,
   WslHealthReport,
   ComposerModel,
-  PickDirectoryOptions
+  PickDirectoryOptions,
+  UpdateCheckResult,
+  UpdateInstallResult,
+  DiagnosticReportOptions,
+  DiagnosticReportResult
 } from '../shared/ipc'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { isWslProjectPath } from '../shared/paths'
@@ -464,6 +470,27 @@ export function registerIpc(
     async (_e, cwd: string): Promise<WslHealthReport> => repairWslEnvironment(cwd)
   )
   ipcMain.handle('forge:getDiagnosticLog', async (): Promise<string> => getDiagnosticLog())
+  ipcMain.handle('forge:checkForUpdates', async (): Promise<UpdateCheckResult> => checkForUpdates())
+  ipcMain.handle(
+    'forge:downloadAndInstallUpdate',
+    async (_e, assetUrl?: string): Promise<UpdateInstallResult> =>
+      downloadAndInstallUpdate(assetUrl)
+  )
+  ipcMain.handle(
+    'forge:exportDiagnosticReport',
+    async (_e, options?: DiagnosticReportOptions): Promise<DiagnosticReportResult> => {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      const res = await dialog.showSaveDialog({
+        title: 'Export Forge diagnostic report',
+        defaultPath: `forge-diagnostic-${stamp}.md`,
+        filters: [{ name: 'Markdown', extensions: ['md'] }]
+      })
+      if (res.canceled || !res.filePath) return { canceled: true }
+      const report = await buildDiagnosticReport(options)
+      writeFileSync(res.filePath, report, 'utf8')
+      return { path: res.filePath }
+    }
+  )
   ipcMain.handle(
     'forge:exportSettings',
     async (_e, appearance?: Record<string, unknown>): Promise<SettingsBackup> =>

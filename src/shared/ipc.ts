@@ -249,6 +249,41 @@ export interface RuntimeStatusOptions {
   refreshProbe?: boolean
 }
 
+export interface UpdateAssetInfo {
+  name: string
+  size?: number
+  browserDownloadUrl: string
+}
+
+export interface UpdateCheckResult {
+  checkedAt: number
+  currentVersion: string
+  latestVersion?: string
+  updateAvailable: boolean
+  releaseName?: string
+  releaseUrl?: string
+  publishedAt?: string
+  body?: string
+  asset?: UpdateAssetInfo
+  error?: string
+}
+
+export interface UpdateInstallResult {
+  ok: boolean
+  path?: string
+  error?: string
+}
+
+export interface DiagnosticReportOptions {
+  cwd?: string
+  appearance?: Record<string, unknown>
+}
+
+export interface DiagnosticReportResult {
+  canceled?: boolean
+  path?: string
+}
+
 export type HealthCheckState = 'pass' | 'warn' | 'fail'
 
 export interface HealthCheckItem {
@@ -447,6 +482,9 @@ export interface ForgeApi {
   runWslHealthCheck(cwd: string): Promise<WslHealthReport>
   repairWslEnvironment(cwd: string): Promise<WslHealthReport>
   getDiagnosticLog(): Promise<string>
+  checkForUpdates(): Promise<UpdateCheckResult>
+  downloadAndInstallUpdate(assetUrl?: string): Promise<UpdateInstallResult>
+  exportDiagnosticReport(options?: DiagnosticReportOptions): Promise<DiagnosticReportResult>
   exportSettings(appearance?: Record<string, unknown>): Promise<SettingsBackup>
   importSettings(backup: SettingsBackup): Promise<void>
 
@@ -462,6 +500,7 @@ export interface ForgeApi {
   showWindow(): Promise<void>
   /** Subscribe to the first-close prompt request (main → renderer). */
   onClosePrompt(cb: () => void): () => void
+  onUpdateAvailable(cb: (info: UpdateCheckResult) => void): () => void
 
   pickDirectory(options?: PickDirectoryOptions): Promise<string | null>
   getApiKey(): Promise<string | null>

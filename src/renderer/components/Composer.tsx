@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent
+} from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { ComposerModel, PickedFile, EffortLevel, Provider, SkillInfo } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
@@ -50,6 +59,24 @@ const SLASH_COMMAND_ROW_HEIGHT = 48
 const TEMPLATE_PANEL_MAX_HEIGHT = 232
 const TEMPLATE_PANEL_HEADER_HEIGHT = 34
 const TEMPLATE_PANEL_ROW_HEIGHT = 42
+const COMPOSER_HEIGHT_STORAGE_KEY = 'forge.composerTextareaHeight.v1'
+
+interface ComposerHeightBounds {
+  min: number
+  max: number
+}
+
+function composerHeightBoundsForViewport(viewportHeight: number): ComposerHeightBounds {
+  const compact = viewportHeight < 680
+  const min = compact ? 42 : 52
+  const maxByViewport = Math.floor(viewportHeight * (compact ? 0.2 : 0.24))
+  const maxCap = compact ? 128 : 184
+  return { min, max: Math.max(min, Math.min(maxCap, maxByViewport)) }
+}
+
+function clampComposerHeight(value: number, bounds: ComposerHeightBounds): number {
+  return Math.round(Math.min(bounds.max, Math.max(bounds.min, value)))
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -123,11 +150,71 @@ export default function Composer(): JSX.Element {
   const [slashError, setSlashError] = useState<string | null>(null)
   const [slashContext, setSlashContext] = useState<SlashContext | null>(null)
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight)
+  const heightBounds = useMemo(
+    () => composerHeightBoundsForViewport(viewportHeight),
+    [viewportHeight]
+  )
+  const [autoTextareaHeight, setAutoTextareaHeight] = useState(heightBounds.min)
+  const [manualTextareaHeight, setManualTextareaHeight] = useState<number | null>(null)
+  const [composerResizing, setComposerResizing] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const slashListRef = useRef<HTMLDivElement | null>(null)
+  const heightBoundsRef = useRef(heightBounds)
+  const resizeCancelRef = useRef<(() => void) | null>(null)
   const dragDepth = useRef(0)
   const [dragActive, setDragActive] = useState(false)
   const [dropError, setDropError] = useState<string | null>(null)
+  const textareaHeight = manualTextareaHeight ?? autoTextareaHeight
+
+  useEffect(() => {
+    heightBoundsRef.current = heightBounds
+    setAutoTextareaHeight((height) => clampComposerHeight(height, heightBounds))
+    setManualTextareaHeight((height) =>
+      height === null ? null : clampComposerHeight(height, heightBounds)
+    )
+  }, [heightBounds])
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(COMPOSER_HEIGHT_STORAGE_KEY)
+      const parsed = saved ? Number(saved) : NaN
+      if (Number.isFinite(parsed)) {
+        setManualTextareaHeight(clampComposerHeight(parsed, heightBoundsRef.current))
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  useEffect(() => {
+    const onResize = (): void => setViewportHeight(window.innerHeight)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('composer-resizing', composerResizing)
+    return () => document.documentElement.classList.remove('composer-resizing')
+  }, [composerResizing])
+
+  useEffect(() => {
+    return () => {
+      resizeCancelRef.current?.()
+      resizeCancelRef.current = null
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea || manualTextareaHeight !== null) return
+
+    const previousHeight = textarea.style.height
+    textarea.style.height = 'auto'
+    const measured = clampComposerHeight(textarea.scrollHeight, heightBounds)
+    textarea.style.height = previousHeight
+    setAutoTextareaHeight((height) => (height === measured ? height : measured))
+  }, [heightBounds, manualTextareaHeight, text])
 
   // Model options follow the current backend: preferences are stored per
   // Windows/WSL backend, and providers are already backend-aware.
@@ -307,6 +394,54 @@ export default function Composer(): JSX.Element {
   const removeAttachment = (i: number): void =>
     setAttachments((prev) => prev.filter((_, idx) => idx !== i))
 
+  const resetTextareaHeight = (): void => {
+    setManualTextareaHeight(null)
+    try {
+      window.localStorage.removeItem(COMPOSER_HEIGHT_STORAGE_KEY)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const beginTextareaResize = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    event.preventDefault()
+    event.stopPropagation()
+
+    resizeCancelRef.current?.()
+    const startY = event.clientY
+    const startHeight = textareaRef.current?.getBoundingClientRect().height ?? textareaHeight
+    let nextHeight = clampComposerHeight(startHeight, heightBoundsRef.current)
+    let finished = false
+
+    const finish = (): void => {
+      if (finished) return
+      finished = true
+      setComposerResizing(false)
+      resizeCancelRef.current = null
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      try {
+        window.localStorage.setItem(COMPOSER_HEIGHT_STORAGE_KEY, String(nextHeight))
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const move = (moveEvent: PointerEvent): void => {
+      const delta = startY - moveEvent.clientY
+      nextHeight = clampComposerHeight(startHeight + delta, heightBoundsRef.current)
+      setManualTextareaHeight(nextHeight)
+    }
+
+    setComposerResizing(true)
+    setManualTextareaHeight(nextHeight)
+    resizeCancelRef.current = finish
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+  }
+
   const hasFileDrag = (e: DragEvent<HTMLElement>): boolean =>
     Array.from(e.dataTransfer.types).includes('Files')
 
@@ -420,7 +555,7 @@ export default function Composer(): JSX.Element {
   }
 
   return (
-    <div className="bg-transparent px-6 pb-3 pt-2">
+    <div className="composer-shell bg-transparent px-6 pb-3 pt-2">
       <div className="mx-auto max-w-5xl">
         {pending.length > 0 && (
           <div className="mb-2 flex flex-col items-end gap-1.5">
@@ -440,12 +575,22 @@ export default function Composer(): JSX.Element {
         <div
           className={`glass-panel composer-panel rounded-[18px] p-3 transition ${
             dragActive ? 'border-accent/60 bg-white/[0.035] shadow-[0_0_0_1px_rgba(223,118,95,0.28)]' : ''
-          }`}
+          } ${composerResizing ? 'is-resizing' : ''}`}
           onDragEnter={onDragEnter}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
           onDrop={(e) => void onDrop(e)}
         >
+          <button
+            type="button"
+            className="composer-resize-handle"
+            aria-label="调整输入框高度"
+            title="拖动调整输入框高度，双击恢复自动"
+            onPointerDown={beginTextareaResize}
+            onDoubleClick={resetTextareaHeight}
+          >
+            <span />
+          </button>
           <div
             className={`slash-command-reveal ${slashMenuOpen ? 'is-open' : ''}`}
             style={{ height: slashPanelHeight }}
@@ -533,7 +678,7 @@ export default function Composer(): JSX.Element {
             }}
             onClick={refreshSlashContextFromTextarea}
             onSelect={refreshSlashContextFromTextarea}
-            rows={2}
+            rows={1}
             placeholder={
               starting
                 ? '正在启动会话…'
@@ -541,7 +686,12 @@ export default function Composer(): JSX.Element {
                   ? 'Claude 正在处理…(可继续发送,消息会排队)'
                   : '给 Claude 发消息…'
             }
-            className="max-h-40 min-h-[64px] w-full resize-none rounded-xl border border-transparent bg-transparent px-3 py-2 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-white/10 focus:bg-white/[0.025]"
+            style={{
+              height: textareaHeight,
+              minHeight: heightBounds.min,
+              maxHeight: heightBounds.max
+            }}
+            className="composer-textarea w-full resize-none rounded-xl border border-transparent bg-transparent px-3 py-2 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-white/10 focus:bg-white/[0.025]"
           />
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 px-1 pt-2">
@@ -573,7 +723,7 @@ export default function Composer(): JSX.Element {
           {dropError && (
             <div className="px-1 pt-2 text-[11px] text-orange-300">{dropError}</div>
           )}
-          <div className="flex flex-wrap items-center gap-2 px-1 pt-2">
+          <div className="composer-toolbar flex flex-wrap items-center gap-2 px-1 pt-2">
             <button
               type="button"
               onClick={() => void pickAttachment()}
@@ -601,11 +751,11 @@ export default function Composer(): JSX.Element {
             >
               上下文
             </button>
-            <span className="px-2 text-[11px] text-zinc-500">
+            <span className="composer-shortcut-hint px-2 text-[11px] text-zinc-500">
               <kbd className="font-sans text-zinc-400">Enter</kbd> 发送 ·{' '}
               <kbd className="font-sans text-zinc-400">Shift+Enter</kbd> 换行
             </span>
-            <div className="ml-auto flex items-end gap-2">
+            <div className="composer-actions ml-auto flex items-end gap-2">
               {meta && (
                 <DisclosureSelect
                   value={effort}

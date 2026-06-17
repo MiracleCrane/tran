@@ -4,7 +4,8 @@ import type {
   EffortLevel,
   PermissionMode,
   ClaudeExecutionBackend,
-  SettingsBackup
+  SettingsBackup,
+  UpdateCheckResult
 } from '../../shared/ipc'
 import {
   MOTION_SPEED_MAX,
@@ -13,6 +14,7 @@ import {
   useAppearanceStore
 } from '../store/appearanceStore'
 import DisclosureSelect from './DisclosureSelect'
+import { useSessionStore } from '../store/sessionStore'
 
 const EFFORTS: { id: EffortLevel; label: string }[] = [
   { id: 'low', label: '低' },
@@ -109,6 +111,12 @@ export default function SettingsPanel(): JSX.Element {
   const [minimizeToTray, setMinimizeToTray] = useState(false)
   const [nativeNotifications, setNativeNotifications] = useState(true)
   const [askOnClose, setAskOnClose] = useState(true)
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [downloadingUpdate, setDownloadingUpdate] = useState(false)
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null)
+  const [exportingDiagnostic, setExportingDiagnostic] = useState(false)
+  const [diagnosticMessage, setDiagnosticMessage] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState(false)
@@ -116,6 +124,7 @@ export default function SettingsPanel(): JSX.Element {
   const appearance = useAppearanceStore((s) => s.settings)
   const updateAppearance = useAppearanceStore((s) => s.updateSetting)
   const resetAppearance = useAppearanceStore((s) => s.reset)
+  const currentCwd = useSessionStore((s) => s.meta?.cwd)
 
   useEffect(() => {
     void window.api.getPreferences().then((p) => {
@@ -180,6 +189,56 @@ export default function SettingsPanel(): JSX.Element {
       setTimeout(() => setSavedAt(false), 1500)
     } catch {
       setAskOnClose(!next)
+    }
+  }
+
+  const checkUpdates = async (): Promise<void> => {
+    setCheckingUpdate(true)
+    setUpdateMessage(null)
+    try {
+      const info = await window.api.checkForUpdates()
+      setUpdateInfo(info)
+      if (info.error) setUpdateMessage(`检查失败：${info.error}`)
+      else if (info.updateAvailable) {
+        setUpdateMessage(`发现新版本 ${info.latestVersion ?? ''}`)
+      } else {
+        setUpdateMessage(`已是最新版本 ${info.currentVersion}`)
+      }
+    } catch (e) {
+      setUpdateMessage(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCheckingUpdate(false)
+    }
+  }
+
+  const downloadUpdate = async (): Promise<void> => {
+    setDownloadingUpdate(true)
+    setUpdateMessage(null)
+    try {
+      const result = await window.api.downloadAndInstallUpdate(updateInfo?.asset?.browserDownloadUrl)
+      if (result.ok) setUpdateMessage('安装包已打开，请按提示完成更新。')
+      else setUpdateMessage(`下载失败：${result.error ?? '未知错误'}`)
+    } catch (e) {
+      setUpdateMessage(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDownloadingUpdate(false)
+    }
+  }
+
+  const exportDiagnosticReport = async (): Promise<void> => {
+    setExportingDiagnostic(true)
+    setDiagnosticMessage(null)
+    try {
+      const result = await window.api.exportDiagnosticReport({
+        cwd: currentCwd,
+        appearance: appearance as unknown as Record<string, unknown>
+      })
+      if (result.canceled) setDiagnosticMessage('已取消导出。')
+      else setDiagnosticMessage(`已导出：${result.path}`)
+    } catch (e) {
+      setDiagnosticMessage(e instanceof Error ? e.message : String(e))
+    } finally {
+      setExportingDiagnostic(false)
     }
   }
 
@@ -468,6 +527,63 @@ export default function SettingsPanel(): JSX.Element {
               checked={askOnClose}
               onChange={(checked) => void toggleAskOnClose(checked)}
             />
+            <div className="border-t border-white/[0.06] pt-4">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs text-zinc-500">自动更新</div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                    启动后自动检查 GitHub Release；也可以手动检查并下载最新安装包。
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void checkUpdates()}
+                    disabled={checkingUpdate}
+                    className="rounded-lg border border-border-subtle bg-bg-elev px-3 py-2 text-xs text-zinc-300 transition hover:bg-bg-hover disabled:opacity-50"
+                  >
+                    {checkingUpdate ? '检查中...' : '检查更新'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void downloadUpdate()}
+                    disabled={downloadingUpdate || !updateInfo?.asset}
+                    className="rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {downloadingUpdate ? '下载中...' : '下载并打开'}
+                  </button>
+                </div>
+              </div>
+              {updateInfo && (
+                <div className="text-[11px] text-zinc-500">
+                  当前 {updateInfo.currentVersion}
+                  {updateInfo.latestVersion ? ` / 最新 ${updateInfo.latestVersion}` : ''}
+                  {updateInfo.asset?.name ? ` / ${updateInfo.asset.name}` : ''}
+                </div>
+              )}
+              {updateMessage && <div className="mt-1 text-[11px] text-zinc-500">{updateMessage}</div>}
+            </div>
+            <div className="border-t border-white/[0.06] pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs text-zinc-500">诊断报告</div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                    导出运行时、WSL、Provider 摘要、配置快照和最近日志；敏感密钥会脱敏。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void exportDiagnosticReport()}
+                  disabled={exportingDiagnostic}
+                  className="shrink-0 rounded-lg border border-border-subtle bg-bg-elev px-3 py-2 text-xs text-zinc-300 transition hover:bg-bg-hover disabled:opacity-50"
+                >
+                  {exportingDiagnostic ? '导出中...' : '导出报告'}
+                </button>
+              </div>
+              {diagnosticMessage && (
+                <div className="mt-2 break-all text-[11px] text-zinc-500">{diagnosticMessage}</div>
+              )}
+            </div>
           </div>
         </section>
 
