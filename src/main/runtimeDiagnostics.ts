@@ -3,10 +3,13 @@ import { arch, hostname, platform, release } from 'node:os'
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { currentBackend, getPreferences } from './preferences'
+import { currentAgentBackend, currentBackend, getPreferences } from './preferences'
 import { getProviderProfile } from './providers'
 import { getSettingsSnapshot, replaceSettingsSnapshot } from './settings'
 import { toWslPath } from './wslClaude'
+import { AGENT_BACKENDS } from '../shared/agentBackends'
+import { readCodexDefaultModel } from './agent/CodexBackend'
+import { resolveWindowsCodexCommand } from './windowsCodex'
 import type {
   DiagnosticReportOptions,
   HealthCheckItem,
@@ -238,24 +241,43 @@ async function probeWslClaudeAsync(): Promise<RuntimeProbe> {
   }
 }
 
+async function probeWindowsCodexAsync(): Promise<RuntimeProbe> {
+  const resolved = resolveWindowsCodexCommand()
+  const version = await runAsync(resolved.command, [...resolved.argsPrefix, '--version'], 10000)
+  const parsed = parseClaudeProbe(version)
+  return {
+    ...parsed,
+    path: resolved.displayPath,
+    checkedAt: Date.now()
+  }
+}
+
 async function runtimeProbe(
+  agentBackend: ReturnType<typeof currentAgentBackend>,
   backend: ReturnType<typeof currentBackend>,
   refresh: boolean
 ): Promise<RuntimeProbe | undefined> {
-  const cached = runtimeProbeCache.get(backend)
+  const cacheKey = `${agentBackend}:${backend}`
+  const cached = runtimeProbeCache.get(cacheKey)
   if (!refresh) return cached
   if (cached && Date.now() - cached.checkedAt < RUNTIME_PROBE_TTL_MS) return cached
 
-  const inflight = runtimeProbeInflight.get(backend)
+  const inflight = runtimeProbeInflight.get(cacheKey)
   if (inflight) return inflight
 
-  const probe = (backend === 'wsl' ? probeWslClaudeAsync() : probeWindowsClaudeAsync())
+  const probe = (
+    agentBackend === 'codex'
+      ? probeWindowsCodexAsync()
+      : backend === 'wsl'
+        ? probeWslClaudeAsync()
+        : probeWindowsClaudeAsync()
+  )
     .then((next) => {
-      runtimeProbeCache.set(backend, next)
+      runtimeProbeCache.set(cacheKey, next)
       return next
     })
-    .finally(() => runtimeProbeInflight.delete(backend))
-  runtimeProbeInflight.set(backend, probe)
+    .finally(() => runtimeProbeInflight.delete(cacheKey))
+  runtimeProbeInflight.set(cacheKey, probe)
   return probe
 }
 
@@ -264,16 +286,28 @@ export async function getRuntimeStatus(
   modelOverride?: string,
   options: RuntimeStatusOptions = {}
 ): Promise<RuntimeStatus> {
-  const backend = currentBackend()
+  const agentBackend = currentAgentBackend()
+  const backend = agentBackend === 'codex' ? 'windows' : currentBackend()
+  const agent = AGENT_BACKENDS.find((item) => item.id === agentBackend) ?? AGENT_BACKENDS[0]
   const profile = getProviderProfile(backend)
-  const provider = profile.providers.find((p) => p.id === profile.activeProviderId) ?? null
-  const probe = await runtimeProbe(backend, options.refreshProbe === true)
+  const provider =
+    agentBackend === 'codex'
+      ? null
+      : profile.providers.find((p) => p.id === profile.activeProviderId) ?? null
+  const probe = await runtimeProbe(agentBackend, backend, options.refreshProbe === true)
+  const model = agentBackend === 'codex'
+    ? modelOverride || readCodexDefaultModel() || 'codex-default'
+    : modelOverride || provider?.model || 'claude-opus-4-8'
   return {
+    agentBackend,
+    agentName: agent.name,
+    ...(probe?.version ? { agentVersion: probe.version } : {}),
+    ...(probe?.path ? { agentPath: probe.path } : {}),
     backend,
     provider,
-    model: modelOverride || provider?.model || 'claude-opus-4-8',
-    ...(probe?.version ? { claudeCodeVersion: probe.version } : {}),
-    ...(probe?.path ? { claudeCodePath: probe.path } : {}),
+    model,
+    ...(agentBackend === 'claude-code' && probe?.version ? { claudeCodeVersion: probe.version } : {}),
+    ...(agentBackend === 'claude-code' && probe?.path ? { claudeCodePath: probe.path } : {}),
     ...(probe?.error ? { versionError: probe.error } : {}),
     ...(probe?.wslDistro ? { wslDistro: probe.wslDistro } : {}),
     checkedAt: probe?.checkedAt ?? Date.now()

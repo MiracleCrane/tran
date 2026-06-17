@@ -8,6 +8,7 @@ import type {
   PermissionMode,
   ComposerModel,
   ClaudeExecutionBackend,
+  AgentBackendId,
   TranslateEngine
 } from '../shared/ipc'
 
@@ -29,6 +30,7 @@ interface PersistedSettings {
   /** Last-used project path (auto-entered on app start). */
   lastProjectPath?: string
   /** Preferences managed by the Settings panel. */
+  agentBackend?: AgentBackendId
   defaultEffort?: EffortLevel
   defaultPermissionMode?: PermissionMode
   /** Gate for all WSL-facing UI and WSL backend features. */
@@ -38,6 +40,8 @@ interface PersistedSettings {
   composerModels?: ComposerModel[]
   /** Composer model list used by the WSL Claude backend. */
   wslComposerModels?: ComposerModel[]
+  /** Composer model list used by the Codex app-server backend. */
+  codexComposerModels?: ComposerModel[]
   /** Experimental Windows-only GPU toggle (ANGLE Vulkan backend). */
   vulkanBackend?: boolean
   /** Close window → hide to system tray instead of quitting (persisted after

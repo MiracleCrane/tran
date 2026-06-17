@@ -30,7 +30,7 @@ interface RawManifest {
   plugins?: RawPlugin[]
 }
 
-export function listMarketplacePlugins(): MarketplacePlugin[] {
+export function listClaudeMarketplacePlugins(): MarketplacePlugin[] {
   const root = marketplacesRoot()
   if (!existsSync(root)) {
     log('marketplace', `no marketplaces dir at ${root}`)
@@ -61,6 +61,7 @@ export function listMarketplacePlugins(): MarketplacePlugin[] {
       out.push({
         name: p.name,
         description: p.description ?? '',
+        agentBackend: 'claude-code',
         author: p.author?.name,
         category: p.category,
         homepage: p.homepage,
@@ -72,3 +73,5 @@ export function listMarketplacePlugins(): MarketplacePlugin[] {
   log('marketplace', `loaded ${out.length} plugins from ${entries.length} marketplace(s)`)
   return out
 }
+
+export const listMarketplacePlugins = listClaudeMarketplacePlugins

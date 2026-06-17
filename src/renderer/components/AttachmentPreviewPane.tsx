@@ -10,6 +10,7 @@ type TextMode = 'rendered' | 'source'
 
 const CLOSE_ANIMATION_MS = 720
 const CONTENT_SWAP_FADE_MS = 120
+const PREVIEW_READ_ERROR = '文件或目录不存在，或无法读取。'
 
 const BackIcon = (): JSX.Element => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -67,11 +68,21 @@ function attachmentKey(attachment: UserAttachment | null): string {
 }
 
 function fileMeta(attachment: UserAttachment): string {
+  if (attachment.previewState === 'loading') return 'loading'
+  if (attachment.previewState === 'error') return 'unavailable'
   if (attachment.kind === 'directory') {
     const count = attachment.entries?.length ?? 0
     return ['directory', `${count}${attachment.entriesTruncated ? '+' : ''} items`].join(' · ')
   }
   return [attachment.kind, formatBytes(attachment.size)].filter(Boolean).join(' · ')
+}
+
+function loadingPathAttachment(path: string): UserAttachment {
+  return pathToUserAttachment(path, { previewState: 'loading' })
+}
+
+function errorPathAttachment(path: string, error = PREVIEW_READ_ERROR): UserAttachment {
+  return pathToUserAttachment(path, { previewState: 'error', previewError: error })
 }
 
 function SourceView({ attachment }: { attachment: UserAttachment }): JSX.Element {
@@ -127,6 +138,29 @@ function DirectoryView({
   )
 }
 
+function LoadingView({ path }: { path?: string }): JSX.Element {
+  return (
+    <div className="flex min-h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-zinc-500">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/15 border-t-accent" />
+      <div>
+        <div className="text-zinc-300">正在读取预览...</div>
+        {path && <div className="mt-1 max-w-[18rem] truncate font-mono text-[11px] text-zinc-600">{path}</div>}
+      </div>
+    </div>
+  )
+}
+
+function ErrorView({ path, message }: { path?: string; message: string }): JSX.Element {
+  return (
+    <div className="flex min-h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-zinc-500">
+      <div className="rounded-lg border border-orange-500/25 bg-orange-500/10 px-3 py-2 text-orange-200">
+        {message}
+      </div>
+      {path && <div className="max-w-[18rem] truncate font-mono text-[11px] text-zinc-600">{path}</div>}
+    </div>
+  )
+}
+
 export default function AttachmentPreviewPane(): JSX.Element | null {
   const attachment = useUiStore((s) => s.attachmentPreview)
   const close = useUiStore((s) => s.closeAttachmentPreview)
@@ -139,6 +173,7 @@ export default function AttachmentPreviewPane(): JSX.Element | null {
   const [displayedCurrent, setDisplayedCurrent] = useState<UserAttachment | null>(current)
   const [contentSwitching, setContentSwitching] = useState(false)
   const closeTimerRef = useRef<number | null>(null)
+  const previewRequestSeqRef = useRef(0)
 
   useEffect(() => {
     if (closeTimerRef.current !== null) {
@@ -152,6 +187,7 @@ export default function AttachmentPreviewPane(): JSX.Element | null {
       return
     }
 
+    previewRequestSeqRef.current += 1
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
       setRenderedAttachment(null)
@@ -209,8 +245,28 @@ export default function AttachmentPreviewPane(): JSX.Element | null {
       void window.api.revealInExplorer(cwd, path)
       return
     }
+    const requestSeq = ++previewRequestSeqRef.current
+    const fallback = loadingPathAttachment(path)
+    pushPreview(fallback)
     void window.api.readFiles(cwd, [path]).then((files) => {
-      pushPreview(files[0] ? pickedFileToUserAttachment(files[0]) : pathToUserAttachment(path))
+      if (previewRequestSeqRef.current !== requestSeq) return
+      const next = files[0] ? pickedFileToUserAttachment(files[0]) : errorPathAttachment(path)
+      setRenderedAttachment(next)
+      setHistory((prev) => {
+        const last = prev[prev.length - 1]
+        if (!last || last.path !== path) return prev
+        return [...prev.slice(0, -1), next]
+      })
+    }).catch((error: unknown) => {
+      if (previewRequestSeqRef.current !== requestSeq) return
+      const message = error instanceof Error ? error.message : PREVIEW_READ_ERROR
+      const next = errorPathAttachment(path, message || PREVIEW_READ_ERROR)
+      setRenderedAttachment(next)
+      setHistory((prev) => {
+        const last = prev[prev.length - 1]
+        if (!last || last.path !== path) return prev
+        return [...prev.slice(0, -1), next]
+      })
     })
   }
 
@@ -218,9 +274,13 @@ export default function AttachmentPreviewPane(): JSX.Element | null {
     setHistory((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev))
   }
 
-  const canPreviewImage = renderCurrent.kind === 'image' && !!renderCurrent.dataUrl
-  const canPreviewText = renderCurrent.kind === 'text' && typeof renderCurrent.text === 'string'
-  const canPreviewDirectory = renderCurrent.kind === 'directory'
+  const loading = renderCurrent.previewState === 'loading'
+  const previewError = renderCurrent.previewState === 'error'
+    ? (renderCurrent.previewError || PREVIEW_READ_ERROR)
+    : null
+  const canPreviewImage = !loading && !previewError && renderCurrent.kind === 'image' && !!renderCurrent.dataUrl
+  const canPreviewText = !loading && !previewError && renderCurrent.kind === 'text' && typeof renderCurrent.text === 'string'
+  const canPreviewDirectory = !loading && !previewError && renderCurrent.kind === 'directory'
   const canGoBack = history.length > 1
   const meta = fileMeta(renderCurrent)
 
@@ -268,6 +328,10 @@ export default function AttachmentPreviewPane(): JSX.Element | null {
       </div>
 
       <div className={`attachment-preview-content min-h-0 flex-1 overflow-auto p-2 ${contentSwitching ? 'is-switching' : ''}`}>
+        {loading && <LoadingView path={renderCurrent.path} />}
+
+        {previewError && <ErrorView path={renderCurrent.path} message={previewError} />}
+
         {canPreviewImage && (
           <div className="flex min-h-full items-center justify-center">
             <img
@@ -320,7 +384,7 @@ export default function AttachmentPreviewPane(): JSX.Element | null {
           </div>
         )}
 
-        {!canPreviewImage && !canPreviewDirectory && !canPreviewText && (
+        {!loading && !previewError && !canPreviewImage && !canPreviewDirectory && !canPreviewText && (
           <div className="flex min-h-full items-center justify-center px-6 text-center text-sm text-zinc-500">
             这个项目没有可预览内容
           </div>

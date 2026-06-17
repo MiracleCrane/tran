@@ -203,6 +203,17 @@ function ChatTopbar({
   )
 }
 
+function BlockingOverlay({ label }: { label: string }): JSX.Element {
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/72 p-6 backdrop-blur-md">
+      <div className="flex flex-col items-center gap-4 text-zinc-100">
+        <div className="h-11 w-11 animate-spin rounded-full border-2 border-white/15 border-t-accent" />
+        <div className="text-sm font-medium text-zinc-200">{label}</div>
+      </div>
+    </div>
+  )
+}
+
 function MainViewContent({
   view,
   chatTopbarCollapsed,
@@ -304,6 +315,7 @@ export default function App(): JSX.Element {
   const view = useUiStore((s) => s.view)
   const setView = useUiStore((s) => s.setView)
   const attachmentPreview = useUiStore((s) => s.attachmentPreview)
+  const blockingOverlay = useUiStore((s) => s.blockingOverlay)
   const previewOpen = !!attachmentPreview
   const closeAttachmentPreview = useUiStore((s) => s.closeAttachmentPreview)
   const chatSessionKey = meta?.sessionId ?? ''
@@ -408,6 +420,23 @@ export default function App(): JSX.Element {
   }, [setView])
 
   useEffect(() => {
+    const enforceAgentBackendView = (): void => {
+      void window.api.getPreferences().then((prefs) => {
+        if (prefs.agentBackend === 'codex' && useUiStore.getState().view === 'providers') {
+          setView('settings')
+        }
+      })
+    }
+    enforceAgentBackendView()
+    window.addEventListener('forge:agent-backend-changed', enforceAgentBackendView)
+    window.addEventListener('forge:provider-changed', enforceAgentBackendView)
+    return () => {
+      window.removeEventListener('forge:agent-backend-changed', enforceAgentBackendView)
+      window.removeEventListener('forge:provider-changed', enforceAgentBackendView)
+    }
+  }, [setView])
+
+  useEffect(() => {
     let timeout: number | null = null
 
     if (previewOpen) {
@@ -485,8 +514,8 @@ export default function App(): JSX.Element {
     }
 
     setViewSwitching(true)
+    setDisplayView(view)
     const timeout = window.setTimeout(() => {
-      setDisplayView(view)
       window.requestAnimationFrame(() => setViewSwitching(false))
     }, VIEW_SWAP_DELAY_MS)
 
@@ -547,6 +576,7 @@ export default function App(): JSX.Element {
             F
           </div>
         </div>
+        {blockingOverlay && <BlockingOverlay label={blockingOverlay.label} />}
       </div>
     )
   }
@@ -563,6 +593,7 @@ export default function App(): JSX.Element {
             info={availableUpdate}
             onClose={() => setAvailableUpdate(null)}
           />
+          {blockingOverlay && <BlockingOverlay label={blockingOverlay.label} />}
         </div>
       </ErrorBoundary>
     )
@@ -628,6 +659,7 @@ export default function App(): JSX.Element {
             info={availableUpdate}
             onClose={() => setAvailableUpdate(null)}
           />
+          {blockingOverlay && <BlockingOverlay label={blockingOverlay.label} />}
         </div>
       </div>
     </ErrorBoundary>

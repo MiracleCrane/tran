@@ -1,4 +1,6 @@
 import type { SDKMessage, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk'
+import type { AgentBackendId, AgentBackendInfo } from './agentBackends'
+export type { AgentBackendId, AgentBackendInfo } from './agentBackends'
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export type PermissionMode =
@@ -11,6 +13,8 @@ export type PermissionMode =
 
 export interface StartSessionOptions {
   cwd: string
+  /** Which pluggable agent backend should own this session. */
+  agentBackend?: AgentBackendId
   /** Optional API key override. If omitted, the SDK uses the logged-in profile / env. */
   apiKey?: string
   model?: string
@@ -49,6 +53,7 @@ export interface PermissionResponsePayload {
 
 export interface SessionListItem {
   sessionId: string
+  agentBackend?: AgentBackendId
   summary: string
   lastModified: number
   cwd?: string
@@ -152,10 +157,13 @@ export interface SkillInfo {
 export interface MarketplacePlugin {
   name: string
   description: string
+  agentBackend?: AgentBackendId
   author?: string
   category?: string
   homepage?: string
   sourceUrl?: string
+  installed?: boolean
+  enabled?: boolean
   /** Marketplace this came from (e.g. "claude-plugins-official"). */
   marketplace: string
 }
@@ -197,6 +205,8 @@ export interface PickDirectoryOptions {
 
 /** Misc app preferences managed by the Settings panel. */
 export interface Preferences {
+  /** Which pluggable agent engine Forge should use. */
+  agentBackend?: AgentBackendId
   /** Default effort for new sessions (AgentBridge fallback). */
   defaultEffort?: EffortLevel
   /** Default permission mode for new sessions. */
@@ -207,6 +217,8 @@ export interface Preferences {
   wslSupportEnabled?: boolean
   /** Models shown in the Composer dropdown; empty/undefined = built-in list. */
   composerModels?: ComposerModel[]
+  /** Models shown when the Codex agent backend is active. */
+  codexComposerModels?: ComposerModel[]
   /** Experimental: route Chromium's compositing through the ANGLE Vulkan
    *  backend on Windows (default D3D11). Off by default; requires restart and
    *  is higher-variance across GPU drivers. */
@@ -235,6 +247,10 @@ export interface ProviderProfiles {
 }
 
 export interface RuntimeStatus {
+  agentBackend: AgentBackendId
+  agentName: string
+  agentVersion?: string
+  agentPath?: string
   backend: ClaudeExecutionBackend
   provider: Provider | null
   model: string
@@ -268,8 +284,28 @@ export interface UpdateCheckResult {
   error?: string
 }
 
+export interface UpdateDownloadOptions {
+  assetUrl?: string
+  directory?: string
+  requestId?: string
+  openWhenDone?: boolean
+}
+
+export interface UpdateDownloadProgress {
+  requestId?: string
+  fileName: string
+  path: string
+  receivedBytes: number
+  totalBytes?: number
+  percent?: number
+  bytesPerSecond: number
+  elapsedMs: number
+  done?: boolean
+}
+
 export interface UpdateInstallResult {
   ok: boolean
+  canceled?: boolean
   path?: string
   error?: string
 }
@@ -460,8 +496,8 @@ export interface ForgeApi {
   /** --- Skills --- */
   /** Skills available to the active session (via supportedCommands). */
   listSkills(sessionId: string): Promise<SkillInfo[]>
-  /** Browse the local plugin marketplace catalogs (read-only). */
-  listMarketplacePlugins(): Promise<MarketplacePlugin[]>
+  /** Browse plugin marketplace catalogs for the selected agent backend (read-only). */
+  listMarketplacePlugins(agentBackend?: AgentBackendId, cwd?: string): Promise<MarketplacePlugin[]>
 
   /** Batch-translate texts EN→ZH via the active provider's /v1/messages. Returns
    *  one translation per input (empty string for any that failed). */
@@ -476,6 +512,8 @@ export interface ForgeApi {
   testTranslate(appId: string, secretKey: string): Promise<TranslateTestResult>
 
   /** --- Preferences (Settings panel) --- */
+  listAgentBackends(): Promise<AgentBackendInfo[]>
+  listAgentModels(): Promise<ComposerModel[]>
   getPreferences(): Promise<Preferences>
   savePreferences(prefs: Preferences): Promise<Preferences>
   getRuntimeStatus(cwd?: string, model?: string, options?: RuntimeStatusOptions): Promise<RuntimeStatus>
@@ -483,7 +521,7 @@ export interface ForgeApi {
   repairWslEnvironment(cwd: string): Promise<WslHealthReport>
   getDiagnosticLog(): Promise<string>
   checkForUpdates(): Promise<UpdateCheckResult>
-  downloadAndInstallUpdate(assetUrl?: string): Promise<UpdateInstallResult>
+  downloadAndInstallUpdate(options?: UpdateDownloadOptions): Promise<UpdateInstallResult>
   exportDiagnosticReport(options?: DiagnosticReportOptions): Promise<DiagnosticReportResult>
   exportSettings(appearance?: Record<string, unknown>): Promise<SettingsBackup>
   importSettings(backup: SettingsBackup): Promise<void>
@@ -501,6 +539,7 @@ export interface ForgeApi {
   /** Subscribe to the first-close prompt request (main → renderer). */
   onClosePrompt(cb: () => void): () => void
   onUpdateAvailable(cb: (info: UpdateCheckResult) => void): () => void
+  onUpdateDownloadProgress(cb: (progress: UpdateDownloadProgress) => void): () => void
 
   pickDirectory(options?: PickDirectoryOptions): Promise<string | null>
   getApiKey(): Promise<string | null>

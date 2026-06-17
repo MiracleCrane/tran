@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
+import { useUiStore } from '../store/uiStore'
 import type { ClaudeExecutionBackend, Project } from '../../shared/ipc'
 import Collapse from './Collapse'
 import { isWslProjectPath } from '../../shared/paths'
@@ -62,8 +63,9 @@ function normalizePickedProjectPath(path: string, backend: ClaudeExecutionBacken
 export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
   const switchProject = useSessionStore((s) => s.switchProject)
-  const starting = useSessionStore((s) => s.starting)
   const reset = useSessionStore((s) => s.reset)
+  const showBlockingOverlay = useUiStore((s) => s.showBlockingOverlay)
+  const hideBlockingOverlay = useUiStore((s) => s.hideBlockingOverlay)
 
   const [projects, setProjects] = useState<Project[]>([])
   const [open, setOpen] = useState(false)
@@ -73,6 +75,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   const [confirmPath, setConfirmPath] = useState<string | null>(null)
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   const elevationTimerRef = useRef<number | null>(null)
+  const projectActionSeqRef = useRef(0)
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -136,42 +139,57 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
     isWslProjectPath(path, { includePosixAbsolute: true }) ? 'wsl' : fallback
 
   const addNew = async (backend: ClaudeExecutionBackend): Promise<void> => {
+    const actionSeq = ++projectActionSeqRef.current
     setOpen(false)
-    const dir = await window.api.pickDirectory({ backend })
+    const overlayId = showBlockingOverlay('正在等待资源管理器响应...')
+    let dir: string | null = null
+    try {
+      dir = await window.api.pickDirectory({ backend })
+    } finally {
+      hideBlockingOverlay(overlayId)
+    }
     if (!dir) return
+    if (projectActionSeqRef.current !== actionSeq) return
     const targetBackend = inferBackendFromPath(dir, backend)
     await window.api.savePreferences({
       claudeExecutionBackend: targetBackend,
       ...(targetBackend === 'wsl' ? { wslSupportEnabled: true } : {})
     })
+    if (projectActionSeqRef.current !== actionSeq) return
     window.dispatchEvent(new Event('forge:provider-changed'))
     window.dispatchEvent(new Event('forge:model-options-changed'))
     if (targetBackend === 'wsl') window.dispatchEvent(new Event('forge:wsl-support-changed'))
     const list = await window.api.addProject(dir)
+    if (projectActionSeqRef.current !== actionSeq) return
     setProjects(list)
     const normalizedDir = normalizePickedProjectPath(dir, targetBackend)
     const savedPath = list.find((p) => p.path === normalizedDir)?.path ?? normalizedDir
-    await switchProject(savedPath)
+    void switchProject(savedPath)
   }
 
-  const onSwitch = async (path: string): Promise<void> => {
+  const onSwitch = (path: string): void => {
+    ++projectActionSeqRef.current
     setOpen(false)
     if (path === meta?.cwd) return
-    await switchProject(path)
+    void switchProject(path)
   }
 
   const commitRename = async (path: string): Promise<void> => {
+    const actionSeq = ++projectActionSeqRef.current
     const list = await window.api.renameProject(path, editText)
+    if (projectActionSeqRef.current !== actionSeq) return
     setProjects(list)
     setEditingPath(null)
   }
 
   const doRemove = async (path: string): Promise<void> => {
+    const actionSeq = ++projectActionSeqRef.current
     setConfirmPath(null)
     const list = await window.api.removeProject(path)
+    if (projectActionSeqRef.current !== actionSeq) return
     setProjects(list)
     if (path === meta?.cwd) {
-      if (list[0]) await switchProject(list[0].path)
+      if (list[0]) void switchProject(list[0].path)
       else reset() // removed the last project → back to Onboarding
     }
   }
@@ -179,18 +197,16 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   const trigger = collapsed ? (
     <button
       onClick={() => setOpen((o) => !o)}
-      disabled={starting}
       title={current?.path ?? meta?.cwd ?? ''}
-      className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-50"
+      className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200"
     >
       <FolderIcon />
     </button>
   ) : (
     <button
       onClick={() => setOpen((o) => !o)}
-      disabled={starting}
       title={current?.path ?? meta?.cwd ?? ''}
-      className="flex h-8 w-full items-center gap-2 rounded-xl px-2.5 text-[11px] text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100 disabled:opacity-50"
+      className="flex h-8 w-full items-center gap-2 rounded-xl px-2.5 text-[11px] text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100"
     >
       <FolderIcon />
       <span className="flex-1 truncate text-left">{currentLabel}</span>

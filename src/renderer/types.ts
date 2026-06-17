@@ -1,4 +1,4 @@
-import type { PickedDirectoryEntry, PermissionRequestPayload } from '../shared/ipc'
+import type { AgentBackendId, PickedDirectoryEntry, PermissionRequestPayload } from '../shared/ipc'
 
 export type ToolStatus = 'pending' | 'running' | 'done' | 'error' | 'denied'
 
@@ -40,6 +40,8 @@ export interface UserAttachment {
   /** For directories: a shallow file list read by the main process. */
   entries?: PickedDirectoryEntry[]
   entriesTruncated?: boolean
+  previewState?: 'loading' | 'error'
+  previewError?: string
 }
 
 export interface UserItem {
@@ -102,6 +104,8 @@ export interface SubagentTask {
 export interface SessionMeta {
   /** The bridge handle id — this is what every IPC call must target. */
   sessionId: string
+  /** Pluggable agent engine that owns this bridge session. */
+  agentBackend?: AgentBackendId
   /** The SDK's own internal session id (for resume/listSessions later). */
   sdkSessionId?: string
   cwd: string

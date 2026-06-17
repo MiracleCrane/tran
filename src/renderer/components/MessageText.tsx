@@ -1,11 +1,11 @@
-import { memo, type AnchorHTMLAttributes, type MouseEvent } from 'react'
+import { memo, useEffect, useState, type AnchorHTMLAttributes, type MouseEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import type { UserAttachment } from '../types'
-import { pickedFileToUserAttachment } from '../utils/attachments'
+import { pathToUserAttachment, pickedFileToUserAttachment } from '../utils/attachments'
 
 function isPathLike(s: string): boolean {
   if (!s || s.length > 260) return false
@@ -18,12 +18,14 @@ function normalizePathForPreview(text: string): string {
   return lineRef?.[1] ?? trimmed
 }
 
-function fallbackPathAttachment(path: string): UserAttachment {
-  return {
-    name: path.split(/[\\/]/).filter(Boolean).pop() ?? path,
-    kind: 'other',
-    path
-  }
+const PREVIEW_READ_ERROR = '文件或目录不存在，或无法读取。'
+
+function loadingPathAttachment(path: string): UserAttachment {
+  return pathToUserAttachment(path, { previewState: 'loading' })
+}
+
+function errorPathAttachment(path: string, error = PREVIEW_READ_ERROR): UserAttachment {
+  return pathToUserAttachment(path, { previewState: 'error', previewError: error })
 }
 
 function stripHrefDecorations(href: string): string {
@@ -68,8 +70,16 @@ function openPathPreview(
   path: string,
   openAttachmentPreview: (attachment: UserAttachment) => void
 ): void {
+  openAttachmentPreview(loadingPathAttachment(path))
   void window.api.readFiles(cwd, [path]).then((files) => {
-    openAttachmentPreview(files[0] ? pickedFileToUserAttachment(files[0]) : fallbackPathAttachment(path))
+    const current = useUiStore.getState().attachmentPreview
+    if (current?.path !== path) return
+    openAttachmentPreview(files[0] ? pickedFileToUserAttachment(files[0]) : errorPathAttachment(path))
+  }).catch((error: unknown) => {
+    const current = useUiStore.getState().attachmentPreview
+    if (current?.path !== path) return
+    const message = error instanceof Error ? error.message : PREVIEW_READ_ERROR
+    openAttachmentPreview(errorPathAttachment(path, message || PREVIEW_READ_ERROR))
   })
 }
 
@@ -164,7 +174,13 @@ function MessageTextImpl({
   children: string
   highlight?: boolean
 }): JSX.Element {
-  const md = highlight ? MD_HIGHLIGHTED : MD_PLAIN
+  const [highlightLocked, setHighlightLocked] = useState(highlight)
+
+  useEffect(() => {
+    if (highlight) setHighlightLocked(true)
+  }, [highlight])
+
+  const md = highlight || highlightLocked ? MD_HIGHLIGHTED : MD_PLAIN
   return (
     <div className="prose-forge text-zinc-200">
       <ReactMarkdown {...md}>{children}</ReactMarkdown>

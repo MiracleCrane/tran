@@ -3,7 +3,7 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore, type View } from '../store/uiStore'
 import Collapse from './Collapse'
 import ProjectSwitcher from './ProjectSwitcher'
-import type { ClaudeExecutionBackend, Provider, SessionListItem } from '../../shared/ipc'
+import type { AgentBackendId, ClaudeExecutionBackend, Provider, SessionListItem } from '../../shared/ipc'
 
 type BackendFilter = 'all' | ClaudeExecutionBackend
 type SessionGroupMode = 'time' | 'project'
@@ -290,6 +290,7 @@ export default function Sidebar(): JSX.Element {
   const toggleNav = useUiStore((s) => s.toggleNav)
 
   const [activeProvider, setActiveProvider] = useState<Provider | null>(null)
+  const [agentBackend, setAgentBackend] = useState<AgentBackendId>('claude-code')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
@@ -567,15 +568,26 @@ export default function Sidebar(): JSX.Element {
     return () => window.removeEventListener('forge:wsl-support-changed', refreshWslSupport)
   }, [refresh, reloadForBackendSwitch])
 
-  // Re-read the active provider whenever a new session spawns (covers provider
-  // switches, which restart the session → new bridge id).
+  // Re-read the active agent/provider whenever a new session spawns (covers
+  // provider switches, which restart the session -> new bridge id).
   useEffect(() => {
-    const refreshActiveProvider = (): void => {
-      void window.api.getActiveProvider().then(setActiveProvider)
+    const refreshAgentProvider = (): void => {
+      void Promise.all([
+        window.api.getPreferences().catch(() => null),
+        window.api.getActiveProvider().catch(() => null)
+      ]).then(([prefs, provider]) => {
+        const nextAgent = prefs?.agentBackend ?? 'claude-code'
+        setAgentBackend(nextAgent)
+        setActiveProvider(nextAgent === 'codex' ? null : provider)
+      })
     }
-    refreshActiveProvider()
-    window.addEventListener('forge:provider-changed', refreshActiveProvider)
-    return () => window.removeEventListener('forge:provider-changed', refreshActiveProvider)
+    refreshAgentProvider()
+    window.addEventListener('forge:provider-changed', refreshAgentProvider)
+    window.addEventListener('forge:agent-backend-changed', refreshAgentProvider)
+    return () => {
+      window.removeEventListener('forge:provider-changed', refreshAgentProvider)
+      window.removeEventListener('forge:agent-backend-changed', refreshAgentProvider)
+    }
   }, [meta?.sessionId])
 
   const clearSidebarMotionTimers = (): void => {
@@ -907,6 +919,11 @@ export default function Sidebar(): JSX.Element {
           : ''
   const wslNavInteractive =
     wslSupportEnabled && (wslNavRevealPhase === 'opening' || wslNavRevealPhase === 'visible')
+  const showProviderNav = agentBackend !== 'codex'
+
+  useEffect(() => {
+    if (!showProviderNav && view === 'providers') setView('settings')
+  }, [setView, showProviderNav, view])
 
   /* ---------- collapsed: icon rail ---------- */
   if (collapsed) {
@@ -939,7 +956,7 @@ export default function Sidebar(): JSX.Element {
         >
           <PlusIcon />
         </button>
-        {activeProvider && (
+        {showProviderNav && activeProvider && (
           <span
             className="mt-2 h-1.5 w-1.5 rounded-full bg-emerald-500"
             title={`运营商:${activeProvider.name || activeProvider.baseUrl}`}
@@ -960,13 +977,20 @@ export default function Sidebar(): JSX.Element {
         >
           <McpIcon />
         </button>
-        <button
-          onClick={() => setView('providers')}
-          className={`mt-1 ${iconBtn(view === 'providers')}`}
-          title="运营商"
-        >
-          <ShieldIcon />
-        </button>
+        <div className={`provider-stack-reveal provider-collapsed-reveal ${showProviderNav ? 'is-enabled' : ''}`}>
+          <button
+            onClick={() => {
+              if (showProviderNav) setView('providers')
+            }}
+            className={iconBtn(view === 'providers')}
+            title="运营商"
+            disabled={!showProviderNav}
+            tabIndex={showProviderNav ? 0 : -1}
+            aria-hidden={!showProviderNav}
+          >
+            <ShieldIcon />
+          </button>
+        </div>
         <button
           onClick={() => setView('translate')}
           className={`mt-1 ${iconBtn(view === 'translate')}`}
@@ -1017,9 +1041,7 @@ export default function Sidebar(): JSX.Element {
   const snapshotListClass =
     sessionListTransitionPhase === 'exiting'
       ? 'is-exiting'
-      : sessionListTransitionPhase === 'loading'
-        ? 'is-hidden'
-        : ''
+      : ''
   const navCls = (on: boolean): string =>
     `sidebar-tool-tab flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs ${
       on ? 'is-active glass-active text-zinc-100' : 'text-zinc-400'
@@ -1173,9 +1195,6 @@ export default function Sidebar(): JSX.Element {
               onScroll={handleSessionListScroll}
               className={`sidebar-deferred-content is-ready session-live-list min-h-0 h-full overflow-y-auto px-3 pb-3 ${liveSessionListClass}`}
             >
-        {!hideLiveSessionList && !hasAnimatedSessionRows && loading && sessions.length === 0 && (
-          <div className="px-2 py-3 text-xs text-zinc-600">加载中…</div>
-        )}
         {!hideLiveSessionList && !hasAnimatedSessionRows && !loading && sessions.length === 0 && (
           <div className="px-2 py-3 text-xs text-zinc-600">还没有对话。</div>
         )}
@@ -1325,7 +1344,7 @@ export default function Sidebar(): JSX.Element {
         ))}
         {!hideLiveSessionList && sessions.length > 0 && (sessionsHasMore || loading) && (
           <div className="px-2 py-3 text-center text-[11px] text-zinc-600">
-            {loading ? '加载更多会话中...' : '继续下滑加载更多'}
+            继续下滑加载更多
           </div>
         )}
             </div>
@@ -1360,10 +1379,12 @@ export default function Sidebar(): JSX.Element {
               {NAV_ITEMS.map((item, i) => {
                 const on = view === item.view
                 const isWslItem = item.view === 'wslHealth'
+                const isProviderItem = item.view === 'providers'
                 const button = (
                   <button
                     key={item.view}
                     onClick={() => {
+                      if (isProviderItem && !showProviderNav) return
                       if (!isWslItem || wslNavInteractive) setView(on ? 'chat' : item.view)
                     }}
                     onPointerEnter={handleSidebarPointerGlow}
@@ -1374,9 +1395,9 @@ export default function Sidebar(): JSX.Element {
                       opacity: navCollapsed ? 0 : 1,
                       transform: navCollapsed ? 'translateY(-6px)' : 'translateY(0)'
                     } as CSSProperties}
-                    disabled={isWslItem && !wslNavInteractive}
-                    tabIndex={isWslItem && !wslNavInteractive ? -1 : 0}
-                    aria-hidden={isWslItem && !wslNavInteractive}
+                    disabled={(isWslItem && !wslNavInteractive) || (isProviderItem && !showProviderNav)}
+                    tabIndex={(isWslItem && !wslNavInteractive) || (isProviderItem && !showProviderNav) ? -1 : 0}
+                    aria-hidden={(isWslItem && !wslNavInteractive) || (isProviderItem && !showProviderNav)}
                   >
                     <item.icon />
                     {item.label}
@@ -1387,6 +1408,16 @@ export default function Sidebar(): JSX.Element {
                     <div
                       key={item.view}
                       className={`wsl-stack-reveal wsl-nav-reveal w-full ${wslNavRevealClass}`}
+                    >
+                      {button}
+                    </div>
+                  )
+                }
+                if (isProviderItem) {
+                  return (
+                    <div
+                      key={item.view}
+                      className={`provider-stack-reveal provider-nav-reveal w-full ${showProviderNav ? 'is-enabled' : ''}`}
                     >
                       {button}
                     </div>

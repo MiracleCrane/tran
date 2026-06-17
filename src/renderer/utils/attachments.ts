@@ -35,10 +35,14 @@ export function pickedFileToUserAttachment(file: PickedFile): UserAttachment {
   return base
 }
 
-export function pathToUserAttachment(path: string): UserAttachment {
+export function pathToUserAttachment(
+  path: string,
+  options: Pick<UserAttachment, 'previewState' | 'previewError'> = {}
+): UserAttachment {
   return {
     name: path.split(/[\\/]/).filter(Boolean).pop() ?? path,
     kind: 'other',
-    path
+    path,
+    ...options
   }
 }

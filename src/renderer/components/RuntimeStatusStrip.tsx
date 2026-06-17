@@ -4,8 +4,8 @@ import { useUiStore } from '../store/uiStore'
 import type { RuntimeStatus } from '../../shared/ipc'
 
 function shortVersion(version: string | undefined): string {
-  if (!version) return 'Claude ?'
-  return version.replace(/^claude(?: code)?\s*/i, '').trim() || version
+  if (!version) return 'Agent ?'
+  return version.replace(/^(claude(?: code)?|codex-cli)\s*/i, '').trim() || version
 }
 
 export default function RuntimeStatusStrip(): JSX.Element {
@@ -55,12 +55,14 @@ export default function RuntimeStatusStrip(): JSX.Element {
     }
 
     refresh()
+    window.addEventListener('forge:agent-backend-changed', refresh)
     window.addEventListener('forge:provider-changed', refresh)
     window.addEventListener('forge:model-options-changed', refresh)
     window.addEventListener('forge:wsl-support-changed', refresh)
     return () => {
       alive = false
       if (probeTimer !== null) window.clearTimeout(probeTimer)
+      window.removeEventListener('forge:agent-backend-changed', refresh)
       window.removeEventListener('forge:provider-changed', refresh)
       window.removeEventListener('forge:model-options-changed', refresh)
       window.removeEventListener('forge:wsl-support-changed', refresh)
@@ -70,11 +72,18 @@ export default function RuntimeStatusStrip(): JSX.Element {
   if (!meta) return <></>
 
   const backend = status?.backend ?? 'windows'
-  const providerName = status?.provider?.name || status?.provider?.baseUrl || 'No provider'
-  const version = status?.claudeCodeVersion ? shortVersion(status.claudeCodeVersion) : 'Claude ?'
+  const activeAgentBackend = status?.agentBackend ?? meta.agentBackend ?? 'claude-code'
+  const showProvider = activeAgentBackend !== 'codex'
+  const agentName = status?.agentName ?? 'Forge Agent'
+  const providerName =
+    activeAgentBackend === 'codex'
+      ? 'Codex CLI'
+      : status?.provider?.name || status?.provider?.baseUrl || 'No provider'
+  const versionSource = status?.agentVersion ?? status?.claudeCodeVersion
+  const version = versionSource ? shortVersion(versionSource) : `${agentName} ?`
   const versionTitle = status?.versionError
-    ? `Claude Code version check failed: ${status.versionError}`
-    : status?.claudeCodePath || status?.claudeCodeVersion || version
+    ? `${agentName} version check failed: ${status.versionError}`
+    : status?.agentPath || status?.claudeCodePath || versionSource || version
 
   const chip =
     'inline-flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] transition hover:bg-white/[0.07] hover:text-zinc-200'
@@ -94,22 +103,30 @@ export default function RuntimeStatusStrip(): JSX.Element {
             <span className="max-w-24 truncate text-zinc-600">{status.wslDistro}</span>
           )}
         </button>
-        <button
-          type="button"
-          onClick={() => setView('providers')}
-          className={`${chip} min-w-0`}
-          title="Provider 配置"
-        >
-          <span className="text-zinc-600">Provider</span>
-          <span className="truncate text-zinc-300">{providerName}</span>
-        </button>
+        <div className={`runtime-provider-reveal ${showProvider ? 'is-visible' : ''}`}>
+          <button
+            type="button"
+            onClick={() => {
+              if (showProvider) setView('providers')
+            }}
+            className={`${chip} min-w-0`}
+            title="Provider 配置"
+            disabled={!showProvider}
+            tabIndex={showProvider ? 0 : -1}
+            aria-hidden={!showProvider}
+          >
+            <span className="text-zinc-600">Provider</span>
+            <span className="truncate text-zinc-300">{providerName}</span>
+          </button>
+        </div>
         <button
           type="button"
           onClick={() => setView(backend === 'wsl' && wslSupportEnabled ? 'wslHealth' : 'settings')}
           className={`${chip} ml-auto shrink-0 ${status?.versionError ? 'text-amber-300' : ''}`}
           title={versionTitle}
         >
-          <span className="text-zinc-600">Claude</span>
+          <span className="text-zinc-600">Agent</span>
+          <span className="text-zinc-300">{agentName}</span>
           <span className="font-mono text-zinc-300">{version}</span>
         </button>
       </div>

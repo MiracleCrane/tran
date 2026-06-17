@@ -1,7 +1,9 @@
-import { ipcMain, dialog, shell, Notification, type BrowserWindow } from 'electron'
-import { readFileSync, readdirSync, statSync, existsSync, writeFileSync } from 'node:fs'
+import { app, ipcMain, dialog, shell, Notification, type BrowserWindow } from 'electron'
+import { readFileSync, existsSync, writeFileSync } from 'node:fs'
+import { readFile, readdir, stat as statAsync } from 'node:fs/promises'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
 import { AgentBridge } from './agent/AgentBridge'
+import { AGENT_BACKENDS } from '../shared/agentBackends'
 import { getApiKey, setApiKey, loadSettings, saveSettings } from './settings'
 import { saveMcpServer, deleteMcpServer } from './mcpConfig'
 import {
@@ -24,10 +26,9 @@ import {
   setLastProject,
   getStartupProject
 } from './projects'
-import { listMarketplacePlugins } from './marketplace'
 import { translateTexts } from './translate'
 import { getTranslateConfig, saveTranslateConfig, testTranslate } from './translateConfig'
-import { getPreferences, savePreferences } from './preferences'
+import { currentAgentBackend, getPreferences, savePreferences } from './preferences'
 import {
   exportSettings,
   getDiagnosticLog,
@@ -46,6 +47,12 @@ import {
   listWslSessions,
   renameWslSession
 } from './wslHistory'
+import {
+  deleteCodexSession,
+  getCodexSessionMessages,
+  listCodexSessions,
+  renameCodexSession
+} from './codexHistory'
 import * as gitModule from './git'
 import { log } from './logger'
 import type {
@@ -77,7 +84,11 @@ import type {
   ComposerModel,
   PickDirectoryOptions,
   UpdateCheckResult,
+  UpdateDownloadOptions,
+  UpdateDownloadProgress,
   UpdateInstallResult,
+  AgentBackendInfo,
+  AgentBackendId,
   DiagnosticReportOptions,
   DiagnosticReportResult
 } from '../shared/ipc'
@@ -101,6 +112,23 @@ const MIME: Record<string, string> = {
 }
 const MAX_TEXT_INLINE = 512 * 1024 // inline at most 512KB of a text file
 const MAX_DIRECTORY_ENTRIES = 300
+const PATH_PREVIEW_READ_TIMEOUT_MS = 4500
+
+function withPathReadTimeout<T>(
+  promise: Promise<T>,
+  label: string,
+  timeoutMs = PATH_PREVIEW_READ_TIMEOUT_MS
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  const timeout = new Promise<T>((_resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+  })
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId !== null) clearTimeout(timeoutId)
+  })
+}
 
 function currentClaudeBackend(): ClaudeExecutionBackend {
   return process.platform === 'win32' && getPreferences().claudeExecutionBackend === 'wsl'
@@ -193,24 +221,35 @@ function normalizeAgentMessageForRenderer(message: SDKMessage): SDKMessage {
   return { ...(message as unknown as Record<string, unknown>), cwd: normalized } as SDKMessage
 }
 
-function readDirectoryEntries(path: string): { entries: PickedDirectoryEntry[]; truncated: boolean } {
-  const entries: PickedDirectoryEntry[] = []
-  const dirents = readdirSync(path, { withFileTypes: true })
-  for (const dirent of dirents) {
-    const childPath = resolve(path, dirent.name)
-    try {
-      const stat = statSync(childPath)
-      entries.push({
-        name: dirent.name,
-        path: rendererPathFromNativePath(childPath),
-        kind: stat.isDirectory() ? 'directory' : 'file',
-        size: stat.isDirectory() ? 0 : stat.size,
-        modifiedAt: stat.mtimeMs
+async function readDirectoryEntries(path: string): Promise<{ entries: PickedDirectoryEntry[]; truncated: boolean }> {
+  const dirents = await withPathReadTimeout(
+    readdir(path, { withFileTypes: true }),
+    `read directory ${path}`
+  )
+  const entries = (
+    await Promise.all(
+      dirents.map(async (dirent): Promise<PickedDirectoryEntry | null> => {
+        const childPath = resolve(path, dirent.name)
+        try {
+          const entryStat = await withPathReadTimeout(
+            statAsync(childPath),
+            `stat directory entry ${childPath}`,
+            1500
+          )
+          const isDirectory = entryStat.isDirectory()
+          return {
+            name: dirent.name,
+            path: rendererPathFromNativePath(childPath),
+            kind: isDirectory ? 'directory' : 'file',
+            size: isDirectory ? 0 : entryStat.size,
+            modifiedAt: entryStat.mtimeMs
+          }
+        } catch {
+          return null
+        }
       })
-    } catch {
-      /* skip entries we cannot stat */
-    }
-  }
+    )
+  ).filter((entry): entry is PickedDirectoryEntry => entry !== null)
   entries.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1
     return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
@@ -221,14 +260,14 @@ function readDirectoryEntries(path: string): { entries: PickedDirectoryEntry[]; 
   }
 }
 
-function readPickedFiles(cwd: string, paths: string[], source: string): PickedFile[] {
+async function readPickedFiles(cwd: string, paths: string[], source: string): Promise<PickedFile[]> {
   const out: PickedFile[] = []
   for (const rawPath of paths) {
     try {
       const p = resolveNativePath(cwd, rawPath)
-      const stat = statSync(p)
+      const stat = await withPathReadTimeout(statAsync(p), `stat ${p}`)
       if (stat.isDirectory()) {
-        const { entries, truncated } = readDirectoryEntries(p)
+        const { entries, truncated } = await readDirectoryEntries(p)
         out.push({
           path: rendererPathFromNativePath(p),
           name: basename(p),
@@ -253,9 +292,9 @@ function readPickedFiles(cwd: string, paths: string[], source: string): PickedFi
           : 'other'
       let data = ''
       if (kind === 'image') {
-        data = readFileSync(p).toString('base64')
+        data = (await withPathReadTimeout(readFile(p), `read image ${p}`)).toString('base64')
       } else if (kind === 'text') {
-        data = readFileSync(p).toString('utf-8').slice(0, MAX_TEXT_INLINE)
+        data = (await withPathReadTimeout(readFile(p, 'utf-8'), `read text ${p}`)).slice(0, MAX_TEXT_INLINE)
       }
       out.push({
         path: rendererPathFromNativePath(p),
@@ -344,7 +383,7 @@ export function registerIpc(
   })
 
   ipcMain.handle('forge:startSession', async (_e, opts: StartSessionOptions): Promise<StartSessionResult> => {
-    log('ipc', `startSession cwd=${opts.cwd} model=${opts.model ?? 'default'}`)
+    log('ipc', `startSession agent=${opts.agentBackend ?? 'default'} cwd=${opts.cwd} model=${opts.model ?? 'default'}`)
     const sessionId = await bridge.start(opts)
     getForgeTray()?.setTooltip?.('Forge · 运行中…')
     return { sessionId }
@@ -401,21 +440,26 @@ export function registerIpc(
       properties: ['openFile', 'multiSelections']
     })
     if (res.canceled || !res.filePaths.length) return []
-    return readPickedFiles(cwd, res.filePaths, 'pickFiles')
+    return await readPickedFiles(cwd, res.filePaths, 'pickFiles')
   })
 
   ipcMain.handle('forge:readFiles', async (_e, cwd: string, paths: string[]): Promise<PickedFile[]> => {
     const filePaths = Array.isArray(paths)
       ? paths.filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
       : []
-    return readPickedFiles(cwd, filePaths, 'readFiles')
+    return await readPickedFiles(cwd, filePaths, 'readFiles')
   })
 
   ipcMain.handle('forge:revealInExplorer', async (_e, cwd: string, pathStr: string): Promise<boolean> => {
     const resolved = resolveNativePath(cwd, pathStr)
-    if (!existsSync(resolved)) return false
-    if (statSync(resolved).isDirectory()) {
-      await shell.openPath(resolved)
+    let stat
+    try {
+      stat = await withPathReadTimeout(statAsync(resolved), `reveal stat ${resolved}`)
+    } catch {
+      return false
+    }
+    if (stat.isDirectory()) {
+      await withPathReadTimeout(shell.openPath(resolved), `open path ${resolved}`)
       return true
     }
     shell.showItemInFolder(resolved)
@@ -431,8 +475,10 @@ export function registerIpc(
     }
   })
 
-  ipcMain.handle('forge:listMarketplacePlugins', async (): Promise<MarketplacePlugin[]> =>
-    listMarketplacePlugins()
+  ipcMain.handle(
+    'forge:listMarketplacePlugins',
+    async (_e, agentBackend?: AgentBackendId, cwd?: string): Promise<MarketplacePlugin[]> =>
+      bridge.listMarketplacePlugins(agentBackend, cwd)
   )
 
   ipcMain.handle('forge:translateTexts', async (_e, texts: string[]): Promise<string[]> =>
@@ -452,6 +498,12 @@ export function registerIpc(
       testTranslate(appId, secretKey)
   )
 
+  ipcMain.handle('forge:listAgentBackends', async (): Promise<AgentBackendInfo[]> =>
+    AGENT_BACKENDS.map((backend) => ({ ...backend, capabilities: { ...backend.capabilities } }))
+  )
+  ipcMain.handle('forge:listAgentModels', async (): Promise<ComposerModel[]> =>
+    bridge.listModels()
+  )
   ipcMain.handle('forge:getPreferences', async (): Promise<Preferences> => getPreferences())
   ipcMain.handle('forge:savePreferences', async (_e, prefs: Preferences): Promise<Preferences> =>
     savePreferences(prefs)
@@ -473,8 +525,46 @@ export function registerIpc(
   ipcMain.handle('forge:checkForUpdates', async (): Promise<UpdateCheckResult> => checkForUpdates())
   ipcMain.handle(
     'forge:downloadAndInstallUpdate',
-    async (_e, assetUrl?: string): Promise<UpdateInstallResult> =>
-      downloadAndInstallUpdate(assetUrl)
+    async (_e, options?: UpdateDownloadOptions | string): Promise<UpdateInstallResult> => {
+      const normalized = typeof options === 'string' ? { assetUrl: options } : (options ?? {})
+      let directory = normalized.directory?.trim()
+
+      if (!directory) {
+        const dialogOptions: Electron.OpenDialogOptions = {
+          title: '选择更新安装包保存目录',
+          defaultPath: app.getPath('downloads'),
+          properties: ['openDirectory', 'createDirectory']
+        }
+        const win = getMainWindow()
+        const res =
+          win && !win.isDestroyed()
+            ? await dialog.showOpenDialog(win, dialogOptions)
+            : await dialog.showOpenDialog(dialogOptions)
+        if (res.canceled || !res.filePaths.length) return { ok: false, canceled: true }
+        directory = res.filePaths[0]
+      }
+
+      const result = await downloadAndInstallUpdate({
+        ...normalized,
+        directory,
+        onProgress: (progress: UpdateDownloadProgress) => {
+          send('forge:update-download-progress', progress)
+          withWindow((win) => {
+            if (progress.done) {
+              win.setProgressBar(-1)
+              return
+            }
+            if (typeof progress.percent === 'number') {
+              win.setProgressBar(Math.max(0, Math.min(1, progress.percent / 100)))
+            } else {
+              win.setProgressBar(2)
+            }
+          })
+        }
+      })
+      withWindow((win) => win.setProgressBar(-1))
+      return result
+    }
   )
   ipcMain.handle(
     'forge:exportDiagnosticReport',
@@ -617,6 +707,9 @@ export function registerIpc(
   ipcMain.handle('forge:listSessions', async (_e, cwd: string, opts?: SessionListOptions): Promise<SessionListItem[]> => {
     const limit = opts?.limit && opts.limit > 0 ? opts.limit : 50
     const offset = opts?.offset && opts.offset > 0 ? opts.offset : 0
+    if (currentAgentBackend() === 'codex') {
+      return listCodexSessions(cwd, { limit, offset })
+    }
     const wslSupportEnabled = getPreferences().wslSupportEnabled === true
     const requestedBackend =
       !wslSupportEnabled && (opts?.backend === 'wsl' || opts?.backend === 'all')
@@ -628,6 +721,7 @@ export function registerIpc(
       const sessions = await listSessions({ dir: cwd, limit: readLimit, offset: readOffset })
       return sessions.map((s) => ({
         sessionId: s.sessionId,
+        agentBackend: 'claude-code' as const,
         summary: s.summary,
         lastModified: s.lastModified,
         cwd: s.cwd ?? undefined,
@@ -639,7 +733,11 @@ export function registerIpc(
     const readWslSessions = async (readLimit: number, readOffset: number): Promise<SessionListItem[]> => {
       if (process.platform !== 'win32') return []
       const sessions = await listWslSessions(cwd, { limit: readLimit, offset: readOffset })
-      return sessions.map((session) => ({ ...session, runtimeBackend: 'wsl' as const }))
+      return sessions.map((session) => ({
+        ...session,
+        agentBackend: 'claude-code' as const,
+        runtimeBackend: 'wsl' as const
+      }))
     }
 
     try {
@@ -675,6 +773,9 @@ export function registerIpc(
     backend?: ClaudeExecutionBackend
   ): Promise<HistoryMessage[]> => {
     try {
+      if (currentAgentBackend() === 'codex') {
+        return getCodexSessionMessages(sessionId)
+      }
       if (useWslClaudeBackend(backend ?? currentClaudeBackend())) {
         return await getWslSessionMessages(sessionId, cwd)
       }
@@ -696,6 +797,10 @@ export function registerIpc(
       cwd: string,
       backend?: ClaudeExecutionBackend
     ): Promise<void> => {
+      if (currentAgentBackend() === 'codex') {
+        renameCodexSession(sessionId, title)
+        return
+      }
       if (useWslClaudeBackend(backend ?? currentClaudeBackend())) {
         await renameWslSession(sessionId, title, cwd)
         return
@@ -713,6 +818,10 @@ export function registerIpc(
       cwd: string,
       backend?: ClaudeExecutionBackend
     ): Promise<void> => {
+      if (currentAgentBackend() === 'codex') {
+        deleteCodexSession(sessionId)
+        return
+      }
       if (useWslClaudeBackend(backend ?? currentClaudeBackend())) {
         await deleteWslSession(sessionId, cwd)
         return
@@ -726,6 +835,7 @@ export function registerIpc(
     'forge:getSubagentMessages',
     async (_e, sessionId: string, agentId: string, cwd: string): Promise<HistoryMessage[]> => {
       try {
+        if (currentAgentBackend() === 'codex') return []
         if (useWslClaudeBackend()) return await getWslSubagentMessages(sessionId, agentId, cwd)
         const { getSubagentMessages } = await import('@anthropic-ai/claude-agent-sdk')
         const msgs = await getSubagentMessages(sessionId, agentId, { dir: cwd, limit: 500 })

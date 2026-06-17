@@ -9,14 +9,9 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import type { ComposerModel, PickedFile, EffortLevel, Provider, SkillInfo } from '../../shared/ipc'
+import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, Provider, SkillInfo } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
-
-const DEFAULT_MODELS: ComposerModel[] = [
-  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
-  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-  { id: 'claude-haiku-4-5', label: 'Haiku 4.5' }
-]
+import { defaultModelsForAgent, modelLabelForAgent } from '../../shared/models'
 
 const EFFORTS: { id: EffortLevel; label: string }[] = [
   { id: 'low', label: '低' },
@@ -105,18 +100,14 @@ function getSlashContext(value: string, caret: number): SlashContext | null {
   }
 }
 
-function modelLabel(id: string): string {
-  return DEFAULT_MODELS.find((m) => m.id === id)?.label ?? id
-}
-
 function providerModels(providers: Provider[]): ComposerModel[] {
   return providers
     .map((provider) => provider.model.trim())
     .filter(Boolean)
-    .map((id) => ({ id, label: modelLabel(id) }))
+    .map((id) => ({ id, label: modelLabelForAgent(undefined, id) }))
 }
 
-function mergeModels(...groups: ComposerModel[][]): ComposerModel[] {
+function mergeModels(agentBackend: AgentBackendId | undefined, ...groups: ComposerModel[][]): ComposerModel[] {
   const seen = new Set<string>()
   const merged: ComposerModel[] = []
   for (const group of groups) {
@@ -124,7 +115,7 @@ function mergeModels(...groups: ComposerModel[][]): ComposerModel[] {
       const id = model.id.trim()
       if (!id || seen.has(id)) continue
       seen.add(id)
-      merged.push({ id, label: model.label.trim() || modelLabel(id) })
+      merged.push({ id, label: model.label.trim() || modelLabelForAgent(agentBackend, id) })
     }
   }
   return merged
@@ -141,7 +132,7 @@ export default function Composer(): JSX.Element {
   const setEffort = useSessionStore((s) => s.setEffort)
   const pending = useSessionStore((s) => s.pendingQueue)
   const [text, setText] = useState('')
-  const [models, setModels] = useState(DEFAULT_MODELS)
+  const [models, setModels] = useState(defaultModelsForAgent(undefined))
   const [attachments, setAttachments] = useState<PickedFile[]>([])
   const [showTemplates, setShowTemplates] = useState(false)
   const [includeProjectContext, setIncludeProjectContext] = useState(true)
@@ -162,6 +153,7 @@ export default function Composer(): JSX.Element {
   const slashListRef = useRef<HTMLDivElement | null>(null)
   const heightBoundsRef = useRef(heightBounds)
   const resizeCancelRef = useRef<(() => void) | null>(null)
+  const attachmentActionSeqRef = useRef(0)
   const dragDepth = useRef(0)
   const [dragActive, setDragActive] = useState(false)
   const [dropError, setDropError] = useState<string | null>(null)
@@ -222,14 +214,29 @@ export default function Composer(): JSX.Element {
     let alive = true
 
     const refreshModels = async (): Promise<void> => {
-      const [prefs, providers] = await Promise.all([
-        window.api.getPreferences(),
-        window.api.listProviders()
+      const prefs = await window.api.getPreferences()
+      const [providers, agentModels] = await Promise.all([
+        prefs.agentBackend === 'codex' ? Promise.resolve([] as Provider[]) : window.api.listProviders(),
+        window.api.listAgentModels().catch(() => defaultModelsForAgent(prefs.agentBackend))
       ])
       if (!alive) return
-      const configured = prefs.composerModels?.length ? prefs.composerModels : DEFAULT_MODELS
-      const selected = meta?.model ? [{ id: meta.model, label: modelLabel(meta.model) }] : []
-      setModels(mergeModels(configured, providerModels(providers), selected))
+      const defaultModels = defaultModelsForAgent(prefs.agentBackend)
+      const configured =
+        prefs.agentBackend === 'codex'
+          ? agentModels.length
+            ? agentModels
+            : prefs.composerModels?.length
+              ? prefs.composerModels
+              : defaultModels
+          : prefs.composerModels?.length
+            ? prefs.composerModels
+            : agentModels.length
+              ? agentModels
+              : defaultModels
+      const selected = meta?.model
+        ? [{ id: meta.model, label: modelLabelForAgent(prefs.agentBackend, meta.model) }]
+        : []
+      setModels(mergeModels(prefs.agentBackend, configured, providerModels(providers), selected))
     }
 
     void refreshModels()
@@ -238,10 +245,12 @@ export default function Composer(): JSX.Element {
     }
     window.addEventListener('forge:provider-changed', onModelsChanged)
     window.addEventListener('forge:model-options-changed', onModelsChanged)
+    window.addEventListener('forge:agent-backend-changed', onModelsChanged)
     return () => {
       alive = false
       window.removeEventListener('forge:provider-changed', onModelsChanged)
       window.removeEventListener('forge:model-options-changed', onModelsChanged)
+      window.removeEventListener('forge:agent-backend-changed', onModelsChanged)
     }
   }, [meta?.model])
 
@@ -386,13 +395,17 @@ export default function Composer(): JSX.Element {
 
   const pickAttachment = async (): Promise<void> => {
     if (!meta) return
+    const actionSeq = ++attachmentActionSeqRef.current
     setDropError(null)
     const files = await window.api.pickFiles(meta.cwd)
+    if (attachmentActionSeqRef.current !== actionSeq) return
     if (files.length) setAttachments((prev) => [...prev, ...files])
   }
 
-  const removeAttachment = (i: number): void =>
+  const removeAttachment = (i: number): void => {
+    ++attachmentActionSeqRef.current
     setAttachments((prev) => prev.filter((_, idx) => idx !== i))
+  }
 
   const resetTextareaHeight = (): void => {
     setManualTextareaHeight(null)
@@ -494,7 +507,9 @@ export default function Composer(): JSX.Element {
       return
     }
 
+    const actionSeq = ++attachmentActionSeqRef.current
     const files = await window.api.readFiles(meta.cwd, paths)
+    if (attachmentActionSeqRef.current !== actionSeq) return
     if (files.length) setAttachments((prev) => [...prev, ...files])
     if (files.length < paths.length) {
       setDropError(`有 ${paths.length - files.length} 个文件无法引用`)
@@ -505,6 +520,7 @@ export default function Composer(): JSX.Element {
     const value = text.trim()
     const atts = attachments
     if (!value && atts.length === 0) return
+    ++attachmentActionSeqRef.current
     const finalText =
       includeProjectContext && meta && value
         ? `Project context: ${meta.cwd}\n\n${value}`
@@ -512,7 +528,7 @@ export default function Composer(): JSX.Element {
     setText('')
     setSlashContext(null)
     setAttachments([])
-    await sendMessage(finalText, atts.length ? atts : undefined)
+    void sendMessage(finalText, atts.length ? atts : undefined)
   }
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -680,11 +696,9 @@ export default function Composer(): JSX.Element {
             onSelect={refreshSlashContextFromTextarea}
             rows={1}
             placeholder={
-              starting
-                ? '正在启动会话…'
-                : running
-                  ? 'Claude 正在处理…(可继续发送,消息会排队)'
-                  : '给 Claude 发消息…'
+              running
+                ? 'Forge 正在处理…(可继续发送,消息会排队)'
+                : '给 Forge 发消息…'
             }
             style={{
               height: textareaHeight,

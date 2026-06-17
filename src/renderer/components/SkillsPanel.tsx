@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import type { SkillInfo, MarketplacePlugin } from '../../shared/ipc'
+import type { AgentBackendId, SkillInfo, MarketplacePlugin } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
 
 type Tab = 'skills' | 'store'
@@ -123,7 +123,27 @@ function useTranslated(texts: string[], on: boolean): { tr: (t: string) => strin
 export default function SkillsPanel(): JSX.Element {
   const [tab, setTab] = useState<Tab>('skills')
   const [translate, setTranslate] = useState(false)
+  const [agentBackend, setAgentBackend] = useState<AgentBackendId>('claude-code')
+  const metaAgentBackend = useSessionStore((s) => s.meta?.agentBackend)
+  const cwd = useSessionStore((s) => s.meta?.cwd)
   const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const refreshAgentBackend = (): void => {
+      void window.api.getPreferences().then((prefs) => {
+        if (!cancelled) setAgentBackend(prefs.agentBackend ?? metaAgentBackend ?? 'claude-code')
+      }).catch(() => {
+        if (!cancelled) setAgentBackend(metaAgentBackend ?? 'claude-code')
+      })
+    }
+    refreshAgentBackend()
+    window.addEventListener('forge:agent-backend-changed', refreshAgentBackend)
+    return () => {
+      cancelled = true
+      window.removeEventListener('forge:agent-backend-changed', refreshAgentBackend)
+    }
+  }, [metaAgentBackend])
 
   return (
     <div ref={rootRef} className="h-full overflow-y-auto bg-bg-base">
@@ -163,9 +183,14 @@ export default function SkillsPanel(): JSX.Element {
         </div>
 
         {tab === 'skills' ? (
-          <SkillsTab translate={translate} rootRef={rootRef} />
+          <SkillsTab translate={translate} rootRef={rootRef} agentBackend={agentBackend} />
         ) : (
-          <StoreTab translate={translate} rootRef={rootRef} />
+          <StoreTab
+            translate={translate}
+            rootRef={rootRef}
+            agentBackend={agentBackend}
+            cwd={cwd}
+          />
         )}
       </div>
     </div>
@@ -174,13 +199,17 @@ export default function SkillsPanel(): JSX.Element {
 
 function SkillsTab({
   translate,
-  rootRef
+  rootRef,
+  agentBackend
 }: {
   translate: boolean
   rootRef: React.RefObject<HTMLDivElement>
+  agentBackend: AgentBackendId
 }): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
   const starting = useSessionStore((s) => s.starting)
+  const activeAgentBackend = meta?.agentBackend ?? agentBackend
+  const skillRoot = activeAgentBackend === 'codex' ? '~/.codex/skills/' : '~/.claude/skills/'
 
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -234,7 +263,7 @@ function SkillsTab({
         <div className="rounded-xl border border-border-subtle bg-bg-panel px-5 py-10 text-center text-sm text-zinc-400">
           没有可用的技能。
           <p className="mt-1 text-xs text-zinc-600">
-            技能来自 <code className="text-zinc-500">~/.claude/skills/</code>{' '}
+            技能来自 <code className="text-zinc-500">{skillRoot}</code>{' '}
             或已安装的插件 —— 去商店看看。
           </p>
         </div>
@@ -270,10 +299,14 @@ function SkillsTab({
 
 function StoreTab({
   translate,
-  rootRef
+  rootRef,
+  agentBackend,
+  cwd
 }: {
   translate: boolean
   rootRef: React.RefObject<HTMLDivElement>
+  agentBackend: AgentBackendId
+  cwd?: string
 }): JSX.Element {
   const [plugins, setPlugins] = useState<MarketplacePlugin[]>([])
   const [loading, setLoading] = useState(true)
@@ -282,16 +315,25 @@ function StoreTab({
   const [category, setCategory] = useState<string>('all')
 
   useEffect(() => {
+    let cancelled = false
     void (async () => {
+      setLoading(true)
+      setError(null)
+      setPlugins([])
+      setCategory('all')
       try {
-        setPlugins(await window.api.listMarketplacePlugins())
+        const nextPlugins = await window.api.listMarketplacePlugins(agentBackend, cwd)
+        if (!cancelled) setPlugins(nextPlugins)
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     })()
-  }, [])
+    return () => {
+      cancelled = true
+    }
+  }, [agentBackend, cwd])
 
   const categories = useMemo(() => {
     const set = new Set<string>()
@@ -319,12 +361,22 @@ function StoreTab({
     [visible, texts]
   )
   const { tr, loading: translating } = useTranslated(visibleTexts, translate)
+  const agentName = agentBackend === 'codex' ? 'Codex' : 'Claude Code'
 
   return (
     <>
       <p className="mb-4 text-xs text-zinc-500">
-        浏览官方插件市场目录(本地缓存)。插件可打包技能与工具 —— 安装请在 Claude Code 里用{' '}
-        <code className="text-zinc-400">/plugin</code> 命令。
+        {agentBackend === 'codex' ? (
+          <>浏览 Codex 插件市场目录。插件可提供技能与工具，安装与启用请在 Codex 的插件管理里完成。</>
+        ) : (
+          <>
+            浏览 Claude Code 插件市场目录(本地缓存)。插件可打包技能与工具 —— 安装请在 Claude Code 里用{' '}
+            <code className="text-zinc-400">/plugin</code> 命令。
+          </>
+        )}
+        <span className="ml-2 rounded border border-border-subtle bg-bg-elev px-1.5 py-0.5 text-[10px] text-zinc-400">
+          {agentName}
+        </span>
         {translating && <span className="ml-2 text-accent">翻译中…</span>}
         {translate && <span className="ml-1 text-zinc-600">(只翻译看得见的)</span>}
       </p>
@@ -368,6 +420,16 @@ function StoreTab({
               {p.category && (
                 <span className="shrink-0 rounded bg-bg-elev px-1.5 py-0.5 text-[10px] text-zinc-500">
                   {p.category}
+                </span>
+              )}
+              {p.installed && (
+                <span className="shrink-0 rounded bg-bg-elev px-1.5 py-0.5 text-[10px] text-zinc-500">
+                  已安装
+                </span>
+              )}
+              {p.enabled === false && (
+                <span className="shrink-0 rounded bg-bg-elev px-1.5 py-0.5 text-[10px] text-zinc-500">
+                  未启用
                 </span>
               )}
             </div>

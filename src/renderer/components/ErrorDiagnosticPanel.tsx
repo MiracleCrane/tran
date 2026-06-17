@@ -17,30 +17,42 @@ function diagnose(error: string): Diagnosis {
   if (text.includes('auth') || text.includes('401') || text.includes('403') || text.includes('unauthorized')) {
     return {
       title: '认证或额度问题',
-      detail: '检查当前 Provider 的 Token/API Key、账号权限、余额和是否使用了正确的鉴权方式。'
+      detail: '检查当前 Agent 或 Provider 的登录状态、Token/API Key、账号权限、余额和鉴权方式。'
+    }
+  }
+  if (text.includes('no rollout found')) {
+    return {
+      title: '历史会话索引缺失',
+      detail: '当前 Agent 找不到这条历史会话的运行记录。Forge 会尝试自动开启新会话继续。'
+    }
+  }
+  if (text.includes('is archived')) {
+    return {
+      title: '历史会话已归档',
+      detail: '这条 Codex 历史会话已归档，Forge 会从历史列表中隐藏它。'
     }
   }
   if (text.includes('model') || text.includes('not found') || text.includes('invalid')) {
     return {
       title: '模型名可能无效',
-      detail: '当前模型可能不被该 Provider 支持。去 Provider/Profile 或模型列表里确认模型 ID。'
+      detail: '当前模型可能不被所选 Agent 后端支持。去设置里的模型列表确认模型 ID。'
     }
   }
   if (text.includes('wsl.exe') || text.includes('wsl') || text.includes('spawn')) {
     return {
       title: 'WSL 命令失败',
-      detail: '检查默认 WSL、claude 是否安装、工作目录映射和 ~/.claude/settings.json。'
+      detail: '检查默认 WSL、对应 Agent 是否安装、工作目录映射和运行时配置。'
     }
   }
   if (text.includes('network') || text.includes('timeout') || text.includes('econn') || text.includes('fetch')) {
     return {
       title: '网络连接失败',
-      detail: '检查代理、DNS、Provider Base URL 和本机网络连通性。'
+      detail: '检查代理、DNS、后端服务地址和本机网络连通性。'
     }
   }
   return {
     title: '会话运行错误',
-    detail: '错误来自 Claude 进程或 SDK。复制诊断日志后可以继续定位具体命令、Provider 和模型。'
+    detail: '错误来自当前 Agent 后端。复制诊断日志后可以继续定位具体命令、运行环境和模型。'
   }
 }
 

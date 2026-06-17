@@ -8,6 +8,7 @@ import type {
   PickedFile,
   EffortLevel,
   PermissionMode,
+  AgentBackendId,
   ClaudeExecutionBackend
 } from '../../shared/ipc'
 import type {
@@ -24,6 +25,7 @@ import type {
   PendingMessage
 } from '../types'
 import { pickedFileToUserAttachment } from '../utils/attachments'
+import { DEFAULT_CLAUDE_MODEL_ID, DEFAULT_CODEX_MODEL_ID } from '../../shared/models'
 
 /** A buffered `content_block_delta` waiting to be folded into the store in a
  *  single batched update (one per animation frame). See streamBatcher.ts. */
@@ -83,6 +85,7 @@ interface SessionStore {
   openSession: (sdkSessionId: string, backend?: ClaudeExecutionBackend) => Promise<void>
   prefetchSessionHistory: (sdkSessionId: string, backend?: ClaudeExecutionBackend) => Promise<void>
   pruneSessionHistoryCache: (visibleSessionIds: string[]) => void
+  setTranscriptScrolling: (scrolling: boolean) => void
   renameSession: (sessionId: string, title: string, backend?: ClaudeExecutionBackend) => Promise<void>
   deleteSession: (sessionId: string, backend?: ClaudeExecutionBackend) => Promise<void>
   /** Move a running subagent to the background (frees the main agent's turn). */
@@ -113,8 +116,14 @@ interface SessionStore {
 
 const emptyStatus: SessionStatus = { running: false }
 const SESSION_PAGE_SIZE = 24
+const HISTORY_PRELOAD_CHUNK_SIZE = 50
+const HISTORY_HYDRATION_IDLE_TIMEOUT_MS = 700
+const HISTORY_HYDRATION_SCROLL_PAUSE_MS = 140
+const HISTORY_HYDRATION_RELEASE_MS = 2_000
 let startupBootstrapPromise: Promise<void> | null = null
-let openSessionRequestSeq = 0
+let sessionNavigationSeq = 0
+let sessionListRequestSeq = 0
+let loadMoreSessionsRequestSeq = 0
 
 interface SessionHistoryCacheEntry {
   items?: TranscriptItem[]
@@ -123,6 +132,19 @@ interface SessionHistoryCacheEntry {
 }
 
 const sessionHistoryCache = new Map<string, SessionHistoryCacheEntry>()
+const sessionStartPromises = new Map<string, Promise<void>>()
+
+interface SessionHistoryHydrationTask {
+  bridgeSessionId: string
+  sourceItems: TranscriptItem[]
+  loadedFrom: number
+  timeoutId: number | ReturnType<typeof setTimeout> | null
+  idleId: number | null
+  cancelled: boolean
+}
+
+let activeHistoryHydrationTask: SessionHistoryHydrationTask | null = null
+let transcriptScrolling = false
 
 function sessionHistoryCacheKey(
   cwd: string,
@@ -194,6 +216,124 @@ function loadSessionHistory(
   return promise.then(cloneTranscriptItems)
 }
 
+function visibleHistoryTail(items: TranscriptItem[]): TranscriptItem[] {
+  return cloneTranscriptItems(items.slice(Math.max(0, items.length - HISTORY_PRELOAD_CHUNK_SIZE)))
+}
+
+function clearHistoryHydrationTimers(task: SessionHistoryHydrationTask): void {
+  if (task.timeoutId !== null) {
+    clearTimeout(task.timeoutId)
+    task.timeoutId = null
+  }
+  if (task.idleId !== null && 'cancelIdleCallback' in window) {
+    window.cancelIdleCallback(task.idleId)
+    task.idleId = null
+  }
+}
+
+function releaseHistoryHydrationTask(task: SessionHistoryHydrationTask): void {
+  task.cancelled = true
+  clearHistoryHydrationTimers(task)
+  task.sourceItems = []
+}
+
+function cancelActiveHistoryHydration(delayMs = HISTORY_HYDRATION_RELEASE_MS): void {
+  const task = activeHistoryHydrationTask
+  if (!task) return
+  activeHistoryHydrationTask = null
+  task.cancelled = true
+  clearHistoryHydrationTimers(task)
+  window.setTimeout(() => releaseHistoryHydrationTask(task), delayMs)
+}
+
+function scheduleHistoryHydrationStep(
+  get: () => SessionStore,
+  set: (fn: (s: SessionStore) => Partial<SessionStore>) => void,
+  task: SessionHistoryHydrationTask
+): void {
+  clearHistoryHydrationTimers(task)
+  if (task.cancelled || task.loadedFrom <= 0) return
+
+  const run = (): void => {
+    task.timeoutId = null
+    task.idleId = null
+    if (task.cancelled || activeHistoryHydrationTask !== task) return
+    if (get().meta?.sessionId !== task.bridgeSessionId) {
+      cancelActiveHistoryHydration()
+      return
+    }
+    if (transcriptScrolling) {
+      task.timeoutId = window.setTimeout(
+        () => scheduleHistoryHydrationStep(get, set, task),
+        HISTORY_HYDRATION_SCROLL_PAUSE_MS
+      )
+      return
+    }
+
+    const nextFrom = Math.max(0, task.loadedFrom - HISTORY_PRELOAD_CHUNK_SIZE)
+    const chunk = cloneTranscriptItems(task.sourceItems.slice(nextFrom, task.loadedFrom))
+    task.loadedFrom = nextFrom
+    if (chunk.length > 0) {
+      set((s) => (
+        s.meta?.sessionId === task.bridgeSessionId
+          ? {
+              items: [
+                ...chunk.filter((item) => !s.items.some((existing) => existing.id === item.id)),
+                ...s.items
+              ]
+            }
+          : {}
+      ))
+    }
+
+    if (task.loadedFrom > 0) {
+      scheduleHistoryHydrationStep(get, set, task)
+    }
+  }
+
+  if ('requestIdleCallback' in window) {
+    task.idleId = window.requestIdleCallback(run, { timeout: HISTORY_HYDRATION_IDLE_TIMEOUT_MS })
+  } else {
+    task.timeoutId = setTimeout(run, 48)
+  }
+}
+
+function startProgressiveSessionHistory(
+  get: () => SessionStore,
+  set: (fn: (s: SessionStore) => Partial<SessionStore>) => void,
+  bridgeSessionId: string,
+  sourceItems: TranscriptItem[]
+): void {
+  cancelActiveHistoryHydration()
+  if (get().meta?.sessionId !== bridgeSessionId) return
+
+  const loadedFrom = Math.max(0, sourceItems.length - HISTORY_PRELOAD_CHUNK_SIZE)
+  const task: SessionHistoryHydrationTask = {
+    bridgeSessionId,
+    sourceItems,
+    loadedFrom,
+    timeoutId: null,
+    idleId: null,
+    cancelled: false
+  }
+  activeHistoryHydrationTask = task
+
+  set((s) => (
+    s.meta?.sessionId === bridgeSessionId
+      ? {
+          items: (() => {
+            const visible = cloneTranscriptItems(sourceItems.slice(loadedFrom))
+            const sourceIds = new Set(sourceItems.map((item) => item.id))
+            const liveItems = s.items.filter((item) => !sourceIds.has(item.id))
+            return [...visible, ...liveItems]
+          })()
+        }
+      : {}
+  ))
+
+  scheduleHistoryHydrationStep(get, set, task)
+}
+
 function deleteSessionHistoryCache(
   cwd: string,
   sdkSessionId: string,
@@ -213,6 +353,23 @@ function pruneSessionHistoryCacheForCwd(cwd: string, retainedSessionIds: Set<str
 
 function uid(): string {
   return crypto.randomUUID()
+}
+
+function modelForAgent(
+  agentBackend: AgentBackendId | undefined,
+  model: string | undefined
+): string | undefined {
+  if (agentBackend === 'codex' && model && (/^claude/i.test(model) || model === DEFAULT_CODEX_MODEL_ID)) {
+    return undefined
+  }
+  return model
+}
+
+function displayModelForAgent(
+  agentBackend: AgentBackendId | undefined,
+  model: string | undefined
+): string {
+  return modelForAgent(agentBackend, model) ?? (agentBackend === 'codex' ? DEFAULT_CODEX_MODEL_ID : DEFAULT_CLAUDE_MODEL_ID)
 }
 
 /** True if the Task tool_use that spawned a task was called with
@@ -422,10 +579,11 @@ export function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
  *  UI after a timeout so the user can retry via New chat. */
 function scheduleInitWatchdog(
   get: () => SessionStore,
-  set: (fn: (s: SessionStore) => Partial<SessionStore>) => void
+  set: (fn: (s: SessionStore) => Partial<SessionStore>) => void,
+  sessionId?: string
 ): void {
   setTimeout(() => {
-    if (get().starting) {
+    if (get().starting && (!sessionId || get().meta?.sessionId === sessionId)) {
       set((s) => ({
         starting: false,
         status: {
@@ -435,6 +593,45 @@ function scheduleInitWatchdog(
       }))
     }
   }, 60000)
+}
+
+function nextSessionNavigationSeq(): number {
+  sessionNavigationSeq += 1
+  return sessionNavigationSeq
+}
+
+function isCurrentSessionNavigation(
+  get: () => SessionStore,
+  requestSeq: number,
+  bridgeSessionId: string
+): boolean {
+  return sessionNavigationSeq === requestSeq && get().meta?.sessionId === bridgeSessionId
+}
+
+function createSessionStartGate(sessionId: string): {
+  promise: Promise<void>
+  resolve: () => void
+  reject: (error: unknown) => void
+} {
+  let resolveGate!: () => void
+  let rejectGate!: (error: unknown) => void
+  const promise = new Promise<void>((resolve, reject) => {
+    resolveGate = resolve
+    rejectGate = reject
+  })
+  sessionStartPromises.set(sessionId, promise)
+  promise.catch(() => {})
+  const cleanup = (): void => {
+    if (sessionStartPromises.get(sessionId) === promise) {
+      sessionStartPromises.delete(sessionId)
+    }
+  }
+  promise.then(cleanup, cleanup)
+  return {
+    promise,
+    resolve: resolveGate,
+    reject: rejectGate
+  }
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
@@ -454,18 +651,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   async startSession(args) {
     if (get().starting) return
+    cancelActiveHistoryHydration()
     set({ starting: true })
     // Pre-register synchronously: bridgeSessionId is added to the bridge's map
     // before claude.exe finishes spawning, so the UI never locks on init.
     try {
       const newId = uid()
       const prefs = await window.api.getPreferences().catch(() => null)
+      const agentBackend = prefs?.agentBackend
+      const model = modelForAgent(agentBackend, args.model)
       const permissionMode = prefs?.defaultPermissionMode ?? 'default'
       const effort = prefs?.defaultEffort ?? 'high'
       const opts: StartSessionOptions = {
         cwd: args.cwd,
+        ...(agentBackend ? { agentBackend } : {}),
         ...(args.apiKey ? { apiKey: args.apiKey } : {}),
-        ...(args.model ? { model: args.model } : {}),
+        ...(model ? { model } : {}),
         effort,
         permissionMode,
         bridgeSessionId: newId
@@ -476,8 +677,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         effort,
         meta: {
           sessionId: newId,
+          ...(agentBackend ? { agentBackend } : {}),
           cwd: args.cwd,
-          model: args.model ?? 'claude-opus-4-8',
+          model: displayModelForAgent(agentBackend, args.model),
           permissionMode,
           tools: []
         },
@@ -488,7 +690,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         currentStreamingMsgId: null
       })
       void get().refreshSessions()
-      scheduleInitWatchdog(get, set)
+      scheduleInitWatchdog(get, set, newId)
     } catch (err) {
       set({ starting: false })
       throw err
@@ -517,7 +719,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       try {
         await window.api.startSession({
           cwd: oldMeta.cwd,
-          model: oldMeta.model,
+          ...(modelForAgent(oldMeta.agentBackend, oldMeta.model) ? { model: modelForAgent(oldMeta.agentBackend, oldMeta.model) } : {}),
+          ...(oldMeta.agentBackend ? { agentBackend: oldMeta.agentBackend } : {}),
           effort: get().effort,
           permissionMode: oldMeta.permissionMode as PermissionMode,
           ...(oldMeta.sdkSessionId ? { resume: oldMeta.sdkSessionId } : {}),
@@ -577,13 +780,26 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       (t) => t.isBackgrounded && t.status === 'running'
     )
     const busy = get().status.running && !hasBackgroundSubagent
-    await window.api.sendMessage(meta.sessionId, content)
     if (busy) {
       set((s) => ({ pendingQueue: [...s.pendingQueue, { id: uid(), text: value, ...attProps }] }))
     } else {
       set((s) => ({
         items: [...s.items, { id: uid(), kind: 'user', text: value, parentToolUseId: null, ...attProps }],
         status: { ...s.status, running: true }
+      }))
+    }
+    try {
+      await sessionStartPromises.get(meta.sessionId)
+      if (get().meta?.sessionId !== meta.sessionId) return
+      await window.api.sendMessage(meta.sessionId, content)
+    } catch (error: unknown) {
+      if (get().meta?.sessionId !== meta.sessionId) return
+      set((s) => ({
+        status: {
+          ...s.status,
+          running: false,
+          error: error instanceof Error ? error.message : String(error)
+        }
       }))
     }
   },
@@ -602,6 +818,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   reset() {
+    cancelActiveHistoryHydration(0)
     set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false })
   },
 
@@ -626,9 +843,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   async switchProject(path: string) {
-    if (get().starting) return
+    cancelActiveHistoryHydration()
     const oldMeta = get().meta
     const newId = uid()
+    const requestSeq = nextSessionNavigationSeq()
+    const startGate = createSessionStartGate(newId)
+    const isLatestRequest = (): boolean => isCurrentSessionNavigation(get, requestSeq, newId)
     // Flip the UI to the new project BEFORE any IPC: the main view clears and
     // enters its starting state immediately, so the click never stalls on the
     // setLastProject / getActiveProvider round-trips. Model & permission mode
@@ -645,45 +865,86 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       currentStreamingMsgId: null,
       meta: {
         sessionId: newId,
+        ...(oldMeta?.agentBackend ? { agentBackend: oldMeta.agentBackend } : {}),
         cwd: path,
-        model: oldMeta?.model ?? 'claude-opus-4-8',
+        model: oldMeta?.model ?? DEFAULT_CLAUDE_MODEL_ID,
         permissionMode: oldMeta?.permissionMode ?? 'default',
         tools: []
       }
     })
     // Persist last-project + read the active provider concurrently; neither
     // blocks the view switch (already done above), they only feed the spawn.
-    const [, provider] = await Promise.all([
+    const [, provider, prefs] = await Promise.all([
       window.api.setLastProject(path),
-      window.api.getActiveProvider()
+      window.api.getActiveProvider(),
+      window.api.getPreferences().catch(() => null)
     ])
-    const model = provider?.model ?? oldMeta?.model ?? 'claude-opus-4-8'
+    if (!isLatestRequest()) {
+      startGate.resolve()
+      return
+    }
+    const agentBackend = prefs?.agentBackend ?? oldMeta?.agentBackend
+    const model = displayModelForAgent(agentBackend, provider?.model ?? oldMeta?.model)
     set((s) => (
       s.meta?.sessionId === newId
-        ? { meta: { ...s.meta, model }, sessionConfigDirty: false }
+        ? {
+            meta: {
+              ...s.meta,
+              model,
+              ...(agentBackend ? { agentBackend } : {})
+            },
+            sessionConfigDirty: false
+          }
         : {}
     ))
-    if (oldMeta?.sessionId) await window.api.closeSession(oldMeta.sessionId).catch(() => {})
-    await window.api.startSession({ cwd: path, model, effort: get().effort, bridgeSessionId: newId })
+    if (oldMeta?.sessionId) void window.api.closeSession(oldMeta.sessionId).catch(() => {})
+    try {
+      await window.api.startSession({
+        cwd: path,
+        ...(modelForAgent(agentBackend, model) ? { model: modelForAgent(agentBackend, model) } : {}),
+        ...(agentBackend ? { agentBackend } : {}),
+        effort: get().effort,
+        bridgeSessionId: newId
+      })
+      startGate.resolve()
+    } catch (error: unknown) {
+      startGate.reject(error)
+      if (!isLatestRequest()) return
+      set((s) => ({
+        starting: false,
+        status: {
+          ...s.status,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      }))
+      return
+    }
+    if (!isLatestRequest()) {
+      await window.api.closeSession(newId).catch(() => {})
+      return
+    }
     set({ starting: false })
-    await get().refreshSessions()
-    scheduleInitWatchdog(get, set)
+    void get().refreshSessions()
+    scheduleInitWatchdog(get, set, newId)
   },
 
   async refreshSessions() {
     const meta = get().meta
     if (!meta) return
+    const requestSeq = ++sessionListRequestSeq
+    const cwd = meta.cwd
     set({ sessionsLoading: true })
     try {
       const prefs = await window.api.getPreferences().catch(() => null)
-      const sessions = await window.api.listSessions(meta.cwd, {
+      const sessions = await window.api.listSessions(cwd, {
         limit: SESSION_PAGE_SIZE,
         offset: 0,
         backend: prefs?.wslSupportEnabled ? 'all' : 'windows'
       })
+      if (sessionListRequestSeq !== requestSeq || get().meta?.cwd !== cwd) return
       set({ sessions, sessionsHasMore: sessions.length === SESSION_PAGE_SIZE })
     } finally {
-      set({ sessionsLoading: false })
+      if (sessionListRequestSeq === requestSeq) set({ sessionsLoading: false })
     }
   },
 
@@ -691,14 +952,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const meta = get().meta
     const state = get()
     if (!meta || state.sessionsLoading || !state.sessionsHasMore) return
+    const requestSeq = ++loadMoreSessionsRequestSeq
+    const cwd = meta.cwd
+    const offset = state.sessions.length
     set({ sessionsLoading: true })
     try {
       const prefs = await window.api.getPreferences().catch(() => null)
-      const page = await window.api.listSessions(meta.cwd, {
+      const page = await window.api.listSessions(cwd, {
         limit: SESSION_PAGE_SIZE,
-        offset: state.sessions.length,
+        offset,
         backend: prefs?.wslSupportEnabled ? 'all' : 'windows'
       })
+      if (loadMoreSessionsRequestSeq !== requestSeq || get().meta?.cwd !== cwd) return
       set((s) => {
         const seen = new Set(s.sessions.map((session) => session.sessionId))
         const next = page.filter((session) => !seen.has(session.sessionId))
@@ -708,7 +973,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         }
       })
     } finally {
-      set({ sessionsLoading: false })
+      if (loadMoreSessionsRequestSeq === requestSeq) set({ sessionsLoading: false })
     }
   },
 
@@ -726,12 +991,23 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     pruneSessionHistoryCacheForCwd(meta.cwd, retained)
   },
 
+  setTranscriptScrolling(scrolling: boolean) {
+    transcriptScrolling = scrolling
+    if (!scrolling && activeHistoryHydrationTask) {
+      scheduleHistoryHydrationStep(get, set, activeHistoryHydrationTask)
+    }
+  },
+
   async newChat() {
     const meta = get().meta
-    if (!meta || get().starting) return
-    const { cwd, model, permissionMode } = meta
+    if (!meta) return
+    cancelActiveHistoryHydration()
+    const { cwd, model, permissionMode, agentBackend } = meta
     const oldSessionId = meta.sessionId
     const newId = uid()
+    const requestSeq = nextSessionNavigationSeq()
+    const startGate = createSessionStartGate(newId)
+    const isLatestRequest = (): boolean => isCurrentSessionNavigation(get, requestSeq, newId)
     // Switch the UI to a fresh session instantly (unlocked). claude.exe spawns
     // in the background; any messages sent now queue and flush once ready.
     set({
@@ -741,61 +1017,75 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessionConfigDirty: false,
       status: { running: false },
       currentStreamingMsgId: null,
-      meta: { sessionId: newId, cwd, model, permissionMode, tools: [] }
+      meta: {
+        sessionId: newId,
+        ...(agentBackend ? { agentBackend } : {}),
+        cwd,
+        model,
+        permissionMode,
+        tools: []
+      }
     })
-    await window.api.closeSession(oldSessionId).catch(() => {})
-    await window.api.startSession({ cwd, model, effort: get().effort, bridgeSessionId: newId })
+    void window.api.closeSession(oldSessionId).catch(() => {})
+    try {
+      await window.api.startSession({
+        cwd,
+        ...(modelForAgent(agentBackend, model) ? { model: modelForAgent(agentBackend, model) } : {}),
+        ...(agentBackend ? { agentBackend } : {}),
+        effort: get().effort,
+        bridgeSessionId: newId
+      })
+      startGate.resolve()
+    } catch (error: unknown) {
+      startGate.reject(error)
+      if (!isLatestRequest()) return
+      set((s) => ({
+        starting: false,
+        status: {
+          ...s.status,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      }))
+      return
+    }
+    if (!isLatestRequest()) {
+      await window.api.closeSession(newId).catch(() => {})
+      return
+    }
     set({ starting: false })
     void get().refreshSessions()
-    scheduleInitWatchdog(get, set)
+    scheduleInitWatchdog(get, set, newId)
   },
 
   async openSession(sdkSessionId: string, backend?: ClaudeExecutionBackend) {
     const meta = get().meta
     if (!meta) return
     if (meta.sdkSessionId === sdkSessionId) return
-    const { cwd, model, permissionMode } = meta
+    cancelActiveHistoryHydration()
+    const { cwd, model, permissionMode, agentBackend } = meta
     const oldSessionId = meta.sessionId
     const newId = uid()
-    const requestSeq = ++openSessionRequestSeq
-    const prefs = await window.api.getPreferences().catch(() => null)
-    const currentBackend: ClaudeExecutionBackend =
-      prefs?.claudeExecutionBackend === 'wsl' ? 'wsl' : 'windows'
-    const targetBackend = backend ?? currentBackend
-    if (targetBackend === 'wsl' && !prefs?.wslSupportEnabled) {
-      set((s) => ({
-        status: {
-          ...s.status,
-          error: 'WSL support is disabled. Enable WSL support in Settings first.'
-        }
-      }))
-      return
-    }
-    if (targetBackend !== currentBackend) {
-      await window.api.savePreferences({ claudeExecutionBackend: targetBackend })
-      window.dispatchEvent(new Event('forge:provider-changed'))
-      window.dispatchEvent(new Event('forge:model-options-changed'))
-    }
-    const provider = await window.api.getActiveProvider().catch(() => null)
-    const nextModel = provider?.model ?? model
+    const requestSeq = nextSessionNavigationSeq()
+    const startGate = createSessionStartGate(newId)
+    const targetBackend: ClaudeExecutionBackend = backend ?? 'windows'
     const cachedItems = getCachedSessionHistory(cwd, sdkSessionId, targetBackend)
-    const isLatestRequest = (): boolean =>
-      openSessionRequestSeq === requestSeq && get().meta?.sessionId === newId
+    const isLatestRequest = (): boolean => isCurrentSessionNavigation(get, requestSeq, newId)
 
     // Switch the selected session immediately; history and bridge resume happen
     // below and stale requests are ignored if the user clicks another session.
     set({
       starting: true,
-      items: cachedItems ?? [],
+      items: cachedItems ? visibleHistoryTail(cachedItems) : [],
       tasks: [], pendingQueue: [],
       sessionConfigDirty: false,
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
         sessionId: newId,
+        ...(agentBackend ? { agentBackend } : {}),
         sdkSessionId,
         cwd,
-        model: nextModel,
+        model,
         permissionMode,
         tools: []
       }
@@ -805,27 +1095,73 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       ? Promise.resolve(cachedItems)
       : loadSessionHistory(cwd, sdkSessionId, targetBackend)
 
+    if (cachedItems) {
+      startProgressiveSessionHistory(get, set, newId, cachedItems)
+    }
+
+    const runtimePromise = (async (): Promise<{ model: string; canStart: boolean; error?: string }> => {
+      const prefs = await window.api.getPreferences().catch(() => null)
+      const currentBackend: ClaudeExecutionBackend =
+        prefs?.claudeExecutionBackend === 'wsl' ? 'wsl' : 'windows'
+      if (targetBackend === 'wsl' && !prefs?.wslSupportEnabled) {
+        return {
+          model,
+          canStart: false,
+          error: 'WSL support is disabled. Enable WSL support in Settings first.'
+        }
+      }
+      if (targetBackend !== currentBackend) {
+        await window.api.savePreferences({ claudeExecutionBackend: targetBackend })
+        window.dispatchEvent(new Event('forge:provider-changed'))
+        window.dispatchEvent(new Event('forge:model-options-changed'))
+      }
+      const provider = await window.api.getActiveProvider().catch(() => null)
+      return { model: provider?.model ?? model, canStart: true }
+    })()
+
     const startPromise = (async (): Promise<{ started: boolean; error?: unknown }> => {
       try {
-        await window.api.closeSession(oldSessionId).catch(() => {})
-        if (!isLatestRequest()) return { started: false }
+        void window.api.closeSession(oldSessionId).catch(() => {})
+        const runtime = await runtimePromise
+        if (!isLatestRequest()) {
+          startGate.resolve()
+          return { started: false }
+        }
+        if (!runtime.canStart) {
+          startGate.reject(runtime.error)
+          return { started: false, error: runtime.error }
+        }
+        set((s) => (
+          isLatestRequest()
+            ? {
+                meta: {
+                  ...s.meta!,
+                  model: runtime.model
+                }
+              }
+            : {}
+        ))
         await window.api.startSession({
           cwd,
-          model: nextModel,
+          ...(modelForAgent(agentBackend, runtime.model) ? { model: modelForAgent(agentBackend, runtime.model) } : {}),
+          ...(agentBackend ? { agentBackend } : {}),
           effort: get().effort,
           resume: sdkSessionId,
           bridgeSessionId: newId
         })
+        startGate.resolve()
         return { started: true }
       } catch (error: unknown) {
+        startGate.reject(error)
         return { started: false, error }
       }
     })()
 
-    const items = await historyPromise
-    if (isLatestRequest()) {
-      set({ items })
-    }
+    void historyPromise
+      .then((items) => {
+        if (!cachedItems && isLatestRequest()) startProgressiveSessionHistory(get, set, newId, items)
+      })
+      .catch(() => {})
 
     const startResult = await startPromise
     if (!isLatestRequest()) {
@@ -834,6 +1170,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
     if (startResult.error) {
       const e = startResult.error
+      startGate.reject(e)
       if (!isLatestRequest()) return
       set((s) => ({
         starting: false,
@@ -847,7 +1184,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
     set({ starting: false })
 
-    scheduleInitWatchdog(get, set)
+    scheduleInitWatchdog(get, set, newId)
   },
 
   /** Close the current session and re-spawn it (resuming when possible) so that
@@ -903,39 +1240,82 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   async restartSession() {
     const meta = get().meta
-    if (!meta || get().starting) return
-    const { cwd, model, permissionMode, sdkSessionId } = meta
+    if (!meta) return
+    cancelActiveHistoryHydration()
+    const { cwd, model, permissionMode, sdkSessionId, agentBackend } = meta
     const effort = get().effort
     const oldSessionId = meta.sessionId
     const newId = uid()
-    set({ starting: true, status: { running: false }, currentStreamingMsgId: null })
+    const requestSeq = nextSessionNavigationSeq()
+    const startGate = createSessionStartGate(newId)
+    const isLatestRequest = (): boolean => isCurrentSessionNavigation(get, requestSeq, newId)
+    set({
+      starting: true,
+      status: { running: false },
+      currentStreamingMsgId: null,
+      items: sdkSessionId ? get().items : [],
+      tasks: [],
+      pendingQueue: [],
+      sessionConfigDirty: false,
+      meta: {
+        sessionId: newId,
+        ...(agentBackend ? { agentBackend } : {}),
+        sdkSessionId,
+        cwd,
+        model,
+        permissionMode,
+        tools: []
+      }
+    })
     // Rebuild the transcript from history so the resumed session shows the same
     // conversation. If we never got an sdkSessionId (init hadn't landed), fall
     // back to a fresh session.
-    let items: TranscriptItem[] = []
     if (sdkSessionId) {
-      try {
-        const history = await window.api.getSessionMessages(sdkSessionId, cwd)
-        items = historyToItems(history)
-      } catch {
-        items = get().items
-      }
+      void loadSessionHistory(cwd, sdkSessionId)
+        .then((items) => {
+          if (isLatestRequest()) startProgressiveSessionHistory(get, set, newId, items)
+        })
+        .catch(() => {})
     }
-    set({
-      items,
-      tasks: [], pendingQueue: [],
-      sessionConfigDirty: false,
-      currentStreamingMsgId: null,
-      meta: { sessionId: newId, sdkSessionId, cwd, model, permissionMode, tools: [] }
-    })
-    await window.api.closeSession(oldSessionId).catch(() => {})
-    await window.api.startSession(
-      sdkSessionId
-        ? { cwd, model, effort, resume: sdkSessionId, bridgeSessionId: newId }
-        : { cwd, model, effort, bridgeSessionId: newId }
-    )
+    void window.api.closeSession(oldSessionId).catch(() => {})
+    try {
+      await window.api.startSession(
+        sdkSessionId
+          ? {
+              cwd,
+              ...(modelForAgent(agentBackend, model) ? { model: modelForAgent(agentBackend, model) } : {}),
+              ...(agentBackend ? { agentBackend } : {}),
+              effort,
+              resume: sdkSessionId,
+              bridgeSessionId: newId
+            }
+          : {
+              cwd,
+              ...(modelForAgent(agentBackend, model) ? { model: modelForAgent(agentBackend, model) } : {}),
+              ...(agentBackend ? { agentBackend } : {}),
+              effort,
+              bridgeSessionId: newId
+            }
+      )
+      startGate.resolve()
+    } catch (error: unknown) {
+      startGate.reject(error)
+      if (!isLatestRequest()) return
+      set((s) => ({
+        starting: false,
+        status: {
+          ...s.status,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      }))
+      return
+    }
+    if (!isLatestRequest()) {
+      await window.api.closeSession(newId).catch(() => {})
+      return
+    }
     set({ starting: false })
-    scheduleInitWatchdog(get, set)
+    scheduleInitWatchdog(get, set, newId)
   },
 
   async setEffort(effort) {
@@ -944,7 +1324,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   async switchProvider(id) {
-    if (get().starting) return
     await window.api.setActiveProvider(id)
     // Keep meta.model in sync with the newly-active provider so the resumed
     // session spawns with that model (the bridge trusts opts.model).
@@ -958,7 +1337,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     sessionHistoryCache.clear()
     const meta = get().meta
     set({ sessions: [], sessionsHasMore: false })
-    if (!meta || get().starting) return
+    if (!meta) return
     await get().switchProject(meta.cwd)
   },
 
@@ -990,6 +1369,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               // internal session_id here, or subsequent sendMessage calls target a
               // session the bridge doesn't know about.
               sessionId: s.meta?.sessionId ?? m.session_id,
+              ...(s.meta?.agentBackend ? { agentBackend: s.meta.agentBackend } : {}),
               sdkSessionId: m.session_id,
               cwd: m.cwd,
               model: s.sessionConfigDirty ? (s.meta?.model ?? m.model) : m.model,

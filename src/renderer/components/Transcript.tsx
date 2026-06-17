@@ -8,6 +8,7 @@ import ToolCallCard from './ToolCallCard'
 
 const INITIAL_HIGHLIGHT_DELAY_MS = 420
 const SCROLL_HIGHLIGHT_RESUME_MS = 180
+const SCROLL_INTENT_IDLE_MS = 220
 const FOLLOW_OUTPUT_LOCK_MS = 1200
 const TOPBAR_RESERVE_NEAR_BOTTOM_THRESHOLD_PX = 120
 
@@ -195,12 +196,18 @@ export default function Transcript({
 }: TranscriptProps): JSX.Element {
   const items = useSessionStore((s) => s.items)
   const sessionKey = useSessionStore((s) => s.meta?.sessionId ?? '')
+  const agentBackend = useSessionStore((s) => s.meta?.agentBackend)
   const running = useSessionStore((s) => s.status.running)
   const starting = useSessionStore((s) => s.starting)
   const compacting = useSessionStore((s) => s.status.compacting)
+  const setTranscriptScrolling = useSessionStore((s) => s.setTranscriptScrolling)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const highlightTimeoutRef = useRef<number | null>(null)
+  const scrollIntentTimeoutRef = useRef<number | null>(null)
   const deferHighlightRef = useRef(true)
+  const appliedScrollingRef = useRef(false)
+  const virtuosoScrollingRef = useRef(false)
+  const scrollIntentActiveRef = useRef(false)
   const followOutputLockedUntilRef = useRef(0)
   const layoutTransitioningRef = useRef(layoutTransitioning)
   const restoreBottomAfterLayoutRef = useRef(false)
@@ -217,6 +224,19 @@ export default function Transcript({
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null)
 
   const roots = useMemo(() => buildForest(items), [items])
+  const scrollTuning = useMemo(
+    () =>
+      agentBackend === 'codex'
+        ? {
+            increaseViewportBy: { top: 900, bottom: 1300 },
+            overscan: { main: 900, reverse: 650 }
+          }
+        : {
+            increaseViewportBy: { top: 260, bottom: 420 },
+            overscan: { main: 260, reverse: 220 }
+          },
+    [agentBackend]
+  )
 
   useEffect(() => {
     deferHighlightRef.current = deferHighlight
@@ -334,6 +354,13 @@ export default function Transcript({
     }
   }
 
+  const clearScrollIntentTimer = (): void => {
+    if (scrollIntentTimeoutRef.current !== null) {
+      window.clearTimeout(scrollIntentTimeoutRef.current)
+      scrollIntentTimeoutRef.current = null
+    }
+  }
+
   const resumeHighlightAfter = (delay: number): void => {
     clearHighlightTimer()
     highlightTimeoutRef.current = window.setTimeout(() => {
@@ -342,12 +369,35 @@ export default function Transcript({
     }, delay)
   }
 
-  const handleTranscriptScrolling = (scrolling: boolean): void => {
+  const applyTranscriptScrolling = (scrolling: boolean): void => {
+    if (appliedScrollingRef.current === scrolling) return
+    appliedScrollingRef.current = scrolling
+    setTranscriptScrolling(scrolling)
     if (scrolling) {
-      if (deferHighlightRef.current) clearHighlightTimer()
+      clearHighlightTimer()
+      if (!deferHighlightRef.current) {
+        deferHighlightRef.current = true
+        setDeferHighlight(true)
+      }
       return
     }
-    if (deferHighlightRef.current) resumeHighlightAfter(SCROLL_HIGHLIGHT_RESUME_MS)
+    resumeHighlightAfter(SCROLL_HIGHLIGHT_RESUME_MS)
+  }
+
+  const handleTranscriptScrolling = (scrolling: boolean): void => {
+    virtuosoScrollingRef.current = scrolling
+    applyTranscriptScrolling(scrolling || scrollIntentActiveRef.current)
+  }
+
+  const markScrollIntent = (): void => {
+    scrollIntentActiveRef.current = true
+    applyTranscriptScrolling(true)
+    clearScrollIntentTimer()
+    scrollIntentTimeoutRef.current = window.setTimeout(() => {
+      scrollIntentTimeoutRef.current = null
+      scrollIntentActiveRef.current = false
+      applyTranscriptScrolling(virtuosoScrollingRef.current)
+    }, SCROLL_INTENT_IDLE_MS)
   }
 
   const lockFollowOutput = (): void => {
@@ -375,6 +425,10 @@ export default function Transcript({
     cancelBottomReserveRestoreFrame()
     restoreBottomAfterLayoutRef.current = false
     restoreBottomAfterReserveRef.current = false
+    virtuosoScrollingRef.current = false
+    scrollIntentActiveRef.current = false
+    appliedScrollingRef.current = false
+    clearScrollIntentTimer()
     setReserveEligible(true, true)
     setPinnedAtBottom(true)
     setDeferHighlight(true)
@@ -382,33 +436,25 @@ export default function Transcript({
 
     return () => {
       clearHighlightTimer()
+      clearScrollIntentTimer()
+      setTranscriptScrolling(false)
     }
-  }, [sessionKey])
+  }, [sessionKey, setTranscriptScrolling])
 
   if (items.length === 0) {
-    // Starting a fresh/resumed session: show a loader so the cleared transcript
-    // never reads as "stuck" while the bridge spawns. Falls through to the
-    // welcome screen once idle.
-    if (starting) {
-      return (
-        <div className="transcript-scroll h-full overflow-y-auto">
-          <div className="mx-auto flex min-h-full max-w-5xl flex-col items-center justify-center px-6 py-6 text-center">
-            <div className="glass-panel mb-5 flex h-16 w-16 items-center justify-center rounded-[18px] text-zinc-100 shadow-[0_0_34px_rgba(94,168,255,0.18)]">
-              <TerminalGlyph />
-            </div>
-            <div className="mb-3 flex items-center gap-1.5">
-              <span className="git-loading-dot" />
-              <span className="git-loading-dot [animation-delay:90ms]" />
-              <span className="git-loading-dot [animation-delay:180ms]" />
-            </div>
-            <p className="text-sm text-zinc-500">正在启动会话…</p>
-          </div>
-        </div>
-      )
-    }
     return (
       <div className="transcript-scroll h-full overflow-y-auto">
         <div className="mx-auto flex min-h-full max-w-5xl flex-col items-center justify-center px-6 py-6 text-center">
+          {starting ? (
+            <>
+              <div className="glass-panel mb-7 flex h-20 w-20 items-center justify-center rounded-[18px] text-zinc-100 shadow-[0_0_34px_rgba(94,168,255,0.18)]">
+                <div className="h-9 w-9 animate-spin rounded-full border-2 border-white/15 border-t-accent" />
+              </div>
+              <h1 className="text-2xl font-semibold text-zinc-100">正在进入会话...</h1>
+              <p className="mt-2 text-sm text-zinc-500">历史和运行环境会在后台接上。</p>
+            </>
+          ) : (
+            <>
           <div className="glass-panel mb-7 flex h-20 w-20 items-center justify-center rounded-[18px] text-zinc-100 shadow-[0_0_34px_rgba(94,168,255,0.18)]">
             <TerminalGlyph />
           </div>
@@ -421,6 +467,8 @@ export default function Transcript({
               </span>
             ))}
           </div>
+            </>
+          )}
         </div>
       </div>
     )
@@ -434,17 +482,24 @@ export default function Transcript({
   return (
     <div
       className="relative h-full"
-      onPointerDownCapture={lockFollowOutput}
+      onPointerDownCapture={() => {
+        lockFollowOutput()
+        markScrollIntent()
+      }}
       onWheelCapture={(event) => {
         lockFollowOutput()
+        markScrollIntent()
         if (event.deltaY < 0) setPinnedAtBottom(false)
       }}
+      onTouchMoveCapture={markScrollIntent}
     >
       <Virtuoso
         ref={virtuosoRef}
         data={roots}
         initialTopMostItemIndex={{ index: Math.max(roots.length - 1, 0), align: 'end' }}
         computeItemKey={(_, node) => node.item.id}
+        increaseViewportBy={scrollTuning.increaseViewportBy}
+        overscan={scrollTuning.overscan}
         scrollerRef={(element) => {
           const nextElement = element instanceof HTMLElement ? element : null
           setScrollElement((current) => (current === nextElement ? current : nextElement))
@@ -466,7 +521,7 @@ export default function Transcript({
               {running && (
                 <div className="flex items-center gap-2 text-xs text-zinc-500">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-                  Claude 正在处理…
+                  Forge 正在处理…
                 </div>
               )}
               {bottomReserve > 0 && <div aria-hidden="true" style={{ height: bottomReserve }} />}

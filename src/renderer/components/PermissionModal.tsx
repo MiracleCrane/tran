@@ -27,7 +27,7 @@ export default function PermissionModal(): JSX.Element | null {
           <h2 className="text-base font-semibold text-zinc-100">权限请求</h2>
         </div>
         <p className="mb-4 text-sm text-zinc-400">
-          Claude 想要使用 <span className="font-mono text-zinc-200">{req.toolName}</span>
+          Forge 想要使用 <span className="font-mono text-zinc-200">{req.toolName}</span>
           {req.agentID ? <span className="text-zinc-500">(在子代理中)</span> : null}。
         </p>
 

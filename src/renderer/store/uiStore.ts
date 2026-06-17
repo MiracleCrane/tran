@@ -14,6 +14,11 @@ export type View =
   | 'wslHealth'
   | 'help'
 
+export interface BlockingOverlayState {
+  id: string
+  label: string
+}
+
 interface UiStore {
   view: View
   setView: (view: View) => void
@@ -25,6 +30,13 @@ interface UiStore {
   attachmentPreview: UserAttachment | null
   openAttachmentPreview: (attachment: UserAttachment) => void
   closeAttachmentPreview: () => void
+  blockingOverlay: BlockingOverlayState | null
+  showBlockingOverlay: (label?: string) => string
+  hideBlockingOverlay: (id: string) => void
+}
+
+function overlayId(): string {
+  return crypto.randomUUID()
 }
 
 export const useUiStore = create<UiStore>((set) => ({
@@ -36,5 +48,13 @@ export const useUiStore = create<UiStore>((set) => ({
   toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
   attachmentPreview: null,
   openAttachmentPreview: (attachment) => set({ attachmentPreview: { ...attachment } }),
-  closeAttachmentPreview: () => set({ attachmentPreview: null })
+  closeAttachmentPreview: () => set({ attachmentPreview: null }),
+  blockingOverlay: null,
+  showBlockingOverlay: (label = '正在等待资源管理器响应...') => {
+    const id = overlayId()
+    set({ blockingOverlay: { id, label } })
+    return id
+  },
+  hideBlockingOverlay: (id) =>
+    set((s) => (s.blockingOverlay?.id === id ? { blockingOverlay: null } : {}))
 }))

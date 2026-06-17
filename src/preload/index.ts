@@ -7,7 +7,8 @@ import type {
   GitBranchInfo,
   GitCommit,
   GitStatus,
-  UpdateCheckResult
+  UpdateCheckResult,
+  UpdateDownloadProgress
 } from '../shared/ipc'
 
 function getPathForFile(file: File): string {
@@ -48,7 +49,8 @@ const api: ForgeApi = {
   revealInExplorer: (cwd, pathStr) => ipcRenderer.invoke('forge:revealInExplorer', cwd, pathStr),
 
   listSkills: (sessionId) => ipcRenderer.invoke('forge:listSkills', sessionId),
-  listMarketplacePlugins: () => ipcRenderer.invoke('forge:listMarketplacePlugins'),
+  listMarketplacePlugins: (agentBackend, cwd) =>
+    ipcRenderer.invoke('forge:listMarketplacePlugins', agentBackend, cwd),
   translateTexts: (texts) => ipcRenderer.invoke('forge:translateTexts', texts),
 
   getTranslateConfig: () => ipcRenderer.invoke('forge:getTranslateConfig'),
@@ -64,11 +66,13 @@ const api: ForgeApi = {
   repairWslEnvironment: (cwd) => ipcRenderer.invoke('forge:repairWslEnvironment', cwd),
   getDiagnosticLog: () => ipcRenderer.invoke('forge:getDiagnosticLog'),
   checkForUpdates: () => ipcRenderer.invoke('forge:checkForUpdates'),
-  downloadAndInstallUpdate: (assetUrl) =>
-    ipcRenderer.invoke('forge:downloadAndInstallUpdate', assetUrl),
+  downloadAndInstallUpdate: (options) =>
+    ipcRenderer.invoke('forge:downloadAndInstallUpdate', options),
   exportDiagnosticReport: (options) => ipcRenderer.invoke('forge:exportDiagnosticReport', options),
   exportSettings: (appearance) => ipcRenderer.invoke('forge:exportSettings', appearance),
   importSettings: (backup) => ipcRenderer.invoke('forge:importSettings', backup),
+  listAgentBackends: () => ipcRenderer.invoke('forge:listAgentBackends'),
+  listAgentModels: () => ipcRenderer.invoke('forge:listAgentModels'),
 
   minimizeWindow: () => ipcRenderer.invoke('forge:minimizeWindow'),
   toggleMaximizeWindow: () => ipcRenderer.invoke('forge:toggleMaximizeWindow'),
@@ -86,6 +90,12 @@ const api: ForgeApi = {
       cb(payload)
     ipcRenderer.on('forge:update-available', listener)
     return () => ipcRenderer.removeListener('forge:update-available', listener)
+  },
+  onUpdateDownloadProgress: (cb) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: UpdateDownloadProgress): void =>
+      cb(payload)
+    ipcRenderer.on('forge:update-download-progress', listener)
+    return () => ipcRenderer.removeListener('forge:update-download-progress', listener)
   },
 
   saveMcpServer: (args) => ipcRenderer.invoke('forge:saveMcpServer', args),

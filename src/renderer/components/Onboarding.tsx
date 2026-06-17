@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
+import { useUiStore } from '../store/uiStore'
 import type { ClaudeExecutionBackend, Provider } from '../../shared/ipc'
 import { isWslProjectPath } from '../../shared/paths'
 
@@ -15,6 +16,8 @@ const EMPTY_SELECTED_PROVIDER_MAP: Record<ClaudeExecutionBackend, string> = {
 
 export default function Onboarding(): JSX.Element {
   const startSession = useSessionStore((s) => s.startSession)
+  const showBlockingOverlay = useUiStore((s) => s.showBlockingOverlay)
+  const hideBlockingOverlay = useUiStore((s) => s.hideBlockingOverlay)
   const [cwd, setCwd] = useState('')
   const [backend, setBackend] = useState<ClaudeExecutionBackend>('windows')
   const [providersByBackend, setProvidersByBackend] =
@@ -60,7 +63,13 @@ export default function Onboarding(): JSX.Element {
   }
 
   const pick = async (): Promise<void> => {
-    const dir = await window.api.pickDirectory({ backend })
+    const overlayId = showBlockingOverlay('正在等待资源管理器响应...')
+    let dir: string | null = null
+    try {
+      dir = await window.api.pickDirectory({ backend })
+    } finally {
+      hideBlockingOverlay(overlayId)
+    }
     if (!dir) return
     const nextBackend = inferBackendFromPath(dir)
     if (nextBackend !== backend) setBackend(nextBackend)
@@ -110,7 +119,7 @@ export default function Onboarding(): JSX.Element {
       <div className="w-full max-w-lg rounded-2xl border border-border-subtle bg-bg-panel p-8 shadow-2xl">
         <div className="mb-1 text-2xl font-semibold text-zinc-100">Forge</div>
         <div className="mb-6 text-sm text-zinc-400">
-          Claude Agent 的桌面客户端。选择一个项目文件夹即可开始。
+          Forge 的桌面 Agent 客户端。选择一个项目文件夹即可开始。
         </div>
 
         <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-zinc-500">

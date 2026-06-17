@@ -3,7 +3,13 @@ import { createWriteStream, mkdirSync, unlinkSync } from 'node:fs'
 import { get } from 'node:https'
 import { join } from 'node:path'
 import type { IncomingMessage } from 'node:http'
-import type { UpdateAssetInfo, UpdateCheckResult, UpdateInstallResult } from '../shared/ipc'
+import type {
+  UpdateAssetInfo,
+  UpdateCheckResult,
+  UpdateDownloadOptions,
+  UpdateDownloadProgress,
+  UpdateInstallResult
+} from '../shared/ipc'
 
 const UPDATE_REPO = 'spideytznn/claude-forge'
 const RELEASES_LATEST_URL = `https://github.com/${UPDATE_REPO}/releases/latest`
@@ -14,6 +20,16 @@ const UPDATE_USER_AGENT = `Forge/${app.getVersion()}`
 interface LatestReleaseInfo {
   tag: string
   releaseUrl: string
+}
+
+interface RuntimeUpdateDownloadOptions extends UpdateDownloadOptions {
+  onProgress?: (progress: UpdateDownloadProgress) => void
+}
+
+interface PipeDownloadOptions {
+  fileName: string
+  requestId?: string
+  onProgress?: (progress: UpdateDownloadProgress) => void
 }
 
 function normalizeVersion(version: string | undefined): number[] {
@@ -145,6 +161,7 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
 function pipeDownload(
   url: string,
   destination: string,
+  options: PipeDownloadOptions,
   redirects = 5
 ): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -173,8 +190,9 @@ function pipeDownload(
           res.statusCode >= 300 &&
           res.statusCode < 400
         ) {
+          const nextUrl = absoluteLocation(location, url)
           res.resume()
-          pipeDownload(location, destination, redirects - 1).then(resolve, reject)
+          pipeDownload(nextUrl, destination, options, redirects - 1).then(resolve, reject)
           return
         }
 
@@ -184,20 +202,56 @@ function pipeDownload(
           return
         }
 
+        const rawTotal = Array.isArray(res.headers['content-length'])
+          ? res.headers['content-length'][0]
+          : res.headers['content-length']
+        const parsedTotal = Number.parseInt(rawTotal ?? '', 10)
+        const totalBytes = Number.isFinite(parsedTotal) && parsedTotal > 0 ? parsedTotal : undefined
+        const startedAt = Date.now()
+        let receivedBytes = 0
+        let lastEmitAt = 0
+
+        const emitProgress = (done = false): void => {
+          const now = Date.now()
+          if (!done && now - lastEmitAt < 250) return
+          lastEmitAt = now
+          const elapsedMs = Math.max(now - startedAt, 1)
+          const progress: UpdateDownloadProgress = {
+            ...(options.requestId ? { requestId: options.requestId } : {}),
+            fileName: options.fileName,
+            path: destination,
+            receivedBytes,
+            ...(totalBytes ? { totalBytes } : {}),
+            ...(totalBytes ? { percent: Math.min(100, (receivedBytes / totalBytes) * 100) } : {}),
+            bytesPerSecond: receivedBytes / (elapsedMs / 1000),
+            elapsedMs,
+            ...(done ? { done: true } : {})
+          }
+          options.onProgress?.(progress)
+        }
+
         const file = createWriteStream(destination)
         file.on('error', fail)
         file.on('finish', () => {
           file.close((error) => {
             if (error) fail(error)
-            else resolve()
+            else {
+              emitProgress(true)
+              resolve()
+            }
           })
         })
         res.on('error', fail)
+        res.on('data', (chunk: Buffer) => {
+          receivedBytes += chunk.length
+          emitProgress()
+        })
+        emitProgress()
         res.pipe(file)
       }
     )
     req.on('error', fail)
-    req.setTimeout(120000, () => {
+    req.setTimeout(300000, () => {
       req.destroy(new Error('Update download timed out.'))
     })
   })
@@ -213,19 +267,29 @@ function safeAssetName(assetUrl: string, fallback = 'Forge-update-setup.exe'): s
   }
 }
 
-export async function downloadAndInstallUpdate(assetUrl?: string): Promise<UpdateInstallResult> {
+export async function downloadAndInstallUpdate(
+  options?: RuntimeUpdateDownloadOptions | string
+): Promise<UpdateInstallResult> {
   try {
-    const update = assetUrl ? undefined : await checkForUpdates()
-    const url = assetUrl ?? update?.asset?.browserDownloadUrl
+    const normalized = typeof options === 'string' ? { assetUrl: options } : (options ?? {})
+    const update = normalized.assetUrl ? undefined : await checkForUpdates()
+    const url = normalized.assetUrl ?? update?.asset?.browserDownloadUrl
     if (!url) throw new Error('No update installer asset found.')
 
-    const updateDir = join(app.getPath('temp'), 'Forge-updates')
+    const updateDir = normalized.directory?.trim() || join(app.getPath('temp'), 'Forge-updates')
     mkdirSync(updateDir, { recursive: true })
-    const destination = join(updateDir, safeAssetName(url))
-    await pipeDownload(url, destination)
+    const fileName = safeAssetName(url)
+    const destination = join(updateDir, fileName)
+    await pipeDownload(url, destination, {
+      fileName,
+      ...(normalized.requestId ? { requestId: normalized.requestId } : {}),
+      ...(normalized.onProgress ? { onProgress: normalized.onProgress } : {})
+    })
 
-    const openError = await shell.openPath(destination)
-    if (openError) throw new Error(openError)
+    if (normalized.openWhenDone !== false) {
+      const openError = await shell.openPath(destination)
+      if (openError) throw new Error(openError)
+    }
     return { ok: true, path: destination }
   } catch (error) {
     return {

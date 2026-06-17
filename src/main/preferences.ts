@@ -1,6 +1,7 @@
 import { loadSettings, saveSettings } from './settings'
 import { armVulkanBackendPreference } from './gpuBackend'
 import type { ClaudeExecutionBackend, ComposerModel, Preferences } from '../shared/ipc'
+import { DEFAULT_AGENT_BACKEND_ID, normalizeAgentBackend } from '../shared/agentBackends'
 
 /** App preferences (Settings panel). Stored in forge-settings.json alongside
  *  providers/projects. */
@@ -12,11 +13,24 @@ export function currentBackend(s: ReturnType<typeof loadSettings> = loadSettings
     : 'windows'
 }
 
+export function currentAgentBackend(
+  s: ReturnType<typeof loadSettings> = loadSettings()
+): ReturnType<typeof normalizeAgentBackend> {
+  return normalizeAgentBackend(s.agentBackend ?? DEFAULT_AGENT_BACKEND_ID)
+}
+
 export function composerModelsForBackend(
   s: ReturnType<typeof loadSettings>,
   backend: ClaudeExecutionBackend
 ): ComposerModel[] | undefined {
   return backend === 'wsl' ? s.wslComposerModels : s.composerModels
+}
+
+export function composerModelsForAgent(
+  s: ReturnType<typeof loadSettings>,
+  backend: ClaudeExecutionBackend
+): ComposerModel[] | undefined {
+  return currentAgentBackend(s) === 'codex' ? s.codexComposerModels : composerModelsForBackend(s, backend)
 }
 
 export function setComposerModelsForBackend(
@@ -26,6 +40,15 @@ export function setComposerModelsForBackend(
 ): void {
   if (backend === 'wsl') s.wslComposerModels = models
   else s.composerModels = models
+}
+
+function setComposerModelsForAgent(
+  s: ReturnType<typeof loadSettings>,
+  backend: ClaudeExecutionBackend,
+  models: ComposerModel[]
+): void {
+  if (currentAgentBackend(s) === 'codex') s.codexComposerModels = models
+  else setComposerModelsForBackend(s, backend, models)
 }
 
 export function saveComposerModelsForBackend(
@@ -42,11 +65,13 @@ export function getPreferences(): Preferences {
   const s = loadSettings()
   const backend = currentBackend(s)
   return {
+    agentBackend: currentAgentBackend(s),
     defaultEffort: s.defaultEffort,
     defaultPermissionMode: s.defaultPermissionMode,
     wslSupportEnabled: s.wslSupportEnabled ?? s.claudeExecutionBackend === 'wsl',
     claudeExecutionBackend: currentBackend(s),
-    composerModels: composerModelsForBackend(s, backend),
+    composerModels: composerModelsForAgent(s, backend),
+    codexComposerModels: s.codexComposerModels,
     vulkanBackend: s.vulkanBackend,
     minimizeToTray: s.minimizeToTray,
     nativeNotifications: s.nativeNotifications,
@@ -57,6 +82,7 @@ export function getPreferences(): Preferences {
 /** Merge-apply the provided fields (only keys present in `prefs` are overwritten). */
 export function savePreferences(prefs: Preferences): Preferences {
   const s = loadSettings()
+  if (prefs.agentBackend !== undefined) s.agentBackend = normalizeAgentBackend(prefs.agentBackend)
   if (prefs.defaultEffort !== undefined) s.defaultEffort = prefs.defaultEffort
   if (prefs.defaultPermissionMode !== undefined) s.defaultPermissionMode = prefs.defaultPermissionMode
   if (prefs.wslSupportEnabled !== undefined) {
@@ -70,7 +96,10 @@ export function savePreferences(prefs: Preferences): Preferences {
         : prefs.claudeExecutionBackend
   }
   if (prefs.composerModels !== undefined) {
-    setComposerModelsForBackend(s, currentBackend(s), prefs.composerModels)
+    setComposerModelsForAgent(s, currentBackend(s), prefs.composerModels)
+  }
+  if (prefs.codexComposerModels !== undefined) {
+    s.codexComposerModels = prefs.codexComposerModels
   }
   if (prefs.vulkanBackend !== undefined) {
     s.vulkanBackend = prefs.vulkanBackend

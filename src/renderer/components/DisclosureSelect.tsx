@@ -93,14 +93,16 @@ export default function DisclosureSelect({
   )
 
   return (
-    <div className={`relative ${className ?? ''}`}>
+    <div className={`relative ${elevated ? 'z-[80]' : 'z-auto'} ${className ?? ''}`}>
       {/* The one frame. Absolute so enlarging it overlaps content instead of
           shoving it; trigger + options share it, so opening reads as the frame
           itself growing, not a second frame appearing. */}
       <div
-        className={`glass-panel-soft absolute inset-x-0 rounded-2xl p-1.5 ${
-          elevated ? 'z-[60]' : 'z-50'
+        className={`glass-panel-soft disclosure-select-panel absolute inset-x-0 rounded-2xl p-1.5 ${
+          elevated ? 'z-[90]' : 'z-50'
         } ${placement === 'top' ? 'bottom-0' : 'top-0'}`}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
       >
         {placement === 'top' ? optionsList : null}
         <button
@@ -125,7 +127,7 @@ export default function DisclosureSelect({
       </div>
 
       {/* click-outside catcher (below the floating frame) */}
-      {open && <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />}
+      {open && <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} />}
 
       {/* Invisible placeholder: reserves the frame's COLLAPSED footprint in
           the flow (the absolute frame doesn't, by itself). Matches the

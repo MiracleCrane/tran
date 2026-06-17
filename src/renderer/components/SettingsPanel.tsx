@@ -4,8 +4,11 @@ import type {
   EffortLevel,
   PermissionMode,
   ClaudeExecutionBackend,
+  AgentBackendId,
+  AgentBackendInfo,
   SettingsBackup,
-  UpdateCheckResult
+  UpdateCheckResult,
+  UpdateDownloadProgress
 } from '../../shared/ipc'
 import {
   MOTION_SPEED_MAX,
@@ -15,6 +18,13 @@ import {
 } from '../store/appearanceStore'
 import DisclosureSelect from './DisclosureSelect'
 import { useSessionStore } from '../store/sessionStore'
+import {
+  createDownloadRequestId,
+  formatProgressText,
+  formatSpeed,
+  progressPercent
+} from '../utils/downloadFormat'
+import { defaultModelsForAgent } from '../../shared/models'
 
 const EFFORTS: { id: EffortLevel; label: string }[] = [
   { id: 'low', label: '低' },
@@ -102,6 +112,8 @@ function ToggleControl({
 }
 
 export default function SettingsPanel(): JSX.Element {
+  const [agentBackend, setAgentBackend] = useState<AgentBackendId>('claude-code')
+  const [agentBackends, setAgentBackends] = useState<AgentBackendInfo[]>([])
   const [effort, setEffort] = useState<EffortLevel>('high')
   const [permMode, setPermMode] = useState<PermissionMode>('default')
   const [models, setModels] = useState<ComposerModel[]>([])
@@ -114,6 +126,7 @@ export default function SettingsPanel(): JSX.Element {
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [downloadingUpdate, setDownloadingUpdate] = useState(false)
+  const [updateProgress, setUpdateProgress] = useState<UpdateDownloadProgress | null>(null)
   const [updateMessage, setUpdateMessage] = useState<string | null>(null)
   const [exportingDiagnostic, setExportingDiagnostic] = useState(false)
   const [diagnosticMessage, setDiagnosticMessage] = useState<string | null>(null)
@@ -121,13 +134,20 @@ export default function SettingsPanel(): JSX.Element {
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState(false)
   const importInputRef = useRef<HTMLInputElement | null>(null)
+  const updateDownloadIdRef = useRef<string | null>(null)
   const appearance = useAppearanceStore((s) => s.settings)
   const updateAppearance = useAppearanceStore((s) => s.updateSetting)
   const resetAppearance = useAppearanceStore((s) => s.reset)
   const currentCwd = useSessionStore((s) => s.meta?.cwd)
+  const reloadForBackendSwitch = useSessionStore((s) => s.reloadForBackendSwitch)
 
   useEffect(() => {
-    void window.api.getPreferences().then((p) => {
+    void Promise.all([
+      window.api.getPreferences(),
+      window.api.listAgentBackends().catch(() => [] as AgentBackendInfo[])
+    ]).then(([p, backends]) => {
+      setAgentBackend(p.agentBackend ?? 'claude-code')
+      setAgentBackends(backends)
       setEffort(p.defaultEffort ?? 'high')
       setPermMode(p.defaultPermissionMode ?? 'default')
       setModels(p.composerModels ?? [])
@@ -138,6 +158,13 @@ export default function SettingsPanel(): JSX.Element {
       setNativeNotifications(p.nativeNotifications !== false)
       setAskOnClose(!p.closePromptDismissed)
       setLoaded(true)
+    })
+  }, [])
+
+  useEffect(() => {
+    return window.api.onUpdateDownloadProgress((next) => {
+      if (next.requestId && next.requestId !== updateDownloadIdRef.current) return
+      setUpdateProgress(next)
     })
   }, [])
 
@@ -214,9 +241,16 @@ export default function SettingsPanel(): JSX.Element {
   const downloadUpdate = async (): Promise<void> => {
     setDownloadingUpdate(true)
     setUpdateMessage(null)
+    setUpdateProgress(null)
     try {
-      const result = await window.api.downloadAndInstallUpdate(updateInfo?.asset?.browserDownloadUrl)
-      if (result.ok) setUpdateMessage('安装包已打开，请按提示完成更新。')
+      const requestId = createDownloadRequestId('settings-update')
+      updateDownloadIdRef.current = requestId
+      const result = await window.api.downloadAndInstallUpdate({
+        assetUrl: updateInfo?.asset?.browserDownloadUrl,
+        requestId
+      })
+      if (result.canceled) setUpdateMessage('已取消选择下载目录。')
+      else if (result.ok) setUpdateMessage(`安装包已保存并打开：${result.path ?? ''}`)
       else setUpdateMessage(`下载失败：${result.error ?? '未知错误'}`)
     } catch (e) {
       setUpdateMessage(e instanceof Error ? e.message : String(e))
@@ -266,18 +300,37 @@ export default function SettingsPanel(): JSX.Element {
     }
   }
 
+  const switchAgentBackend = async (next: AgentBackendId): Promise<void> => {
+    if (next === agentBackend) return
+    const previous = agentBackend
+    setAgentBackend(next)
+    try {
+      const prefs = await window.api.savePreferences({ agentBackend: next })
+      setModels(prefs.composerModels ?? [])
+      window.dispatchEvent(new Event('forge:agent-backend-changed'))
+      window.dispatchEvent(new Event('forge:provider-changed'))
+      window.dispatchEvent(new Event('forge:model-options-changed'))
+      setSavedAt(true)
+      setTimeout(() => setSavedAt(false), 1500)
+    } catch {
+      setAgentBackend(previous)
+      return
+    }
+    await reloadForBackendSwitch()
+  }
+
   const save = async (): Promise<void> => {
     setSaving(true)
     try {
       const cleanModels = models
         .map((m) => ({ id: m.id.trim(), label: m.label.trim() }))
         .filter((m) => m.id)
-      await window.api.savePreferences({
+      const prefs = await window.api.savePreferences({
         defaultEffort: effort,
         defaultPermissionMode: permMode,
         composerModels: cleanModels
       })
-      setModels(cleanModels)
+      setModels(prefs.composerModels ?? cleanModels)
       window.dispatchEvent(new Event('forge:model-options-changed'))
       setSavedAt(true)
       setTimeout(() => setSavedAt(false), 1500)
@@ -291,9 +344,40 @@ export default function SettingsPanel(): JSX.Element {
     setModels((m) => m.map((x, idx) => (idx === i ? { ...x, ...patch } : x)))
   const removeModel = (i: number): void => setModels((m) => m.filter((_, idx) => idx !== i))
   const backendLabel = claudeBackend === 'wsl' ? 'WSL' : 'Windows'
+  const modelScopeLabel = agentBackend === 'codex' ? 'Codex' : backendLabel
+  const defaultModelListLabel = agentBackend === 'codex' ? 'Codex' : 'Opus/Sonnet/Haiku'
+  const defaultModelCount = defaultModelsForAgent(agentBackend).length
+  const agentOptions = (agentBackends.length
+    ? agentBackends
+    : [
+        {
+          id: 'claude-code' as AgentBackendId,
+          name: 'Claude Code',
+          description: '当前稳定后端。',
+          status: 'available' as const,
+          runtimeModes: ['windows', 'wsl'] as Array<'windows' | 'wsl'>,
+          capabilities: {
+            streaming: true,
+            permissions: true,
+            mcp: true,
+            skills: true,
+            sessionHistory: true,
+            subagents: true
+          }
+        }
+      ]).map((backend) => ({
+    value: backend.id,
+    label: backend.status === 'available' ? backend.name : `${backend.name}（即将支持）`
+  }))
+  const selectedAgent = agentBackends.find((backend) => backend.id === agentBackend)
 
   const reloadPreferenceState = async (): Promise<void> => {
-    const p = await window.api.getPreferences()
+    const [p, backends] = await Promise.all([
+      window.api.getPreferences(),
+      window.api.listAgentBackends().catch(() => [] as AgentBackendInfo[])
+    ])
+    setAgentBackend(p.agentBackend ?? 'claude-code')
+    setAgentBackends(backends)
     setEffort(p.defaultEffort ?? 'high')
     setPermMode(p.defaultPermissionMode ?? 'default')
     setModels(p.composerModels ?? [])
@@ -348,6 +432,7 @@ export default function SettingsPanel(): JSX.Element {
   const inputCls =
     'w-full rounded-lg border border-border-subtle bg-bg-elev px-3 py-2 text-sm text-zinc-200 outline-none focus:border-accent'
   const labelCls = 'mb-1.5 block text-xs text-zinc-500'
+  const updatePercent = progressPercent(updateProgress)
 
   if (!loaded) {
     return (
@@ -390,6 +475,50 @@ export default function SettingsPanel(): JSX.Element {
           </div>
         </section>
 
+        <section className="glass-panel-soft glass-overflow-visible rounded-2xl p-4">
+          <div className="mb-3">
+            <label className={labelCls}>Agent 后端</label>
+            <p className="text-[11px] leading-relaxed text-zinc-600">
+              控制会话由哪个 Agent 引擎接管。Windows/WSL 是 Claude Code 的运行环境，Agent 后端是更上层的可插拔引擎。
+            </p>
+          </div>
+          <DisclosureSelect
+            value={agentBackend}
+            options={agentOptions}
+            onChange={(v) => void switchAgentBackend(v as AgentBackendId)}
+            className="w-full"
+          />
+          {selectedAgent && (
+            <div className="mt-3 rounded-xl border border-white/[0.06] bg-bg-elev/50 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium text-zinc-300">{selectedAgent.name}</span>
+                <span className="rounded bg-accent/15 px-2 py-0.5 text-[10px] text-accent">
+                  {selectedAgent.status === 'available' ? '可用' : '即将支持'}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                {selectedAgent.description}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-zinc-500">
+                {[
+                  selectedAgent.capabilities.streaming ? '流式输出' : '',
+                  selectedAgent.capabilities.permissions ? '权限拦截' : '',
+                  selectedAgent.capabilities.mcp ? 'MCP' : '',
+                  selectedAgent.capabilities.skills ? 'Skills' : '',
+                  selectedAgent.capabilities.sessionHistory ? '历史恢复' : '',
+                  selectedAgent.capabilities.subagents ? 'Subagents' : ''
+                ]
+                  .filter(Boolean)
+                  .map((label) => (
+                    <span key={label} className="rounded bg-white/[0.04] px-2 py-0.5">
+                      {label}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          )}
+        </section>
+
         <section>
           <label className={labelCls}>默认思考强度(effort)</label>
           <DisclosureSelect
@@ -422,7 +551,7 @@ export default function SettingsPanel(): JSX.Element {
         <section>
           <div className="mb-1.5 flex items-center justify-between">
             <label className="text-xs text-zinc-500">
-              Composer 模型列表({backendLabel}, 留空用内置)
+              Composer 模型列表({modelScopeLabel}, 留空用内置)
             </label>
             <button onClick={addModel} className="text-xs text-accent hover:underline">
               + 添加
@@ -452,7 +581,9 @@ export default function SettingsPanel(): JSX.Element {
               </div>
             ))}
             {models.length === 0 && (
-              <div className="text-xs text-zinc-600">未配置,使用内置列表(Opus/Sonnet/Haiku)。</div>
+              <div className="text-xs text-zinc-600">
+                未配置,使用内置 {defaultModelListLabel} 列表({defaultModelCount} 个)。
+              </div>
             )}
           </div>
         </section>
@@ -550,7 +681,7 @@ export default function SettingsPanel(): JSX.Element {
                     disabled={downloadingUpdate || !updateInfo?.asset}
                     className="rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {downloadingUpdate ? '下载中...' : '下载并打开'}
+                    {downloadingUpdate ? '下载中...' : '选择目录并下载'}
                   </button>
                 </div>
               </div>
@@ -559,6 +690,37 @@ export default function SettingsPanel(): JSX.Element {
                   当前 {updateInfo.currentVersion}
                   {updateInfo.latestVersion ? ` / 最新 ${updateInfo.latestVersion}` : ''}
                   {updateInfo.asset?.name ? ` / ${updateInfo.asset.name}` : ''}
+                </div>
+              )}
+              {(downloadingUpdate || updateProgress) && (
+                <div className="mt-3 rounded-xl border border-white/[0.06] bg-bg-elev/60 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3 text-[11px]">
+                    <span className="text-zinc-400">
+                      {updateProgress?.done ? '下载完成' : downloadingUpdate ? '下载中' : '准备下载'}
+                    </span>
+                    <span className="font-mono text-zinc-500">
+                      {updateProgress?.totalBytes
+                        ? `${updatePercent.toFixed(1)}%`
+                        : formatSpeed(updateProgress?.bytesPerSecond)}
+                    </span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-black/30">
+                    <div
+                      className="h-full rounded-full bg-accent transition-[width]"
+                      style={{
+                        width: `${updateProgress?.totalBytes ? updatePercent : downloadingUpdate ? 100 : 0}%`
+                      }}
+                    />
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-zinc-500">
+                    <span>{formatProgressText(updateProgress)}</span>
+                    {updateProgress?.totalBytes && <span>{formatSpeed(updateProgress.bytesPerSecond)}</span>}
+                  </div>
+                  {updateProgress?.path && (
+                    <div className="mt-1 truncate text-[11px] text-zinc-600" title={updateProgress.path}>
+                      {updateProgress.path}
+                    </div>
+                  )}
                 </div>
               )}
               {updateMessage && <div className="mt-1 text-[11px] text-zinc-500">{updateMessage}</div>}
