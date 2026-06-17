@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import type { Project } from '../../shared/ipc'
+import type { ClaudeExecutionBackend, Project } from '../../shared/ipc'
 import Collapse from './Collapse'
+import { isWslProjectPath } from '../../shared/paths'
 
 const FolderIcon = (): JSX.Element => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
@@ -53,6 +54,11 @@ const ChevronIcon = ({ up }: { up: boolean }): JSX.Element => (
 
 const PROJECT_SWITCHER_CLOSE_ELEVATION_MS = 560
 
+function normalizePickedProjectPath(path: string, backend: ClaudeExecutionBackend): string {
+  if (backend !== 'wsl') return path
+  return path.replace(/^\\\\wsl\$\\/i, '\\\\wsl.localhost\\')
+}
+
 export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
   const switchProject = useSessionStore((s) => s.switchProject)
@@ -65,6 +71,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   const [editingPath, setEditingPath] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [confirmPath, setConfirmPath] = useState<string | null>(null)
+  const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   const elevationTimerRef = useRef<number | null>(null)
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -75,9 +82,24 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
     }
   }, [])
 
+  const refreshWslSupport = useCallback(async (): Promise<void> => {
+    try {
+      const prefs = await window.api.getPreferences()
+      setWslSupportEnabled(!!prefs.wslSupportEnabled)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
   useEffect(() => {
     void refresh()
   }, [refresh, meta?.cwd])
+
+  useEffect(() => {
+    void refreshWslSupport()
+    window.addEventListener('forge:wsl-support-changed', refreshWslSupport)
+    return () => window.removeEventListener('forge:wsl-support-changed', refreshWslSupport)
+  }, [refreshWslSupport])
 
   useEffect(() => {
     if (elevationTimerRef.current !== null) {
@@ -107,13 +129,29 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   const currentLabel =
     current?.name ?? (meta?.cwd ? meta.cwd.split(/[\\/]/).pop() : '项目')
 
-  const addNew = async (): Promise<void> => {
+  const inferBackendFromPath = (
+    path: string,
+    fallback: ClaudeExecutionBackend
+  ): ClaudeExecutionBackend =>
+    isWslProjectPath(path, { includePosixAbsolute: true }) ? 'wsl' : fallback
+
+  const addNew = async (backend: ClaudeExecutionBackend): Promise<void> => {
     setOpen(false)
-    const dir = await window.api.pickDirectory()
+    const dir = await window.api.pickDirectory({ backend })
     if (!dir) return
+    const targetBackend = inferBackendFromPath(dir, backend)
+    await window.api.savePreferences({
+      claudeExecutionBackend: targetBackend,
+      ...(targetBackend === 'wsl' ? { wslSupportEnabled: true } : {})
+    })
+    window.dispatchEvent(new Event('forge:provider-changed'))
+    window.dispatchEvent(new Event('forge:model-options-changed'))
+    if (targetBackend === 'wsl') window.dispatchEvent(new Event('forge:wsl-support-changed'))
     const list = await window.api.addProject(dir)
     setProjects(list)
-    await switchProject(dir)
+    const normalizedDir = normalizePickedProjectPath(dir, targetBackend)
+    const savedPath = list.find((p) => p.path === normalizedDir)?.path ?? normalizedDir
+    await switchProject(savedPath)
   }
 
   const onSwitch = async (path: string): Promise<void> => {
@@ -159,6 +197,10 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
       <ChevronIcon up={open} />
     </button>
   )
+
+  const addProjectBackends: ClaudeExecutionBackend[] = wslSupportEnabled
+    ? ['windows', 'wsl']
+    : ['windows']
 
   // Shared project list + "add" row. `open` drives the stagger transition; in
   // the expanded sidebar it lives inside <Collapse> (so it animates), in the
@@ -276,18 +318,27 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
         })}
       </div>
       <div className="mt-0.5 border-t border-white/[0.06] pt-0.5">
-        <button
-          type="button"
-          onClick={() => void addNew()}
+        <div
           style={{
             transitionDelay: open ? `${projects.length * 40}ms` : '0ms',
             opacity: open ? 1 : 0,
             transform: open ? 'translateY(0)' : 'translateY(-6px)'
           }}
-          className="project-add-button flex min-h-8 w-full items-center gap-2 rounded-xl px-2.5 py-1 text-left text-[11px] text-zinc-300 transition-all duration-[360ms] ease-spring hover:text-zinc-100"
+          className={`grid ${
+            wslSupportEnabled ? 'grid-cols-2' : 'grid-cols-1'
+          } gap-1.5 transition-all duration-[360ms] ease-spring`}
         >
-          <PlusIcon /> 添加项目…
-        </button>
+          {addProjectBackends.map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => void addNew(item)}
+              className="project-add-button flex min-h-8 items-center gap-1.5 rounded-xl px-2 py-1 text-left text-[11px] text-zinc-300 transition-all duration-[360ms] ease-spring hover:text-zinc-100"
+            >
+              <PlusIcon /> {item === 'wsl' ? 'WSL' : 'Windows'}
+            </button>
+          ))}
+        </div>
       </div>
     </>
   )

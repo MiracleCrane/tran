@@ -31,6 +31,18 @@ function ExternalLink({ href, children }: { href: string; children: string }): J
   )
 }
 
+const WSL_CLAUDE_INSTALL_COMMAND = [
+  'npm install -g @anthropic-ai/claude-code',
+  'mkdir -p "$HOME/.local/bin"',
+  'ln -sfn "$(npm prefix -g)/bin/claude" "$HOME/.local/bin/claude"',
+  'hash -r'
+].join('\n')
+
+const WSL_CLAUDE_VERIFY_COMMAND = [
+  'command -v claude',
+  'claude --version'
+].join('\n')
+
 export default function HelpPanel(): JSX.Element {
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
 
@@ -137,11 +149,14 @@ export default function HelpPanel(): JSX.Element {
             <h2 className="text-sm font-semibold text-zinc-200">WSL 版本</h2>
             <p className="mt-2 text-xs leading-relaxed text-zinc-500">
               如果 Forge 设置里启用了“使用 WSL 内 Claude”，需要进入 WSL 终端后安装并配置 Claude Code。
-              Windows 原生版和 WSL 版是两套环境，配置文件也不同。
+              推荐用 npm 安装；Windows 原生版和 WSL 版是两套环境，配置文件也不同。
             </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <CommandBlock label="WSL 内安装" command="curl -fsSL https://claude.ai/install.sh | bash" />
-              <CommandBlock label="检查版本" command="claude --version" />
+            <div className="mt-3 grid gap-3">
+              <CommandBlock label="WSL 内安装" command={WSL_CLAUDE_INSTALL_COMMAND} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <CommandBlock label="检查版本" command={WSL_CLAUDE_VERIFY_COMMAND} />
+                <CommandBlock label="PowerShell 验证" command="wsl.exe --exec /usr/bin/env claude --version" />
+              </div>
             </div>
             <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.025] px-3 py-2 font-mono text-xs leading-relaxed text-zinc-400">
               Windows: C:\Users\&lt;用户名&gt;\.claude<br />

@@ -3,13 +3,25 @@ productName: Forge
 directories:
   buildResources: build
   output: release
+icon: build/icon.ico
 files:
   - out/**/*
+  - package.json
+  - '!node_modules/@anthropic-ai/claude-agent-sdk-*/**'
+asar: true
+compression: maximum
+electronLanguages:
+  - en-US
+  - zh-CN
+  - zh-TW
 win:
+  icon: build/icon.ico
   target:
     - nsis
-  artifactName: ${productName}-${version}-setup.${ext}
+  artifactName: ${productName}-${version}-external-claude-setup.${ext}
 nsis:
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

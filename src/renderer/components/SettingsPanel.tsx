@@ -253,7 +253,11 @@ export default function SettingsPanel(): JSX.Element {
       void reloadPreferenceState()
     }
     window.addEventListener('forge:close-prefs-changed', handler)
-    return () => window.removeEventListener('forge:close-prefs-changed', handler)
+    window.addEventListener('forge:wsl-support-changed', handler)
+    return () => {
+      window.removeEventListener('forge:close-prefs-changed', handler)
+      window.removeEventListener('forge:wsl-support-changed', handler)
+    }
   }, [])
 
   const exportSettings = async (): Promise<void> => {

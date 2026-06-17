@@ -17,6 +17,7 @@ import { log } from '../logger'
 import { getActiveProvider } from '../providers'
 import { getPreferences } from '../preferences'
 import { spawnClaudeViaWsl } from '../wslClaude'
+import { resolveWindowsClaudeCommand, spawnClaudeViaWindowsPath } from '../windowsClaude'
 
 /**
  * The Claude Agent SDK is ESM-only and relies on `import.meta.url` to locate its
@@ -122,6 +123,10 @@ export class AgentBridge {
         delete env['ANTHROPIC_API_KEY']
       }
     }
+    const windowsClaude =
+      !useWslClaude && process.platform === 'win32'
+        ? resolveWindowsClaudeCommand(env)
+        : null
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const options: any = {
       cwd: opts.cwd,
@@ -140,7 +145,14 @@ export class AgentBridge {
         ctx: CanUseToolCtx
       ) => this.handlePermission(toolName, input, ctx),
       env,
-      ...(useWslClaude ? { spawnClaudeCodeProcess: spawnClaudeViaWsl } : {}),
+      ...(useWslClaude
+        ? { pathToClaudeCodeExecutable: 'claude', spawnClaudeCodeProcess: spawnClaudeViaWsl }
+        : process.platform === 'win32'
+          ? {
+              pathToClaudeCodeExecutable: windowsClaude?.command,
+              spawnClaudeCodeProcess: spawnClaudeViaWindowsPath
+            }
+          : {}),
       ...(opts.resume ? { resume: opts.resume } : {})
     }
     const q = query({ prompt: stream.iterable, options })

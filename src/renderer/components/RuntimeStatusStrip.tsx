@@ -16,28 +16,56 @@ export default function RuntimeStatusStrip(): JSX.Element {
 
   useEffect(() => {
     let alive = true
-    const refresh = async (): Promise<void> => {
-      if (!meta) return
-      if (typeof window.api.getRuntimeStatus !== 'function') return
-      const [next, prefs] = await Promise.all([
-        window.api.getRuntimeStatus(meta.cwd, meta.model).catch(() => null),
-        window.api.getPreferences().catch(() => null)
-      ])
-      if (alive) setWslSupportEnabled(!!prefs?.wslSupportEnabled)
-      if (alive && next) setStatus(next)
+    let requestSeq = 0
+    let probeTimer: number | null = null
+
+    if (!meta) {
+      setStatus(null)
+      return () => {
+        alive = false
+      }
     }
 
-    void refresh()
+    const loadStatus = async (refreshProbe: boolean, seq: number): Promise<void> => {
+      if (typeof window.api.getRuntimeStatus !== 'function') return
+      const [next, prefs] = await Promise.all([
+        window.api
+          .getRuntimeStatus(meta.cwd, meta.model, refreshProbe ? { refreshProbe: true } : undefined)
+          .catch(() => null),
+        window.api.getPreferences().catch(() => null)
+      ])
+      if (!alive || seq !== requestSeq) return
+      setWslSupportEnabled(!!prefs?.wslSupportEnabled)
+      if (next) setStatus(next)
+    }
+
+    const refresh = (): void => {
+      requestSeq += 1
+      const seq = requestSeq
+      if (probeTimer !== null) {
+        window.clearTimeout(probeTimer)
+        probeTimer = null
+      }
+
+      void loadStatus(false, seq)
+      probeTimer = window.setTimeout(() => {
+        probeTimer = null
+        void loadStatus(true, seq)
+      }, 450)
+    }
+
+    refresh()
     window.addEventListener('forge:provider-changed', refresh)
     window.addEventListener('forge:model-options-changed', refresh)
     window.addEventListener('forge:wsl-support-changed', refresh)
     return () => {
       alive = false
+      if (probeTimer !== null) window.clearTimeout(probeTimer)
       window.removeEventListener('forge:provider-changed', refresh)
       window.removeEventListener('forge:model-options-changed', refresh)
       window.removeEventListener('forge:wsl-support-changed', refresh)
     }
-  }, [meta?.cwd, meta?.model, meta])
+  }, [meta?.cwd, meta?.model])
 
   if (!meta) return <></>
 

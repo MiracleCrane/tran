@@ -1,6 +1,6 @@
 {
   "name": "forge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A desktop client for Claude Agent on Windows",
   "main": "./out/main/index.js",
   "author": "",
@@ -9,21 +9,13 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "build:win": "electron-vite build && electron-builder --win",
+    "build:win": "electron-vite build && electron-builder --config electron-builder.yml --win",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.177",
-    "highlight.js": "^11.11.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-markdown": "^10.1.0",
-    "react-virtuoso": "^4.18.7",
-    "rehype-highlight": "^7.0.2",
-    "remark-gfm": "^4.0.1",
-    "zustand": "^5.0.14"
+    "@anthropic-ai/claude-agent-sdk": "^0.3.177"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
@@ -34,26 +26,17 @@
     "electron": "^42.4.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "highlight.js": "^11.11.1",
     "postcss": "^8.5.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "react-virtuoso": "^4.18.7",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
     "tailwindcss": "^3.4.19",
     "typescript": "^6.0.3",
-    "vite": "^7.3.5"
-  },
-  "build": {
-    "appId": "com.spideytznn.forge",
-    "productName": "Forge",
-    "directories": {
-      "output": "release"
-    },
-    "asar": false,
-    "win": {
-      "target": "nsis",
-      "artifactName": "${productName}-${version}-setup.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true
-    }
+    "vite": "^7.3.5",
+    "zustand": "^5.0.14"
   }
 }

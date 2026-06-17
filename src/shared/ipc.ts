@@ -191,6 +191,10 @@ export interface ComposerModel {
 
 export type ClaudeExecutionBackend = 'windows' | 'wsl'
 
+export interface PickDirectoryOptions {
+  backend?: ClaudeExecutionBackend
+}
+
 /** Misc app preferences managed by the Settings panel. */
 export interface Preferences {
   /** Default effort for new sessions (AgentBridge fallback). */
@@ -239,6 +243,10 @@ export interface RuntimeStatus {
   versionError?: string
   wslDistro?: string
   checkedAt: number
+}
+
+export interface RuntimeStatusOptions {
+  refreshProbe?: boolean
 }
 
 export type HealthCheckState = 'pass' | 'warn' | 'fail'
@@ -435,7 +443,7 @@ export interface ForgeApi {
   /** --- Preferences (Settings panel) --- */
   getPreferences(): Promise<Preferences>
   savePreferences(prefs: Preferences): Promise<Preferences>
-  getRuntimeStatus(cwd?: string, model?: string): Promise<RuntimeStatus>
+  getRuntimeStatus(cwd?: string, model?: string, options?: RuntimeStatusOptions): Promise<RuntimeStatus>
   runWslHealthCheck(cwd: string): Promise<WslHealthReport>
   repairWslEnvironment(cwd: string): Promise<WslHealthReport>
   getDiagnosticLog(): Promise<string>
@@ -455,7 +463,7 @@ export interface ForgeApi {
   /** Subscribe to the first-close prompt request (main → renderer). */
   onClosePrompt(cb: () => void): () => void
 
-  pickDirectory(): Promise<string | null>
+  pickDirectory(options?: PickDirectoryOptions): Promise<string | null>
   getApiKey(): Promise<string | null>
   setApiKey(key: string): Promise<void>
 

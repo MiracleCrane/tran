@@ -1,6 +1,6 @@
 import { ipcMain, dialog, shell, Notification, type BrowserWindow } from 'electron'
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
-import { basename, extname, resolve } from 'node:path'
+import { basename, extname, isAbsolute, resolve } from 'node:path'
 import { AgentBridge } from './agent/AgentBridge'
 import { getApiKey, setApiKey, loadSettings, saveSettings } from './settings'
 import { saveMcpServer, deleteMcpServer } from './mcpConfig'
@@ -36,7 +36,7 @@ import {
   repairWslEnvironment,
   runWslHealthCheck
 } from './runtimeDiagnostics'
-import { fromWslPath } from './wslClaude'
+import { fromWslPath, getDefaultWslDistro, getWslHome, toWslPath, toWslUncPath } from './wslClaude'
 import {
   deleteWslSession,
   getWslSessionMessages,
@@ -72,9 +72,11 @@ import type {
   RuntimeStatus,
   SettingsBackup,
   WslHealthReport,
-  ComposerModel
+  ComposerModel,
+  PickDirectoryOptions
 } from '../shared/ipc'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
+import { isWslProjectPath } from '../shared/paths'
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
 const TEXT_EXTS = new Set([
@@ -104,6 +106,78 @@ function useWslClaudeBackend(backend: ClaudeExecutionBackend = currentClaudeBack
   return process.platform === 'win32' && backend === 'wsl'
 }
 
+function isNativeAbsolutePath(path: string): boolean {
+  return isAbsolute(path) || /^[/\\]{2}/.test(path)
+}
+
+function normalizeProjectPathForBackend(
+  path: string,
+  backend: ClaudeExecutionBackend = currentClaudeBackend()
+): string {
+  const trimmed = path.trim()
+  if (!trimmed) return trimmed
+  if (!useWslClaudeBackend(backend)) return trimmed
+  return fromWslPath(trimmed) ?? trimmed
+}
+
+function projectBackendFromPath(
+  path: string,
+  fallback: ClaudeExecutionBackend = currentClaudeBackend()
+): ClaudeExecutionBackend {
+  return process.platform === 'win32' &&
+    isWslProjectPath(path, { includePosixAbsolute: true })
+    ? 'wsl'
+    : fallback
+}
+
+function enableWslPreferencesForProjectBackend(backend: ClaudeExecutionBackend): void {
+  if (backend !== 'wsl') return
+  savePreferences({ wslSupportEnabled: true, claudeExecutionBackend: 'wsl' })
+}
+
+function resolveNativePath(cwd: string, pathStr: string): string {
+  const nativePath = fromWslPath(pathStr) ?? pathStr
+  if (isNativeAbsolutePath(nativePath)) return nativePath
+  const nativeCwd = fromWslPath(cwd) ?? cwd
+  return resolve(nativeCwd, pathStr)
+}
+
+function rendererPathFromNativePath(path: string): string {
+  return useWslClaudeBackend() ? (toWslPath(path) ?? path) : path
+}
+
+function toWslPickerPath(path: string | undefined): string | undefined {
+  return path?.replace(/^\\\\wsl\.localhost\\/i, '\\\\wsl$\\')
+}
+
+function wslDirectoryDefaultPath(): string | undefined {
+  const distro = getDefaultWslDistro()
+  const home = getWslHome()
+  if (home) return toWslPickerPath(toWslUncPath(home, distro))
+  if (distro) return `\\\\wsl$\\${distro}`
+  return '\\\\wsl$'
+}
+
+async function pickWslDirectory(): Promise<string | null> {
+  const defaultPath = wslDirectoryDefaultPath()
+  let res: Electron.OpenDialogReturnValue
+  try {
+    res = await dialog.showOpenDialog({
+      title: 'Select WSL project directory',
+      ...(defaultPath ? { defaultPath } : {}),
+      properties: ['openDirectory']
+    })
+  } catch (err) {
+    log('ipc', `WSL directory picker fallback: ${err instanceof Error ? err.message : String(err)}`)
+    res = await dialog.showOpenDialog({
+      title: 'Select WSL project directory',
+      properties: ['openDirectory']
+    })
+  }
+  if (res.canceled || !res.filePaths.length) return null
+  return normalizeProjectPathForBackend(res.filePaths[0], 'wsl')
+}
+
 function normalizeAgentMessageForRenderer(message: SDKMessage): SDKMessage {
   if (!useWslClaudeBackend() || message.type !== 'system') return message
   const cwd = (message as { cwd?: unknown }).cwd
@@ -122,7 +196,7 @@ function readDirectoryEntries(path: string): { entries: PickedDirectoryEntry[]; 
       const stat = statSync(childPath)
       entries.push({
         name: dirent.name,
-        path: childPath,
+        path: rendererPathFromNativePath(childPath),
         kind: stat.isDirectory() ? 'directory' : 'file',
         size: stat.isDirectory() ? 0 : stat.size,
         modifiedAt: stat.mtimeMs
@@ -145,12 +219,12 @@ function readPickedFiles(cwd: string, paths: string[], source: string): PickedFi
   const out: PickedFile[] = []
   for (const rawPath of paths) {
     try {
-      const p = resolve(cwd, rawPath)
+      const p = resolveNativePath(cwd, rawPath)
       const stat = statSync(p)
       if (stat.isDirectory()) {
         const { entries, truncated } = readDirectoryEntries(p)
         out.push({
-          path: p,
+          path: rendererPathFromNativePath(p),
           name: basename(p),
           kind: 'directory',
           mimeType: 'application/x-directory',
@@ -178,7 +252,7 @@ function readPickedFiles(cwd: string, paths: string[], source: string): PickedFi
         data = readFileSync(p).toString('utf-8').slice(0, MAX_TEXT_INLINE)
       }
       out.push({
-        path: p,
+        path: rendererPathFromNativePath(p),
         name: basename(p),
         kind,
         mimeType: MIME[ext] ?? 'application/octet-stream',
@@ -317,7 +391,7 @@ export function registerIpc(
   ipcMain.handle('forge:pickFiles', async (_e, cwd: string): Promise<PickedFile[]> => {
     const res = await dialog.showOpenDialog({
       title: '选择文件附件',
-      defaultPath: cwd,
+      defaultPath: fromWslPath(cwd) ?? cwd,
       properties: ['openFile', 'multiSelections']
     })
     if (res.canceled || !res.filePaths.length) return []
@@ -332,8 +406,7 @@ export function registerIpc(
   })
 
   ipcMain.handle('forge:revealInExplorer', async (_e, cwd: string, pathStr: string): Promise<boolean> => {
-    const { resolve } = await import('node:path')
-    const resolved = resolve(cwd, pathStr)
+    const resolved = resolveNativePath(cwd, pathStr)
     if (!existsSync(resolved)) return false
     if (statSync(resolved).isDirectory()) {
       await shell.openPath(resolved)
@@ -379,8 +452,8 @@ export function registerIpc(
   )
   ipcMain.handle(
     'forge:getRuntimeStatus',
-    async (_e, cwd?: string, model?: string): Promise<RuntimeStatus> =>
-      getRuntimeStatus(cwd, model)
+    async (_e, cwd?: string, model?: string, options?: { refreshProbe?: boolean }): Promise<RuntimeStatus> =>
+      getRuntimeStatus(cwd, model, options)
   )
   ipcMain.handle(
     'forge:runWslHealthCheck',
@@ -492,21 +565,27 @@ export function registerIpc(
   )
 
   ipcMain.handle('forge:listProjects', async (): Promise<Project[]> => listProjects())
-  ipcMain.handle('forge:addProject', async (_e, path: string, name?: string): Promise<Project[]> =>
-    addProject(path, name)
-  )
+  ipcMain.handle('forge:addProject', async (_e, path: string, name?: string): Promise<Project[]> => {
+    const backend = projectBackendFromPath(path)
+    enableWslPreferencesForProjectBackend(backend)
+    return addProject(normalizeProjectPathForBackend(path, backend), name)
+  })
   ipcMain.handle('forge:removeProject', async (_e, path: string): Promise<Project[]> =>
     removeProject(path)
   )
   ipcMain.handle('forge:renameProject', async (_e, path: string, name: string): Promise<Project[]> =>
     renameProject(path, name)
   )
-  ipcMain.handle('forge:setLastProject', async (_e, path: string): Promise<void> =>
-    setLastProject(path)
-  )
-  ipcMain.handle('forge:getStartupProject', async (): Promise<Project | null> =>
-    getStartupProject()
-  )
+  ipcMain.handle('forge:setLastProject', async (_e, path: string): Promise<void> => {
+    const backend = projectBackendFromPath(path)
+    enableWslPreferencesForProjectBackend(backend)
+    setLastProject(normalizeProjectPathForBackend(path, backend))
+  })
+  ipcMain.handle('forge:getStartupProject', async (): Promise<Project | null> => {
+    const project = getStartupProject()
+    if (project) enableWslPreferencesForProjectBackend(projectBackendFromPath(project.path))
+    return project
+  })
 
   ipcMain.handle('forge:listSessions', async (_e, cwd: string, opts?: SessionListOptions): Promise<SessionListItem[]> => {
     const limit = opts?.limit && opts.limit > 0 ? opts.limit : 50
@@ -631,11 +710,17 @@ export function registerIpc(
     }
   )
 
-  ipcMain.handle('forge:pickDirectory', async (): Promise<string | null> => {
-    const res = await dialog.showOpenDialog({ properties: ['openDirectory'] })
-    if (res.canceled || !res.filePaths.length) return null
-    return res.filePaths[0]
-  })
+  ipcMain.handle(
+    'forge:pickDirectory',
+    async (_e, options?: PickDirectoryOptions): Promise<string | null> => {
+      const backend = options?.backend ?? currentClaudeBackend()
+      if (useWslClaudeBackend(backend)) return pickWslDirectory()
+
+      const res = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+      if (res.canceled || !res.filePaths.length) return null
+      return res.filePaths[0]
+    }
+  )
 
   ipcMain.handle('forge:getApiKey', async (): Promise<string | null> => {
     return getApiKey()

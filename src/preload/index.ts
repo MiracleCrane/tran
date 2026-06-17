@@ -57,7 +57,8 @@ const api: ForgeApi = {
 
   getPreferences: () => ipcRenderer.invoke('forge:getPreferences'),
   savePreferences: (prefs) => ipcRenderer.invoke('forge:savePreferences', prefs),
-  getRuntimeStatus: (cwd, model) => ipcRenderer.invoke('forge:getRuntimeStatus', cwd, model),
+  getRuntimeStatus: (cwd, model, options) =>
+    ipcRenderer.invoke('forge:getRuntimeStatus', cwd, model, options),
   runWslHealthCheck: (cwd) => ipcRenderer.invoke('forge:runWslHealthCheck', cwd),
   repairWslEnvironment: (cwd) => ipcRenderer.invoke('forge:repairWslEnvironment', cwd),
   getDiagnosticLog: () => ipcRenderer.invoke('forge:getDiagnosticLog'),
@@ -101,7 +102,7 @@ const api: ForgeApi = {
   setLastProject: (path) => ipcRenderer.invoke('forge:setLastProject', path),
   getStartupProject: () => ipcRenderer.invoke('forge:getStartupProject'),
 
-  pickDirectory: () => ipcRenderer.invoke('forge:pickDirectory'),
+  pickDirectory: (options) => ipcRenderer.invoke('forge:pickDirectory', options),
   getApiKey: () => ipcRenderer.invoke('forge:getApiKey'),
   setApiKey: (key) => ipcRenderer.invoke('forge:setApiKey', key),
 

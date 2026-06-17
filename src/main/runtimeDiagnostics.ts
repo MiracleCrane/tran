@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { currentBackend } from './preferences'
@@ -8,6 +8,7 @@ import { toWslPath } from './wslClaude'
 import type {
   HealthCheckItem,
   RuntimeStatus,
+  RuntimeStatusOptions,
   SettingsBackup,
   WslHealthReport
 } from '../shared/ipc'
@@ -19,6 +20,18 @@ interface CommandResult {
   status: number | null
   error?: string
 }
+
+interface RuntimeProbe {
+  version?: string
+  path?: string
+  error?: string
+  wslDistro?: string
+  checkedAt: number
+}
+
+const RUNTIME_PROBE_TTL_MS = 60_000
+const runtimeProbeCache = new Map<string, RuntimeProbe>()
+const runtimeProbeInflight = new Map<string, Promise<RuntimeProbe>>()
 
 function cleanOutput(value: string | Buffer | undefined): string {
   return String(value ?? '').replace(/\0/g, '').trim()
@@ -52,6 +65,72 @@ function run(command: string, args: string[], timeoutMs = 10000): CommandResult 
   }
 }
 
+function runAsync(command: string, args: string[], timeoutMs = 10000): Promise<CommandResult> {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(command, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      })
+      let stdout = ''
+      let stderr = ''
+      let settled = false
+
+      const finish = (result: CommandResult): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(result)
+      }
+
+      const timer = setTimeout(() => {
+        child.kill()
+        finish({
+          ok: false,
+          stdout: cleanOutput(stdout),
+          stderr: cleanOutput(stderr),
+          status: null,
+          error: `timed out after ${timeoutMs}ms`
+        })
+      }, timeoutMs)
+
+      child.stdout.setEncoding('utf8')
+      child.stderr.setEncoding('utf8')
+      child.stdout.on('data', (chunk: string) => {
+        stdout += chunk
+      })
+      child.stderr.on('data', (chunk: string) => {
+        stderr += chunk
+      })
+      child.on('error', (error) => {
+        finish({
+          ok: false,
+          stdout: cleanOutput(stdout),
+          stderr: cleanOutput(stderr),
+          status: null,
+          error: error.message
+        })
+      })
+      child.on('close', (code) => {
+        finish({
+          ok: code === 0,
+          stdout: cleanOutput(stdout),
+          stderr: cleanOutput(stderr),
+          status: code
+        })
+      })
+    } catch (error) {
+      resolve({
+        ok: false,
+        stdout: '',
+        stderr: '',
+        status: null,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    }
+  })
+}
+
 function runWsl(args: string[], timeoutMs = 15000): CommandResult {
   if (process.platform !== 'win32') {
     return {
@@ -63,6 +142,19 @@ function runWsl(args: string[], timeoutMs = 15000): CommandResult {
     }
   }
   return run('wsl.exe', args, timeoutMs)
+}
+
+function runWslAsync(args: string[], timeoutMs = 15000): Promise<CommandResult> {
+  if (process.platform !== 'win32') {
+    return Promise.resolve({
+      ok: false,
+      stdout: '',
+      stderr: '',
+      status: null,
+      error: 'WSL is only available from Forge on Windows.'
+    })
+  }
+  return runAsync('wsl.exe', args, timeoutMs)
 }
 
 function resultDetail(result: CommandResult): string {
@@ -86,6 +178,23 @@ function getDefaultWslDistro(): string | undefined {
     .find(Boolean)
 }
 
+async function getDefaultWslDistroAsync(): Promise<string | undefined> {
+  const verbose = await runWslAsync(['-l', '-v'], 10000)
+  if (verbose.ok || verbose.stdout) {
+    for (const line of verbose.stdout.split(/\r?\n/)) {
+      const match = line.match(/^\s*\*\s+(.+?)\s{2,}/)
+      if (match?.[1]) return match[1].trim()
+    }
+  }
+
+  const quiet = await runWslAsync(['-l', '-q'], 10000)
+  if (!quiet.ok && !quiet.stdout) return undefined
+  return quiet.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean)
+}
+
 function parseClaudeProbe(result: CommandResult): {
   version?: string
   path?: string
@@ -101,36 +210,70 @@ function parseClaudeProbe(result: CommandResult): {
   }
 }
 
-function probeWindowsClaude(): { version?: string; path?: string; error?: string } {
-  const where = run('where.exe', ['claude'], 5000)
-  const version = run('cmd.exe', ['/d', '/s', '/c', 'claude --version'], 10000)
+async function probeWindowsClaudeAsync(): Promise<RuntimeProbe> {
+  const [where, version] = await Promise.all([
+    runAsync('where.exe', ['claude'], 5000),
+    runAsync('cmd.exe', ['/d', '/s', '/c', 'claude --version'], 10000)
+  ])
   const parsed = parseClaudeProbe(version)
   return {
     ...parsed,
-    ...(where.stdout ? { path: where.stdout.split(/\r?\n/).find(Boolean) } : {})
+    ...(where.stdout ? { path: where.stdout.split(/\r?\n/).find(Boolean) } : {}),
+    checkedAt: Date.now()
   }
 }
 
-function probeWslClaude(): { version?: string; path?: string; error?: string } {
-  return parseClaudeProbe(
-    runWsl(['--exec', 'sh', '-lc', 'command -v claude && claude --version'], 12000)
-  )
+async function probeWslClaudeAsync(): Promise<RuntimeProbe> {
+  const [version, wslDistro] = await Promise.all([
+    runWslAsync(['--exec', 'sh', '-lc', 'command -v claude && claude --version'], 12000),
+    getDefaultWslDistroAsync()
+  ])
+  return {
+    ...parseClaudeProbe(version),
+    ...(wslDistro ? { wslDistro } : {}),
+    checkedAt: Date.now()
+  }
 }
 
-export function getRuntimeStatus(_cwd?: string, modelOverride?: string): RuntimeStatus {
+async function runtimeProbe(
+  backend: ReturnType<typeof currentBackend>,
+  refresh: boolean
+): Promise<RuntimeProbe | undefined> {
+  const cached = runtimeProbeCache.get(backend)
+  if (!refresh) return cached
+  if (cached && Date.now() - cached.checkedAt < RUNTIME_PROBE_TTL_MS) return cached
+
+  const inflight = runtimeProbeInflight.get(backend)
+  if (inflight) return inflight
+
+  const probe = (backend === 'wsl' ? probeWslClaudeAsync() : probeWindowsClaudeAsync())
+    .then((next) => {
+      runtimeProbeCache.set(backend, next)
+      return next
+    })
+    .finally(() => runtimeProbeInflight.delete(backend))
+  runtimeProbeInflight.set(backend, probe)
+  return probe
+}
+
+export async function getRuntimeStatus(
+  _cwd?: string,
+  modelOverride?: string,
+  options: RuntimeStatusOptions = {}
+): Promise<RuntimeStatus> {
   const backend = currentBackend()
   const profile = getProviderProfile(backend)
   const provider = profile.providers.find((p) => p.id === profile.activeProviderId) ?? null
-  const probe = backend === 'wsl' ? probeWslClaude() : probeWindowsClaude()
+  const probe = await runtimeProbe(backend, options.refreshProbe === true)
   return {
     backend,
     provider,
     model: modelOverride || provider?.model || 'claude-opus-4-8',
-    ...(probe.version ? { claudeCodeVersion: probe.version } : {}),
-    ...(probe.path ? { claudeCodePath: probe.path } : {}),
-    ...(probe.error ? { versionError: probe.error } : {}),
-    ...(backend === 'wsl' ? { wslDistro: getDefaultWslDistro() } : {}),
-    checkedAt: Date.now()
+    ...(probe?.version ? { claudeCodeVersion: probe.version } : {}),
+    ...(probe?.path ? { claudeCodePath: probe.path } : {}),
+    ...(probe?.error ? { versionError: probe.error } : {}),
+    ...(probe?.wslDistro ? { wslDistro: probe.wslDistro } : {}),
+    checkedAt: probe?.checkedAt ?? Date.now()
   }
 }
 

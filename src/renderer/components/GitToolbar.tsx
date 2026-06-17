@@ -89,8 +89,7 @@ function formatTime(ts: number): string {
 type Drawer = 'branches' | 'commit' | 'log' | 'stash' | 'output' | null
 type OpenDrawer = Exclude<Drawer, null>
 type FileKind = 'staged' | 'unstaged' | 'untracked' | 'conflict'
-const DRAWER_CLOSE_CLEAR_MS = 760
-const DRAWER_CONTENT_FADE_MS = 110
+const DRAWER_CLOSE_CLEAR_MS = 220
 const GIT_LOG_LIMIT = 30
 export const CLOSE_GIT_DRAWER_EVENT = 'forge:close-git-drawer'
 
@@ -279,7 +278,6 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   const drawerHeightRafRef = useRef<number | null>(null)
   const drawerLoadSeqRef = useRef<Partial<Record<OpenDrawer, number>>>({})
   const mountedRef = useRef(true)
-  const [drawerContentSwitching, setDrawerContentSwitching] = useState(false)
   const [drawerHeight, setDrawerHeight] = useState<number | null>(null)
   const [drawerLoading, setDrawerLoading] = useState<Partial<Record<OpenDrawer, boolean>>>({})
   const [commitMsg, setCommitMsg] = useState('')
@@ -402,22 +400,14 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
       const current = renderedDrawerRef.current
       if (wasOpen && current && current !== drawer) {
         lockDrawerVisibleHeight()
-        setDrawerContentSwitching(true)
-        const timeout = window.setTimeout(() => {
-          setRenderedDrawer(drawer)
-          window.requestAnimationFrame(() => {
-            window.requestAnimationFrame(() => setDrawerContentSwitching(false))
-          })
-        }, DRAWER_CONTENT_FADE_MS)
-        return () => window.clearTimeout(timeout)
+        setRenderedDrawer(drawer)
+        return
       }
       setRenderedDrawer(drawer)
-      setDrawerContentSwitching(false)
       return
     }
 
     drawerOpenRef.current = false
-    setDrawerContentSwitching(false)
     const timeout = window.setTimeout(() => setRenderedDrawer(null), DRAWER_CLOSE_CLEAR_MS)
     return () => window.clearTimeout(timeout)
   }, [drawer])
@@ -732,7 +722,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
       {/* --- drawer area (one at a time) --- */}
       <Collapse
         open={!!drawer}
-        className={`absolute left-0 right-0 top-full z-40 shadow-[0_24px_60px_rgba(0,0,0,0.28)] ${
+        className={`git-drawer-collapse absolute left-0 right-0 top-full z-40 shadow-[0_24px_60px_rgba(0,0,0,0.28)] ${
           drawer ? 'pointer-events-auto' : 'pointer-events-none'
         }`}
       >
@@ -743,7 +733,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
         >
           <div
             ref={drawerContentRef}
-            className={`git-drawer-content px-3 py-2.5 ${drawerContentSwitching ? 'is-switching' : ''}`}
+            className="git-drawer-content px-3 py-2.5"
           >
           {/* Branches drawer */}
           {renderedDrawer === 'branches' && (
