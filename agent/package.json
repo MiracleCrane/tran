@@ -1,0 +1,9 @@
+{
+  "name": "@claude-forge/agent",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Reserved workspace for the self-developed Forge agent.",
+  "scripts": {
+    "typecheck": "echo \"agent workspace has no implementation yet\""
+  }
+}

@@ -267,7 +267,7 @@ export class CodexBackend {
     try {
       pending.client.respond(
         pending.requestId,
-        permissionResponseFor(pending.method, pending.params, resp.behavior === 'allow')
+        permissionResponseFor(pending.method, pending.params, resp)
       )
     } catch (error) {
       log('codex', `permission response failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -972,8 +972,9 @@ function isPermissionRequest(method: string): boolean {
 function permissionResponseFor(
   method: string,
   params: Record<string, unknown>,
-  allow: boolean
+  resp: PermissionResponsePayload
 ): Record<string, unknown> {
+  const allow = resp.behavior === 'allow'
   if (method === 'item/commandExecution/requestApproval') {
     return { decision: allow ? 'accept' : 'decline' }
   }
@@ -988,7 +989,7 @@ function permissionResponseFor(
     return { action: allow ? 'accept' : 'decline', content: null, _meta: null }
   }
   if (method === 'item/tool/requestUserInput') {
-    return { answers: {} }
+    return { answers: allow ? (resp.answers ?? {}) : {} }
   }
   if (method === 'applyPatchApproval' || method === 'execCommandApproval') {
     return { decision: allow ? 'approved' : 'denied' }

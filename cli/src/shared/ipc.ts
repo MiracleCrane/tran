@@ -49,6 +49,7 @@ export interface PermissionResponsePayload {
   toolUseID: string
   behavior: 'allow' | 'deny'
   message?: string
+  answers?: Record<string, unknown>
 }
 
 export interface SessionListItem {

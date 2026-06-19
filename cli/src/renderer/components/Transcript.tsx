@@ -4,7 +4,6 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import type { AssistantBlock, AssistantItem, UserItem, TranscriptItem, ItemNode } from '../types'
 import MessageText from './MessageText'
-import StreamText from './StreamText'
 import ToolCallCard from './ToolCallCard'
 
 const INITIAL_HIGHLIGHT_DELAY_MS = 420
@@ -173,18 +172,13 @@ const AssistantMessage = memo(function AssistantMessage({
       {item.blocks
         .filter((b): b is AssistantBlock => !!b)
         .map((block, i) => {
-          // `highlight={!item.streaming}`: skip syntax highlighting while the
-          // message is still streaming (the expensive stage), apply it once on
-          // the final render when streaming flips false.
           if (block.kind === 'text') {
-            if (isStreaming) {
-              return (
-                <div key={i} className="stream-mask-edge">
-                  <StreamText text={block.text} streaming />
-                </div>
-              )
-            }
-            return <MessageText key={i} highlight={!deferHighlight}>{block.text}</MessageText>
+            const highlight = !isStreaming && !deferHighlight
+            return (
+              <div key={i} className={isStreaming ? 'stream-mask-edge' : undefined}>
+                <MessageText highlight={highlight}>{block.text}</MessageText>
+              </div>
+            )
           }
           if (block.kind === 'thinking') return <ThinkingBlock key={i} text={block.text} />
           return <ToolCallCard key={i} block={block} />

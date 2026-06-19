@@ -123,7 +123,8 @@ interface SessionStore {
   respondPermission: (
     toolUseID: string,
     behavior: 'allow' | 'deny',
-    message?: string
+    message?: string,
+    answers?: Record<string, unknown>
   ) => Promise<void>
 }
 
@@ -1798,8 +1799,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set((s) => ({ pendingPermissions: [...s.pendingPermissions, r] }))
   },
 
-  async respondPermission(toolUseID, behavior, message) {
-    const resp: PermissionResponsePayload = { toolUseID, behavior, ...(message ? { message } : {}) }
+  async respondPermission(toolUseID, behavior, message, answers) {
+    const resp: PermissionResponsePayload = {
+      toolUseID,
+      behavior,
+      ...(message ? { message } : {}),
+      ...(answers ? { answers } : {})
+    }
     set((s) => ({
       pendingPermissions: s.pendingPermissions.filter((p) => p.toolUseID !== toolUseID)
     }))

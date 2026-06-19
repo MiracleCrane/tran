@@ -1,7 +1,12 @@
 node_modules
+*/node_modules
 out
+*/out
 dist
+*/dist
 release
+*/release
 logs
+*/logs
 *.log
 .DS_Store

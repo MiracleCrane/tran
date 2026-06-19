@@ -357,7 +357,7 @@ export class ClaudeCodeBackend {
       // claude.exe validates an `allow` with a Zod schema that requires
       // updatedInput to be a record — pass the (unchanged) input back through.
       resp.behavior === 'allow'
-        ? { behavior: 'allow', updatedInput: pending.input }
+        ? { behavior: 'allow', updatedInput: withPermissionAnswers(pending.input, resp.answers) }
         : { behavior: 'deny', message: resp.message ?? 'denied' }
     )
     return true
@@ -416,6 +416,13 @@ function cryptoId(): string {
   const g = globalThis as { crypto?: { randomUUID?: () => string } }
   if (g.crypto?.randomUUID) return g.crypto.randomUUID()
   return 'sess-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
+
+function withPermissionAnswers(
+  input: Record<string, unknown>,
+  answers?: Record<string, unknown>
+): Record<string, unknown> {
+  return answers ? { ...input, answers } : input
 }
 
 /** Trim an SDK McpServerStatus down to the serializable shape the renderer uses. */
