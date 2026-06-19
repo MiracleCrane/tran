@@ -192,19 +192,19 @@ textarea:focus-visible {
   }
 
   .chat-topbar-shell {
-    --chat-topbar-toggle-right: 0.88rem;
-    --chat-topbar-toggle-size: 1.35rem;
+    --chat-topbar-toggle-right: 0.5rem;
+    --chat-topbar-toggle-size: 1.15rem;
     position: relative;
     z-index: 35;
   }
 
   .chat-topbar-shell.is-collapsed {
-    min-height: calc(var(--chat-topbar-toggle-size) + 0.18rem);
+    min-height: calc(var(--chat-topbar-toggle-size) + 0.12rem);
   }
 
   .chat-topbar-collapsed-handle {
     position: absolute;
-    inset: 0.12rem var(--chat-topbar-toggle-right) auto auto;
+    inset: 0.08rem var(--chat-topbar-toggle-right) auto auto;
     z-index: 55;
     display: flex;
     height: var(--chat-topbar-toggle-size);
@@ -299,7 +299,7 @@ textarea:focus-visible {
   }
 
   .runtime-provider-reveal.is-visible {
-    max-width: 28rem;
+    max-width: 22rem;
     opacity: 1;
     pointer-events: auto;
     transform: translateX(0);
@@ -323,7 +323,7 @@ textarea:focus-visible {
   .git-toolbar-corner-action {
     position: absolute;
     right: var(--chat-topbar-toggle-right);
-    bottom: 0.28rem;
+    bottom: 0.16rem;
     z-index: 50;
     display: flex;
     height: var(--chat-topbar-toggle-size);

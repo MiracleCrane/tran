@@ -26,7 +26,7 @@ export default function ConfirmDialog({
   if (!open) return null
 
   return (
-    // z-[60] sits above GitToolbar popups (z-50) and PermissionModal (z-50).
+    // z-[60] sits above GitToolbar popups, while active permission prompts stay above it.
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6" onClick={onCancel}>
       <div
         className="w-full max-w-md rounded-2xl border border-border-subtle bg-bg-panel p-6 shadow-2xl"

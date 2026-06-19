@@ -524,6 +524,7 @@ export class CodexBackend {
     const client = this.client
     if (!client) return
     if (!isPermissionRequest(method)) {
+      log('codex', `unhandled server request method=${method} params=${previewJson(params)}`)
       client.respondError(msg.id, `Forge does not handle Codex app-server request: ${method}`)
       return
     }
@@ -534,9 +535,11 @@ export class CodexBackend {
       method,
       params
     })
+    const toolName = permissionToolName(method, params)
+    log('codex', `permission request method=${method} id=${String(msg.id)} tool=${toolName}`)
     this.h.onPermissionRequest({
       toolUseID,
-      toolName: permissionToolName(method, params),
+      toolName,
       input: permissionInput(method, params),
       decisionReason: asString(params.reason) ?? undefined
     })
@@ -946,29 +949,39 @@ function permissionToolName(method: string, params: Record<string, unknown>): st
   if (method === 'item/permissions/requestApproval') return 'permissions'
   if (method === 'mcpServer/elicitation/request') return 'mcp'
   if (method === 'item/tool/requestUserInput') return 'user_input'
-  return asString(params.toolName) ?? method
+  const explicitTool = asString(params.toolName) ?? asString(params.tool) ?? asString(params.name)
+  if (explicitTool && /^(bash|shell|commandExecution|execCommand)$/i.test(explicitTool)) return 'shell'
+  if (explicitTool && /^(apply_patch|applyPatch|fileChange)$/i.test(explicitTool)) return 'apply_patch'
+  if (explicitTool) return explicitTool
+  const lower = method.toLowerCase()
+  if (lower.includes('command') || lower.includes('exec') || params.command) return 'shell'
+  if (lower.includes('file') || lower.includes('patch') || params.changes) return 'apply_patch'
+  if (lower.includes('permission')) return 'permissions'
+  if (lower.includes('elicitation') || lower.includes('mcp')) return 'mcp'
+  return method
 }
 
 function permissionInput(method: string, params: Record<string, unknown>): Record<string, unknown> {
-  if (method === 'item/commandExecution/requestApproval') {
+  if (method === 'item/commandExecution/requestApproval' || isCommandApproval(method, params)) {
     return {
-      command: params.command,
-      cwd: params.cwd,
+      command: params.command ?? params.commandLine ?? params.cmd,
+      cwd: params.cwd ?? params.workingDirectory,
       reason: params.reason,
       commandActions: params.commandActions
     }
   }
-  if (method === 'item/fileChange/requestApproval') {
+  if (method === 'item/fileChange/requestApproval' || isFileApproval(method, params)) {
     return {
       reason: params.reason,
-      grantRoot: params.grantRoot
+      grantRoot: params.grantRoot,
+      changes: params.changes
     }
   }
   return params
 }
 
 function isPermissionRequest(method: string): boolean {
-  return [
+  if ([
     'item/commandExecution/requestApproval',
     'item/fileChange/requestApproval',
     'item/permissions/requestApproval',
@@ -976,7 +989,13 @@ function isPermissionRequest(method: string): boolean {
     'item/tool/requestUserInput',
     'applyPatchApproval',
     'execCommandApproval'
-  ].includes(method)
+  ].includes(method)) return true
+
+  const lower = method.toLowerCase()
+  if (lower.includes('requestapproval') || lower.includes('request_approval')) return true
+  if (lower.includes('approval') && (lower.includes('command') || lower.includes('exec') || lower.includes('file') || lower.includes('patch') || lower.includes('tool'))) return true
+  if (lower.includes('permission') && lower.includes('request')) return true
+  return lower.includes('elicitation') && lower.includes('request')
 }
 
 function permissionResponseFor(
@@ -985,10 +1004,10 @@ function permissionResponseFor(
   resp: PermissionResponsePayload
 ): Record<string, unknown> {
   const allow = resp.behavior === 'allow'
-  if (method === 'item/commandExecution/requestApproval') {
+  if (method === 'item/commandExecution/requestApproval' || (isCommandApproval(method, params) && method !== 'execCommandApproval')) {
     return { decision: allow ? 'accept' : 'decline' }
   }
-  if (method === 'item/fileChange/requestApproval') {
+  if (method === 'item/fileChange/requestApproval' || (isFileApproval(method, params) && method !== 'applyPatchApproval')) {
     return { decision: allow ? 'accept' : 'decline' }
   }
   if (method === 'item/permissions/requestApproval') {
@@ -1004,7 +1023,28 @@ function permissionResponseFor(
   if (method === 'applyPatchApproval' || method === 'execCommandApproval') {
     return { decision: allow ? 'approved' : 'denied' }
   }
+  if (method.toLowerCase().includes('approval')) {
+    return { decision: allow ? 'accept' : 'decline' }
+  }
   return {}
+}
+
+function isCommandApproval(method: string, params: Record<string, unknown>): boolean {
+  const lower = method.toLowerCase()
+  return lower.includes('approval') && (lower.includes('command') || lower.includes('exec') || !!params.command)
+}
+
+function isFileApproval(method: string, params: Record<string, unknown>): boolean {
+  const lower = method.toLowerCase()
+  return lower.includes('approval') && (lower.includes('file') || lower.includes('patch') || !!params.changes)
+}
+
+function previewJson(value: unknown): string {
+  try {
+    return JSON.stringify(value).slice(0, 600)
+  } catch {
+    return String(value).slice(0, 600)
+  }
 }
 
 function stringifyToolResult(value: unknown): string {

@@ -217,7 +217,7 @@ export default function PermissionModal(): JSX.Element | null {
 
   if (userInputRequest) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-6 backdrop-blur-md">
+      <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/45 p-6 backdrop-blur-md">
         <div className="glass-panel liquid-float-in w-full max-w-xl rounded-[22px] p-6 shadow-2xl">
           <div className="mb-1 flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-accent" />
@@ -337,7 +337,7 @@ export default function PermissionModal(): JSX.Element | null {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-6 backdrop-blur-md">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/45 p-6 backdrop-blur-md">
       <div className="glass-panel liquid-float-in w-full max-w-lg rounded-[22px] p-6 shadow-2xl">
         <div className="mb-1 flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />

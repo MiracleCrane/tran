@@ -608,7 +608,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
     }
     return (
       <div className="relative z-30 shrink-0 border-b border-white/[0.06]">
-        <div className="flex h-9 items-center gap-2 px-3 pr-12 text-[11px] text-zinc-500">
+        <div className="flex h-8 items-center gap-1.5 px-2.5 pr-10 text-[11px] text-zinc-500">
           <BranchIcon />
           <span className="font-medium">Git 状态加载中...</span>
         </div>
@@ -618,7 +618,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   }
 
   const btnCls =
-    'flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-medium text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-40'
+    'flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-40'
   const dotCls = 'h-1.5 w-1.5 shrink-0 rounded-full'
   const dirty = !status.clean
   const totalChanges = status.staged.length + status.unstaged.length + status.untracked.length + status.conflicts.length
@@ -629,11 +629,11 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   return (
     <div className="relative z-30 shrink-0 border-b border-white/[0.06]">
       {/* --- toolbar row --- */}
-      <div className="flex items-center gap-1.5 px-3 py-1.5 pr-12 text-zinc-400">
+      <div className="flex items-center gap-1.5 px-2.5 py-1 pr-10 text-zinc-400">
         {/* Branch + ahead/behind */}
         <button
           onClick={() => toggleDrawer('branches')}
-          className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-medium text-zinc-300 transition hover:bg-white/[0.06] ${activeBtn('branches')}`}
+          className={`flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-zinc-300 transition hover:bg-white/[0.06] ${activeBtn('branches')}`}
         >
           <BranchIcon />
           <span className="max-w-[160px] truncate font-mono">{branch}</span>
@@ -651,7 +651,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
           </div>
         )}
 
-        <span className="h-4 w-px shrink-0 bg-white/[0.08]" />
+        <span className="h-3 w-px shrink-0 bg-white/[0.08]" />
 
         {/* Sync: fetch / pull / push */}
         <button onClick={() => runGitAction(() => window.api.gitFetch(cwd), '拉取(fetch)')} disabled={loading} className={btnCls} title="拉取远端信息(不合并)">
@@ -664,7 +664,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
           <PushIcon /> 推送
         </button>
 
-        <span className="h-4 w-px shrink-0 bg-white/[0.08]" />
+        <span className="h-3 w-px shrink-0 bg-white/[0.08]" />
 
         {/* Commit → opens commit drawer */}
         <button
@@ -687,7 +687,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
           <StashIcon /> 储藏
         </button>
 
-        <span className="h-4 w-px shrink-0 bg-white/[0.08]" />
+        <span className="h-3 w-px shrink-0 bg-white/[0.08]" />
 
         {/* Log */}
         <button onClick={() => toggleDrawer('log')} disabled={loading} className={`${btnCls} ${activeBtn('log')}`} title="提交历史">

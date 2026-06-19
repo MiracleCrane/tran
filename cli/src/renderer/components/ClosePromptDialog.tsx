@@ -39,7 +39,7 @@ export default function ClosePromptDialog({ open, onClose }: ClosePromptDialogPr
   }
 
   return (
-    // z-[60] sits above GitToolbar popups (z-50) and PermissionModal (z-50).
+    // z-[60] sits above GitToolbar popups, while active permission prompts stay above it.
     // Backdrop darkened so the opaque card below reads clearly.
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-6"
