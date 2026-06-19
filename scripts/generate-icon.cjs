@@ -45,22 +45,22 @@ function over(dst, src) {
 function renderPixel(x, y, aa) {
   let color = [0, 0, 0, 0]
 
-  const shadow1 = coverRoundedRect(x, y - 0.028, 0.5, 0.5, 0.76, 0.76, 0.2, aa * 3.5)
+  const shadow1 = coverRoundedRect(x, y - 0.03, 0.5, 0.5, 0.86, 0.86, 0.23, aa * 3.5)
   color = over(color, [45, 18, 12, shadow1 * 0.16])
 
-  const shadow2 = coverRoundedRect(x, y - 0.012, 0.5, 0.5, 0.78, 0.78, 0.205, aa * 2.5)
+  const shadow2 = coverRoundedRect(x, y - 0.014, 0.5, 0.5, 0.88, 0.88, 0.235, aa * 2.5)
   color = over(color, [0, 0, 0, shadow2 * 0.12])
 
-  const body = coverRoundedRect(x, y, 0.5, 0.5, 0.76, 0.76, 0.205, aa)
+  const body = coverRoundedRect(x, y, 0.5, 0.5, 0.86, 0.86, 0.235, aa)
   if (body > 0) {
     const top = [231, 128, 101]
     const bottom = [205, 94, 73]
-    const t = clamp((y - 0.12) / 0.76)
+    const t = clamp((y - 0.07) / 0.86)
     let r = mix(top[0], bottom[0], t)
     let g = mix(top[1], bottom[1], t)
     let b = mix(top[2], bottom[2], t)
 
-    const highlight = clamp(1 - Math.hypot((x - 0.25) / 0.56, (y - 0.16) / 0.44))
+    const highlight = clamp(1 - Math.hypot((x - 0.25) / 0.62, (y - 0.15) / 0.5))
     r = mix(r, 255, highlight * 0.22)
     g = mix(g, 245, highlight * 0.2)
     b = mix(b, 235, highlight * 0.18)
@@ -73,20 +73,20 @@ function renderPixel(x, y, aa) {
     color = over(color, [r, g, b, body * 0.98])
   }
 
-  const rim = coverRoundedRect(x, y, 0.5, 0.5, 0.76, 0.76, 0.205, aa) -
-    coverRoundedRect(x, y, 0.5, 0.5, 0.71, 0.71, 0.175, aa)
+  const rim = coverRoundedRect(x, y, 0.5, 0.5, 0.86, 0.86, 0.235, aa) -
+    coverRoundedRect(x, y, 0.5, 0.5, 0.81, 0.81, 0.205, aa)
   if (rim > 0) color = over(color, [255, 235, 220, rim * 0.22])
 
   const fShadow =
-    coverRoundedRect(x, y - 0.018, 0.355, 0.51, 0.13, 0.56, 0.032, aa) +
-    coverRoundedRect(x, y - 0.018, 0.5, 0.275, 0.42, 0.13, 0.032, aa) +
-    coverRoundedRect(x, y - 0.018, 0.475, 0.472, 0.35, 0.12, 0.03, aa)
+    coverRoundedRect(x, y - 0.012, 0.405, 0.518, 0.091, 0.418, 0.023, aa) +
+    coverRoundedRect(x, y - 0.012, 0.505, 0.331, 0.287, 0.087, 0.023, aa) +
+    coverRoundedRect(x, y - 0.012, 0.487, 0.488, 0.252, 0.08, 0.021, aa)
   if (fShadow > 0) color = over(color, [92, 28, 18, clamp(fShadow) * 0.18])
 
   const f =
-    coverRoundedRect(x, y, 0.355, 0.51, 0.13, 0.56, 0.032, aa) +
-    coverRoundedRect(x, y, 0.5, 0.275, 0.42, 0.13, 0.032, aa) +
-    coverRoundedRect(x, y, 0.475, 0.472, 0.35, 0.12, 0.03, aa)
+    coverRoundedRect(x, y, 0.405, 0.518, 0.091, 0.418, 0.023, aa) +
+    coverRoundedRect(x, y, 0.505, 0.331, 0.287, 0.087, 0.023, aa) +
+    coverRoundedRect(x, y, 0.487, 0.488, 0.252, 0.08, 0.021, aa)
   if (f > 0) color = over(color, [255, 255, 255, clamp(f) * 0.98])
 
   return color
@@ -215,6 +215,11 @@ const preview = png(PREVIEW_SIZE, render(PREVIEW_SIZE))
 writeFileSync(join(OUT_DIR, 'icon.png'), preview)
 
 const iconEntries = ICO_SIZES.map((size) => ({ size, data: png(size, render(size)) }))
-writeFileSync(join(OUT_DIR, 'icon.ico'), ico(iconEntries))
+const iconFile = ico(iconEntries)
+writeFileSync(join(OUT_DIR, 'icon.ico'), iconFile)
+writeFileSync(join(OUT_DIR, 'installerIcon.ico'), iconFile)
+writeFileSync(join(OUT_DIR, 'installerHeaderIcon.ico'), iconFile)
+writeFileSync(join(OUT_DIR, 'uninstallerIcon.ico'), iconFile)
+writeFileSync(join(OUT_DIR, 'desktopShortcutIcon.ico'), iconFile)
 
-console.log(`Generated ${join(OUT_DIR, 'icon.ico')} and ${join(OUT_DIR, 'icon.png')}`)
+console.log(`Generated Forge icon assets in ${OUT_DIR}`)

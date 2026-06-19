@@ -8,6 +8,9 @@ files:
   - out/**/*
   - package.json
   - '!node_modules/@anthropic-ai/claude-agent-sdk-*/**'
+extraResources:
+  - from: build/desktopShortcutIcon.ico
+    to: desktopShortcutIcon.ico
 asar: true
 compression: maximum
 electronLanguages:
@@ -20,8 +23,10 @@ win:
     - nsis
   artifactName: ${productName}-${version}-external-claude-setup.${ext}
 nsis:
-  installerIcon: build/icon.ico
-  uninstallerIcon: build/icon.ico
+  include: build/installer.nsh
+  installerIcon: build/installerIcon.ico
+  installerHeaderIcon: build/installerHeaderIcon.ico
+  uninstallerIcon: build/uninstallerIcon.ico
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

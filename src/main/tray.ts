@@ -7,7 +7,7 @@ import { log } from './logger'
  *
  * We rasterize an anti-aliased RGBA pixel grid (accent rounded square + a
  * white geometric "F" glyph) and encode it as a PNG via Node's zlib + a tiny
- * CRC/PNG chunk writer. The shape mirrors the small in-window Forge badge.
+ * CRC/PNG chunk writer. The shape mirrors the packaged Forge app icon.
  * ------------------------------------------------------------------ */
 
 const ACCENT_R = 0xdf
@@ -68,21 +68,43 @@ function over(sample: PaintSample, r: number, g: number, b: number, a: number): 
 }
 
 function inForgeGlyph(x: number, y: number, size: number): boolean {
-  const scale = size / 32
-  const stem = inRoundedRect(x, y, 10.6 * scale, 8.2 * scale, 14.8 * scale, 23.8 * scale, 1.1 * scale)
-  const top = inRoundedRect(x, y, 10.6 * scale, 8.2 * scale, 23.3 * scale, 11.9 * scale, 1.1 * scale)
-  const middle = inRoundedRect(x, y, 10.6 * scale, 14.4 * scale, 20.6 * scale, 17.8 * scale, 1.0 * scale)
+  const stem = inRoundedRect(
+    x,
+    y,
+    (0.405 - 0.091 / 2) * size,
+    (0.518 - 0.418 / 2) * size,
+    (0.405 + 0.091 / 2) * size,
+    (0.518 + 0.418 / 2) * size,
+    0.023 * size
+  )
+  const top = inRoundedRect(
+    x,
+    y,
+    (0.505 - 0.287 / 2) * size,
+    (0.331 - 0.087 / 2) * size,
+    (0.505 + 0.287 / 2) * size,
+    (0.331 + 0.087 / 2) * size,
+    0.023 * size
+  )
+  const middle = inRoundedRect(
+    x,
+    y,
+    (0.487 - 0.252 / 2) * size,
+    (0.488 - 0.08 / 2) * size,
+    (0.487 + 0.252 / 2) * size,
+    (0.488 + 0.08 / 2) * size,
+    0.021 * size
+  )
   return stem || top || middle
 }
 
 function paintIconSample(x: number, y: number, size: number): PaintSample {
   const sample: PaintSample = { r: 0, g: 0, b: 0, a: 0 }
-  const scale = size / 32
-  const left = 3.6 * scale
-  const top = 3.6 * scale
-  const right = size - 3.6 * scale
-  const bottom = size - 3.6 * scale
-  const radius = 6.2 * scale
+  const left = (0.5 - 0.86 / 2) * size
+  const top = (0.5 - 0.86 / 2) * size
+  const right = (0.5 + 0.86 / 2) * size
+  const bottom = (0.5 + 0.86 / 2) * size
+  const radius = 0.235 * size
   const distance = roundedRectSdf(x, y, left, top, right, bottom, radius)
   if (distance > 0) return sample
 
@@ -91,7 +113,7 @@ function paintIconSample(x: number, y: number, size: number): PaintSample {
   const verticalPosition = clamp((y - top) / (bottom - top), 0, 1)
   over(sample, 1, 1, 1, 0.08 * (1 - verticalPosition))
 
-  if (distance > -1.15 * scale) {
+  if (distance > -0.036 * size) {
     over(sample, 1, 1, 1, 0.16)
   }
 
