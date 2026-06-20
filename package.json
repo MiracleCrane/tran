@@ -5,6 +5,7 @@
   "description": "Forge workspace containing the CLI client and the future self-developed agent.",
   "workspaces": [
     "cli",
+    "cli-mac",
     "agent"
   ],
   "scripts": {
@@ -12,11 +13,19 @@
     "build": "npm --workspace @claude-forge/cli run build",
     "preview": "npm --workspace @claude-forge/cli run preview",
     "build:win": "npm --workspace @claude-forge/cli run build:win",
+    "build:mac": "npm --workspace @claude-forge/cli-mac run build:mac",
     "typecheck": "npm --workspace @claude-forge/cli run typecheck",
     "cli:dev": "npm --workspace @claude-forge/cli run dev",
     "cli:build": "npm --workspace @claude-forge/cli run build",
     "cli:build:win": "npm --workspace @claude-forge/cli run build:win",
     "cli:typecheck": "npm --workspace @claude-forge/cli run typecheck",
+    "cli-mac:dev": "npm --workspace @claude-forge/cli-mac run dev",
+    "cli-mac:build": "npm --workspace @claude-forge/cli-mac run build",
+    "cli-mac:build:mac": "npm --workspace @claude-forge/cli-mac run build:mac",
+    "cli-mac:typecheck": "npm --workspace @claude-forge/cli-mac run typecheck",
     "agent:typecheck": "npm --workspace @claude-forge/agent run typecheck"
+  },
+  "overrides": {
+    "@noble/hashes": "1.8.0"
   }
 }
