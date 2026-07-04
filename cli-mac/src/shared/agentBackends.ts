@@ -1,6 +1,6 @@
 export const DEFAULT_AGENT_BACKEND_ID = 'claude-code' as const
 
-export const AGENT_BACKEND_IDS = [DEFAULT_AGENT_BACKEND_ID, 'codex', 'hermes'] as const
+export const AGENT_BACKEND_IDS = [DEFAULT_AGENT_BACKEND_ID, 'codex', 'hermes', 'anvil'] as const
 
 export type AgentBackendId = (typeof AGENT_BACKEND_IDS)[number]
 
@@ -63,6 +63,22 @@ export const AGENT_BACKENDS: AgentBackendInfo[] = [
       mcp: true,
       skills: true,
       sessionHistory: true,
+      subagents: false
+    }
+  },
+  {
+    id: 'anvil',
+    name: 'Anvil',
+    description:
+      'Forge 自研 agent：直连任意 OpenAI 兼容运营商（智谱/DeepSeek/自建中转），不依赖 claude.exe。倾向代码开发，兼顾日常任务。',
+    status: 'available',
+    runtimeModes: ['windows', 'wsl'],
+    capabilities: {
+      streaming: true,
+      permissions: false,
+      mcp: false,
+      skills: false,
+      sessionHistory: false,
       subagents: false
     }
   }

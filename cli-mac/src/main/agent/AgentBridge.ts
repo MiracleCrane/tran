@@ -16,6 +16,7 @@ import { log } from '../logger'
 import { ClaudeCodeBackend, type AgentBackendHandlers } from './ClaudeCodeBackend'
 import { CodexBackend } from './CodexBackend'
 import { HermesBackend } from './HermesBackend'
+import { AnvilBackend } from './AnvilBackend'
 
 interface AgentBackendAdapter {
   readonly id: AgentBackendId
@@ -57,7 +58,8 @@ export class AgentBridge {
     this.backends = {
       'claude-code': new ClaudeCodeBackend(wrappedHandlers),
       codex: new CodexBackend(wrappedHandlers),
-      hermes: new HermesBackend(wrappedHandlers)
+      hermes: new HermesBackend(wrappedHandlers),
+      anvil: new AnvilBackend(wrappedHandlers)
     }
   }
 

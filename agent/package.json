@@ -1,9 +1,16 @@
 {
   "name": "@claude-forge/agent",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "Reserved workspace for the self-developed Forge agent.",
+  "description": "Anvil — Forge's self-developed agent runtime. Provider-direct, SDK-free agent loop for code + daily tasks.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
   "scripts": {
-    "typecheck": "echo \"agent workspace has no implementation yet\""
+    "typecheck": "tsc --noEmit"
   }
 }
