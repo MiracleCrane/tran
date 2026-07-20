@@ -224,7 +224,7 @@ export default function PermissionModal(): JSX.Element | null {
             <h2 className="text-base font-semibold text-zinc-100">需要你的选择</h2>
           </div>
           <p className="mb-4 text-sm text-zinc-400">
-            Forge 正在等待你回答智能体的问题。
+            Tran 正在等待你回答智能体的问题。
             {secondsLeft !== null ? <span className="text-zinc-500"> {secondsLeft}s 后自动选择推荐项。</span> : null}
           </p>
 
@@ -260,7 +260,7 @@ export default function PermissionModal(): JSX.Element | null {
                           onChange={() =>
                             setAnswers((current) => selectChoice(current, question, option.label))
                           }
-                          className="mt-0.5 h-4 w-4 flex-none accent-[#df765f]"
+                          className="mt-0.5 h-4 w-4 flex-none accent-[#8b5cf6]"
                         />
                         <span className="min-w-0">
                           <span className="block break-words text-sm">{option.label}</span>
@@ -286,7 +286,7 @@ export default function PermissionModal(): JSX.Element | null {
                       onChange={() =>
                         setAnswers((current) => selectChoice(current, question, OTHER_CHOICE))
                       }
-                      className="mt-0.5 h-4 w-4 flex-none accent-[#df765f]"
+                      className="mt-0.5 h-4 w-4 flex-none accent-[#8b5cf6]"
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm">其他</span>
@@ -344,7 +344,7 @@ export default function PermissionModal(): JSX.Element | null {
           <h2 className="text-base font-semibold text-zinc-100">权限请求</h2>
         </div>
         <p className="mb-4 text-sm text-zinc-400">
-          Forge 想要使用 <span className="font-mono text-zinc-200">{req.toolName}</span>
+          Tran 想要使用 <span className="font-mono text-zinc-200">{req.toolName}</span>
           {req.agentID ? <span className="text-zinc-500">（在子代理中）</span> : null}。
         </p>
 

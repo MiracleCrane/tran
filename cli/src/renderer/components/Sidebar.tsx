@@ -3,7 +3,7 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore, type View } from '../store/uiStore'
 import Collapse from './Collapse'
 import ProjectSwitcher from './ProjectSwitcher'
-import type { AgentBackendId, ClaudeExecutionBackend, Provider, SessionListItem } from '../../shared/ipc'
+import type { ClaudeExecutionBackend, SessionListItem } from '../../shared/ipc'
 import { onForgeEvent } from '../events'
 
 type BackendFilter = 'all' | ClaudeExecutionBackend
@@ -257,15 +257,15 @@ const LanguageIcon = (): JSX.Element => (
   </svg>
 )
 
-/** The five footer tool tabs, in display order. Drives both the icon rail
- *  (collapsed sidebar) and the collapsible nav (expanded sidebar). */
+/** The footer tool tabs, in display order. Drives both the icon rail
+ *  (collapsed sidebar) and the collapsible nav (expanded sidebar).
+ *  TODO(legacy): providers(运营商) 深度绑定旧 Claude 后端、wslHealth 与 MCP
+ *  面板的增删改写的是 Claude 配置文件 —— kimi-only 阶段先从导航隐藏，后续
+ *  接入 kimi 对应能力后再恢复。 */
 const NAV_ITEMS: { view: View; label: string; icon: () => JSX.Element }[] = [
   { view: 'skills', label: '技能', icon: SkillsIcon },
-  { view: 'mcp', label: 'MCP 服务器', icon: McpIcon },
-  { view: 'providers', label: '运营商', icon: ShieldIcon },
   { view: 'translate', label: '翻译', icon: LanguageIcon },
   { view: 'settings', label: '设置', icon: GearIcon },
-  { view: 'wslHealth', label: 'WSL', icon: TerminalIcon },
   { view: 'help', label: '说明', icon: HelpIcon }
 ]
 
@@ -290,8 +290,6 @@ export default function Sidebar(): JSX.Element {
   const navCollapsed = useUiStore((s) => s.navCollapsed)
   const toggleNav = useUiStore((s) => s.toggleNav)
 
-  const [activeProvider, setActiveProvider] = useState<Provider | null>(null)
-  const [agentBackend, setAgentBackend] = useState<AgentBackendId>('claude-code')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
@@ -535,8 +533,10 @@ export default function Sidebar(): JSX.Element {
 
   useEffect(() => {
     const refreshWslSupport = (): void => {
-      void window.api.getPreferences().then((prefs) => {
-        const enabled = !!prefs.wslSupportEnabled
+      void window.api.getPreferences().then(() => {
+        // TODO(wsl): WSL 支持已随旧后端移除，固定按关闭处理（忽略旧版设置里
+        // 可能残留的 wslSupportEnabled=true），WSL 导航保持隐藏。
+        const enabled = false
         if (!wslSupportInitializedRef.current) {
           wslSupportInitializedRef.current = true
           setWslSupportEnabled(enabled)
@@ -567,28 +567,6 @@ export default function Sidebar(): JSX.Element {
     refreshWslSupport()
     return onForgeEvent('wslSupportChanged', refreshWslSupport)
   }, [refresh, reloadForBackendSwitch])
-
-  // Re-read the active agent/provider whenever a new session spawns (covers
-  // provider switches, which restart the session -> new bridge id).
-  useEffect(() => {
-    const refreshAgentProvider = (): void => {
-      void Promise.all([
-        window.api.getPreferences().catch(() => null),
-        window.api.getActiveProvider().catch(() => null)
-      ]).then(([prefs, provider]) => {
-        const nextAgent = prefs?.agentBackend ?? 'claude-code'
-        setAgentBackend(nextAgent)
-        setActiveProvider(nextAgent === 'claude-code' || nextAgent === 'hermes' ? provider : null)
-      })
-    }
-    refreshAgentProvider()
-    const offProvider = onForgeEvent('providerChanged', refreshAgentProvider)
-    const offAgentBackend = onForgeEvent('agentBackendChanged', refreshAgentProvider)
-    return () => {
-      offProvider()
-      offAgentBackend()
-    }
-  }, [meta?.sessionId])
 
   const clearSidebarMotionTimers = (): void => {
     if (sidebarMotionTimeoutRef.current !== null) {
@@ -919,7 +897,8 @@ export default function Sidebar(): JSX.Element {
           : ''
   const wslNavInteractive =
     wslSupportEnabled && (wslNavRevealPhase === 'opening' || wslNavRevealPhase === 'visible')
-  const showProviderNav = agentBackend === 'claude-code' || agentBackend === 'hermes'
+  // TODO(providers): 运营商面板绑定旧 Claude 后端，kimi-only 阶段固定隐藏。
+  const showProviderNav = false
 
   useEffect(() => {
     if (!showProviderNav && view === 'providers') setView('settings')
@@ -941,7 +920,7 @@ export default function Sidebar(): JSX.Element {
           <ChevronIcon collapsed />
         </button>
         <div className="accent-soft-button mt-2 flex h-8 w-8 items-center justify-center rounded-xl text-sm font-bold text-white">
-          F
+          T
         </div>
         <div className="mt-2">
           <ProjectSwitcher collapsed />
@@ -956,12 +935,6 @@ export default function Sidebar(): JSX.Element {
         >
           <PlusIcon />
         </button>
-        {showProviderNav && activeProvider && (
-          <span
-            className="mt-2 h-1.5 w-1.5 rounded-full bg-emerald-500"
-            title={`运营商:${activeProvider.name || activeProvider.baseUrl}`}
-          />
-        )}
         <div className="min-h-0 flex-1" />
         <button
           onClick={() => setView('skills')}
@@ -969,13 +942,6 @@ export default function Sidebar(): JSX.Element {
           title="技能"
         >
           <SkillsIcon />
-        </button>
-        <button
-          onClick={() => setView('mcp')}
-          className={`mt-1 ${iconBtn(view === 'mcp')}`}
-          title="MCP 服务器"
-        >
-          <McpIcon />
         </button>
         <div className={`provider-stack-reveal provider-collapsed-reveal ${showProviderNav ? 'is-enabled' : ''}`}>
           <button
@@ -1093,9 +1059,9 @@ export default function Sidebar(): JSX.Element {
       {/* brand + collapse */}
       <div className="flex items-center gap-2 px-4 pt-3">
         <div className="accent-soft-button flex h-8 w-8 items-center justify-center rounded-xl text-sm font-bold text-white">
-          F
+          T
         </div>
-        <div className="flex-1 text-sm font-semibold text-zinc-100">Forge</div>
+        <div className="flex-1 text-sm font-semibold text-zinc-100">Tran</div>
         <button
           onClick={handleToggleSidebar}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"

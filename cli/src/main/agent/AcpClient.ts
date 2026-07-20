@@ -1,13 +1,12 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { spawn } from 'node:child_process'
 import { log } from '../logger'
-import { resolveMacHermesCommand } from '../macHermes'
 
-export type HermesRpcId = number | string
+export type AcpRpcId = number | string
 
-export interface HermesRpcMessage {
+export interface AcpRpcMessage {
   jsonrpc?: '2.0'
-  id?: HermesRpcId
+  id?: AcpRpcId
   method?: string
   params?: unknown
   result?: unknown
@@ -22,37 +21,75 @@ interface PendingRequest {
 }
 
 interface ClientHandlers {
-  onNotification: (msg: HermesRpcMessage) => void
-  onServerRequest: (msg: HermesRpcMessage) => void
+  onNotification: (msg: AcpRpcMessage) => void
+  onServerRequest: (msg: AcpRpcMessage) => void
   onClose: (error?: string) => void
 }
 
-export class HermesAcpClient {
+export interface AcpClientOptions {
+  /** Resolved executable (see windowsKimi.ts). */
+  command: string
+  /** Extra args that must precede the subcommand (e.g. cmd.exe /d /s /c wrapper). */
+  argsPrefix?: string[]
+  /** Subcommand args, e.g. ['acp']. */
+  args: string[]
+  /** displayPath used in logs. */
+  displayPath?: string
+  /** Log tag for the ACP stdout/stderr lines. */
+  logTag: string
+  clientInfo: { name: string; title: string; version: string }
+  clientCapabilities?: {
+    fs?: { readTextFile?: boolean; writeTextFile?: boolean }
+    terminal?: boolean
+  }
+}
+
+/** JSON-RPC error with the ACP error code attached (e.g. -32000 authRequired). */
+export class AcpRequestError extends Error {
+  constructor(
+    message: string,
+    readonly code?: number,
+    readonly data?: unknown
+  ) {
+    super(message)
+    this.name = 'AcpRequestError'
+  }
+}
+
+/**
+ * Generic ACP (Agent Client Protocol) client: spawns an agent CLI in ACP mode
+ * and speaks newline-delimited JSON-RPC over stdio. Agent-agnostic — concrete
+ * backends (Kimi today, others later) provide the spawn spec + clientInfo.
+ */
+export class AcpClient {
   private child: ChildProcessWithoutNullStreams | null = null
   private nextId = 1
   private stdoutBuffer = ''
   private stderr = ''
   private closed = false
   private closing = false
-  private readonly pending = new Map<HermesRpcId, PendingRequest>()
+  private readonly pending = new Map<AcpRpcId, PendingRequest>()
 
-  private constructor(private handlers: ClientHandlers) {}
+  private constructor(
+    private options: AcpClientOptions,
+    private handlers: ClientHandlers
+  ) {}
 
-  static async start(handlers: ClientHandlers): Promise<HermesAcpClient> {
-    const client = new HermesAcpClient(handlers)
+  static async start(options: AcpClientOptions, handlers: ClientHandlers): Promise<AcpClient> {
+    const client = new AcpClient(options, handlers)
     await client.spawn()
     return client
   }
 
   request<T = unknown>(method: string, params?: unknown, timeoutMs = 180000): Promise<T> {
-    if (this.closed || !this.child) throw new Error('Hermes ACP server is not running.')
+    if (this.closed || !this.child) throw new Error(`ACP server (${this.options.logTag}) is not running.`)
     const id = this.nextId++
-    const message: HermesRpcMessage = { jsonrpc: '2.0', id, method }
+    const message: AcpRpcMessage = { jsonrpc: '2.0', id, method }
     if (params !== undefined) message.params = params
     return new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id)
-        reject(new Error(`Hermes ACP request timed out: ${method}`))
+        reject(new Error(`ACP request timed out: ${method}`))
       }, timeoutMs)
       this.pending.set(id, {
         method,
@@ -65,31 +102,31 @@ export class HermesAcpClient {
   }
 
   notify(method: string, params?: unknown): void {
-    const message: HermesRpcMessage = { jsonrpc: '2.0', method }
+    const message: AcpRpcMessage = { jsonrpc: '2.0', method }
     if (params !== undefined) message.params = params
     this.write(message)
   }
 
-  respond(id: HermesRpcId, result: unknown): void {
+  respond(id: AcpRpcId, result: unknown): void {
     this.write({ jsonrpc: '2.0', id, result })
   }
 
-  respondError(id: HermesRpcId, message: string, code = -32000): void {
+  respondError(id: AcpRpcId, message: string, code = -32000): void {
     this.write({ jsonrpc: '2.0', id, error: { code, message } })
   }
 
   close(): void {
     this.closing = true
     this.child?.kill()
-    this.rejectAll(new Error('Hermes ACP server closed.'))
+    this.rejectAll(new Error(`ACP server (${this.options.logTag}) closed.`))
   }
 
   private async spawn(): Promise<void> {
-    if (process.platform !== 'win32') throw new Error('Hermes backend currently supports Windows only.')
-    const resolved = resolveMacHermesCommand()
-    const args = [...resolved.argsPrefix, 'acp', '--accept-hooks']
-    log('hermes', `spawn ACP ${resolved.displayPath}`)
-    const child = spawn(resolved.command, args, {
+    if (process.platform !== 'win32') throw new Error('ACP backends currently support Windows only.')
+    const { command, argsPrefix = [], args, displayPath, logTag } = this.options
+    const fullArgs = [...argsPrefix, ...args]
+    log(logTag, `spawn ACP ${displayPath ?? command} ${args.join(' ')}`)
+    const child = spawn(command, fullArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true
     })
@@ -101,7 +138,7 @@ export class HermesAcpClient {
     child.stderr.on('data', (chunk: string) => {
       this.stderr += chunk
       const trimmed = chunk.trim()
-      if (trimmed) log('hermes-stderr', trimmed)
+      if (trimmed) log(`${logTag}-stderr`, trimmed)
     })
     child.on('error', (error) => {
       this.closed = true
@@ -110,7 +147,7 @@ export class HermesAcpClient {
     })
     child.on('close', (code) => {
       this.closed = true
-      const detail = this.stderr.trim() || (code == null ? 'Hermes ACP server stopped.' : `Hermes ACP server exited with code ${code}.`)
+      const detail = this.stderr.trim() || (code == null ? 'ACP server stopped.' : `ACP server exited with code ${code}.`)
       this.rejectAll(new Error(detail))
       if (!this.closing) this.handlers.onClose(detail)
     })
@@ -118,10 +155,10 @@ export class HermesAcpClient {
     await this.request('initialize', {
       protocolVersion: 1,
       clientCapabilities: {
-        fs: { readTextFile: true, writeTextFile: false },
-        terminal: false
+        fs: { readTextFile: true, writeTextFile: true, ...this.options.clientCapabilities?.fs },
+        terminal: this.options.clientCapabilities?.terminal ?? false
       },
-      clientInfo: { name: 'forge', title: 'Forge', version: '1.0.4' }
+      clientInfo: this.options.clientInfo
     }, 60000)
   }
 
@@ -137,11 +174,11 @@ export class HermesAcpClient {
   }
 
   private handleLine(line: string): void {
-    let msg: HermesRpcMessage
+    let msg: AcpRpcMessage
     try {
-      msg = JSON.parse(line) as HermesRpcMessage
+      msg = JSON.parse(line) as AcpRpcMessage
     } catch {
-      log('hermes', `non-json ACP stdout: ${line.slice(0, 240)}`)
+      log(this.options.logTag, `non-json ACP stdout: ${line.slice(0, 240)}`)
       return
     }
 
@@ -150,8 +187,15 @@ export class HermesAcpClient {
       if (!pending) return
       this.pending.delete(msg.id)
       clearTimeout(pending.timeout)
-      if (msg.error) pending.reject(new Error(msg.error.message || `${pending.method} failed`))
-      else pending.resolve(msg.result)
+      if (msg.error) {
+        pending.reject(new AcpRequestError(
+          msg.error.message || `${pending.method} failed`,
+          msg.error.code,
+          msg.error.data
+        ))
+      } else {
+        pending.resolve(msg.result)
+      }
       return
     }
 
@@ -162,8 +206,8 @@ export class HermesAcpClient {
     }
   }
 
-  private write(message: HermesRpcMessage): void {
-    if (this.closed || !this.child) throw new Error('Hermes ACP server is not running.')
+  private write(message: AcpRpcMessage): void {
+    if (this.closed || !this.child) throw new Error(`ACP server (${this.options.logTag}) is not running.`)
     this.child.stdin.write(`${JSON.stringify(message)}\n`)
   }
 

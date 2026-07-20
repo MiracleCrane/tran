@@ -68,7 +68,7 @@ function notifyRendererUpdateAvailable(info: UpdateCheckResult): void {
 
   if (!app.isPackaged || !Notification.isSupported()) return
   const notification = new Notification({
-    title: 'Forge 有可用更新',
+    title: 'Tran 有可用更新',
     body: `发现 ${info.latestVersion ?? '新版本'}，点击查看发布页。`,
     silent: false
   })
@@ -125,7 +125,7 @@ function createWindow(): void {
     backgroundColor: WINDOW_BACKGROUND_COLOR,
     transparent: false,
     accentColor: process.platform === 'win32' ? WINDOW_FRAME_COLOR : undefined,
-    title: 'Forge',
+    title: 'Tran',
     show: false,
     autoHideMenuBar: true,
     frame: false,
@@ -163,7 +163,7 @@ function createWindow(): void {
       if (s.minimizeToTray) {
         event.preventDefault()
         mainWindow?.hide()
-        forgeTray?.setTooltip('Forge — 后台运行中')
+        forgeTray?.setTooltip('Tran — 后台运行中')
       }
       return
     }

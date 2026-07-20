@@ -2,7 +2,7 @@ import { loadSettings, saveSettings, getBaiduSecret, setBaiduSecret } from './se
 import { translateViaBaidu } from './baidu'
 import type { TranslateConfig, TranslateTestResult } from '../shared/ipc'
 
-/** Translate-engine config (Translate panel). Stored in forge-settings.json
+/** Translate-engine config (Translate panel). Stored in tran-settings.json
  *  alongside providers/projects; the Baidu secretKey is safeStorage-encrypted. */
 
 export function getTranslateConfig(): TranslateConfig {

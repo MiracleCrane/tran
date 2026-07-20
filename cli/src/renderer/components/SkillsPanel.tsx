@@ -124,7 +124,7 @@ function useTranslated(texts: string[], on: boolean): { tr: (t: string) => strin
 export default function SkillsPanel(): JSX.Element {
   const [tab, setTab] = useState<Tab>('skills')
   const [translate, setTranslate] = useState(false)
-  const [agentBackend, setAgentBackend] = useState<AgentBackendId>('claude-code')
+  const [agentBackend, setAgentBackend] = useState<AgentBackendId>('kimi')
   const metaAgentBackend = useSessionStore((s) => s.meta?.agentBackend)
   const cwd = useSessionStore((s) => s.meta?.cwd)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -133,9 +133,9 @@ export default function SkillsPanel(): JSX.Element {
     let cancelled = false
     const refreshAgentBackend = (): void => {
       void window.api.getPreferences().then((prefs) => {
-        if (!cancelled) setAgentBackend(prefs.agentBackend ?? metaAgentBackend ?? 'claude-code')
+        if (!cancelled) setAgentBackend(prefs.agentBackend ?? metaAgentBackend ?? 'kimi')
       }).catch(() => {
-        if (!cancelled) setAgentBackend(metaAgentBackend ?? 'claude-code')
+        if (!cancelled) setAgentBackend(metaAgentBackend ?? 'kimi')
       })
     }
     refreshAgentBackend()
@@ -209,13 +209,7 @@ function SkillsTab({
 }): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
   const starting = useSessionStore((s) => s.starting)
-  const activeAgentBackend = meta?.agentBackend ?? agentBackend
-  const skillRoot =
-    activeAgentBackend === 'codex'
-      ? '~/.codex/skills/'
-      : activeAgentBackend === 'hermes'
-        ? '~/.hermes/skills/'
-        : '~/.claude/skills/'
+  const skillRoot = '~/.kimi-code/skills/'
 
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -367,22 +361,12 @@ function StoreTab({
     [visible, texts]
   )
   const { tr, loading: translating } = useTranslated(visibleTexts, translate)
-  const agentName =
-    agentBackend === 'codex' ? 'Codex' : agentBackend === 'hermes' ? 'Hermes' : 'Claude Code'
+  const agentName = 'Kimi'
 
   return (
     <>
       <p className="mb-4 text-xs text-zinc-500">
-        {agentBackend === 'codex' ? (
-          <>浏览 Codex 插件市场目录。插件可提供技能与工具，安装与启用请在 Codex 的插件管理里完成。</>
-        ) : agentBackend === 'hermes' ? (
-          <>Hermes 的技能和插件由 Hermes 自身管理；这里会显示当前会话通过 ACP 暴露的命令。</>
-        ) : (
-          <>
-            浏览 Claude Code 插件市场目录(本地缓存)。插件可打包技能与工具 —— 安装请在 Claude Code 里用{' '}
-            <code className="text-zinc-400">/plugin</code> 命令。
-          </>
-        )}
+        Kimi 的技能和插件由 Kimi Code CLI 自身管理；这里会显示当前会话通过 ACP 暴露的命令。
         <span className="ml-2 rounded border border-border-subtle bg-bg-elev px-1.5 py-0.5 text-[10px] text-zinc-400">
           {agentName}
         </span>

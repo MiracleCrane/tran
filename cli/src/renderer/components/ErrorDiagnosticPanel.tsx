@@ -23,13 +23,13 @@ function diagnose(error: string): Diagnosis {
   if (text.includes('no rollout found')) {
     return {
       title: '历史会话索引缺失',
-      detail: '当前 Agent 找不到这条历史会话的运行记录。Forge 会尝试自动开启新会话继续。'
+      detail: '当前 Agent 找不到这条历史会话的运行记录。Tran 会尝试自动开启新会话继续。'
     }
   }
   if (text.includes('is archived')) {
     return {
       title: '历史会话已归档',
-      detail: '这条 Codex 历史会话已归档，Forge 会从历史列表中隐藏它。'
+      detail: '这条历史会话已归档，Tran 会从历史列表中隐藏它。'
     }
   }
   if (text.includes('model') || text.includes('not found') || text.includes('invalid')) {

@@ -88,8 +88,8 @@ export function applyAppearanceSettings(settings: AppearanceSettings): void {
 
   root.dataset.glassGlow = normalized.glassGlow ? 'on' : 'off'
 
-  root.style.setProperty('--motion-collapse-open', `${Math.round(550 * durationFactor)}ms`)
-  root.style.setProperty('--motion-collapse-close', `${Math.round(480 * durationFactor)}ms`)
+  root.style.setProperty('--motion-collapse-open', `${Math.round(180 * durationFactor)}ms`)
+  root.style.setProperty('--motion-collapse-close', `${Math.round(150 * durationFactor)}ms`)
   root.style.setProperty('--motion-sidebar', `${Math.round(500 * durationFactor)}ms`)
   root.style.setProperty('--motion-sidebar-content-open', `${Math.round(410 * durationFactor)}ms`)
   root.style.setProperty('--motion-sidebar-content-close', `${Math.round(320 * durationFactor)}ms`)

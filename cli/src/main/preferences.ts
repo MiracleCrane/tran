@@ -3,7 +3,7 @@ import { armVulkanBackendPreference } from './gpuBackend'
 import type { ClaudeExecutionBackend, ComposerModel, Preferences } from '../shared/ipc'
 import { DEFAULT_AGENT_BACKEND_ID, normalizeAgentBackend } from '../shared/agentBackends'
 
-/** App preferences (Settings panel). Stored in forge-settings.json alongside
+/** App preferences (Settings panel). Stored in tran-settings.json alongside
  *  providers/projects. */
 
 export function currentBackend(s: ReturnType<typeof loadSettings> = loadSettings()): ClaudeExecutionBackend {
@@ -26,16 +26,6 @@ export function composerModelsForBackend(
   return backend === 'wsl' ? s.wslComposerModels : s.composerModels
 }
 
-export function composerModelsForAgent(
-  s: ReturnType<typeof loadSettings>,
-  backend: ClaudeExecutionBackend
-): ComposerModel[] | undefined {
-  const agentBackend = currentAgentBackend(s)
-  if (agentBackend === 'codex') return s.codexComposerModels
-  if (agentBackend === 'hermes') return s.hermesComposerModels
-  return composerModelsForBackend(s, backend)
-}
-
 export function setComposerModelsForBackend(
   s: ReturnType<typeof loadSettings>,
   backend: ClaudeExecutionBackend,
@@ -43,17 +33,6 @@ export function setComposerModelsForBackend(
 ): void {
   if (backend === 'wsl') s.wslComposerModels = models
   else s.composerModels = models
-}
-
-function setComposerModelsForAgent(
-  s: ReturnType<typeof loadSettings>,
-  backend: ClaudeExecutionBackend,
-  models: ComposerModel[]
-): void {
-  const agentBackend = currentAgentBackend(s)
-  if (agentBackend === 'codex') s.codexComposerModels = models
-  else if (agentBackend === 'hermes') s.hermesComposerModels = models
-  else setComposerModelsForBackend(s, backend, models)
 }
 
 export function saveComposerModelsForBackend(
@@ -75,7 +54,8 @@ export function getPreferences(): Preferences {
     defaultPermissionMode: s.defaultPermissionMode,
     wslSupportEnabled: s.wslSupportEnabled ?? s.claudeExecutionBackend === 'wsl',
     claudeExecutionBackend: currentBackend(s),
-    composerModels: composerModelsForAgent(s, backend),
+    // 只剩 kimi 一个后端，Composer 模型列表统一走 composerModels 字段。
+    composerModels: s.composerModels,
     codexComposerModels: s.codexComposerModels,
     hermesComposerModels: s.hermesComposerModels,
     vulkanBackend: s.vulkanBackend,
@@ -102,7 +82,7 @@ export function savePreferences(prefs: Preferences): Preferences {
         : prefs.claudeExecutionBackend
   }
   if (prefs.composerModels !== undefined) {
-    setComposerModelsForAgent(s, currentBackend(s), prefs.composerModels)
+    setComposerModelsForBackend(s, currentBackend(s), prefs.composerModels)
   }
   if (prefs.codexComposerModels !== undefined) {
     s.codexComposerModels = prefs.codexComposerModels

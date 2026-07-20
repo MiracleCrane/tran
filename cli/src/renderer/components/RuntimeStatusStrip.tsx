@@ -6,7 +6,7 @@ import { onForgeEvent } from '../events'
 
 function shortVersion(version: string | undefined): string {
   if (!version) return 'Agent ?'
-  return version.replace(/^(claude(?: code)?|codex-cli|hermes agent)\s*/i, '').trim() || version
+  return version.replace(/^(kimi(?: code(?: cli)?)?)\s*/i, '').trim() || version
 }
 
 export default function RuntimeStatusStrip(): JSX.Element {
@@ -73,20 +73,15 @@ export default function RuntimeStatusStrip(): JSX.Element {
   if (!meta) return <></>
 
   const backend = status?.backend ?? 'windows'
-  const activeAgentBackend = status?.agentBackend ?? meta.agentBackend ?? 'claude-code'
-  const showProvider = activeAgentBackend === 'claude-code' || activeAgentBackend === 'hermes'
-  const agentName = status?.agentName ?? 'Forge Agent'
-  const providerName =
-    activeAgentBackend === 'codex'
-      ? 'Codex CLI'
-      : activeAgentBackend === 'hermes'
-        ? status?.provider?.name || status?.provider?.baseUrl || 'Hermes 运营商'
-        : status?.provider?.name || status?.provider?.baseUrl || '未配置运营商'
-  const versionSource = status?.agentVersion ?? status?.claudeCodeVersion
+  // TODO(providers): 运营商芯片绑定旧 Claude 后端，kimi-only 阶段固定隐藏。
+  const showProvider = false
+  const agentName = status?.agentName ?? 'Tran Agent'
+  const providerName = status?.provider?.name || status?.provider?.baseUrl || '未配置运营商'
+  const versionSource = status?.agentVersion
   const version = versionSource ? shortVersion(versionSource) : `${agentName} ?`
   const versionTitle = status?.versionError
     ? `${agentName} version check failed: ${status.versionError}`
-    : status?.agentPath || status?.claudeCodePath || versionSource || version
+    : status?.agentPath || versionSource || version
 
   const chip =
     'inline-flex min-w-0 items-center gap-1 rounded-[5px] px-1 py-0 text-[9px] leading-[11px] transition hover:bg-white/[0.07] hover:text-zinc-200'

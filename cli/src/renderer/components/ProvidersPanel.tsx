@@ -30,10 +30,10 @@ function blankProvider(): Provider {
   return {
     id: crypto.randomUUID(),
     name: '',
-    baseUrl: 'https://api.anthropic.com',
+    baseUrl: '',
     token: '',
     authType: 'bearer',
-    model: 'claude-opus-4-8'
+    model: 'kimi-default'
   }
 }
 
@@ -81,15 +81,12 @@ export default function ProvidersPanel(): JSX.Element {
         window.api.getPreferences()
       ])
       const supportEnabled = !!prefs.wslSupportEnabled
-      const nextAgentBackend = prefs.agentBackend ?? 'claude-code'
+      // TODO(legacy): 面板当前不可达（kimi-only 阶段入口已隐藏）；后端 id 只有 'kimi'。
+      const nextAgentBackend = prefs.agentBackend ?? 'kimi'
       setProfiles(data)
       setWslSupportEnabled(supportEnabled)
       setAgentBackend(nextAgentBackend)
-      setEditingBackend((current) => {
-        if (nextAgentBackend === 'hermes') return 'hermes'
-        if (current === 'hermes') return supportEnabled ? data.activeBackend : 'windows'
-        return supportEnabled ? current || data.activeBackend : 'windows'
-      })
+      setEditingBackend('windows')
       setModelDrafts({
         windows: profileFrom(data, 'windows').composerModels ?? [],
         wsl: supportEnabled ? profileFrom(data, 'wsl').composerModels ?? [] : [],
@@ -116,9 +113,8 @@ export default function ProvidersPanel(): JSX.Element {
   )
   const providers = profile.providers
   const activeId = profile.activeProviderId
-  const effectiveAgentBackend = agentBackend ?? sessionAgentBackend ?? 'claude-code'
-  const isHermesAgent = effectiveAgentBackend === 'hermes'
-  const isHermesProfile = isHermesAgent || editingBackend === 'hermes'
+  // TODO(legacy): 面板当前不可达（kimi-only 阶段入口已隐藏）；hermes 分支已移除。
+  const isHermesProfile = editingBackend === 'hermes'
   const isEditingActiveRuntime = editingBackend === (profiles?.activeBackend ?? 'windows')
   const settingsTarget = `${backendName(editingBackend)} 的 ~/.claude/settings.json`
   const models = modelDrafts[editingBackend] ?? []
@@ -254,7 +250,7 @@ export default function ProvidersPanel(): JSX.Element {
         />
 
         <div className="mb-4 flex rounded-xl border border-white/[0.08] bg-white/[0.025] p-1">
-          {isHermesAgent ? (
+          {isHermesProfile ? (
             <button
               type="button"
               onClick={() => setEditingBackend('hermes')}

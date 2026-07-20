@@ -12,7 +12,7 @@ module.exports = {
           hover: 'rgba(76, 76, 88, 0.34)'
         },
         border: { subtle: 'rgba(238, 232, 226, 0.16)' },
-        accent: '#df765f'
+        accent: '#8b5cf6'
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],

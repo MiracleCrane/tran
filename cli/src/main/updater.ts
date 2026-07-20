@@ -11,11 +11,11 @@ import type {
   UpdateInstallResult
 } from '../shared/ipc'
 
-const UPDATE_REPO = 'spideytznn/claude-forge'
+const UPDATE_REPO = 'MiracleCrane/tran'
 const RELEASES_LATEST_URL = `https://github.com/${UPDATE_REPO}/releases/latest`
 const RELEASES_TAG_BASE_URL = `https://github.com/${UPDATE_REPO}/releases/tag`
 const RELEASES_DOWNLOAD_BASE_URL = `https://github.com/${UPDATE_REPO}/releases/download`
-const UPDATE_USER_AGENT = `Forge/${app.getVersion()}`
+const UPDATE_USER_AGENT = `Tran/${app.getVersion()}`
 
 interface LatestReleaseInfo {
   tag: string
@@ -124,7 +124,7 @@ function requestLatestRelease(url = RELEASES_LATEST_URL, redirects = 5): Promise
 }
 
 function installerAssetForVersion(version: string, tag = `v${version}`): UpdateAssetInfo {
-  const name = `Forge-${version}-external-claude-setup.exe`
+  const name = `Tran-${version}-setup.exe`
   return {
     name,
     browserDownloadUrl: `${RELEASES_DOWNLOAD_BASE_URL}/${tag}/${encodeURIComponent(name)}`
@@ -144,7 +144,7 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
       currentVersion,
       ...(latestVersion ? { latestVersion } : {}),
       updateAvailable,
-      ...(latestVersion ? { releaseName: `Forge ${latestVersion}` } : {}),
+      ...(latestVersion ? { releaseName: `Tran ${latestVersion}` } : {}),
       releaseUrl: release.releaseUrl,
       ...(asset ? { asset } : {})
     }
@@ -257,7 +257,7 @@ function pipeDownload(
   })
 }
 
-function safeAssetName(assetUrl: string, fallback = 'Forge-update-setup.exe'): string {
+function safeAssetName(assetUrl: string, fallback = 'Tran-update-setup.exe'): string {
   try {
     const parsed = new URL(assetUrl)
     const name = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() ?? '')
@@ -276,7 +276,7 @@ export async function downloadAndInstallUpdate(
     const url = normalized.assetUrl ?? update?.asset?.browserDownloadUrl
     if (!url) throw new Error('No update installer asset found.')
 
-    const updateDir = normalized.directory?.trim() || join(app.getPath('temp'), 'Forge-updates')
+    const updateDir = normalized.directory?.trim() || join(app.getPath('temp'), 'Tran-updates')
     mkdirSync(updateDir, { recursive: true })
     const fileName = safeAssetName(url)
     const destination = join(updateDir, fileName)

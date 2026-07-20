@@ -21,7 +21,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: unknown): void {
     // eslint-disable-next-line no-console
-    console.error('[Forge] render error:', error, info)
+    console.error('[Tran] render error:', error, info)
   }
 
   reset = (): void => this.setState({ error: null })

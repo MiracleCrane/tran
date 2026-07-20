@@ -29,7 +29,7 @@ import {
 } from './projects'
 import { translateTexts } from './translate'
 import { getTranslateConfig, saveTranslateConfig, testTranslate } from './translateConfig'
-import { currentAgentBackend, getPreferences, savePreferences } from './preferences'
+import { getPreferences, savePreferences } from './preferences'
 import {
   exportSettings,
   getDiagnosticLog,
@@ -40,26 +40,7 @@ import {
   runWslHealthCheck
 } from './runtimeDiagnostics'
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
-import { fromWslPath, getDefaultWslDistro, getWslHome, toWslPath, toWslUncPath } from './wslClaude'
-import {
-  deleteWslSession,
-  getWslSessionMessages,
-  getWslSubagentMessages,
-  listWslSessions,
-  renameWslSession
-} from './wslHistory'
-import {
-  deleteCodexSession,
-  getCodexSessionMessages,
-  listCodexSessions,
-  renameCodexSession
-} from './codexHistory'
-import {
-  deleteHermesSession,
-  getHermesSessionMessages,
-  listHermesSessions,
-  renameHermesSession
-} from './hermesHistory'
+import { listKimiSessions } from './kimiHistory'
 import * as gitModule from './git'
 import { log } from './logger'
 import type {
@@ -100,8 +81,6 @@ import type {
   DiagnosticReportOptions,
   DiagnosticReportResult
 } from '../shared/ipc'
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
-import { isWslProjectPath } from '../shared/paths'
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
 const TEXT_EXTS = new Set([
@@ -138,95 +117,13 @@ function withPathReadTimeout<T>(
   })
 }
 
-function currentClaudeBackend(): ClaudeExecutionBackend {
-  return process.platform === 'win32' && getPreferences().claudeExecutionBackend === 'wsl'
-    ? 'wsl'
-    : 'windows'
-}
-
-function useWslClaudeBackend(backend: ClaudeExecutionBackend = currentClaudeBackend()): boolean {
-  return process.platform === 'win32' && backend === 'wsl'
-}
-
 function isNativeAbsolutePath(path: string): boolean {
   return isAbsolute(path) || /^[/\\]{2}/.test(path)
 }
 
-function normalizeProjectPathForBackend(
-  path: string,
-  backend: ClaudeExecutionBackend = currentClaudeBackend()
-): string {
-  const trimmed = path.trim()
-  if (!trimmed) return trimmed
-  if (!useWslClaudeBackend(backend)) return trimmed
-  return fromWslPath(trimmed) ?? trimmed
-}
-
-function projectBackendFromPath(
-  path: string,
-  fallback: ClaudeExecutionBackend = currentClaudeBackend()
-): ClaudeExecutionBackend {
-  return process.platform === 'win32' &&
-    isWslProjectPath(path, { includePosixAbsolute: true })
-    ? 'wsl'
-    : fallback
-}
-
-function enableWslPreferencesForProjectBackend(backend: ClaudeExecutionBackend): void {
-  if (backend !== 'wsl') return
-  savePreferences({ wslSupportEnabled: true, claudeExecutionBackend: 'wsl' })
-}
-
 function resolveNativePath(cwd: string, pathStr: string): string {
-  const nativePath = fromWslPath(pathStr) ?? pathStr
-  if (isNativeAbsolutePath(nativePath)) return nativePath
-  const nativeCwd = fromWslPath(cwd) ?? cwd
-  return resolve(nativeCwd, pathStr)
-}
-
-function rendererPathFromNativePath(path: string): string {
-  return useWslClaudeBackend() ? (toWslPath(path) ?? path) : path
-}
-
-function toWslPickerPath(path: string | undefined): string | undefined {
-  return path?.replace(/^\\\\wsl\.localhost\\/i, '\\\\wsl$\\')
-}
-
-function wslDirectoryDefaultPath(): string | undefined {
-  const distro = getDefaultWslDistro()
-  const home = getWslHome()
-  if (home) return toWslPickerPath(toWslUncPath(home, distro))
-  if (distro) return `\\\\wsl$\\${distro}`
-  return '\\\\wsl$'
-}
-
-async function pickWslDirectory(): Promise<string | null> {
-  const defaultPath = wslDirectoryDefaultPath()
-  let res: Electron.OpenDialogReturnValue
-  try {
-    res = await dialog.showOpenDialog({
-      title: 'Select WSL project directory',
-      ...(defaultPath ? { defaultPath } : {}),
-      properties: ['openDirectory']
-    })
-  } catch (err) {
-    log('ipc', `WSL directory picker fallback: ${err instanceof Error ? err.message : String(err)}`)
-    res = await dialog.showOpenDialog({
-      title: 'Select WSL project directory',
-      properties: ['openDirectory']
-    })
-  }
-  if (res.canceled || !res.filePaths.length) return null
-  return normalizeProjectPathForBackend(res.filePaths[0], 'wsl')
-}
-
-function normalizeAgentMessageForRenderer(message: SDKMessage): SDKMessage {
-  if (!useWslClaudeBackend() || message.type !== 'system') return message
-  const cwd = (message as { cwd?: unknown }).cwd
-  if (typeof cwd !== 'string') return message
-  const normalized = fromWslPath(cwd)
-  if (!normalized || normalized === cwd) return message
-  return { ...(message as unknown as Record<string, unknown>), cwd: normalized } as SDKMessage
+  if (isNativeAbsolutePath(pathStr)) return pathStr
+  return resolve(cwd, pathStr)
 }
 
 async function readDirectoryEntries(path: string): Promise<{ entries: PickedDirectoryEntry[]; truncated: boolean }> {
@@ -247,7 +144,7 @@ async function readDirectoryEntries(path: string): Promise<{ entries: PickedDire
           const isDirectory = entryStat.isDirectory()
           return {
             name: dirent.name,
-            path: rendererPathFromNativePath(childPath),
+            path: childPath,
             kind: isDirectory ? 'directory' : 'file',
             size: isDirectory ? 0 : entryStat.size,
             modifiedAt: entryStat.mtimeMs
@@ -277,7 +174,7 @@ async function readPickedFiles(cwd: string, paths: string[], source: string): Pr
       if (stat.isDirectory()) {
         const { entries, truncated } = await readDirectoryEntries(p)
         out.push({
-          path: rendererPathFromNativePath(p),
+          path: p,
           name: basename(p),
           kind: 'directory',
           mimeType: 'application/x-directory',
@@ -305,7 +202,7 @@ async function readPickedFiles(cwd: string, paths: string[], source: string): Pr
         data = (await withPathReadTimeout(readFile(p, 'utf-8'), `read text ${p}`)).slice(0, MAX_TEXT_INLINE)
       }
       out.push({
-        path: rendererPathFromNativePath(p),
+        path: p,
         name: basename(p),
         kind,
         mimeType: MIME[ext] ?? 'application/octet-stream',
@@ -358,7 +255,7 @@ export function registerIpc(
       const event: AgentEvent = {
         type: 'agent:message',
         sessionId,
-        message: normalizeAgentMessageForRenderer(message)
+        message
       }
       send('forge:agent-event', event)
     },
@@ -375,7 +272,7 @@ export function registerIpc(
         const inactive = !win || win.isDestroyed() || !win.isFocused()
         if (inactive) {
           const n = new Notification({
-            title: error ? 'Forge · 会话出错' : 'Forge · 会话完成',
+            title: error ? 'Tran · 会话出错' : 'Tran · 会话完成',
             body: error ? `任务异常结束：${error}` : 'Agent 已完成当前任务',
             silent: false
           })
@@ -389,7 +286,7 @@ export function registerIpc(
           n.show()
         }
       }
-      getForgeTray()?.setTooltip?.('Forge')
+      getForgeTray()?.setTooltip?.('Tran')
     },
     onPermissionRequest: (req: PermissionRequestPayload) => {
       send('forge:permission-request', req)
@@ -399,7 +296,7 @@ export function registerIpc(
   ipcMain.handle('forge:startSession', async (_e, opts: StartSessionOptions): Promise<StartSessionResult> => {
     log('ipc', `startSession agent=${opts.agentBackend ?? 'default'} cwd=${opts.cwd} model=${opts.model ?? 'default'}`)
     const sessionId = await bridge.start(opts)
-    getForgeTray()?.setTooltip?.('Forge · 运行中…')
+    getForgeTray()?.setTooltip?.('Tran · 运行中…')
     return { sessionId }
   })
 
@@ -459,7 +356,7 @@ export function registerIpc(
   ipcMain.handle('forge:pickFiles', async (_e, cwd: string): Promise<PickedFile[]> => {
     const res = await dialog.showOpenDialog({
       title: '选择文件附件',
-      defaultPath: fromWslPath(cwd) ?? cwd,
+      defaultPath: cwd,
       properties: ['openFile', 'multiSelections']
     })
     if (res.canceled || !res.filePaths.length) return []
@@ -594,8 +491,8 @@ export function registerIpc(
     async (_e, options?: DiagnosticReportOptions): Promise<DiagnosticReportResult> => {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
       const res = await dialog.showSaveDialog({
-        title: 'Export Forge diagnostic report',
-        defaultPath: `forge-diagnostic-${stamp}.md`,
+        title: 'Export Tran diagnostic report',
+        defaultPath: `tran-diagnostic-${stamp}.md`,
         filters: [{ name: 'Markdown', extensions: ['md'] }]
       })
       if (res.canceled || !res.filePath) return { canceled: true }
@@ -641,7 +538,7 @@ export function registerIpc(
       if (!win || win.isDestroyed()) return
       if (decision.minimize) {
         win.hide()
-        getForgeTray()?.setTooltip?.('Forge — 后台运行中')
+        getForgeTray()?.setTooltip?.('Tran — 后台运行中')
       } else {
         // Bypass the close-intercept for THIS close only so the app actually
         // quits. Using a one-shot (not the sticky isQuitting flag) so a future
@@ -705,11 +602,9 @@ export function registerIpc(
   )
 
   ipcMain.handle('forge:listProjects', async (): Promise<Project[]> => listProjects())
-  ipcMain.handle('forge:addProject', async (_e, path: string, name?: string): Promise<Project[]> => {
-    const backend = projectBackendFromPath(path)
-    enableWslPreferencesForProjectBackend(backend)
-    return addProject(normalizeProjectPathForBackend(path, backend), name)
-  })
+  ipcMain.handle('forge:addProject', async (_e, path: string, name?: string): Promise<Project[]> =>
+    addProject(path.trim(), name)
+  )
   ipcMain.handle('forge:removeProject', async (_e, path: string): Promise<Project[]> =>
     removeProject(path)
   )
@@ -717,79 +612,14 @@ export function registerIpc(
     renameProject(path, name)
   )
   ipcMain.handle('forge:setLastProject', async (_e, path: string): Promise<void> => {
-    const backend = projectBackendFromPath(path)
-    enableWslPreferencesForProjectBackend(backend)
-    setLastProject(normalizeProjectPathForBackend(path, backend))
+    setLastProject(path.trim())
   })
-  ipcMain.handle('forge:getStartupProject', async (): Promise<Project | null> => {
-    const project = getStartupProject()
-    if (project) enableWslPreferencesForProjectBackend(projectBackendFromPath(project.path))
-    return project
-  })
+  ipcMain.handle('forge:getStartupProject', async (): Promise<Project | null> => getStartupProject())
 
   ipcMain.handle('forge:listSessions', async (_e, cwd: string, opts?: SessionListOptions): Promise<SessionListItem[]> => {
     const limit = opts?.limit && opts.limit > 0 ? opts.limit : 50
     const offset = opts?.offset && opts.offset > 0 ? opts.offset : 0
-    if (currentAgentBackend() === 'codex') {
-      return listCodexSessions(cwd, { limit, offset })
-    }
-    if (currentAgentBackend() === 'hermes') {
-      return listHermesSessions(cwd, { limit, offset })
-    }
-    const wslSupportEnabled = getPreferences().wslSupportEnabled === true
-    const requestedBackend =
-      !wslSupportEnabled && (opts?.backend === 'wsl' || opts?.backend === 'all')
-        ? 'windows'
-        : opts?.backend ?? currentClaudeBackend()
-
-    const readWindowsSessions = async (readLimit: number, readOffset: number): Promise<SessionListItem[]> => {
-      const { listSessions } = await import('@anthropic-ai/claude-agent-sdk')
-      const sessions = await listSessions({ dir: cwd, limit: readLimit, offset: readOffset })
-      return sessions.map((s) => ({
-        sessionId: s.sessionId,
-        agentBackend: 'claude-code' as const,
-        summary: s.summary,
-        lastModified: s.lastModified,
-        cwd: s.cwd ?? undefined,
-        gitBranch: s.gitBranch ?? undefined,
-        runtimeBackend: 'windows' as const
-      }))
-    }
-
-    const readWslSessions = async (readLimit: number, readOffset: number): Promise<SessionListItem[]> => {
-      if (process.platform !== 'win32') return []
-      const sessions = await listWslSessions(cwd, { limit: readLimit, offset: readOffset })
-      return sessions.map((session) => ({
-        ...session,
-        agentBackend: 'claude-code' as const,
-        runtimeBackend: 'wsl' as const
-      }))
-    }
-
-    try {
-      if (requestedBackend === 'all') {
-        const readLimit = offset + limit
-        const [windowsSessions, wslSessions] = await Promise.all([
-          readWindowsSessions(readLimit, 0).catch((err) => {
-            log('ipc', `list Windows sessions failed: ${err instanceof Error ? err.message : String(err)}`)
-            return [] as SessionListItem[]
-          }),
-          readWslSessions(readLimit, 0).catch((err) => {
-            log('ipc', `list WSL sessions failed: ${err instanceof Error ? err.message : String(err)}`)
-            return [] as SessionListItem[]
-          })
-        ])
-        return [...windowsSessions, ...wslSessions]
-          .sort((a, b) => b.lastModified - a.lastModified)
-          .slice(offset, offset + limit)
-      }
-
-      if (useWslClaudeBackend(requestedBackend)) return await readWslSessions(limit, offset)
-      return await readWindowsSessions(limit, offset)
-    } catch (err) {
-      console.error('[forge] listSessions failed:', err)
-      return []
-    }
+    return listKimiSessions(cwd, { limit, offset })
   })
 
   ipcMain.handle('forge:getSessionMessages', async (
@@ -798,23 +628,12 @@ export function registerIpc(
     cwd: string,
     backend?: ClaudeExecutionBackend
   ): Promise<HistoryMessage[]> => {
-    try {
-      if (currentAgentBackend() === 'codex') {
-        return getCodexSessionMessages(sessionId)
-      }
-      if (currentAgentBackend() === 'hermes') {
-        return getHermesSessionMessages(sessionId)
-      }
-      if (useWslClaudeBackend(backend ?? currentClaudeBackend())) {
-        return await getWslSessionMessages(sessionId, cwd)
-      }
-      const { getSessionMessages } = await import('@anthropic-ai/claude-agent-sdk')
-      const msgs = await getSessionMessages(sessionId, { dir: cwd, limit: 500 })
-      return msgs as unknown as HistoryMessage[]
-    } catch (err) {
-      log('ipc', `getSessionMessages failed: ${err instanceof Error ? err.message : String(err)}`)
-      return []
-    }
+    // TODO(kimi-history): ACP 没有逐条读取历史消息的方法；恢复会话时由
+    // session/load 在 agent 侧回放（见 KimiBackend / kimiHistory 的 TODO）。
+    void sessionId
+    void cwd
+    void backend
+    return []
   })
 
   ipcMain.handle(
@@ -826,20 +645,11 @@ export function registerIpc(
       cwd: string,
       backend?: ClaudeExecutionBackend
     ): Promise<void> => {
-      if (currentAgentBackend() === 'codex') {
-        renameCodexSession(sessionId, title)
-        return
-      }
-      if (currentAgentBackend() === 'hermes') {
-        renameHermesSession(sessionId, title)
-        return
-      }
-      if (useWslClaudeBackend(backend ?? currentClaudeBackend())) {
-        await renameWslSession(sessionId, title, cwd)
-        return
-      }
-      const { renameSession } = await import('@anthropic-ai/claude-agent-sdk')
-      await renameSession(sessionId, title, { dir: cwd })
+      // TODO(kimi-history): Kimi ACP 暂无重命名接口；渲染层只做本地乐观更新。
+      void sessionId
+      void title
+      void cwd
+      void backend
     }
   )
 
@@ -851,46 +661,28 @@ export function registerIpc(
       cwd: string,
       backend?: ClaudeExecutionBackend
     ): Promise<void> => {
-      if (currentAgentBackend() === 'codex') {
-        deleteCodexSession(sessionId)
-        return
-      }
-      if (currentAgentBackend() === 'hermes') {
-        deleteHermesSession(sessionId)
-        return
-      }
-      if (useWslClaudeBackend(backend ?? currentClaudeBackend())) {
-        await deleteWslSession(sessionId, cwd)
-        return
-      }
-      const { deleteSession } = await import('@anthropic-ai/claude-agent-sdk')
-      await deleteSession(sessionId, { dir: cwd })
+      // TODO(kimi-history): Kimi ACP 暂无删除接口；会话会在下次刷新时重新出现。
+      void sessionId
+      void cwd
+      void backend
     }
   )
 
   ipcMain.handle(
     'forge:getSubagentMessages',
     async (_e, sessionId: string, agentId: string, cwd: string): Promise<HistoryMessage[]> => {
-      try {
-        if (currentAgentBackend() === 'codex') return []
-        if (currentAgentBackend() === 'hermes') return []
-        if (useWslClaudeBackend()) return await getWslSubagentMessages(sessionId, agentId, cwd)
-        const { getSubagentMessages } = await import('@anthropic-ai/claude-agent-sdk')
-        const msgs = await getSubagentMessages(sessionId, agentId, { dir: cwd, limit: 500 })
-        return msgs as unknown as HistoryMessage[]
-      } catch (err) {
-        log('ipc', `getSubagentMessages failed: ${err instanceof Error ? err.message : String(err)}`)
-        return []
-      }
+      // Kimi ACP 不暴露 subagent 转录（subagents 能力未验证）。
+      void sessionId
+      void agentId
+      void cwd
+      return []
     }
   )
 
   ipcMain.handle(
     'forge:pickDirectory',
     async (_e, options?: PickDirectoryOptions): Promise<string | null> => {
-      const backend = options?.backend ?? currentClaudeBackend()
-      if (useWslClaudeBackend(backend)) return pickWslDirectory()
-
+      void options
       const res = await dialog.showOpenDialog({ properties: ['openDirectory'] })
       if (res.canceled || !res.filePaths.length) return null
       return res.filePaths[0]

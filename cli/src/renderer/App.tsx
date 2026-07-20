@@ -89,9 +89,9 @@ function WindowTitlebar(): JSX.Element {
     <div className="window-titlebar flex shrink-0 items-center text-[13px] text-zinc-200/80">
       <div className="window-titlebar-drag flex min-w-0 flex-1 items-center gap-2 px-4">
         <div className="flex h-5 w-5 items-center justify-center rounded-md border border-white/15 bg-accent/70 text-[10px] font-semibold text-white shadow-sm shadow-black/20">
-          F
+          T
         </div>
-        <span className="font-medium">Forge</span>
+        <span className="font-medium">Tran</span>
       </div>
       <div className="window-controls flex h-full shrink-0 items-stretch">
         <button
@@ -420,24 +420,24 @@ export default function App(): JSX.Element {
   }, [bootstrap])
 
   useEffect(() => {
+    // TODO(wsl): WSL 支持已随旧后端移除，wslHealth 视图入口已隐藏；若状态里
+    // 残留该视图（例如旧版设置），直接拉回设置页。
     const enforceWslSupport = (): void => {
-      void window.api.getPreferences().then((prefs) => {
-        if (!prefs.wslSupportEnabled && useUiStore.getState().view === 'wslHealth') {
-          setView('settings')
-        }
-      })
+      if (useUiStore.getState().view === 'wslHealth') {
+        setView('settings')
+      }
     }
     enforceWslSupport()
     return onForgeEvent('wslSupportChanged', enforceWslSupport)
   }, [setView])
 
   useEffect(() => {
+    // TODO(providers): 运营商面板深度绑定旧 Claude 后端，kimi-only 阶段入口
+    // 已隐藏；残留 providers 视图时拉回设置页。
     const enforceAgentBackendView = (): void => {
-      void window.api.getPreferences().then((prefs) => {
-        if (prefs.agentBackend === 'codex' && useUiStore.getState().view === 'providers') {
-          setView('settings')
-        }
-      })
+      if (useUiStore.getState().view === 'providers') {
+        setView('settings')
+      }
     }
     enforceAgentBackendView()
     const offAgentBackend = onForgeEvent('agentBackendChanged', enforceAgentBackendView)
@@ -593,7 +593,7 @@ export default function App(): JSX.Element {
       if (!markDirty || previousKey === null || previousKey === nextKey || !provider) return
       const state = useSessionStore.getState()
       const currentMeta = state.meta
-      if (!currentMeta || currentMeta.agentBackend === 'codex') return
+      if (!currentMeta) return
       useSessionStore.setState({
         meta: { ...currentMeta, model: provider.model },
         sessionConfigDirty: true
@@ -627,7 +627,7 @@ export default function App(): JSX.Element {
         <WindowTitlebar />
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <div className="accent-soft-button flex h-10 w-10 items-center justify-center rounded-xl text-lg font-bold text-white">
-            F
+            T
           </div>
         </div>
         {blockingOverlay && <BlockingOverlay label={blockingOverlay.label} />}

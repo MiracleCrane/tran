@@ -1,15 +1,22 @@
-import type { SDKMessage, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk'
 import type { AgentBackendId, AgentBackendInfo } from './agentBackends'
 export type { AgentBackendId, AgentBackendInfo } from './agentBackends'
 
+/** 结构化的 agent 消息信封。后端（如 Kimi ACP）按 Claude Agent SDK 的消息
+ *  形状构造事件，渲染进程按 `type` 字段做结构化收窄；Tran 不再直接依赖
+ *  @anthropic-ai/claude-agent-sdk。 */
+export type SDKMessage = Record<string, unknown> & { type: string }
+
+/** 权限建议的不透明负载（原 SDK 的 PermissionUpdate），仅透传到 UI。 */
+export type PermissionUpdate = Record<string, unknown>
+
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+/** Kimi ACP 的真实模式（session/new configOptions.mode 实测值）：
+ *  default=每次询问, plan=只读计划, auto=自动批准安全操作, yolo=全部自动批准。 */
 export type PermissionMode =
   | 'default'
-  | 'acceptEdits'
-  | 'bypassPermissions'
   | 'plan'
-  | 'dontAsk'
   | 'auto'
+  | 'yolo'
 
 export interface StartSessionOptions {
   cwd: string
@@ -207,13 +214,13 @@ export interface PickDirectoryOptions {
 
 /** Misc app preferences managed by the Settings panel. */
 export interface Preferences {
-  /** Which pluggable agent engine Forge should use. */
+  /** Which pluggable agent engine Tran should use. */
   agentBackend?: AgentBackendId
   /** Default effort for new sessions (AgentBridge fallback). */
   defaultEffort?: EffortLevel
   /** Default permission mode for new sessions. */
   defaultPermissionMode?: PermissionMode
-  /** Which Claude runtime/history backend Forge should use. */
+  /** Which Claude runtime/history backend Tran should use. */
   claudeExecutionBackend?: ClaudeExecutionBackend
   /** Whether WSL-specific UI and backend capabilities are exposed. */
   wslSupportEnabled?: boolean
@@ -233,7 +240,7 @@ export interface Preferences {
   /** Show OS native notifications when a session ends while the window is
    *  inactive (default true). */
   nativeNotifications?: boolean
-  /** When false, Forge re-shows the close prompt (minimize vs. quit) on every
+  /** When false, Tran re-shows the close prompt (minimize vs. quit) on every
    *  window close. Default false = always ask until the user picks. */
   closePromptDismissed?: boolean
 }

@@ -115,7 +115,7 @@ export function log(scope: string, msg: unknown): void {
 
 export function readRecentLog(maxLines = 220): string {
   const path = ensurePath()
-  if (!existsSync(path)) return 'No Forge main log found.'
+  if (!existsSync(path)) return 'No Tran main log found.'
   try {
     return readFileSync(path, 'utf8')
       .split(/\r?\n/)
@@ -123,7 +123,7 @@ export function readRecentLog(maxLines = 220): string {
       .join('\n')
       .trim()
   } catch {
-    return 'No Forge main log found.'
+    return 'No Tran main log found.'
   }
 }
 

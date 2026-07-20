@@ -6,7 +6,7 @@ interface ClosePromptDialogProps {
   onClose: () => void
 }
 
-/** First-close prompt shown when the user closes Forge for the first time.
+/** First-close prompt shown when the user closes Tran for the first time.
  *  Lets them pick: minimize to tray (keep running) or quit outright, with a
  *  "don't ask again" checkbox that persists the choice. Visual pattern mirrors
  *  ConfirmDialog (fixed overlay + centered glass card). */
@@ -61,7 +61,7 @@ export default function ClosePromptDialog({ open, onClose }: ClosePromptDialogPr
       >
         <div className="mb-2 flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-full bg-accent" />
-          <h2 className="text-base font-semibold text-zinc-100">关闭 Forge</h2>
+          <h2 className="text-base font-semibold text-zinc-100">关闭 Tran</h2>
         </div>
         <p className="mb-5 text-sm leading-relaxed text-zinc-400">
           关闭窗口时是否最小化到系统托盘继续运行?最小化后 Agent 仍在后台执行,点击托盘图标可恢复窗口。
@@ -72,7 +72,7 @@ export default function ClosePromptDialog({ open, onClose }: ClosePromptDialogPr
             type="checkbox"
             checked={remember}
             onChange={(e) => setRemember(e.target.checked)}
-            className="h-3.5 w-3.5 accent-[#df765f]"
+            className="h-3.5 w-3.5 accent-[#8b5cf6]"
           />
           不再提醒(之后可在「设置」中修改)
         </label>

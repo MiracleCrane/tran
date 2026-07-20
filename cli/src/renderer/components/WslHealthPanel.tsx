@@ -22,7 +22,7 @@ export default function WslHealthPanel(): JSX.Element {
   const runCheck = async (): Promise<void> => {
     if (!cwd) return
     if (typeof window.api.runWslHealthCheck !== 'function') {
-      setError('WSL 检查 IPC 尚未加载。请重启 Forge/Electron 窗口，让 preload 更新生效。')
+      setError('WSL 检查 IPC 尚未加载。请重启 Tran/Electron 窗口，让 preload 更新生效。')
       return
     }
     setError(null)
@@ -39,7 +39,7 @@ export default function WslHealthPanel(): JSX.Element {
   const repair = async (): Promise<void> => {
     if (!cwd) return
     if (typeof window.api.repairWslEnvironment !== 'function') {
-      setError('修复 IPC 尚未加载。请重启 Forge/Electron 窗口，让 preload 更新生效。')
+      setError('修复 IPC 尚未加载。请重启 Tran/Electron 窗口，让 preload 更新生效。')
       return
     }
     setError(null)

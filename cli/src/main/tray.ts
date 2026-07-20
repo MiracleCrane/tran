@@ -6,13 +6,13 @@ import { log } from './logger'
  * Tray icon — generated at runtime so no binary asset is needed.
  *
  * We rasterize an anti-aliased RGBA pixel grid (accent rounded square + a
- * white geometric "F" glyph) and encode it as a PNG via Node's zlib + a tiny
- * CRC/PNG chunk writer. The shape mirrors the packaged Forge app icon.
+ * white geometric "T" glyph) and encode it as a PNG via Node's zlib + a tiny
+ * CRC/PNG chunk writer. The shape mirrors the packaged Tran app icon.
  * ------------------------------------------------------------------ */
 
-const ACCENT_R = 0xdf
-const ACCENT_G = 0x76
-const ACCENT_B = 0x5f
+const ACCENT_R = 0x8b
+const ACCENT_G = 0x5c
+const ACCENT_B = 0xf6
 const ICON_SUPERSAMPLE = 4
 
 function clamp(v: number, min: number, max: number): number {
@@ -67,35 +67,27 @@ function over(sample: PaintSample, r: number, g: number, b: number, a: number): 
   sample.a = alpha + sample.a * inverse
 }
 
-function inForgeGlyph(x: number, y: number, size: number): boolean {
+function inTranGlyph(x: number, y: number, size: number): boolean {
+  // "T"：居中的竖笔 + 顶部横笔。
   const stem = inRoundedRect(
     x,
     y,
-    (0.405 - 0.091 / 2) * size,
+    (0.5 - 0.091 / 2) * size,
     (0.518 - 0.418 / 2) * size,
-    (0.405 + 0.091 / 2) * size,
+    (0.5 + 0.091 / 2) * size,
     (0.518 + 0.418 / 2) * size,
     0.023 * size
   )
   const top = inRoundedRect(
     x,
     y,
-    (0.505 - 0.287 / 2) * size,
+    (0.5 - 0.287 / 2) * size,
     (0.331 - 0.087 / 2) * size,
-    (0.505 + 0.287 / 2) * size,
+    (0.5 + 0.287 / 2) * size,
     (0.331 + 0.087 / 2) * size,
     0.023 * size
   )
-  const middle = inRoundedRect(
-    x,
-    y,
-    (0.487 - 0.252 / 2) * size,
-    (0.488 - 0.08 / 2) * size,
-    (0.487 + 0.252 / 2) * size,
-    (0.488 + 0.08 / 2) * size,
-    0.021 * size
-  )
-  return stem || top || middle
+  return stem || top
 }
 
 function paintIconSample(x: number, y: number, size: number): PaintSample {
@@ -117,7 +109,7 @@ function paintIconSample(x: number, y: number, size: number): PaintSample {
     over(sample, 1, 1, 1, 0.16)
   }
 
-  if (inForgeGlyph(x, y, size)) {
+  if (inTranGlyph(x, y, size)) {
     over(sample, 1, 1, 1, 1)
   }
 
@@ -268,7 +260,7 @@ export function createTray(
   }
 
   const tray = new Tray(icon)
-  tray.setToolTip('Forge')
+  tray.setToolTip('Tran')
 
   tray.on('click', showWindow)
   tray.on('double-click', showWindow)
@@ -291,7 +283,7 @@ export function createTray(
       },
       { type: 'separator' },
       {
-        label: '退出 Forge',
+        label: '退出 Tran',
         click: () => requestQuit()
       }
     ])

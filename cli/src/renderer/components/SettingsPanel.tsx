@@ -37,10 +37,9 @@ const EFFORTS: { id: EffortLevel; label: string }[] = [
 
 const PERMISSION_MODES: { id: PermissionMode; label: string }[] = [
   { id: 'default', label: '默认(每次询问)' },
-  { id: 'acceptEdits', label: '自动接受编辑' },
-  { id: 'plan', label: '计划模式' },
-  { id: 'bypassPermissions', label: '跳过权限(慎用)' },
-  { id: 'auto', label: '自动' }
+  { id: 'plan', label: '计划模式(只读)' },
+  { id: 'auto', label: '自动(批准安全操作)' },
+  { id: 'yolo', label: 'YOLO(全部自动批准·慎用)' }
 ]
 
 function RangeControl({
@@ -73,7 +72,7 @@ function RangeControl({
         step={step}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="h-2 w-full cursor-pointer accent-[#df765f]"
+        className="h-2 w-full cursor-pointer accent-[#8b5cf6]"
       />
     </label>
   )
@@ -113,7 +112,7 @@ function ToggleControl({
 }
 
 export default function SettingsPanel(): JSX.Element {
-  const [agentBackend, setAgentBackend] = useState<AgentBackendId>('claude-code')
+  const [agentBackend, setAgentBackend] = useState<AgentBackendId>('kimi')
   const [agentBackends, setAgentBackends] = useState<AgentBackendInfo[]>([])
   const [effort, setEffort] = useState<EffortLevel>('high')
   const [permMode, setPermMode] = useState<PermissionMode>('default')
@@ -147,7 +146,7 @@ export default function SettingsPanel(): JSX.Element {
       window.api.getPreferences(),
       window.api.listAgentBackends().catch(() => [] as AgentBackendInfo[])
     ]).then(([p, backends]) => {
-      setAgentBackend(p.agentBackend ?? 'claude-code')
+      setAgentBackend(p.agentBackend ?? 'kimi')
       setAgentBackends(backends)
       setEffort(p.defaultEffort ?? 'high')
       setPermMode(p.defaultPermissionMode ?? 'default')
@@ -277,30 +276,6 @@ export default function SettingsPanel(): JSX.Element {
     }
   }
 
-  const toggleWslSupport = async (enabled: boolean): Promise<void> => {
-    if (enabled === wslSupportEnabled) return
-    const previousSupport = wslSupportEnabled
-    const previousBackend = claudeBackend
-    setWslSupportEnabled(enabled)
-    if (!enabled) setClaudeBackend('windows')
-    try {
-      const prefs = await window.api.savePreferences({
-        wslSupportEnabled: enabled,
-        ...(enabled ? {} : { claudeExecutionBackend: 'windows' as const })
-      })
-      setModels(prefs.composerModels ?? [])
-      setClaudeBackend(prefs.claudeExecutionBackend ?? 'windows')
-      emitForgeEvent('providerChanged')
-      emitForgeEvent('modelOptionsChanged')
-      emitForgeEvent('wslSupportChanged')
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
-    } catch {
-      setWslSupportEnabled(previousSupport)
-      setClaudeBackend(previousBackend)
-    }
-  }
-
   const switchAgentBackend = async (next: AgentBackendId): Promise<void> => {
     if (next === agentBackend) return
     const previous = agentBackend
@@ -344,28 +319,25 @@ export default function SettingsPanel(): JSX.Element {
   const updateModel = (i: number, patch: Partial<ComposerModel>): void =>
     setModels((m) => m.map((x, idx) => (idx === i ? { ...x, ...patch } : x)))
   const removeModel = (i: number): void => setModels((m) => m.filter((_, idx) => idx !== i))
-  const backendLabel = claudeBackend === 'wsl' ? 'WSL' : 'Windows'
-  const modelScopeLabel =
-    agentBackend === 'codex' ? 'Codex' : agentBackend === 'hermes' ? 'Hermes' : backendLabel
-  const defaultModelListLabel =
-    agentBackend === 'codex' ? 'Codex' : agentBackend === 'hermes' ? 'Hermes' : 'Opus/Sonnet/Haiku'
+  const modelScopeLabel = 'Kimi'
+  const defaultModelListLabel = 'Kimi'
   const defaultModelCount = defaultModelsForAgent(agentBackend).length
   const agentOptions = (agentBackends.length
     ? agentBackends
     : [
         {
-          id: 'claude-code' as AgentBackendId,
-          name: 'Claude Code',
-          description: '当前稳定后端。',
+          id: 'kimi' as AgentBackendId,
+          name: 'Kimi Code CLI',
+          description: '当前内置后端。',
           status: 'available' as const,
-          runtimeModes: ['windows', 'wsl'] as Array<'windows' | 'wsl'>,
+          runtimeModes: ['windows'] as Array<'windows' | 'wsl'>,
           capabilities: {
             streaming: true,
             permissions: true,
             mcp: true,
-            skills: true,
+            skills: false,
             sessionHistory: true,
-            subagents: true
+            subagents: false
           }
         }
       ]).map((backend) => ({
@@ -379,7 +351,7 @@ export default function SettingsPanel(): JSX.Element {
       window.api.getPreferences(),
       window.api.listAgentBackends().catch(() => [] as AgentBackendInfo[])
     ])
-    setAgentBackend(p.agentBackend ?? 'claude-code')
+    setAgentBackend(p.agentBackend ?? 'kimi')
     setAgentBackends(backends)
     setEffort(p.defaultEffort ?? 'high')
     setPermMode(p.defaultPermissionMode ?? 'default')
@@ -412,7 +384,7 @@ export default function SettingsPanel(): JSX.Element {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `forge-settings-${new Date().toISOString().slice(0, 10)}.json`
+    a.download = `tran-settings-${new Date().toISOString().slice(0, 10)}.json`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -482,15 +454,18 @@ export default function SettingsPanel(): JSX.Element {
           <div className="mb-3">
             <label className={labelCls}>Agent 后端</label>
             <p className="text-[11px] leading-relaxed text-zinc-600">
-              控制会话由哪个 Agent 引擎接管。Windows/WSL 是 Claude Code 的运行环境，Agent 后端是更上层的可插拔引擎。
+              控制会话由哪个 Agent 引擎接管。当前版本内置 Kimi Code CLI 后端。
             </p>
           </div>
-          <DisclosureSelect
-            value={agentBackend}
-            options={agentOptions}
-            onChange={(v) => void switchAgentBackend(v as AgentBackendId)}
-            className="w-full"
-          />
+          {/* 只有一个后端时隐藏切换器，只展示能力说明卡片。 */}
+          {agentOptions.length > 1 && (
+            <DisclosureSelect
+              value={agentBackend}
+              options={agentOptions}
+              onChange={(v) => void switchAgentBackend(v as AgentBackendId)}
+              className="w-full"
+            />
+          )}
           {selectedAgent && (
             <div className="mt-3 rounded-xl border border-white/[0.06] bg-bg-elev/50 p-3">
               <div className="flex items-center justify-between gap-3">
@@ -539,15 +514,6 @@ export default function SettingsPanel(): JSX.Element {
             options={PERMISSION_MODES.map((p) => ({ value: p.id, label: p.label }))}
             onChange={(v) => setPermMode(v as PermissionMode)}
             className="w-full"
-          />
-        </section>
-
-        <section className="glass-panel-soft rounded-2xl p-4">
-          <ToggleControl
-            label="WSL 支持"
-            description="开启后才显示 WSL 会话信息、WSL Provider Profile、WSL 健康检查，并允许打开 WSL 历史时自动切换后端。关闭后界面回到纯 Windows 模式。"
-            checked={wslSupportEnabled}
-            onChange={(checked) => void toggleWslSupport(checked)}
           />
         </section>
 
@@ -606,7 +572,7 @@ export default function SettingsPanel(): JSX.Element {
           <div className="mb-3">
             <h2 className="text-sm font-semibold text-zinc-200">设置导入 / 导出</h2>
             <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-              备份 Forge 设置、Provider 配置、模型列表和外观设置。
+              备份 Tran 设置、Provider 配置、模型列表和外观设置。
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -733,7 +699,7 @@ export default function SettingsPanel(): JSX.Element {
                 <div>
                   <div className="text-xs text-zinc-500">诊断报告</div>
                   <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-                    导出运行时、WSL、Provider 摘要、配置快照和最近日志；敏感密钥会脱敏。
+                    导出运行时状态、配置快照和最近日志；敏感密钥会脱敏。
                   </p>
                 </div>
                 <button

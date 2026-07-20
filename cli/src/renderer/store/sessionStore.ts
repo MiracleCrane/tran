@@ -25,11 +25,7 @@ import type {
   PendingMessage
 } from '../types'
 import { pickedFileToUserAttachment } from '../utils/attachments'
-import {
-  DEFAULT_CLAUDE_MODEL_ID,
-  DEFAULT_CODEX_MODEL_ID,
-  DEFAULT_HERMES_MODEL_ID
-} from '../../shared/models'
+import { DEFAULT_KIMI_MODEL_ID } from '../../shared/models'
 import { emitForgeEvent } from '../events'
 
 /** A buffered `content_block_delta` waiting to be folded into the store in a
@@ -370,13 +366,11 @@ function uid(): string {
 }
 
 function modelForAgent(
-  agentBackend: AgentBackendId | undefined,
+  _agentBackend: AgentBackendId | undefined,
   model: string | undefined
 ): string | undefined {
-  if (agentBackend === 'codex' && model && (/^claude/i.test(model) || model === DEFAULT_CODEX_MODEL_ID)) {
-    return undefined
-  }
-  if (agentBackend === 'hermes' && model === DEFAULT_HERMES_MODEL_ID) return undefined
+  // 'kimi-default' 表示交给 Kimi CLI 自己选模型，不下发显式 model。
+  if (!model || model === DEFAULT_KIMI_MODEL_ID) return undefined
   return model
 }
 
@@ -384,12 +378,7 @@ function displayModelForAgent(
   agentBackend: AgentBackendId | undefined,
   model: string | undefined
 ): string {
-  return modelForAgent(agentBackend, model) ??
-    (agentBackend === 'codex'
-      ? DEFAULT_CODEX_MODEL_ID
-      : agentBackend === 'hermes'
-        ? DEFAULT_HERMES_MODEL_ID
-        : DEFAULT_CLAUDE_MODEL_ID)
+  return modelForAgent(agentBackend, model) ?? DEFAULT_KIMI_MODEL_ID
 }
 
 function isUserStopDiagnostic(error: string | undefined): boolean {
@@ -856,8 +845,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const meta = get().meta
     if (!meta) return
     if (meta.model === model) return
-    if (meta.agentBackend === 'hermes') return
-    set({ meta: { ...meta, model }, sessionConfigDirty: true, sessionModelDirty: true })
+    // Kimi ACP 支持会话内实时切换模型（session/set_config_option），无需重启
+    // 会话；切换失败时后端只记录日志，本地状态保持新值即可。
+    set({ meta: { ...meta, model } })
+    await window.api.setModel(meta.sessionId, model).catch(() => {})
   },
 
   async setPermissionMode(mode) {
@@ -923,7 +914,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         sessionId: newId,
         ...(oldMeta?.agentBackend ? { agentBackend: oldMeta.agentBackend } : {}),
         cwd: path,
-        model: oldMeta?.model ?? DEFAULT_CLAUDE_MODEL_ID,
+        model: oldMeta?.model ?? DEFAULT_KIMI_MODEL_ID,
         permissionMode: oldMeta?.permissionMode ?? 'default',
         tools: []
       }

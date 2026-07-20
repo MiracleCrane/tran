@@ -231,7 +231,7 @@ export default function Transcript({
   const roots = useMemo(() => buildForest(items), [items])
   const scrollTuning = useMemo(
     () =>
-      agentBackend === 'codex' || agentBackend === 'hermes'
+      agentBackend === 'kimi'
         ? {
             increaseViewportBy: { top: 900, bottom: 1300 },
             overscan: { main: 900, reverse: 650 }
@@ -526,7 +526,7 @@ export default function Transcript({
               {running && (
                 <div className="flex items-center gap-2 text-xs text-zinc-500">
                   <span className="stream-cursor-glow" />
-                  Forge 正在处理…
+                  Tran 正在处理…
                 </div>
               )}
               {bottomReserve > 0 && <div aria-hidden="true" style={{ height: bottomReserve }} />}

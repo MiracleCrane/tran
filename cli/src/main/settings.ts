@@ -17,11 +17,9 @@ const SETTINGS_SCHEMA_VERSION = 1
 const EFFORT_LEVELS = new Set<EffortLevel>(['low', 'medium', 'high', 'xhigh', 'max'])
 const PERMISSION_MODES = new Set<PermissionMode>([
   'default',
-  'acceptEdits',
-  'bypassPermissions',
   'plan',
-  'dontAsk',
-  'auto'
+  'auto',
+  'yolo'
 ])
 const CLAUDE_BACKENDS = new Set<ClaudeExecutionBackend>(['windows', 'wsl'])
 const TRANSLATE_ENGINES = new Set<TranslateEngine>(['llm', 'baidu'])
@@ -85,7 +83,7 @@ let cache: PersistedSettings | null = null
 let cacheMtimeMs: number | null = null
 
 function settingsPath(): string {
-  return join(app.getPath('userData'), 'forge-settings.json')
+  return join(app.getPath('userData'), 'tran-settings.json')
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -122,7 +120,7 @@ function normalizeProvider(value: unknown): Provider | null {
     baseUrl: optionalString(provider.baseUrl) ?? 'https://api.anthropic.com',
     token: optionalString(provider.token) ?? '',
     authType,
-    model: optionalString(provider.model) ?? 'claude-opus-4-8'
+    model: optionalString(provider.model) ?? 'kimi-default'
   }
 }
 

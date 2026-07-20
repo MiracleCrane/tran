@@ -52,7 +52,7 @@ export default function McpPanel(): JSX.Element {
   const [confirmDelete, setConfirmDelete] = useState<McpServerEntry | null>(null)
   const [viewing, setViewing] = useState<McpServerEntry | null>(null)
   const [copied, setCopied] = useState(false)
-  const mcpAddCommand = meta?.agentBackend === 'hermes' ? 'hermes mcp add' : 'claude mcp add'
+  const mcpAddCommand = 'kimi mcp add'
 
   const fetchServers = useCallback(async (): Promise<void> => {
     if (!meta) return
@@ -73,18 +73,8 @@ export default function McpPanel(): JSX.Element {
     setLoading(true)
     setError(null)
     try {
-      const backend = meta.agentBackend ?? 'claude-code'
-      if (backend === 'claude-code') {
-        await restartSession()
-        const nextMeta = useSessionStore.getState().meta
-        if (nextMeta) {
-          const list = await window.api.listMcpServers(nextMeta.sessionId)
-          setServers(list)
-        }
-      } else {
-        const list = await window.api.refreshMcpServers(meta.sessionId)
-        setServers(list)
-      }
+      const list = await window.api.refreshMcpServers(meta.sessionId)
+      setServers(list)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

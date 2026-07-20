@@ -1,36 +1,33 @@
-import { readFileSync } from 'node:fs'
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
+import { readFileSync, writeFileSync } from 'node:fs'
 import type {
   ComposerModel,
   MarketplacePlugin,
   McpServerEntry,
   PermissionRequestPayload,
   PermissionResponsePayload,
+  SDKMessage,
   SkillInfo,
   StartSessionOptions
 } from '../../shared/ipc'
 import {
-  DEFAULT_HERMES_MODEL_ID,
-  DEFAULT_HERMES_MODELS
+  DEFAULT_KIMI_MODEL_ID,
+  DEFAULT_KIMI_MODELS
 } from '../../shared/models'
-import type { AgentBackendHandlers } from './ClaudeCodeBackend'
+import type { AgentBackendHandlers } from './AgentBridge'
 import {
-  HermesAcpClient,
-  type HermesRpcId,
-  type HermesRpcMessage
-} from './HermesAcpClient'
+  AcpClient,
+  AcpRequestError,
+  type AcpRpcId,
+  type AcpRpcMessage
+} from './AcpClient'
+import { resolveWindowsKimiCommand } from '../windowsKimi'
 import { log } from '../logger'
-import {
-  listHermesMcpServers,
-  readHermesDefaultModel,
-  setHermesMcpServerEnabled
-} from '../hermesConfig'
 
 interface QueuedMessage {
   content: string | unknown[]
 }
 
-interface ActiveHermesSession {
+interface ActiveKimiSession {
   id: string
   cwd: string
   model?: string
@@ -51,8 +48,8 @@ interface ActiveHermesSession {
 }
 
 interface PendingPermission {
-  client: HermesAcpClient
-  requestId: HermesRpcId
+  client: AcpClient
+  requestId: AcpRpcId
   options: Array<Record<string, unknown>>
 }
 
@@ -66,23 +63,36 @@ interface PromptPayload {
   prompt: Array<Record<string, unknown>>
 }
 
-export class HermesBackend {
-  readonly id = 'hermes' as const
-  private sessions = new Map<string, ActiveHermesSession>()
+const KIMI_AUTH_HINT = 'Kimi CLI 未登录或登录已过期：请在终端运行 kimi login 完成登录，然后重启 Tran。'
+
+/** Map ACP/JSON-RPC failures to user-facing text. authRequired (-32000) means
+ *  the Kimi CLI has no usable token — the fix is a terminal `kimi login`. */
+function userFacingError(error: unknown): string {
+  if (error instanceof AcpRequestError && error.code === -32000) return KIMI_AUTH_HINT
+  const message = error instanceof Error ? error.message : String(error)
+  return /auth(entication)? (is )?required/i.test(message) ? KIMI_AUTH_HINT : message
+}
+
+export class KimiBackend {
+  readonly id = 'kimi' as const
+  private sessions = new Map<string, ActiveKimiSession>()
   private acpToSession = new Map<string, string>()
   private pendingPermissions = new Map<string, PendingPermission>()
-  private clientPromise: Promise<HermesAcpClient> | null = null
-  private client: HermesAcpClient | null = null
+  private clientPromise: Promise<AcpClient> | null = null
+  private client: AcpClient | null = null
+  /** Model choices discovered from session/new configOptions (ACP-side source
+   *  of truth), merged over DEFAULT_KIMI_MODELS in listModels(). */
+  private discoveredModels: ComposerModel[] = []
 
   constructor(private h: AgentBackendHandlers) {}
 
   async start(opts: StartSessionOptions): Promise<string> {
-    if (process.platform !== 'win32') throw new Error('Hermes backend currently supports Windows only.')
+    if (process.platform !== 'win32') throw new Error('Kimi backend currently supports Windows only.')
     const sessionId = opts.bridgeSessionId ?? cryptoId()
-    const session: ActiveHermesSession = {
+    const session: ActiveKimiSession = {
       id: sessionId,
       cwd: opts.cwd,
-      model: hermesModel(opts.model),
+      model: kimiModel(opts.model),
       permissionMode: opts.permissionMode,
       queue: [],
       running: false,
@@ -98,8 +108,8 @@ export class HermesBackend {
     this.sessions.set(sessionId, session)
     session.ready.catch((error) => {
       if (!this.sessions.has(sessionId)) return
-      const message = error instanceof Error ? error.message : String(error)
-      log('hermes', `prepare failed session=${sessionId}: ${message}`)
+      const message = userFacingError(error)
+      log('kimi', `prepare failed session=${sessionId}: ${message}`)
       this.h.onEnded(sessionId, message)
       this.sessions.delete(sessionId)
     })
@@ -122,10 +132,17 @@ export class HermesBackend {
   async setModel(sessionId: string, model: string): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session) return
-    // Hermes owns model/provider selection through config.yaml and `hermes model`.
-    // Its ACP set-model route is unstable in 0.16.x and can surface as a server
-    // "Internal error", so keep Forge's local state only.
-    session.model = hermesModel(model)
+    session.model = kimiModel(model)
+    // 'kimi-default' 表示交给 CLI 自己选模型，不下发 ACP 切换。
+    if (!session.model || !session.acpSessionId) return
+    const client = await this.ensureClient()
+    await client.request('session/set_config_option', {
+      sessionId: session.acpSessionId,
+      configId: 'model',
+      value: session.model
+    }).catch((error) => {
+      log('kimi', `set model failed: ${userFacingError(error)}`)
+    })
   }
 
   async setPermissionMode(sessionId: string, mode: string): Promise<void> {
@@ -134,11 +151,12 @@ export class HermesBackend {
     session.permissionMode = mode
     if (!session.acpSessionId) return
     const client = await this.ensureClient()
-    await client.request('session/set_mode', {
+    await client.request('session/set_config_option', {
       sessionId: session.acpSessionId,
-      modeId: hermesMode(mode)
+      configId: 'mode',
+      value: kimiMode(mode)
     }).catch((error) => {
-      log('hermes', `set mode failed: ${error instanceof Error ? error.message : String(error)}`)
+      log('kimi', `set mode failed: ${userFacingError(error)}`)
     })
   }
 
@@ -148,25 +166,26 @@ export class HermesBackend {
     session.closed = true
     if (session.acpSessionId) {
       this.acpToSession.delete(session.acpSessionId)
-      const client = this.client
-      client?.notify('session/cancel', { sessionId: session.acpSessionId })
-      await client?.request('session/close', { sessionId: session.acpSessionId }, 5000).catch(() => {})
+      // Kimi ACP 未实现 session/close —— 只取消当前 turn 并丢弃本地映射。
+      this.client?.notify('session/cancel', { sessionId: session.acpSessionId })
     }
     this.sessions.delete(sessionId)
   }
 
+  // TODO(kimi-mcp): 接入 Kimi 的 MCP 配置（session/new 的 mcpServers 转发已获
+  // ACP 支持）；目前 UI 的 MCP 面板入口已隐藏，这里先返回空列表。
   async listMcpServers(sessionId: string): Promise<McpServerEntry[]> {
     const session = this.requireSession(sessionId)
     await session.ready
-    return listHermesMcpServers()
+    return []
   }
 
   async refreshMcpServers(sessionId: string): Promise<McpServerEntry[]> {
     return this.listMcpServers(sessionId)
   }
 
-  async toggleMcpServer(_sessionId: string, name: string, enabled: boolean): Promise<void> {
-    setHermesMcpServerEnabled(name, enabled)
+  async toggleMcpServer(_sessionId: string, _name: string, _enabled: boolean): Promise<void> {
+    // see listMcpServers TODO
   }
 
   async backgroundTask(_sessionId: string, _toolUseId?: string): Promise<boolean> {
@@ -180,13 +199,7 @@ export class HermesBackend {
   }
 
   async listModels(): Promise<ComposerModel[]> {
-    return mergeComposerModels(
-      [{ id: DEFAULT_HERMES_MODEL_ID, label: 'Hermes default' }],
-      readHermesDefaultModel()
-        ? [{ id: readHermesDefaultModel()!, label: readHermesDefaultModel()! }]
-        : [],
-      DEFAULT_HERMES_MODELS
-    )
+    return mergeComposerModels(DEFAULT_KIMI_MODELS, this.discoveredModels)
   }
 
   async listMarketplacePlugins(): Promise<MarketplacePlugin[]> {
@@ -206,23 +219,26 @@ export class HermesBackend {
           : { outcome: { outcome: 'cancelled' } }
       )
     } catch (error) {
-      log('hermes', `permission response failed: ${error instanceof Error ? error.message : String(error)}`)
+      log('kimi', `permission response failed: ${error instanceof Error ? error.message : String(error)}`)
     }
     return true
   }
 
   private async prepareSession(
-    session: ActiveHermesSession,
+    session: ActiveKimiSession,
     opts: StartSessionOptions
   ): Promise<void> {
     const client = await this.ensureClient()
     let response: Record<string, unknown> | null = null
     if (opts.resume) {
+      // session/load 恢复会话并回放历史；回放产生的 session/update 通知在
+      // replaying 窗口内被吞掉（UI 的历史预览走 getSessionMessages，ACP 侧
+      // 暂无逐条消息读取 —— 见 main/kimiHistory.ts 的 TODO）。
       session.replaying = true
       session.acpSessionId = opts.resume
       this.acpToSession.set(opts.resume, session.id)
       try {
-        response = await client.request<Record<string, unknown>>('session/resume', {
+        response = await client.request<Record<string, unknown>>('session/load', {
           cwd: session.cwd,
           sessionId: opts.resume,
           mcpServers: []
@@ -236,13 +252,14 @@ export class HermesBackend {
         mcpServers: []
       }, 120000)
       const acpSessionId = asString(response?.sessionId)
-      if (!acpSessionId) throw new Error('Hermes ACP did not return a session id.')
+      if (!acpSessionId) throw new Error('Kimi ACP did not return a session id.')
       session.acpSessionId = acpSessionId
       this.acpToSession.set(acpSessionId, session.id)
     }
 
-    const model = asString(asRecord(response?.models)?.currentModelId) ?? session.model ?? readHermesDefaultModel() ?? DEFAULT_HERMES_MODEL_ID
-    session.model = hermesModel(model) ?? undefined
+    this.rememberConfigOptions(response?.configOptions)
+    const model = currentConfigValue(response?.configOptions, 'model') ?? session.model ?? DEFAULT_KIMI_MODEL_ID
+    session.model = kimiModel(model) ?? undefined
     if (session.permissionMode) {
       await this.setPermissionMode(session.id, session.permissionMode)
     }
@@ -250,7 +267,12 @@ export class HermesBackend {
     void this.drain(session)
   }
 
-  private async drain(session: ActiveHermesSession): Promise<void> {
+  private rememberConfigOptions(value: unknown): void {
+    const models = modelOptionsFromConfig(value)
+    if (models.length) this.discoveredModels = models
+  }
+
+  private async drain(session: ActiveKimiSession): Promise<void> {
     if (session.running || session.closed) return
     const next = session.queue.shift()
     if (!next) return
@@ -262,7 +284,7 @@ export class HermesBackend {
     } catch (error) {
       this.emitResult(session, {
         subtype: 'error',
-        error: error instanceof Error ? error.message : String(error)
+        error: userFacingError(error)
       })
     } finally {
       session.running = false
@@ -274,8 +296,8 @@ export class HermesBackend {
     }
   }
 
-  private async runTurn(session: ActiveHermesSession, message: QueuedMessage): Promise<void> {
-    if (!session.acpSessionId) throw new Error('Hermes session is not ready.')
+  private async runTurn(session: ActiveKimiSession, message: QueuedMessage): Promise<void> {
+    if (!session.acpSessionId) throw new Error('Kimi session is not ready.')
     const client = await this.ensureClient()
     const payload = contentToPrompt(message.content)
     const response = await client.request<Record<string, unknown>>('session/prompt', {
@@ -290,17 +312,29 @@ export class HermesBackend {
     const usage = asRecord(response.usage)
     this.emitResult(session, {
       subtype: response.stopReason === 'refusal' ? 'error' : 'success',
-      error: response.stopReason === 'refusal' ? 'Hermes refused the prompt.' : undefined,
+      error: response.stopReason === 'refusal' ? 'Kimi refused the prompt.' : undefined,
       inputTokens: asNumber(usage?.inputTokens),
       outputTokens: asNumber(usage?.outputTokens),
       totalTokens: asNumber(usage?.totalTokens)
     })
   }
 
-  private async ensureClient(): Promise<HermesAcpClient> {
+  private async ensureClient(): Promise<AcpClient> {
     if (this.client) return this.client
     if (!this.clientPromise) {
-      this.clientPromise = HermesAcpClient.start({
+      const resolved = resolveWindowsKimiCommand()
+      this.clientPromise = AcpClient.start({
+        command: resolved.command,
+        argsPrefix: resolved.argsPrefix,
+        args: ['acp'],
+        displayPath: resolved.displayPath,
+        logTag: 'kimi',
+        clientInfo: { name: 'tran', title: 'Tran', version: '1.0.0' },
+        clientCapabilities: {
+          fs: { readTextFile: true, writeTextFile: true },
+          terminal: false
+        }
+      }, {
         onNotification: (msg) => this.handleNotification(msg),
         onServerRequest: (msg) => this.handleServerRequest(msg),
         onClose: (error) => this.handleClientClose(error)
@@ -315,7 +349,7 @@ export class HermesBackend {
     return this.clientPromise
   }
 
-  private handleNotification(msg: HermesRpcMessage): void {
+  private handleNotification(msg: AcpRpcMessage): void {
     if (msg.method !== 'session/update') return
     const params = asRecord(msg.params)
     const acpSessionId = asString(params?.sessionId)
@@ -326,7 +360,7 @@ export class HermesBackend {
     this.handleSessionUpdate(session, update)
   }
 
-  private handleSessionUpdate(session: ActiveHermesSession, update: Record<string, unknown>): void {
+  private handleSessionUpdate(session: ActiveKimiSession, update: Record<string, unknown>): void {
     const type = asString(update.sessionUpdate)
     if (type === 'agent_message_chunk') {
       const text = textFromContentBlock(update.content)
@@ -369,9 +403,10 @@ export class HermesBackend {
         totalTokens: asNumber(usage?.totalTokens)
       }
     }
+    // TODO: 'plan' / 'config_option_update' 暂不映射到 UI。
   }
 
-  private handleServerRequest(msg: HermesRpcMessage): void {
+  private handleServerRequest(msg: AcpRpcMessage): void {
     const method = msg.method ?? ''
     const params = asRecord(msg.params) ?? {}
     if (msg.id === undefined) return
@@ -394,16 +429,30 @@ export class HermesBackend {
       }
       return
     }
-    client.respondError(msg.id, `Forge does not handle Hermes ACP request: ${method}`, -32601)
+    if (method === 'fs/write_text_file') {
+      const path = asString(params.path)
+      if (!path) {
+        client.respondError(msg.id, 'path is required')
+        return
+      }
+      try {
+        writeFileSync(path, asString(params.content) ?? '', 'utf8')
+        client.respond(msg.id, {})
+      } catch (error) {
+        client.respondError(msg.id, error instanceof Error ? error.message : String(error))
+      }
+      return
+    }
+    client.respondError(msg.id, `Tran does not handle Kimi ACP request: ${method}`, -32601)
   }
 
   private handlePermissionRequest(
-    client: HermesAcpClient,
-    requestId: HermesRpcId,
+    client: AcpClient,
+    requestId: AcpRpcId,
     params: Record<string, unknown>
   ): void {
     const toolCall = asRecord(params.toolCall) ?? {}
-    const toolUseID = `hermes-${String(requestId)}`
+    const toolUseID = `kimi-${String(requestId)}`
     const options = Array.isArray(params.options)
       ? params.options.filter((option): option is Record<string, unknown> => !!asRecord(option))
       : []
@@ -427,22 +476,22 @@ export class HermesBackend {
     this.pendingPermissions.clear()
   }
 
-  private emitInit(session: ActiveHermesSession, sdkSessionId: string, model: string): void {
+  private emitInit(session: ActiveKimiSession, acpSessionId: string, model: string): void {
     this.h.onMessage(session.id, {
       type: 'system',
       subtype: 'init',
-      session_id: sdkSessionId,
+      session_id: acpSessionId,
       cwd: session.cwd,
       model,
       permissionMode: session.permissionMode ?? 'default',
-      tools: ['terminal', 'read_file', 'write_file', 'patch', 'search_files', 'mcp']
+      tools: ['shell', 'read_file', 'write_file', 'patch', 'search', 'mcp']
     } as unknown as SDKMessage)
   }
 
-  private emitAssistantDelta(session: ActiveHermesSession, messageId: string | undefined, delta: string): void {
+  private emitAssistantDelta(session: ActiveKimiSession, messageId: string | undefined, delta: string): void {
     if (!session.streamStarted) {
       session.streamStarted = true
-      session.currentMessageId = messageId ?? `hermes-message-${cryptoId()}`
+      session.currentMessageId = messageId ?? `kimi-message-${cryptoId()}`
       this.emitStreamEvent(session, { type: 'message_start', message: { id: session.currentMessageId } })
       this.emitStreamEvent(session, {
         type: 'content_block_start',
@@ -458,8 +507,8 @@ export class HermesBackend {
     })
   }
 
-  private emitThinking(session: ActiveHermesSession, text: string): void {
-    const id = `hermes-thinking-${cryptoId()}`
+  private emitThinking(session: ActiveKimiSession, text: string): void {
+    const id = `kimi-thinking-${cryptoId()}`
     this.h.onMessage(session.id, {
       type: 'assistant',
       uuid: id,
@@ -471,23 +520,23 @@ export class HermesBackend {
     } as unknown as SDKMessage)
   }
 
-  private emitContentBlockStop(session: ActiveHermesSession): void {
+  private emitContentBlockStop(session: ActiveKimiSession): void {
     this.emitStreamEvent(session, { type: 'content_block_stop', index: 0 })
   }
 
-  private emitStreamEvent(session: ActiveHermesSession, event: Record<string, unknown>): void {
+  private emitStreamEvent(session: ActiveKimiSession, event: Record<string, unknown>): void {
     this.h.onMessage(session.id, {
       type: 'stream_event',
-      uuid: `hermes-stream-${session.currentMessageId ?? cryptoId()}`,
+      uuid: `kimi-stream-${session.currentMessageId ?? cryptoId()}`,
       parent_tool_use_id: null,
       event
     } as unknown as SDKMessage)
   }
 
-  private emitAssistant(session: ActiveHermesSession, itemId: string, text: string): void {
+  private emitAssistant(session: ActiveKimiSession, itemId: string, text: string): void {
     this.h.onMessage(session.id, {
       type: 'assistant',
-      uuid: `hermes-assistant-${itemId}`,
+      uuid: `kimi-assistant-${itemId}`,
       parent_tool_use_id: null,
       message: {
         id: itemId,
@@ -497,31 +546,31 @@ export class HermesBackend {
   }
 
   private emitToolUse(
-    session: ActiveHermesSession,
+    session: ActiveKimiSession,
     toolUseId: string,
     name: string,
     input: Record<string, unknown>
   ): void {
     this.h.onMessage(session.id, {
       type: 'assistant',
-      uuid: `hermes-tool-${toolUseId}`,
+      uuid: `kimi-tool-${toolUseId}`,
       parent_tool_use_id: null,
       message: {
-        id: `hermes-tool-message-${toolUseId}`,
+        id: `kimi-tool-message-${toolUseId}`,
         content: [{ type: 'tool_use', id: toolUseId, name, input }]
       }
     } as unknown as SDKMessage)
   }
 
   private emitToolResult(
-    session: ActiveHermesSession,
+    session: ActiveKimiSession,
     toolUseId: string,
     content: string,
     isError: boolean
   ): void {
     this.h.onMessage(session.id, {
       type: 'user',
-      uuid: `hermes-tool-result-${toolUseId}`,
+      uuid: `kimi-tool-result-${toolUseId}`,
       parent_tool_use_id: null,
       message: {
         content: [{ type: 'tool_result', tool_use_id: toolUseId, content, is_error: isError }]
@@ -530,7 +579,7 @@ export class HermesBackend {
   }
 
   private emitResult(
-    session: ActiveHermesSession,
+    session: ActiveKimiSession,
     result: {
       subtype: 'success' | 'error'
       error?: string
@@ -557,13 +606,13 @@ export class HermesBackend {
     } as unknown as SDKMessage)
   }
 
-  private sessionForAcp(acpSessionId: string | undefined): ActiveHermesSession | null {
+  private sessionForAcp(acpSessionId: string | undefined): ActiveKimiSession | null {
     if (!acpSessionId) return null
     const sessionId = this.acpToSession.get(acpSessionId)
     return sessionId ? (this.sessions.get(sessionId) ?? null) : null
   }
 
-  private requireSession(sessionId: string): ActiveHermesSession {
+  private requireSession(sessionId: string): ActiveKimiSession {
     const session = this.sessions.get(sessionId)
     if (!session) throw new Error(`session not found: ${sessionId}`)
     return session
@@ -597,14 +646,15 @@ function contentToPrompt(content: string | unknown[]): PromptPayload {
   return { prompt }
 }
 
-function hermesMode(mode: string | undefined): string {
-  if (mode === 'acceptEdits') return 'accept_edits'
-  if (mode === 'bypassPermissions' || mode === 'dontAsk') return 'dont_ask'
+/** Kimi 的真实模式（session/new configOptions.mode 实测）：default / plan /
+ *  auto / yolo。原样直通，未知值回落 default。 */
+function kimiMode(mode: string | undefined): string {
+  if (mode === 'plan' || mode === 'auto' || mode === 'yolo') return mode
   return 'default'
 }
 
-function hermesModel(model: string | undefined): string | undefined {
-  if (!model || model === DEFAULT_HERMES_MODEL_ID) return undefined
+function kimiModel(model: string | undefined): string | undefined {
+  if (!model || model === DEFAULT_KIMI_MODEL_ID) return undefined
   return model
 }
 
@@ -707,6 +757,43 @@ function mergeComposerModels(...groups: ComposerModel[][]): ComposerModel[] {
   return merged
 }
 
+/** Flatten the `model` select out of a session/new|load configOptions array.
+ *  Tolerates both flat { value, name } options and one level of grouped
+ *  { name, options: [...] } nesting. */
+function modelOptionsFromConfig(value: unknown): ComposerModel[] {
+  if (!Array.isArray(value)) return []
+  for (const entry of value) {
+    const option = asRecord(entry)
+    if (!option || asString(option.id) !== 'model') continue
+    const rawOptions = Array.isArray(option.options) ? option.options : []
+    const models: ComposerModel[] = []
+    const push = (item: unknown): void => {
+      const record = asRecord(item)
+      if (!record) return
+      const id = asString(record.value) ?? asString(record.id)
+      if (!id) return
+      models.push({ id, label: asString(record.name) ?? asString(record.label) ?? id })
+    }
+    for (const item of rawOptions) {
+      const nested = asRecord(item)?.options
+      if (Array.isArray(nested)) nested.forEach(push)
+      else push(item)
+    }
+    if (models.length) return models
+  }
+  return []
+}
+
+function currentConfigValue(configOptions: unknown, configId: string): string | undefined {
+  if (!Array.isArray(configOptions)) return undefined
+  for (const entry of configOptions) {
+    const option = asRecord(entry)
+    if (!option || asString(option.id) !== configId) continue
+    return asString(option.currentValue) ?? asString(option.value)
+  }
+  return undefined
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null
 }
@@ -722,5 +809,5 @@ function asNumber(value: unknown): number | undefined {
 function cryptoId(): string {
   const g = globalThis as { crypto?: { randomUUID?: () => string } }
   if (g.crypto?.randomUUID) return g.crypto.randomUUID()
-  return 'hermes-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+  return 'kimi-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
 }

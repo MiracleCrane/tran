@@ -24,7 +24,7 @@ export function isVulkanBackendActive(): boolean {
 }
 
 function settingsPath(): string {
-  return join(app.getPath('userData'), 'forge-settings.json')
+  return join(app.getPath('userData'), 'tran-settings.json')
 }
 
 function statePath(): string {

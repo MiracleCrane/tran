@@ -13,9 +13,15 @@ import {
 } from '../../shared/agentBackends'
 import { getPreferences } from '../preferences'
 import { log } from '../logger'
-import { ClaudeCodeBackend, type AgentBackendHandlers } from './ClaudeCodeBackend'
-import { CodexBackend } from './CodexBackend'
-import { HermesBackend } from './HermesBackend'
+import { KimiBackend } from './KimiBackend'
+import type { PermissionRequestPayload, SDKMessage } from '../../shared/ipc'
+
+/** Events every backend adapter emits toward the IPC layer. */
+export interface AgentBackendHandlers {
+  onMessage: (sessionId: string, message: SDKMessage) => void
+  onEnded: (sessionId: string, error?: string) => void
+  onPermissionRequest: (req: PermissionRequestPayload) => void
+}
 
 interface AgentBackendAdapter {
   readonly id: AgentBackendId
@@ -55,9 +61,8 @@ export class AgentBridge {
       }
     }
     this.backends = {
-      'claude-code': new ClaudeCodeBackend(wrappedHandlers),
-      codex: new CodexBackend(wrappedHandlers),
-      hermes: new HermesBackend(wrappedHandlers)
+      // 目前只实例化 Kimi 一个后端；新增后端时在此挂接新的 adapter。
+      kimi: new KimiBackend(wrappedHandlers)
     }
   }
 

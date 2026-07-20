@@ -1,29 +1,21 @@
 {
-  "name": "claude-forge",
-  "version": "1.0.5",
+  "name": "tran",
+  "version": "1.0.0",
   "private": true,
-  "description": "Forge workspace containing the CLI client and the future self-developed agent.",
+  "description": "Tran workspace containing the Windows desktop client.",
   "workspaces": [
-    "cli",
-    "cli-mac",
-    "agent"
+    "cli"
   ],
   "scripts": {
-    "dev": "npm --workspace @claude-forge/cli run dev",
-    "build": "npm --workspace @claude-forge/cli run build",
-    "preview": "npm --workspace @claude-forge/cli run preview",
-    "build:win": "npm --workspace @claude-forge/cli run build:win",
-    "build:mac": "npm --workspace @claude-forge/cli-mac run build:mac",
-    "typecheck": "npm --workspace @claude-forge/cli run typecheck",
-    "cli:dev": "npm --workspace @claude-forge/cli run dev",
-    "cli:build": "npm --workspace @claude-forge/cli run build",
-    "cli:build:win": "npm --workspace @claude-forge/cli run build:win",
-    "cli:typecheck": "npm --workspace @claude-forge/cli run typecheck",
-    "cli-mac:dev": "npm --workspace @claude-forge/cli-mac run dev",
-    "cli-mac:build": "npm --workspace @claude-forge/cli-mac run build",
-    "cli-mac:build:mac": "npm --workspace @claude-forge/cli-mac run build:mac",
-    "cli-mac:typecheck": "npm --workspace @claude-forge/cli-mac run typecheck",
-    "agent:typecheck": "npm --workspace @claude-forge/agent run typecheck"
+    "dev": "npm --workspace @tran/cli run dev",
+    "build": "npm --workspace @tran/cli run build",
+    "preview": "npm --workspace @tran/cli run preview",
+    "build:win": "npm --workspace @tran/cli run build:win",
+    "typecheck": "npm --workspace @tran/cli run typecheck",
+    "cli:dev": "npm --workspace @tran/cli run dev",
+    "cli:build": "npm --workspace @tran/cli run build",
+    "cli:build:win": "npm --workspace @tran/cli run build:win",
+    "cli:typecheck": "npm --workspace @tran/cli run typecheck"
   },
   "overrides": {
     "@noble/hashes": "1.8.0"

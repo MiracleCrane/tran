@@ -73,7 +73,7 @@ export default function UpdateAvailableDialog({
       >
         <div className="mb-2 flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-full bg-accent" />
-          <h2 className="text-base font-semibold text-zinc-100">发现 Forge 更新</h2>
+          <h2 className="text-base font-semibold text-zinc-100">发现 Tran 更新</h2>
         </div>
         <p className="text-sm leading-relaxed text-zinc-400">
           当前版本 {info.currentVersion}，最新版本 {info.latestVersion ?? '未知'}。

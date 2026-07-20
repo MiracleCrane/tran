@@ -8,15 +8,13 @@ function fmt(n?: number): string {
   return String(n)
 }
 
-/** Permission-mode values come back from the SDK as raw enum strings; map the
- *  known ones to Chinese for readability, fall back to the raw value. */
+/** Kimi 的权限模式值原样透传（见 shared/ipc.ts PermissionMode），映射到
+ *  中文标签便于阅读；未知值回退原始字符串。 */
 const PERMISSION_MODE_LABEL: Record<string, string> = {
   default: '默认',
-  acceptEdits: '自动接受编辑',
-  bypassPermissions: '跳过权限',
   plan: '计划模式',
-  dontAsk: '不询问',
-  auto: '自动'
+  auto: '自动',
+  yolo: 'YOLO'
 }
 
 export default function StatusBar(): JSX.Element {

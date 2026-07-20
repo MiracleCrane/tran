@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, PermissionMode, Provider, SkillInfo } from '../../shared/ipc'
+import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, PermissionMode, SkillInfo } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
 import { defaultModelsForAgent, modelLabelForAgent } from '../../shared/models'
 import { onForgeEvent } from '../events'
@@ -24,10 +24,9 @@ const EFFORTS: { id: EffortLevel; label: string }[] = [
 
 const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string }[] = [
   { value: 'default', label: '默认' },
-  { value: 'acceptEdits', label: '自动接受编辑' },
   { value: 'plan', label: '计划模式' },
-  { value: 'bypassPermissions', label: '跳过权限' },
-  { value: 'auto', label: '自动' }
+  { value: 'auto', label: '自动' },
+  { value: 'yolo', label: 'YOLO(慎用)' }
 ]
 
 type PromptTemplate = { command: string; label: string; text: string }
@@ -109,13 +108,6 @@ function getSlashContext(value: string, caret: number): SlashContext | null {
   }
 }
 
-function providerModels(providers: Provider[]): ComposerModel[] {
-  return providers
-    .map((provider) => provider.model.trim())
-    .filter(Boolean)
-    .map((id) => ({ id, label: modelLabelForAgent(undefined, id) }))
-}
-
 function mergeModels(agentBackend: AgentBackendId | undefined, ...groups: ComposerModel[][]): ComposerModel[] {
   const seen = new Set<string>()
   const merged: ComposerModel[] = []
@@ -167,7 +159,6 @@ export default function Composer(): JSX.Element {
   const [dragActive, setDragActive] = useState(false)
   const [dropError, setDropError] = useState<string | null>(null)
   const textareaHeight = manualTextareaHeight ?? autoTextareaHeight
-  const isHermesAgent = meta?.agentBackend === 'hermes'
 
   useEffect(() => {
     heightBoundsRef.current = heightBounds
@@ -218,36 +209,27 @@ export default function Composer(): JSX.Element {
     setAutoTextareaHeight((height) => (height === measured ? height : measured))
   }, [heightBounds, manualTextareaHeight, text])
 
-  // Model options follow the current backend: preferences are stored per
-  // Windows/WSL backend, and providers are already backend-aware.
+  // Model options follow the current backend: 用户自定义列表优先，其次后端
+  // (ACP configOptions) 上报的模型，最后兜底内置列表。
   useEffect(() => {
     let alive = true
 
     const refreshModels = async (): Promise<void> => {
       const prefs = await window.api.getPreferences()
-      const usesClaudeProviders = (prefs.agentBackend ?? 'claude-code') === 'claude-code'
-      const [providers, agentModels] = await Promise.all([
-        usesClaudeProviders ? window.api.listProviders() : Promise.resolve([] as Provider[]),
-        window.api.listAgentModels().catch(() => defaultModelsForAgent(prefs.agentBackend))
-      ])
+      const agentModels = await window.api
+        .listAgentModels()
+        .catch(() => defaultModelsForAgent(prefs.agentBackend))
       if (!alive) return
       const defaultModels = defaultModelsForAgent(prefs.agentBackend)
-      const configured =
-        !usesClaudeProviders
-          ? agentModels.length
-            ? agentModels
-            : prefs.composerModels?.length
-              ? prefs.composerModels
-              : defaultModels
-          : prefs.composerModels?.length
-            ? prefs.composerModels
-            : agentModels.length
-              ? agentModels
-              : defaultModels
+      const configured = prefs.composerModels?.length
+        ? prefs.composerModels
+        : agentModels.length
+          ? agentModels
+          : defaultModels
       const selected = meta?.model
         ? [{ id: meta.model, label: modelLabelForAgent(prefs.agentBackend, meta.model) }]
         : []
-      setModels(mergeModels(prefs.agentBackend, configured, providerModels(providers), selected))
+      setModels(mergeModels(prefs.agentBackend, configured, selected))
     }
 
     void refreshModels()
@@ -704,8 +686,8 @@ export default function Composer(): JSX.Element {
             rows={1}
             placeholder={
               running
-                ? 'Forge 正在处理…(可继续发送,消息会排队)'
-                : '给 Forge 发消息…'
+                ? 'Tran 正在处理…(可继续发送,消息会排队)'
+                : '给 Tran 发消息…'
             }
             style={{
               height: textareaHeight,
@@ -806,8 +788,6 @@ export default function Composer(): JSX.Element {
                   options={models.map((m) => ({ value: m.id, label: m.label }))}
                   onChange={(v) => void setModel(v)}
                   placement="top"
-                  disabled={isHermesAgent}
-                  title={isHermesAgent ? 'Hermes 模型由 hermes model 或 config.yaml 管理' : undefined}
                   className="min-w-36"
                 />
               )}

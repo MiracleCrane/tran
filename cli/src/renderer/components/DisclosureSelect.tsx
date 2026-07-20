@@ -6,7 +6,7 @@ export interface DisclosureOption {
   label: string
 }
 
-const DISCLOSURE_CLOSE_ELEVATION_MS = 560
+const DISCLOSURE_CLOSE_ELEVATION_MS = 180
 
 /** A selector whose OWN frame enlarges in place — the trigger and the option
  *  list live in one glass-panel-soft frame; opening it grows that same frame
@@ -85,11 +85,11 @@ export default function DisclosureSelect({
                 setOpen(false)
               }}
               style={{
-                transitionDelay: open ? `${i * 40}ms` : '0ms',
+                transitionDelay: open ? `${i * 10}ms` : '0ms',
                 opacity: open ? 1 : 0,
                 transform: open ? 'translateY(0)' : 'translateY(-6px)'
               }}
-              className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs transition-all duration-[360ms] ease-spring ${
+              className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs transition-all duration-[150ms] ease-out ${
                 active ? 'glass-active text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-200'
               }`}
             >
@@ -130,7 +130,7 @@ export default function DisclosureSelect({
             height="13"
             viewBox="0 0 24 24"
             fill="none"
-            className={`shrink-0 text-zinc-500 transition-transform duration-[360ms] ease-spring ${open ? 'rotate-180' : ''}`}
+            className={`shrink-0 text-zinc-500 transition-transform duration-[150ms] ease-out ${open ? 'rotate-180' : ''}`}
           >
             <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>

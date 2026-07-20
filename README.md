@@ -1,67 +1,29 @@
-# Claude Forge
+# Tran
 
-This repository is split into three subprojects:
+Tran 是一个 Windows 桌面客户端：给本机的 CLI AI agent 套上图形界面。
+当前内置 **Kimi Code CLI** 后端（通过 ACP / `kimi acp` 接入）；主进程的
+`AgentBridge` 保留了可插拔的后端适配层，未来可以在不动 UI/IPC 的情况下扩展更多后端。
 
-- `cli/`: the existing Forge Windows desktop client and all work completed so far.
-- `cli-mac/`: the Forge macOS desktop client (Claude Code backend; Apple Silicon & Intel).
-- `agent/`: reserved for the future self-developed Forge agent.
+## 技术栈
 
-## Platform support
+- Electron + electron-vite
+- React 18 + Tailwind + zustand（渲染进程）
+- 主进程：`cli/src/main`（agent 后端桥接在 `cli/src/main/agent`）
+- 共享类型：`cli/src/shared`
 
-| Platform | Workspace | Build target | Notes |
-|----------|-----------|--------------|-------|
-| Windows  | `cli`     | NSIS `.exe`  | Claude Code (native + WSL), Codex, Hermes |
-| macOS    | `cli-mac` | `.dmg`       | Claude Code (native). Codex/Hermes/WSL are not available on macOS |
+## 前置条件
 
-The macOS build resolves the `claude` binary itself (scanning PATH plus
-`/opt/homebrew/bin`, `/usr/local/bin`, `~/.claude/local`, …) because a
-GUI-launched Electron app does not inherit the user's shell PATH.
+- 安装 Kimi Code CLI 并完成登录（终端里运行 `kimi`，按提示登录）。
+- `kimi` 需在 PATH 上；不在时 Tran 会回退查找
+  `%USERPROFILE%\.kimi-code\bin\kimi.cmd` / `kimi.exe` / `kimi`。
 
-## Commands
+## 常用命令
 
-Run commands from the repository root:
+在仓库根目录执行：
 
 ```bash
 npm install
+npm run dev          # 开发模式启动桌面客户端
+npm run typecheck    # 主进程 + 渲染进程类型检查
+npm run build:win    # 打包 NSIS 安装包（release/）
 ```
-
-Windows:
-
-```powershell
-npm run dev           # launch the Windows client (hot reload)
-npm run typecheck
-npm run build:win     # produce cli/release/*.exe
-```
-
-macOS:
-
-```bash
-npm run cli-mac:dev       # launch the macOS client (hot reload)
-npm run cli-mac:typecheck
-npm run cli-mac:build:mac # produce cli-mac/release/*.dmg
-```
-
-The root scripts forward to the corresponding workspace. CLI build output is
-written under `cli/release/` (Windows) and `cli-mac/release/` (macOS).
-
-### macOS prerequisites
-
-1. Install Claude Code on your Mac (the app launches it as a subprocess):
-   ```bash
-   curl -fsSL https://claude.ai/install.sh | bash   # or: brew install claude-code
-   ```
-2. Build and open the `.dmg`, then drag **Forge** into Applications.
-3. First launch: right-click the app → **Open** to bypass Gatekeeper (the build
-   is unsigned for local use).
-
-## Subprojects
-
-```text
-claude-forge/
-  cli/       Forge client (Windows)
-  cli-mac/   Forge client (macOS)
-  agent/     Future Forge agent
-```
-
-See `cli/README.md` / `cli-mac/README.md` for the platform-specific client
-documentation.
