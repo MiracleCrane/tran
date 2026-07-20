@@ -102,8 +102,8 @@ function ToggleControl({
         className={`relative h-6 w-11 shrink-0 rounded-full transition ${checked ? 'bg-accent' : 'bg-zinc-700'}`}
       >
         <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
-            checked ? 'left-[22px]' : 'left-0.5'
+          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform duration-150 ease-out ${
+            checked ? 'translate-x-5' : 'translate-x-0'
           }`}
         />
       </button>
@@ -733,8 +733,8 @@ export default function SettingsPanel(): JSX.Element {
               className={`relative h-6 w-11 shrink-0 rounded-full transition ${vulkan ? 'bg-accent' : 'bg-zinc-700'}`}
             >
               <span
-                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
-                  vulkan ? 'left-[22px]' : 'left-0.5'
+                className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform duration-150 ease-out ${
+                  vulkan ? 'translate-x-5' : 'translate-x-0'
                 }`}
               />
             </button>

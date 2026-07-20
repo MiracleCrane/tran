@@ -2,9 +2,10 @@ import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from 'rea
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
-import type { AssistantBlock, AssistantItem, UserItem, TranscriptItem, ItemNode } from '../types'
+import type { AssistantBlock, AssistantItem, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
 import MessageText from './MessageText'
 import ToolCallCard from './ToolCallCard'
+import ToolGroupCard from './ToolGroupCard'
 
 const INITIAL_HIGHLIGHT_DELAY_MS = 420
 const SCROLL_HIGHLIGHT_RESUME_MS = 180
@@ -66,6 +67,47 @@ function buildForest(items: TranscriptItem[]): ItemNode[] {
     }
   }
   return roots
+}
+
+/** 顶层渲染行：普通消息节点，或"连续相邻的纯工具调用消息"聚成的分组块
+ *  （纯渲染层聚合，不改后端事件；单个工具调用仍按普通消息渲染）。 */
+type DisplayRow =
+  | { kind: 'item'; node: ItemNode }
+  | { kind: 'toolGroup'; id: string; blocks: ToolBlock[] }
+
+/** 该节点是否"整条消息只有工具调用块"（可聚合）。 */
+function toolBlocksOf(node: ItemNode): ToolBlock[] | null {
+  const item = node.item
+  if (item.kind !== 'assistant' || item.error || item.blocks.length === 0) return null
+  if (!item.blocks.every((b): b is ToolBlock => !!b && b.kind === 'tool')) return null
+  return item.blocks as ToolBlock[]
+}
+
+function buildDisplayRows(roots: ItemNode[]): DisplayRow[] {
+  const rows: DisplayRow[] = []
+  let run: { node: ItemNode; blocks: ToolBlock[] }[] = []
+  const flush = (): void => {
+    if (run.length >= 2) {
+      rows.push({
+        kind: 'toolGroup',
+        id: `tool-group-${run[0].blocks[0].toolUseId}`,
+        blocks: run.flatMap((r) => r.blocks)
+      })
+    } else {
+      for (const r of run) rows.push({ kind: 'item', node: r.node })
+    }
+    run = []
+  }
+  for (const node of roots) {
+    const blocks = toolBlocksOf(node)
+    if (blocks) run.push({ node, blocks })
+    else {
+      flush()
+      rows.push({ kind: 'item', node })
+    }
+  }
+  flush()
+  return rows
 }
 
 /** Memoized on `item`. With stream-batched updates only the streaming item
@@ -137,11 +179,11 @@ const UserMessage = memo(function UserMessage({ item }: { item: UserItem }): JSX
 const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }): JSX.Element {
   if (!text) return <></>
   return (
-    <details open className="glass-panel-soft my-1.5 rounded-xl px-3 py-2">
+    <details open className="thinking-block glass-panel-soft my-1.5 rounded-xl px-3 py-2">
       <summary className="cursor-pointer select-none text-xs font-medium text-zinc-500 hover:text-zinc-400">
         思考过程
       </summary>
-      <div className="mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-zinc-500">
+      <div className="mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap pl-1.5 text-xs leading-relaxed text-zinc-500">
         {text}
       </div>
     </details>
@@ -177,6 +219,7 @@ const AssistantMessage = memo(function AssistantMessage({
             return (
               <div key={i} className={isStreaming ? 'stream-mask-edge' : undefined}>
                 <MessageText highlight={highlight}>{block.text}</MessageText>
+                {isStreaming && <span className="tran-stream-cursor" aria-hidden />}
               </div>
             )
           }
@@ -221,6 +264,8 @@ export default function Transcript({
   const restoreBottomAfterReserveRef = useRef(false)
   const atBottomRef = useRef(true)
   const reserveEligibleRef = useRef(true)
+  /** 已渲染过的消息 id（Virtuoso 滚动复用行时不重播入场动画；新消息才入场）。 */
+  const seenItemIdsRef = useRef<Set<string>>(new Set())
   // "stick to bottom": Virtuoso reports this via atBottomStateChange. While at
   // the bottom, followOutput pins to the newest content; scroll up to read and
   // it stops following until the ↓ button returns you.
@@ -229,6 +274,7 @@ export default function Transcript({
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null)
 
   const roots = useMemo(() => buildForest(items), [items])
+  const displayRows = useMemo(() => buildDisplayRows(roots), [roots])
   const scrollTuning = useMemo(
     () =>
       agentBackend === 'kimi'
@@ -433,6 +479,7 @@ export default function Transcript({
     virtuosoScrollingRef.current = false
     scrollIntentActiveRef.current = false
     appliedScrollingRef.current = false
+    seenItemIdsRef.current.clear()
     clearScrollIntentTimer()
     setReserveEligible(true, true)
     setPinnedAtBottom(true)
@@ -479,9 +526,10 @@ export default function Transcript({
     )
   }
 
-  const renderRow = (node: ItemNode): JSX.Element => {
-    if (node.item.kind === 'user') return <UserMessage item={node.item as UserItem} />
-    return <AssistantMessage item={node.item as AssistantItem} depth={0} deferHighlight={deferHighlight} />
+  const renderRow = (row: DisplayRow): JSX.Element => {
+    if (row.kind === 'toolGroup') return <ToolGroupCard blocks={row.blocks} />
+    if (row.node.item.kind === 'user') return <UserMessage item={row.node.item as UserItem} />
+    return <AssistantMessage item={row.node.item as AssistantItem} depth={0} deferHighlight={deferHighlight} />
   }
 
   return (
@@ -500,9 +548,9 @@ export default function Transcript({
     >
       <Virtuoso
         ref={virtuosoRef}
-        data={roots}
-        initialTopMostItemIndex={{ index: Math.max(roots.length - 1, 0), align: 'end' }}
-        computeItemKey={(_, node) => node.item.id}
+        data={displayRows}
+        initialTopMostItemIndex={{ index: Math.max(displayRows.length - 1, 0), align: 'end' }}
+        computeItemKey={(_, row) => (row.kind === 'item' ? row.node.item.id : row.id)}
         increaseViewportBy={scrollTuning.increaseViewportBy}
         overscan={scrollTuning.overscan}
         scrollerRef={(element) => {
@@ -510,11 +558,23 @@ export default function Transcript({
           setScrollElement((current) => (current === nextElement ? current : nextElement))
         }}
         isScrolling={handleTranscriptScrolling}
-        itemContent={(_, node) => (
+        itemContent={(index, row) => {
           // Per-row wrapper preserves the centered, padded column the old single
           // container provided; py-2 approximates the former gap-4 between rows.
-          <div className="mx-auto w-full max-w-5xl px-6 py-2">{renderRow(node)}</div>
-        )}
+          // 入场动画只给"新到"的消息（seenItemIdsRef 去重，滚动复用不重播）；
+          // 批量历史同帧挂载时 stagger 封顶 300ms。
+          const rowKey = row.kind === 'item' ? row.node.item.id : row.id
+          const isNew = !seenItemIdsRef.current.has(rowKey)
+          if (isNew) seenItemIdsRef.current.add(rowKey)
+          return (
+            <div
+              className={`mx-auto w-full max-w-5xl px-6 py-2 ${isNew ? 'tran-msg-enter' : ''}`}
+              style={isNew ? { animationDelay: `${Math.min(index * 24, 280)}ms` } : undefined}
+            >
+              {renderRow(row)}
+            </div>
+          )
+        }}
         followOutput={shouldFollowOutput}
         atBottomThreshold={2}
         atBottomStateChange={handleAtBottomStateChange}

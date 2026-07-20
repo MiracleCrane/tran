@@ -3,6 +3,7 @@ import type {
   MarketplacePlugin,
   McpServerEntry,
   PermissionResponsePayload,
+  SessionUsageInfo,
   SkillInfo,
   StartSessionOptions
 } from '../../shared/ipc'
@@ -36,6 +37,8 @@ interface AgentBackendAdapter {
   toggleMcpServer(sessionId: string, name: string, enabled: boolean): Promise<void>
   backgroundTask(sessionId: string, toolUseId?: string): Promise<boolean>
   listSkills(sessionId: string): Promise<SkillInfo[]>
+  /** 可选：会话级 token/上下文用量（后端不上报时返回缺省值）。 */
+  getSessionUsage?(sessionId: string): Promise<SessionUsageInfo>
   listModels(): Promise<ComposerModel[]>
   listMarketplacePlugins(cwd?: string): Promise<MarketplacePlugin[]>
   respondPermission(resp: PermissionResponsePayload): boolean
@@ -118,6 +121,13 @@ export class AgentBridge {
 
   listSkills(sessionId: string): Promise<SkillInfo[]> {
     return this.backendForSession(sessionId).listSkills(sessionId)
+  }
+
+  async getSessionUsage(sessionId: string): Promise<SessionUsageInfo> {
+    const backend = this.maybeBackendForSession(sessionId)
+    if (backend?.getSessionUsage) return backend.getSessionUsage(sessionId)
+    // 后端不支持（或会话已结束）：返回缺省上下文上限，渲染层显示"暂无数据"。
+    return { contextSize: 1_048_576 }
   }
 
   listModels(agentBackend?: AgentBackendId): Promise<ComposerModel[]> {

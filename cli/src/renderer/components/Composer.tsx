@@ -9,7 +9,8 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, PermissionMode, SkillInfo } from '../../shared/ipc'
+import { useUiStore } from '../store/uiStore'
+import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, PermissionMode } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
 import { defaultModelsForAgent, modelLabelForAgent } from '../../shared/models'
 import { onForgeEvent } from '../events'
@@ -137,9 +138,21 @@ export default function Composer(): JSX.Element {
   const [models, setModels] = useState(defaultModelsForAgent(undefined))
   const [attachments, setAttachments] = useState<PickedFile[]>([])
   const [showTemplates, setShowTemplates] = useState(false)
-  const [slashSkills, setSlashSkills] = useState<SkillInfo[]>([])
-  const [slashLoading, setSlashLoading] = useState(false)
-  const [slashError, setSlashError] = useState<string | null>(null)
+  // Kimi ACP 推送的斜杠命令（available_commands_update → sessionStore）。
+  const slashSkills = useSessionStore((s) => s.slashCommands)
+
+  // 兜底：订阅仍为空时通过 listSkills IPC 主动拉一次（后端 listSkills 返回
+  // session.skills，缓冲队列修复后它在 start 期间已被正确赋值）。订阅优先，
+  // 拉取只在订阅为空时补。
+  useEffect(() => {
+    if (!meta?.sessionId || starting) return
+    if (useSessionStore.getState().slashCommands.length > 0) return
+    void window.api.listSkills(meta.sessionId).then((skills) => {
+      if (skills.length && useSessionStore.getState().slashCommands.length === 0) {
+        useSessionStore.setState({ slashCommands: skills })
+      }
+    }).catch(() => {})
+  }, [meta?.sessionId, starting])
   const [slashContext, setSlashContext] = useState<SlashContext | null>(null)
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight)
@@ -247,31 +260,6 @@ export default function Composer(): JSX.Element {
     }
   }, [meta?.model])
 
-  useEffect(() => {
-    let alive = true
-    setSlashSkills([])
-    setSlashError(null)
-    if (!meta?.sessionId || starting) {
-      setSlashLoading(false)
-      return
-    }
-
-    setSlashLoading(true)
-    void window.api.listSkills(meta.sessionId).then((skills) => {
-      if (!alive) return
-      setSlashSkills(skills)
-    }).catch((e: unknown) => {
-      if (!alive) return
-      setSlashError(e instanceof Error ? e.message : String(e))
-    }).finally(() => {
-      if (alive) setSlashLoading(false)
-    })
-
-    return () => {
-      alive = false
-    }
-  }, [meta?.sessionId, starting])
-
   const slashCommands = useMemo<SlashCommandItem[]>(() => {
     const templateCommands = PROMPT_TEMPLATES.map((template) => ({
       id: `template:${template.command}`,
@@ -299,7 +287,7 @@ export default function Composer(): JSX.Element {
       return commands
     }, [])
 
-    return [...templateCommands, ...skillCommands]
+    return [...skillCommands, ...templateCommands]
   }, [slashSkills])
 
   const slashFilteredCommands = useMemo(() => {
@@ -512,6 +500,13 @@ export default function Composer(): JSX.Element {
     const value = text.trim()
     const atts = attachments
     if (!value && atts.length === 0) return
+    // /usage 是 Tran 原生命令：打开用量面板，不发给 agent。
+    if (value === '/usage' && atts.length === 0) {
+      setText('')
+      setSlashContext(null)
+      useUiStore.getState().setUsageOpen(true)
+      return
+    }
     ++attachmentActionSeqRef.current
     const finalText = value
     setText('')
@@ -579,13 +574,14 @@ export default function Composer(): JSX.Element {
         )}
         <div
           className={`glass-panel composer-panel rounded-[18px] p-3 transition ${
-            dragActive ? 'border-accent/60 bg-white/[0.035] shadow-[0_0_0_1px_rgba(223,118,95,0.28)]' : ''
+            dragActive ? 'border-accent/60 bg-white/[0.035] shadow-[0_0_0_1px_rgba(139,92,246,0.28)]' : ''
           } ${composerResizing ? 'is-resizing' : ''}`}
           onDragEnter={onDragEnter}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
           onDrop={(e) => void onDrop(e)}
         >
+          <div className="composer-focus-ring" aria-hidden />
           <div
             className="composer-resize-zone"
             role="separator"
@@ -606,11 +602,7 @@ export default function Composer(): JSX.Element {
                 {slashContext && <span className="font-mono text-zinc-600">/{slashContext.query}</span>}
               </div>
               <div ref={slashListRef} className="slash-command-list git-stable-scroll">
-                {slashLoading && slashFilteredCommands.length === 0 ? (
-                  <div className="px-2 py-2 text-xs text-zinc-500">命令加载中…</div>
-                ) : slashError && slashFilteredCommands.length === 0 ? (
-                  <div className="px-2 py-2 text-xs text-red-300">{slashError}</div>
-                ) : slashFilteredCommands.length === 0 ? (
+                {slashFilteredCommands.length === 0 ? (
                   <div className="px-2 py-2 text-xs text-zinc-500">没有匹配命令</div>
                 ) : (
                   slashFilteredCommands.map((command, index) => (
@@ -632,7 +624,7 @@ export default function Composer(): JSX.Element {
                             <span className="truncate font-mono text-[10px] text-zinc-600">{command.argumentHint}</span>
                           )}
                           <span className="shrink-0 rounded bg-white/[0.055] px-1.5 py-0.5 text-[9px] text-zinc-500">
-                            {command.source === 'skill' ? 'Skill' : '模板'}
+                            {command.source === 'skill' ? 'Kimi' : '模板'}
                           </span>
                         </span>
                         <span className="mt-0.5 block truncate text-[11px] text-zinc-500">
@@ -701,7 +693,7 @@ export default function Composer(): JSX.Element {
               {attachments.map((a, i) => (
                 <span
                   key={`${a.path}-${i}`}
-                  className="glass-control flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-zinc-300"
+                  className="tran-enter glass-control flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-zinc-300"
                   title={a.path}
                 >
                   <span className="text-zinc-500">{a.kind === 'image' ? '🖼' : a.kind === 'text' ? '📄' : '📎'}</span>
@@ -749,6 +741,32 @@ export default function Composer(): JSX.Element {
               <kbd className="font-sans text-zinc-400">Shift+Enter</kbd> 换行
             </span>
             <div className="composer-actions ml-auto flex items-end gap-2">
+              {meta && (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={meta.permissionMode === 'plan'}
+                  onClick={() => void setPermissionMode(meta.permissionMode === 'plan' ? 'default' : 'plan')}
+                  className={`glass-control flex h-10 shrink-0 items-center gap-2 rounded-xl px-3 text-xs transition ${
+                    meta.permissionMode === 'plan' ? 'border-accent/50 text-accent' : 'text-zinc-300'
+                  }`}
+                  title="先让智能体梳理计划，再修改文件"
+                >
+                  <span>计划</span>
+                  {/* 开关滑块：只动 transform，200ms */}
+                  <span
+                    className={`relative h-4 w-7 rounded-full ${
+                      meta.permissionMode === 'plan' ? 'bg-accent/70' : 'bg-white/15'
+                    }`}
+                  >
+                    <span
+                      className={`absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white transition-transform duration-200 ${
+                        meta.permissionMode === 'plan' ? 'translate-x-3' : 'translate-x-0'
+                      }`}
+                    />
+                  </span>
+                </button>
+              )}
               {meta && (
                 <DisclosureSelect
                   value={meta.permissionMode}
@@ -803,7 +821,7 @@ export default function Composer(): JSX.Element {
               <button
                 onClick={() => void submit()}
                 disabled={!text.trim() && attachments.length === 0}
-                className="accent-soft-button h-10 shrink-0 rounded-xl px-5 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                className="composer-send accent-soft-button h-10 shrink-0 rounded-xl px-5 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 发送
               </button>

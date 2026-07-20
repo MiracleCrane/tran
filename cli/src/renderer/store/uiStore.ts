@@ -33,6 +33,9 @@ interface UiStore {
   blockingOverlay: BlockingOverlayState | null
   showBlockingOverlay: (label?: string) => string
   hideBlockingOverlay: (id: string) => void
+  /** 用量面板（UsageModal）开关。 */
+  usageOpen: boolean
+  setUsageOpen: (open: boolean) => void
 }
 
 function overlayId(): string {
@@ -56,5 +59,7 @@ export const useUiStore = create<UiStore>((set) => ({
     return id
   },
   hideBlockingOverlay: (id) =>
-    set((s) => (s.blockingOverlay?.id === id ? { blockingOverlay: null } : {}))
+    set((s) => (s.blockingOverlay?.id === id ? { blockingOverlay: null } : {})),
+  usageOpen: false,
+  setUsageOpen: (open) => set({ usageOpen: open })
 }))

@@ -64,11 +64,11 @@ export default function UpdateAvailableDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6"
+      className="tran-modal-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6"
       onClick={downloading ? undefined : onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl border border-border-subtle bg-bg-panel p-6 shadow-2xl"
+        className="tran-modal-panel w-full max-w-md rounded-2xl border border-border-subtle bg-bg-panel p-6 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-2 flex items-center gap-2">

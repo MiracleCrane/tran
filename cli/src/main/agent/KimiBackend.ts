@@ -6,6 +6,7 @@ import type {
   PermissionRequestPayload,
   PermissionResponsePayload,
   SDKMessage,
+  SessionUsageInfo,
   SkillInfo,
   StartSessionOptions
 } from '../../shared/ipc'
@@ -42,6 +43,13 @@ interface ActiveKimiSession {
   currentMessageId?: string
   streamedText: string
   streamStarted: boolean
+  /** 正文/思考在同一 assistant 消息里的 content block 索引（Claude 惯例：
+   *  thinking 在前、text 在后）。同一 turn 的思考流累积进同一个 thinking block，
+   *  修复"每个词一个思考块"的碎块问题。 */
+  textBlockIndex: number | null
+  thinkingText: string
+  thinkingBlockIndex: number | null
+  nextBlockIndex: number
   toolResults: Set<string>
   skills: SkillInfo[]
   lastUsage?: TokenUsage
@@ -57,6 +65,8 @@ interface TokenUsage {
   inputTokens?: number
   outputTokens?: number
   totalTokens?: number
+  contextUsed?: number
+  contextSize?: number
 }
 
 interface PromptPayload {
@@ -78,6 +88,9 @@ export class KimiBackend {
   private sessions = new Map<string, ActiveKimiSession>()
   private acpToSession = new Map<string, string>()
   private pendingPermissions = new Map<string, PendingPermission>()
+  /** 注册竞争窗口里到达的 session/update 通知（按 acpSessionId 分组），
+   *  在 acpToSession 注册后按序 flush —— 不丢、不重、顺序保持。 */
+  private pendingNotifications = new Map<string, AcpRpcMessage[]>()
   private clientPromise: Promise<AcpClient> | null = null
   private client: AcpClient | null = null
   /** Model choices discovered from session/new configOptions (ACP-side source
@@ -101,6 +114,10 @@ export class KimiBackend {
       replaying: false,
       streamedText: '',
       streamStarted: false,
+      textBlockIndex: null,
+      thinkingText: '',
+      thinkingBlockIndex: null,
+      nextBlockIndex: 0,
       toolResults: new Set(),
       skills: []
     }
@@ -166,6 +183,7 @@ export class KimiBackend {
     session.closed = true
     if (session.acpSessionId) {
       this.acpToSession.delete(session.acpSessionId)
+      this.pendingNotifications.delete(session.acpSessionId)
       // Kimi ACP 未实现 session/close —— 只取消当前 turn 并丢弃本地映射。
       this.client?.notify('session/cancel', { sessionId: session.acpSessionId })
     }
@@ -196,6 +214,20 @@ export class KimiBackend {
     const session = this.requireSession(sessionId)
     await session.ready
     return [...session.skills]
+  }
+
+  async getSessionUsage(sessionId: string): Promise<SessionUsageInfo> {
+    const session = this.requireSession(sessionId)
+    await session.ready.catch(() => {})
+    const usage = session.lastUsage
+    return {
+      inputTokens: usage?.inputTokens,
+      outputTokens: usage?.outputTokens,
+      totalTokens: usage?.totalTokens,
+      contextUsed: usage?.contextUsed,
+      contextSize: usage?.contextSize ?? contextWindowForModel(session.model),
+      model: session.model
+    }
   }
 
   async listModels(): Promise<ComposerModel[]> {
@@ -237,6 +269,8 @@ export class KimiBackend {
       session.replaying = true
       session.acpSessionId = opts.resume
       this.acpToSession.set(opts.resume, session.id)
+      // resume 路径注册在请求之前，理论上不会有缓冲；防御性 flush（通常空转）。
+      this.flushPendingNotifications(opts.resume)
       try {
         response = await client.request<Record<string, unknown>>('session/load', {
           cwd: session.cwd,
@@ -255,6 +289,9 @@ export class KimiBackend {
       if (!acpSessionId) throw new Error('Kimi ACP did not return a session id.')
       session.acpSessionId = acpSessionId
       this.acpToSession.set(acpSessionId, session.id)
+      // kimi 在 session/new 响应后立即推 available_commands_update 等通知，此时
+      // 注册刚完成——把竞争窗口里缓冲的通知按序回放（见 handleNotification）。
+      this.flushPendingNotifications(acpSessionId)
     }
 
     this.rememberConfigOptions(response?.configOptions)
@@ -291,6 +328,10 @@ export class KimiBackend {
       session.currentMessageId = undefined
       session.streamedText = ''
       session.streamStarted = false
+      session.textBlockIndex = null
+      session.thinkingText = ''
+      session.thinkingBlockIndex = null
+      session.nextBlockIndex = 0
       session.toolResults.clear()
       if (!session.closed && session.queue.length) void this.drain(session)
     }
@@ -305,10 +346,7 @@ export class KimiBackend {
       prompt: payload.prompt,
       messageId: cryptoId()
     }, 900000)
-    if (session.streamStarted) this.emitContentBlockStop(session)
-    if (session.streamedText) {
-      this.emitAssistant(session, session.currentMessageId ?? cryptoId(), session.streamedText)
-    }
+    this.sealStreamMessage(session)
     const usage = asRecord(response.usage)
     this.emitResult(session, {
       subtype: response.stopReason === 'refusal' ? 'error' : 'success',
@@ -354,10 +392,32 @@ export class KimiBackend {
     const params = asRecord(msg.params)
     const acpSessionId = asString(params?.sessionId)
     const session = this.sessionForAcp(acpSessionId)
-    if (!session || session.replaying) return
+    if (!session) {
+      // 时序竞争：kimi 在 session/new 响应后紧跟着推 available_commands_update
+      // 等通知，stdout 在同一同步块里先 resolve request、再处理通知，而
+      // acpToSession 注册要等微任务。查不到 session 时先缓冲，注册后按序回放。
+      if (acpSessionId) {
+        const pending = this.pendingNotifications.get(acpSessionId) ?? []
+        pending.push(msg)
+        this.pendingNotifications.set(acpSessionId, pending)
+      }
+      return
+    }
     const update = asRecord(params?.update)
     if (!update) return
+    // 回放（session/load）期间吞掉历史内容，但 available_commands_update 是
+    // 会话级配置推送，照常处理（否则 resume 的会话拿不到斜杠命令）。
+    if (session.replaying && asString(update.sessionUpdate) !== 'available_commands_update') return
     this.handleSessionUpdate(session, update)
+  }
+
+  /** 注册完成后回放该 acpSessionId 在竞争窗口里缓冲的通知（到达顺序）。
+   *  先删再逐条走正常逻辑，重入安全、不会重复。 */
+  private flushPendingNotifications(acpSessionId: string): void {
+    const pending = this.pendingNotifications.get(acpSessionId)
+    if (!pending?.length) return
+    this.pendingNotifications.delete(acpSessionId)
+    for (const msg of pending) this.handleNotification(msg)
   }
 
   private handleSessionUpdate(session: ActiveKimiSession, update: Record<string, unknown>): void {
@@ -374,36 +434,62 @@ export class KimiBackend {
     }
     if (type === 'tool_call') {
       const toolUseId = asString(update.toolCallId) ?? cryptoId()
+      // 工具调用是独立的 assistant 消息；先封停当前流式消息（思考/正文），
+      // 否则渲染层会把工具卡覆盖到正在流式的那条消息上。
+      this.sealStreamMessage(session)
       this.emitToolUse(session, toolUseId, toolName(update), toolInput(update))
       return
     }
     if (type === 'tool_call_update') {
       const toolUseId = asString(update.toolCallId)
-      if (!toolUseId || session.toolResults.has(toolUseId)) return
+      if (!toolUseId) return
       const status = asString(update.status)
-      if (status !== 'completed' && status !== 'failed') return
-      session.toolResults.add(toolUseId)
-      this.emitToolResult(
-        session,
-        toolUseId,
-        stringifyToolResult(update.rawOutput ?? update.content ?? update.title ?? status),
-        status === 'failed'
-      )
+      if (status === 'completed' || status === 'failed') {
+        if (session.toolResults.has(toolUseId)) return
+        session.toolResults.add(toolUseId)
+        this.emitToolResult(
+          session,
+          toolUseId,
+          stringifyToolResult(update.rawOutput ?? update.content ?? update.title ?? status),
+          status === 'failed'
+        )
+        return
+      }
+      // in_progress 等中间态：转发流式内容（子代理输出等），partial 标记让
+      // 渲染层保持 running 状态、只更新卡片内容。
+      const partialText = stringifyToolResult(update.rawOutput ?? update.content)
+      if (partialText) this.emitToolPartial(session, toolUseId, partialText)
       return
     }
     if (type === 'available_commands_update') {
       session.skills = toSkillInfos(update.availableCommands)
+      this.emitSlashCommands(session)
+      return
+    }
+    if (type === 'plan') {
+      // 待办清单（kimi 在计划模式下全量推送 entries），合成 system/plan 消息
+      // 走 onMessage 通道送到渲染层（同 slash_commands 的模式）。
+      this.h.onMessage(session.id, {
+        type: 'system',
+        subtype: 'plan',
+        entries: toPlanEntries(update.entries)
+      } as unknown as SDKMessage)
       return
     }
     if (type === 'usage_update') {
-      const usage = asRecord(update.usage)
+      // 实测 kimi 0.26.0 不发送 usage_update（936 条 session/update 中零条）；
+      // 解析保留以便未来版本上报时直接可用。形状防御：字段可能在 update.usage
+      // 下，也可能平铺在 update 上（ACP 规范的 used/size）。
+      const usage = asRecord(update.usage) ?? update
       session.lastUsage = {
-        inputTokens: asNumber(usage?.inputTokens),
-        outputTokens: asNumber(usage?.outputTokens),
-        totalTokens: asNumber(usage?.totalTokens)
+        inputTokens: asNumber(usage.inputTokens),
+        outputTokens: asNumber(usage.outputTokens),
+        totalTokens: asNumber(usage.totalTokens),
+        contextUsed: asNumber(usage.used),
+        contextSize: asNumber(usage.size)
       }
     }
-    // TODO: 'plan' / 'config_option_update' 暂不映射到 UI。
+    // TODO: 'config_option_update' 暂不映射到 UI。
   }
 
   private handleServerRequest(msg: AcpRpcMessage): void {
@@ -474,6 +560,7 @@ export class KimiBackend {
     this.sessions.clear()
     this.acpToSession.clear()
     this.pendingPermissions.clear()
+    this.pendingNotifications.clear()
   }
 
   private emitInit(session: ActiveKimiSession, acpSessionId: string, model: string): void {
@@ -489,39 +576,85 @@ export class KimiBackend {
   }
 
   private emitAssistantDelta(session: ActiveKimiSession, messageId: string | undefined, delta: string): void {
-    if (!session.streamStarted) {
-      session.streamStarted = true
-      session.currentMessageId = messageId ?? `kimi-message-${cryptoId()}`
-      this.emitStreamEvent(session, { type: 'message_start', message: { id: session.currentMessageId } })
+    this.ensureStreamMessage(session, messageId)
+    if (session.textBlockIndex === null) {
+      session.textBlockIndex = session.nextBlockIndex++
       this.emitStreamEvent(session, {
         type: 'content_block_start',
-        index: 0,
+        index: session.textBlockIndex,
         content_block: { type: 'text', text: '' }
       })
     }
     session.streamedText += delta
     this.emitStreamEvent(session, {
       type: 'content_block_delta',
-      index: 0,
+      index: session.textBlockIndex,
       delta: { type: 'text_delta', text: delta }
     })
   }
 
+  /** 思考流累积：与正文同款流式模式——首个 thought chunk 在当前消息里开
+   *  thinking content block，后续 chunk 以 thinking_delta 追加到同一 block，
+   *  封停时连同正文一起以最终 assistant 消息定稿（渲染层只渲染一个思考块）。
+   *  content 结构防御式解析见 textFromContentBlock。 */
   private emitThinking(session: ActiveKimiSession, text: string): void {
-    const id = `kimi-thinking-${cryptoId()}`
-    this.h.onMessage(session.id, {
-      type: 'assistant',
-      uuid: id,
-      parent_tool_use_id: null,
-      message: {
-        id,
-        content: [{ type: 'thinking', thinking: text }]
-      }
-    } as unknown as SDKMessage)
+    this.ensureStreamMessage(session, undefined)
+    if (session.thinkingBlockIndex === null) {
+      session.thinkingBlockIndex = session.nextBlockIndex++
+      this.emitStreamEvent(session, {
+        type: 'content_block_start',
+        index: session.thinkingBlockIndex,
+        content_block: { type: 'thinking', thinking: '' }
+      })
+    }
+    session.thinkingText += text
+    this.emitStreamEvent(session, {
+      type: 'content_block_delta',
+      index: session.thinkingBlockIndex,
+      delta: { type: 'thinking_delta', thinking: text }
+    })
   }
 
-  private emitContentBlockStop(session: ActiveKimiSession): void {
-    this.emitStreamEvent(session, { type: 'content_block_stop', index: 0 })
+  private ensureStreamMessage(session: ActiveKimiSession, messageId: string | undefined): void {
+    if (session.streamStarted) return
+    session.streamStarted = true
+    session.currentMessageId = messageId ?? `kimi-message-${cryptoId()}`
+    this.emitStreamEvent(session, { type: 'message_start', message: { id: session.currentMessageId } })
+  }
+
+  /** 封停当前流式消息：补 content_block_stop，把累积的思考+正文以最终
+   *  assistant 消息定稿（替换渲染层的流式 item），然后重置流式状态——
+   *  后续 chunk / tool_call 会开新消息，互不覆盖。 */
+  private sealStreamMessage(session: ActiveKimiSession): void {
+    if (!session.streamStarted) return
+    if (session.thinkingBlockIndex !== null) {
+      this.emitStreamEvent(session, { type: 'content_block_stop', index: session.thinkingBlockIndex })
+    }
+    if (session.textBlockIndex !== null) {
+      this.emitStreamEvent(session, { type: 'content_block_stop', index: session.textBlockIndex })
+    }
+    const content: Array<Record<string, unknown>> = []
+    if (session.thinkingText) content.push({ type: 'thinking', thinking: session.thinkingText })
+    if (session.streamedText) content.push({ type: 'text', text: session.streamedText })
+    if (content.length) this.emitAssistant(session, session.currentMessageId ?? cryptoId(), content)
+    session.streamStarted = false
+    session.currentMessageId = undefined
+    session.streamedText = ''
+    session.thinkingText = ''
+    session.textBlockIndex = null
+    session.thinkingBlockIndex = null
+    session.nextBlockIndex = 0
+  }
+
+  /** Kimi 在 session/new 后推送的斜杠命令（available_commands_update）——
+   *  经 system/slash_commands 消息送到渲染层，供 Composer 的 `/` 菜单使用。 */
+  private emitSlashCommands(session: ActiveKimiSession): void {
+    log('kimi', `slash commands x${session.skills.length}`)
+    this.h.onMessage(session.id, {
+      type: 'system',
+      subtype: 'slash_commands',
+      commands: session.skills
+    } as unknown as SDKMessage)
   }
 
   private emitStreamEvent(session: ActiveKimiSession, event: Record<string, unknown>): void {
@@ -533,14 +666,14 @@ export class KimiBackend {
     } as unknown as SDKMessage)
   }
 
-  private emitAssistant(session: ActiveKimiSession, itemId: string, text: string): void {
+  private emitAssistant(session: ActiveKimiSession, itemId: string, content: Array<Record<string, unknown>>): void {
     this.h.onMessage(session.id, {
       type: 'assistant',
       uuid: `kimi-assistant-${itemId}`,
       parent_tool_use_id: null,
       message: {
         id: itemId,
-        content: [{ type: 'text', text }]
+        content
       }
     } as unknown as SDKMessage)
   }
@@ -574,6 +707,23 @@ export class KimiBackend {
       parent_tool_use_id: null,
       message: {
         content: [{ type: 'tool_result', tool_use_id: toolUseId, content, is_error: isError }]
+      }
+    } as unknown as SDKMessage)
+  }
+
+  /** 工具执行中的流式中间内容（如子代理输出）：partial=true，渲染层只更新
+   *  卡片内容、不翻完成态。 */
+  private emitToolPartial(
+    session: ActiveKimiSession,
+    toolUseId: string,
+    content: string
+  ): void {
+    this.h.onMessage(session.id, {
+      type: 'user',
+      uuid: `kimi-tool-partial-${toolUseId}`,
+      parent_tool_use_id: null,
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: toolUseId, content, is_error: false, partial: true }]
       }
     } as unknown as SDKMessage)
   }
@@ -658,6 +808,19 @@ function kimiModel(model: string | undefined): string | undefined {
   return model
 }
 
+/** 上下文窗口上限（实测 /usage 分母）：k3 / kimi-for-coding 系列均 1,048,576，
+ *  未知模型回落 1M。 */
+const KIMI_CONTEXT_WINDOWS: Record<string, number> = {
+  'kimi-code/k3': 1_048_576,
+  'kimi-code/kimi-for-coding': 1_048_576,
+  'kimi-code/kimi-for-coding-highspeed': 1_048_576
+}
+const DEFAULT_KIMI_CONTEXT_WINDOW = 1_048_576
+
+function contextWindowForModel(model: string | undefined): number {
+  return (model ? KIMI_CONTEXT_WINDOWS[model] : undefined) ?? DEFAULT_KIMI_CONTEXT_WINDOW
+}
+
 function readFileSlice(path: string, line?: number, limit?: number): string {
   const text = readFileSync(path, 'utf8')
   if (!line && !limit) return text
@@ -701,6 +864,35 @@ function toolInput(update: Record<string, unknown>): Record<string, unknown> {
     ...(title ? { title } : {}),
     ...(content ? { content } : {})
   }
+}
+
+/** ACP plan 条目的防御式解析：每项取 content/status(/priority/activeForm)，
+ *  status 非三态时归一为 pending。 */
+function toPlanEntries(value: unknown): Array<{
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+  priority?: string
+  activeForm?: string
+}> {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      const entry = asRecord(item)
+      const content = asString(entry?.content)
+      if (!content) return null
+      const rawStatus = asString(entry?.status)
+      const status: 'pending' | 'in_progress' | 'completed' =
+        rawStatus === 'in_progress' || rawStatus === 'completed' ? rawStatus : 'pending'
+      const priority = asString(entry?.priority)
+      const activeForm = asString(entry?.activeForm)
+      return {
+        content,
+        status,
+        ...(priority ? { priority } : {}),
+        ...(activeForm ? { activeForm } : {})
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => !!item)
 }
 
 function toSkillInfos(value: unknown): SkillInfo[] {

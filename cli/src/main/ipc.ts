@@ -41,6 +41,7 @@ import {
 } from './runtimeDiagnostics'
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { listKimiSessions } from './kimiHistory'
+import { fetchPlanUsage } from './usageService'
 import * as gitModule from './git'
 import { log } from './logger'
 import type {
@@ -79,7 +80,9 @@ import type {
   AgentBackendInfo,
   AgentBackendId,
   DiagnosticReportOptions,
-  DiagnosticReportResult
+  DiagnosticReportResult,
+  SessionUsageInfo,
+  PlanUsageResult
 } from '../shared/ipc'
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
@@ -394,6 +397,17 @@ export function registerIpc(
       throw err
     }
   })
+
+  ipcMain.handle('forge:getSessionUsage', async (_e, sessionId: string): Promise<SessionUsageInfo> => {
+    try {
+      return await bridge.getSessionUsage(sessionId)
+    } catch (err) {
+      log('ipc', `getSessionUsage failed: ${err instanceof Error ? err.message : String(err)}`)
+      return { contextSize: 1_048_576 }
+    }
+  })
+
+  ipcMain.handle('forge:getPlanUsage', async (): Promise<PlanUsageResult> => fetchPlanUsage())
 
   ipcMain.handle(
     'forge:listMarketplacePlugins',

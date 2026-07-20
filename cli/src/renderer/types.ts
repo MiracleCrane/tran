@@ -70,6 +70,14 @@ export interface AssistantItem {
 }
 export type TranscriptItem = UserItem | AssistantItem
 
+/** ACP session/update 'plan' 的待办条目（kimi 全量推送，整体替换）。 */
+export interface PlanEntry {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+  priority?: string
+  activeForm?: string
+}
+
 /** A transcript item plus its nested children (the subagent conversation under
  *  each of its tool_use blocks, linked by parent_tool_use_id). The Transcript
  *  builds a forest of these from the flat `items` list and renders recursively. */

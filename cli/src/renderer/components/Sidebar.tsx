@@ -6,7 +6,6 @@ import ProjectSwitcher from './ProjectSwitcher'
 import type { ClaudeExecutionBackend, SessionListItem } from '../../shared/ipc'
 import { onForgeEvent } from '../events'
 
-type BackendFilter = 'all' | ClaudeExecutionBackend
 type SessionGroupMode = 'time' | 'project'
 type SessionListTransitionPhase = 'idle' | 'exiting' | 'loading' | 'entering'
 type WslNavRevealPhase = 'hidden' | 'opening' | 'visible' | 'closing'
@@ -294,7 +293,6 @@ export default function Sidebar(): JSX.Element {
   const [editText, setEditText] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [sessionSearch, setSessionSearch] = useState('')
-  const [backendFilter, setBackendFilter] = useState<BackendFilter>('all')
   const [groupMode, setGroupMode] = useState<SessionGroupMode>('time')
   const [pinnedSessionKeys, setPinnedSessionKeys] = useState<Set<string>>(() => readPinnedSessions())
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
@@ -421,7 +419,6 @@ export default function Sidebar(): JSX.Element {
     if (transitionId !== sessionListTransitionIdRef.current) return
     sessionListFadeTimeoutRef.current = null
     setSessionListPhase('loading')
-    setBackendFilter('all')
     setWslSupportEnabled(false)
     try {
       await reloadForBackendSwitch()
@@ -522,7 +519,6 @@ export default function Sidebar(): JSX.Element {
     const transitionId = sessionListTransitionIdRef.current
     setSessionListSnapshot(null)
     setSessionListPhase('idle')
-    setBackendFilter('windows')
     void refresh()
     sessionListFadeTimeoutRef.current = window.setTimeout(() => {
       sessionListFadeTimeoutRef.current = null
@@ -541,7 +537,6 @@ export default function Sidebar(): JSX.Element {
           wslSupportInitializedRef.current = true
           setWslSupportEnabled(enabled)
           setWslNavPhase(enabled ? 'visible' : 'hidden')
-          setBackendFilter(enabled ? 'windows' : 'all')
           return
         }
         setWslSupportEnabled((previous) => {
@@ -734,7 +729,6 @@ export default function Sidebar(): JSX.Element {
     return sessions
       .filter((session) => {
         if (!wslSupportEnabled && (session.runtimeBackend ?? 'windows') === 'wsl') return false
-        if (backendFilter !== 'all' && (session.runtimeBackend ?? 'windows') !== backendFilter) return false
         if (!q) return true
         const haystack = [
           session.summary,
@@ -759,7 +753,7 @@ export default function Sidebar(): JSX.Element {
           BACKEND_SORT_ORDER[b.runtimeBackend ?? 'windows']
         )
       })
-  }, [backendFilter, pinnedSessionKeys, sessionSearch, sessions, wslSupportEnabled])
+  }, [pinnedSessionKeys, sessionSearch, sessions, wslSupportEnabled])
 
   const sessionGroups = useMemo(
     () =>
@@ -1038,7 +1032,7 @@ export default function Sidebar(): JSX.Element {
                 }`}
               >
                 {active && (
-                  <span className="absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-accent" />
+                  <span className="session-active-bar absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-accent" />
                 )}
                 <div className="truncate text-xs">{s.summary || '(未命名)'}</div>
                 <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-zinc-600">
@@ -1109,35 +1103,6 @@ export default function Sidebar(): JSX.Element {
             className="h-8 w-full rounded-lg border border-white/[0.08] bg-bg-elev/60 px-2.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-accent/60"
           />
           <div className="flex items-center">
-            <button
-              type="button"
-              onClick={() => setBackendFilter('all')}
-              className={`rounded-md px-1.5 py-1 text-[10px] transition ${
-                backendFilter === 'all'
-                  ? 'bg-accent/20 text-accent'
-                  : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
-              }`}
-            >
-              全部
-            </button>
-            <div className={`wsl-filter-options ${wslSupportEnabled ? 'is-visible' : ''}`}>
-              {(['windows', 'wsl'] as ClaudeExecutionBackend[]).map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setBackendFilter(value)}
-                  className={`rounded-md px-1.5 py-1 text-[10px] transition ${
-                    backendFilter === value
-                      ? 'bg-accent/20 text-accent'
-                      : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
-                  }`}
-                  tabIndex={wslSupportEnabled ? 0 : -1}
-                  aria-hidden={!wslSupportEnabled}
-                >
-                  {backendLabel(value)}
-                </button>
-              ))}
-            </div>
             <button
               type="button"
               onClick={() => setGroupMode((mode) => (mode === 'time' ? 'project' : 'time'))}
@@ -1227,7 +1192,7 @@ export default function Sidebar(): JSX.Element {
                       disabled={exiting}
                     >
                       {active && (
-                        <span className="absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-accent" />
+                        <span className="session-active-bar absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-accent" />
                       )}
                       <div className="truncate text-xs">{s.summary || '(未命名)'}</div>
                       <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-zinc-600">

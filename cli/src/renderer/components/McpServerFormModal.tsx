@@ -191,8 +191,8 @@ export default function McpServerFormModal(props: Props): JSX.Element {
   const labelCls = 'mb-1.5 block text-xs text-zinc-500'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border-subtle bg-bg-panel p-6 shadow-2xl">
+    <div className="tran-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
+      <div className="tran-modal-panel max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border-subtle bg-bg-panel p-6 shadow-2xl">
         <div className="mb-4 flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-full bg-accent" />
           <h2 className="text-base font-semibold text-zinc-100">

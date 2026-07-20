@@ -5,12 +5,14 @@ import Onboarding from './components/Onboarding'
 import Sidebar from './components/Sidebar'
 import Transcript from './components/Transcript'
 import Composer from './components/Composer'
+import PlanCard from './components/PlanCard'
 import StatusBar from './components/StatusBar'
 import RuntimeStatusStrip from './components/RuntimeStatusStrip'
 import ErrorDiagnosticPanel from './components/ErrorDiagnosticPanel'
 import GitToolbar, { requestCloseGitDrawer } from './components/GitToolbar'
 import AttachmentPreviewPane from './components/AttachmentPreviewPane'
 import PermissionModal from './components/PermissionModal'
+import UsageModal from './components/UsageModal'
 import McpPanel from './components/McpPanel'
 import ProvidersPanel from './components/ProvidersPanel'
 import SkillsPanel from './components/SkillsPanel'
@@ -302,6 +304,7 @@ function MainViewContent({
   return (
     <>
       <ChatTopbar collapsed={chatTopbarCollapsed} onToggle={onToggleChatTopbar} />
+      <PlanCard />
       <div className="min-h-0 flex-1 overflow-hidden" onPointerDownCapture={requestCloseGitDrawer}>
         <Transcript
           layoutTransitioning={chatTopbarLayoutMotion}
@@ -639,6 +642,7 @@ export default function App(): JSX.Element {
     return (
       <ErrorBoundary>
         <div className="app-shell flex h-screen flex-col overflow-hidden text-zinc-200">
+          <div className="tran-ambient" aria-hidden />
           <WindowTitlebar />
           <div className="min-h-0 flex-1">
             <Onboarding />
@@ -656,6 +660,8 @@ export default function App(): JSX.Element {
   return (
     <ErrorBoundary>
       <div className="app-shell flex h-screen flex-col overflow-hidden text-zinc-200">
+        {/* 环境紫光漂移层（全应用仅一层，opacity ≤ 0.06，只动 transform） */}
+        <div className="tran-ambient" aria-hidden />
         <WindowTitlebar />
         <div
           className={`workspace-shell min-h-0 flex-1 p-4 ${
@@ -708,6 +714,7 @@ export default function App(): JSX.Element {
             {(previewOpen || previewMounted) && <AttachmentPreviewPane />}
           </div>
           <PermissionModal />
+          <UsageModal />
           <ClosePromptDialog open={closePromptOpen} onClose={() => setClosePromptOpen(false)} />
           <UpdateAvailableDialog
             info={availableUpdate}

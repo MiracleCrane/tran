@@ -74,6 +74,12 @@ function asTimestamp(value: unknown): number | undefined {
   return undefined
 }
 
+/** Windows 路径归一化：正斜杠、去尾斜杠、小写（kimi session/list 返回
+ *  `C:/project/...`，而渲染层传入的 cwd 通常是反斜杠路径，直接 === 会全被滤掉）。 */
+function normalizeCwd(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
 export async function listKimiSessions(
   cwd: string,
   opts: { limit: number; offset: number }
@@ -86,6 +92,7 @@ export async function listKimiSessions(
       : Array.isArray(response)
         ? response
         : []
+    const targetCwd = normalizeCwd(cwd)
     const sessions: SessionListItem[] = []
     for (const raw of rawSessions) {
       const entry = asRecord(raw)
@@ -94,7 +101,7 @@ export async function listKimiSessions(
       if (!sessionId) continue
       const entryCwd = asString(entry.cwd)
       // 只列当前项目目录的会话（条目不带 cwd 时保守放行）。
-      if (entryCwd && entryCwd !== cwd) continue
+      if (entryCwd && normalizeCwd(entryCwd) !== targetCwd) continue
       sessions.push({
         sessionId,
         agentBackend: 'kimi',

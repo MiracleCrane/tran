@@ -26,6 +26,31 @@ function normalizeResult(result: unknown): string {
   return String(result)
 }
 
+/** 子代理（Agent）工具输入的防御式解析：input 可能是对象或 JSON 字符串；
+ *  取 description / subagent_type / prompt，解析不出对象时返回 null（走原始回落）。 */
+function parseSubagentInput(input: unknown): {
+  description?: string
+  subagentType?: string
+  prompt?: string
+} | null {
+  let value = input
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return null
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined)
+  return {
+    description: str(record.description),
+    subagentType: str(record.subagent_type),
+    prompt: str(record.prompt)
+  }
+}
+
 function summaryForTool(name: string, input: unknown): string {
   const inp = (input ?? {}) as Record<string, unknown>
   const s = (v: unknown): string => (typeof v === 'string' ? v : '')
@@ -66,25 +91,37 @@ const STATUS_META: Record<
 }
 
 const ToolCallCard = memo(function ToolCallCard({ block }: { block: ToolBlock }): JSX.Element {
-  // Collapsed by default — tool details (read text, inputs, diffs) stay folded
-  // out of the conversation until clicked, so the transcript isn't cluttered.
-  const [collapsed, setCollapsed] = useState(true)
+  // 子代理（kimi 的 Agent tool_call）默认展开：输出是实时流式的，值得直接可见；
+  // 普通工具调用保持默认折叠，避免刷屏。
+  const isSubagent = block.name === 'Agent'
+  const [collapsed, setCollapsed] = useState(!isSubagent)
   const meta = STATUS_META[block.status]
   const summary = summaryForTool(block.name, block.input)
   const resultText = collapsed ? '' : normalizeResult(block.result)
   const inputText =
     !collapsed && block.name === 'Bash' ? ((block.input as { command?: string })?.command ?? '') : ''
+  const streaming = isSubagent && block.status === 'running'
 
   return (
-    <div className="my-1.5 overflow-hidden rounded-lg border border-border-subtle bg-[#101116]">
+    <div
+      className={`tool-call-card my-1.5 overflow-hidden rounded-lg border bg-[#101116] ${
+        block.status === 'running' ? 'is-running' : ''
+      } ${isSubagent ? 'border-accent/35' : 'border-border-subtle'}`}
+    >
       <button
         type="button"
         aria-expanded={!collapsed}
         onClick={() => setCollapsed((c) => !c)}
         className="flex w-full items-center gap-2 bg-[#14151b] px-3 py-2 text-left transition-colors hover:bg-[#1b1c23]"
       >
-        <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dot}`} />
-        <span className="shrink-0 font-mono text-xs font-medium text-zinc-300">{block.name}</span>
+        <span className={`h-2 w-2 shrink-0 rounded-full ${isSubagent ? 'bg-accent' : meta.dot} ${streaming ? 'animate-pulse' : ''}`} />
+        {isSubagent ? (
+          <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+            子代理
+          </span>
+        ) : (
+          <span className="shrink-0 font-mono text-xs font-medium text-zinc-300">{block.name}</span>
+        )}
         {summary && (
           <span className="truncate font-mono text-xs text-zinc-500">{summary}</span>
         )}
@@ -104,7 +141,7 @@ const ToolCallCard = memo(function ToolCallCard({ block }: { block: ToolBlock })
             </pre>
           )}
 
-          {block.name !== 'Bash' && block.input != null && (
+          {!isSubagent && block.name !== 'Bash' && block.input != null && (
             <details className="mb-2">
               <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300">
                 输入
@@ -115,14 +152,66 @@ const ToolCallCard = memo(function ToolCallCard({ block }: { block: ToolBlock })
             </details>
           )}
 
+          {isSubagent && (() => {
+            // 子代理输入区：友好渲染 description / subagent_type / prompt，
+            // 解析失败时回落原始 JSON 显示。
+            const parsed = parseSubagentInput(block.input)
+            if (!parsed) {
+              return block.input != null && (
+                <details className="mb-2">
+                  <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300">
+                    输入
+                  </summary>
+                  <pre className="mt-1 overflow-auto rounded bg-[#0b0c10] p-2.5 text-xs text-zinc-400">
+                    {typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2)}
+                  </pre>
+                </details>
+              )
+            }
+            return (
+              <div className="mb-2">
+                {(parsed.description || parsed.subagentType) && (
+                  <div className="flex items-center gap-2">
+                    {parsed.description && (
+                      <span className="min-w-0 break-words text-xs font-semibold text-zinc-200">
+                        {parsed.description}
+                      </span>
+                    )}
+                    {parsed.subagentType && (
+                      <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                        {parsed.subagentType}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {parsed.prompt && (
+                  <details className={parsed.description || parsed.subagentType ? 'mt-1.5' : ''}>
+                    <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300">
+                      查看指令
+                    </summary>
+                    <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-[#0b0c10] p-2.5 text-xs leading-relaxed text-zinc-400">
+                      {parsed.prompt}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )
+          })()}
+
           {block.errorMessage && (
             <div className="mb-2 text-xs text-orange-400">{block.errorMessage}</div>
           )}
 
-          {resultText && <DiffView text={resultText} />}
+          {isSubagent && resultText && (
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-[#0b0c10] p-2.5 text-xs leading-relaxed text-zinc-300">
+              {resultText}
+              {streaming && <span className="tran-stream-cursor" aria-hidden />}
+            </pre>
+          )}
+          {!isSubagent && resultText && <DiffView text={resultText} />}
 
           {!resultText && block.status === 'running' && (
-            <div className="text-xs text-zinc-600">等待输出…</div>
+            <div className="text-xs text-zinc-600">{isSubagent ? '子代理运行中，等待输出…' : '等待输出…'}</div>
           )}
           {!resultText && block.status === 'pending' && (
             <div className="text-xs text-zinc-600">排队中 — 等待批准或轮到执行。</div>

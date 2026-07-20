@@ -42,13 +42,13 @@ export default function ClosePromptDialog({ open, onClose }: ClosePromptDialogPr
     // z-[60] sits above GitToolbar popups, while active permission prompts stay above it.
     // Backdrop darkened so the opaque card below reads clearly.
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-6"
+      className="tran-modal-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-6"
       onClick={onClose}
     >
       {/* Opaque card mirroring the main-surface (chat panel) styling so the
           dialog reads as part of the app rather than a bright-edged overlay. */}
       <div
-        className="w-full max-w-md p-6"
+        className="tran-modal-panel w-full max-w-md p-6"
         style={{
           borderRadius: '18px',
           border: '1px solid rgba(238, 232, 226, 0.12)',

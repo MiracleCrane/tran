@@ -392,6 +392,47 @@ export interface HistoryMessage {
   parent_tool_use_id: string | null
 }
 
+/** --- Usage panel (UsageModal) --- */
+export interface SessionUsageInfo {
+  /** 本会话累计 token。kimi 0.26.0 的 ACP 不上报会话用量（实测），
+   *  全部缺省时面板显示"暂无数据"。 */
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  /** 上下文窗口已用 token（如有上报）。 */
+  contextUsed?: number
+  /** 上下文窗口上限（按模型查表，未知回落 1M）。 */
+  contextSize: number
+  /** 当前模型 id（供展示）。 */
+  model?: string
+}
+
+export interface UsageLimitWindow {
+  /** 窗口标签，如 "每周" / "5 小时"。 */
+  label: string
+  limit?: number
+  used?: number
+  remaining?: number
+  /** 重置时间（epoch ms）。 */
+  resetAt?: number
+}
+
+export interface PlanUsageInfo {
+  /** 会员等级原始值（如 LEVEL_INTERMEDIATE），渲染层负责映射展示。 */
+  membershipLevel?: string
+  weekly?: UsageLimitWindow
+  rolling?: UsageLimitWindow
+  parallelLimit?: number
+  boosterWallet?: {
+    monthlyUsedCny?: number
+    monthlyLimitCny?: number
+  }
+}
+
+export type PlanUsageResult =
+  | { ok: true; data: PlanUsageInfo }
+  | { ok: false; error: string }
+
 /** --- Git integration types --- */
 export interface GitBranchInfo {
   name: string
@@ -560,6 +601,12 @@ export interface ForgeApi {
   setApiKey(key: string): Promise<void>
 
   respondPermission(resp: PermissionResponsePayload): Promise<void>
+
+  /** --- Usage panel --- */
+  /** 本会话 token / 上下文用量（ACP 侧；kimi 暂未上报时返回缺省值）。 */
+  getSessionUsage(sessionId: string): Promise<SessionUsageInfo>
+  /** 套餐额度 / 会员 / 加油包（Kimi 云端 API，主进程直连）。 */
+  getPlanUsage(): Promise<PlanUsageResult>
 
   /** --- Git integration --- */
   isGitRepo(cwd: string): Promise<boolean>

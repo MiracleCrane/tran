@@ -9,7 +9,8 @@ import type {
   EffortLevel,
   PermissionMode,
   AgentBackendId,
-  ClaudeExecutionBackend
+  ClaudeExecutionBackend,
+  SkillInfo
 } from '../../shared/ipc'
 import type {
   TranscriptItem,
@@ -22,7 +23,8 @@ import type {
   SubagentTask,
   SubagentStatus,
   UserAttachment,
-  PendingMessage
+  PendingMessage,
+  PlanEntry
 } from '../types'
 import { pickedFileToUserAttachment } from '../utils/attachments'
 import { DEFAULT_KIMI_MODEL_ID } from '../../shared/models'
@@ -65,6 +67,10 @@ interface SessionStore {
   sessionModelDirty: boolean
   /** The bridge process has ended and its session id can no longer accept input. */
   bridgeEnded: boolean
+  /** Kimi ACP 推送的可用斜杠命令（available_commands_update → system/slash_commands）。 */
+  slashCommands: SkillInfo[]
+  /** ACP plan 事件推送的待办清单（system/plan，全量替换；空数组表示无）。 */
+  planEntries: PlanEntry[]
 
   startSession: (args: StartArgs) => Promise<void>
   sendMessage: (text: string, attachments?: PickedFile[]) => Promise<void>
@@ -670,6 +676,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   sessionConfigDirty: false,
   sessionModelDirty: false,
   bridgeEnded: false,
+  slashCommands: [],
+  planEntries: [],
 
   async startSession(args) {
     if (get().starting) return
@@ -710,6 +718,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         sessionConfigDirty: false,
         sessionModelDirty: false,
         bridgeEnded: false,
+        planEntries: [],
         status: { running: false },
         currentStreamingMsgId: null
       })
@@ -864,7 +873,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   reset() {
     cancelActiveHistoryHydration(0)
-    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false })
+    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [] })
   },
 
   async bootstrap() {
@@ -908,6 +917,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       bridgeEnded: false,
       sessions: [],
       sessionsHasMore: false,
+      planEntries: [],
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -984,11 +994,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const cwd = meta.cwd
     set({ sessionsLoading: true })
     try {
-      const prefs = await window.api.getPreferences().catch(() => null)
+      // kimi-only：不再有 windows/wsl 之分，后端忽略 backend 参数。
       const sessions = await window.api.listSessions(cwd, {
         limit: SESSION_PAGE_SIZE,
-        offset: 0,
-        backend: prefs?.wslSupportEnabled ? 'all' : 'windows'
+        offset: 0
       })
       if (sessionListRequestSeq !== requestSeq || get().meta?.cwd !== cwd) return
       set({ sessions, sessionsHasMore: sessions.length === SESSION_PAGE_SIZE })
@@ -1006,11 +1015,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const offset = state.sessions.length
     set({ sessionsLoading: true })
     try {
-      const prefs = await window.api.getPreferences().catch(() => null)
       const page = await window.api.listSessions(cwd, {
         limit: SESSION_PAGE_SIZE,
-        offset,
-        backend: prefs?.wslSupportEnabled ? 'all' : 'windows'
+        offset
       })
       if (loadMoreSessionsRequestSeq !== requestSeq || get().meta?.cwd !== cwd) return
       set((s) => {
@@ -1066,6 +1073,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessionConfigDirty: false,
       sessionModelDirty: false,
       bridgeEnded: false,
+      planEntries: [],
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1131,6 +1139,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessionConfigDirty: false,
       sessionModelDirty: false,
       bridgeEnded: false,
+      planEntries: [],
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1435,11 +1444,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             },
             sessionModelDirty: false,
             bridgeEnded: false,
+            // 新会话/恢复会话时清空上一会话残留的待办清单（新 plan 事件会重建）。
+            planEntries: [],
             status: { ...s.status }
           }))
         } else if (subtype === 'status') {
           const status = (msg as unknown as { status: string | null }).status
           set((s) => ({ status: { ...s.status, compacting: status === 'compacting' } }))
+        } else if (subtype === 'slash_commands') {
+          const c = (msg as unknown as { commands?: SkillInfo[] }).commands
+          set({ slashCommands: Array.isArray(c) ? c : [] })
+        } else if (subtype === 'plan') {
+          // ACP plan：kimi 全量推送待办清单，直接整体替换（实时更新）。
+          const entries = (msg as unknown as { entries?: PlanEntry[] }).entries
+          set({ planEntries: Array.isArray(entries) ? entries : [] })
         } else if (subtype === 'permission_denied') {
           const d = msg as unknown as { tool_use_id: string; message: string }
           set((s) => ({
@@ -1572,7 +1590,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           })
         } else if (Array.isArray(content)) {
           const toolResults = content.filter(
-            (c): c is { type: 'tool_result'; tool_use_id: string; content: unknown; is_error?: boolean } =>
+            (c): c is { type: 'tool_result'; tool_use_id: string; content: unknown; is_error?: boolean; partial?: boolean } =>
               !!c && typeof c === 'object' && (c as { type?: string }).type === 'tool_result'
           )
           if (toolResults.length) {
@@ -1581,9 +1599,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               for (const tr of toolResults) {
                 items = mapTool(items, tr.tool_use_id, (b) => ({
                   ...b,
-                  status: tr.is_error ? 'error' : 'done',
+                  // partial=true 是执行中的流式内容（子代理输出等）：只更新内容。
+                  status: tr.partial ? 'running' : tr.is_error ? 'error' : 'done',
                   result: tr.content,
-                  resultIsError: !!tr.is_error
+                  resultIsError: tr.partial ? b.resultIsError : !!tr.is_error
                 }))
               }
               return { items }

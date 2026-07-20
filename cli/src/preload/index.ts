@@ -135,6 +135,9 @@ const api: ForgeApi = {
 
   respondPermission: (resp) => ipcRenderer.invoke('forge:respondPermission', resp),
 
+  getSessionUsage: (sessionId) => ipcRenderer.invoke('forge:getSessionUsage', sessionId),
+  getPlanUsage: () => ipcRenderer.invoke('forge:getPlanUsage'),
+
   // --- Git integration ---
   isGitRepo: (cwd) => ipcRenderer.invoke('forge:gitIsRepo', cwd),
   gitGetCurrentBranch: (cwd) => ipcRenderer.invoke('forge:gitGetCurrentBranch', cwd),

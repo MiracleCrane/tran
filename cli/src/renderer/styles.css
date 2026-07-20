@@ -1462,7 +1462,7 @@ textarea:focus-visible {
 @keyframes liquid-float-in {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(0.975);
+    transform: translateY(8px) scale(0.98);
   }
   to {
     opacity: 1;
@@ -1471,7 +1471,7 @@ textarea:focus-visible {
 }
 
 .liquid-float-in {
-  animation: liquid-float-in 320ms cubic-bezier(0.18, 1.2, 0.28, 1) both;
+  animation: liquid-float-in 200ms var(--easing-out, cubic-bezier(0.22, 1, 0.36, 1)) both;
   transform-origin: center;
 }
 
@@ -2456,4 +2456,198 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
 @keyframes stream-cursor-bar-blink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }
+}
+
+/* ------------------------------------------------------------------ *
+ * Tran motion tokens & 细腻装饰动效（克制精致方向）
+ * 规则：只动画 transform / opacity（GPU 合成）；交互动画 150~250ms、
+ * ease-out 为主、无 spring；环境动画慢而低存在感。
+ * ------------------------------------------------------------------ */
+:root {
+  --motion-fast: 150ms;
+  --motion-med: 220ms;
+  --easing-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes tran-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes tran-fade-rise {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes tran-pop-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes tran-cursor-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+@keyframes tran-glow-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@keyframes tran-bar-in {
+  from { opacity: 0; transform: scaleY(0.2); }
+  to { opacity: 1; transform: scaleY(1); }
+}
+
+/* 窗口首次加载：整体淡入一次（一次性动画，非循环） */
+.app-shell {
+  animation: tran-fade-in 300ms var(--easing-out) both;
+}
+
+/* 环境紫光层：全应用只挂一层，alpha ≤ 0.06。
+ *  实测（本机 GPU 一般）：即便抬到内容之上，大面积渐变层逐帧位移仍会把
+ *  合成帧率打到 ~44fps，故放弃位移动画，改为静态光晕——零持续合成开销。
+ *  z-index 保持在内容之上，避免参与 backdrop-filter 采样。 */
+.tran-ambient {
+  position: absolute;
+  inset: -12%;
+  z-index: 30;
+  pointer-events: none;
+  background:
+    radial-gradient(38rem circle at 22% 18%, rgba(139, 92, 246, 0.06), transparent 62%),
+    radial-gradient(30rem circle at 78% 72%, rgba(139, 92, 246, 0.05), transparent 60%);
+}
+
+/* 消息/小元素入场：opacity + translateY，stagger 上限见使用处（≤300ms）。 */
+.tran-enter {
+  animation: tran-fade-rise 180ms var(--easing-out) both;
+}
+
+.tran-msg-enter {
+  animation: tran-fade-rise var(--motion-med) var(--easing-out) both;
+}
+
+/* Modal 统一入场：backdrop 淡入 + 面板 scale(0.96→1)。 */
+.tran-modal-backdrop {
+  animation: tran-fade-in 180ms var(--easing-out) both;
+}
+
+.tran-modal-panel {
+  animation: tran-pop-in 180ms var(--easing-out) both;
+}
+
+/* 流式消息末尾的紫色呼吸光标（竖线），流结束即移除。 */
+.tran-stream-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  border-radius: 1px;
+  background: rgba(139, 92, 246, 0.9);
+  animation: tran-cursor-breathe 1.2s ease-in-out infinite;
+}
+
+/* 工具卡运行态：克制的紫色边框光晕（静态 box-shadow 由 ::after 承载，
+ *  只有 opacity 参与过渡/呼吸，不重绘阴影本身）。 */
+.tool-call-card {
+  position: relative;
+}
+
+.tool-call-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow:
+    inset 0 0 0 1px rgba(139, 92, 246, 0.38),
+    0 0 14px rgba(139, 92, 246, 0.1);
+  transition: opacity var(--motion-med) var(--easing-out);
+}
+
+.tool-call-card.is-running::after {
+  opacity: 1;
+  animation: tran-glow-breathe 2.8s ease-in-out infinite;
+}
+
+/* 思考块：左侧 2px 紫色竖条 + 底色微差（用 border 而非 ::before，
+ *  避免与 glass-panel-soft 的玻璃镜头伪元素冲突）。 */
+.thinking-block {
+  position: relative;
+  background: rgba(139, 92, 246, 0.045);
+  border-left: 2px solid rgba(139, 92, 246, 0.55);
+}
+
+/* Composer 聚焦：独立 ring 元素承载光晕，只过渡 opacity。
+ *  glass-panel 有 overflow:hidden，外发光会被裁剪，故用内阴影。 */
+.composer-panel {
+  position: relative;
+}
+
+.composer-focus-ring {
+  position: absolute;
+  inset: -1px;
+  z-index: 0;
+  border-radius: 18px;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow:
+    inset 0 0 0 1px rgba(139, 92, 246, 0.45),
+    inset 0 0 18px rgba(139, 92, 246, 0.08);
+  transition: opacity var(--motion-med) var(--easing-out);
+}
+
+.composer-panel:focus-within .composer-focus-ring {
+  opacity: 1;
+}
+
+/* 发送按钮：hover 亮度 + scale(1.03)，按下轻微回缩，150ms。 */
+.composer-send {
+  transition:
+    transform var(--motion-fast) var(--easing-out),
+    filter var(--motion-fast) var(--easing-out);
+}
+
+.composer-send:hover:not(:disabled) {
+  transform: scale(1.03);
+  filter: brightness(1.12);
+}
+
+.composer-send:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+/* Sidebar 选中指示条：挂载时 scaleY 滑入（条本身只在选中时渲染）。 */
+.session-active-bar {
+  transform-origin: center;
+  animation: tran-bar-in var(--motion-med) var(--easing-out) both;
+}
+
+/* 窗口顶栏底部 1px 紫色渐变分隔线（静态）。 */
+.window-titlebar {
+  background-image: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.22), transparent);
+  background-size: 100% 1px;
+  background-position: bottom;
+  background-repeat: no-repeat;
+}
+
+/* DisclosureSelect 面板：更精致的静态阴影层次（不加动画）。 */
+.disclosure-select-panel {
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.34),
+    0 2px 8px rgba(0, 0, 0, 0.22),
+    0 0 0 1px rgba(139, 92, 246, 0.05);
+}
+
+/* 减少动态偏好：关掉所有装饰性动画/过渡。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
