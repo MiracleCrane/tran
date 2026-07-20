@@ -12,7 +12,6 @@ import ErrorDiagnosticPanel from './components/ErrorDiagnosticPanel'
 import GitToolbar, { requestCloseGitDrawer } from './components/GitToolbar'
 import AttachmentPreviewPane from './components/AttachmentPreviewPane'
 import PermissionModal from './components/PermissionModal'
-import UsageModal from './components/UsageModal'
 import McpPanel from './components/McpPanel'
 import ProvidersPanel from './components/ProvidersPanel'
 import SkillsPanel from './components/SkillsPanel'
@@ -714,7 +713,6 @@ export default function App(): JSX.Element {
             {(previewOpen || previewMounted) && <AttachmentPreviewPane />}
           </div>
           <PermissionModal />
-          <UsageModal />
           <ClosePromptDialog open={closePromptOpen} onClose={() => setClosePromptOpen(false)} />
           <UpdateAvailableDialog
             info={availableUpdate}

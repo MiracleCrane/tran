@@ -22,6 +22,7 @@ import {
   type AcpRpcMessage
 } from './AcpClient'
 import { resolveWindowsKimiCommand } from '../windowsKimi'
+import { recordSessionTitle } from '../sessionTitles'
 import { log } from '../logger'
 
 interface QueuedMessage {
@@ -339,6 +340,8 @@ export class KimiBackend {
 
   private async runTurn(session: ActiveKimiSession, message: QueuedMessage): Promise<void> {
     if (!session.acpSessionId) throw new Error('Kimi session is not ready.')
+    // 侧栏标题兜底：kimi 对未命名会话只回 "New Session"，用首条用户消息补。
+    recordSessionTitle(session.acpSessionId, firstUserText(message.content))
     const client = await this.ensureClient()
     const payload = contentToPrompt(message.content)
     const response = await client.request<Record<string, unknown>>('session/prompt', {
@@ -769,6 +772,16 @@ export class KimiBackend {
   }
 }
 
+/** 取用户消息的首段纯文本（作为会话标题兜底；附件块跳过）。 */
+function firstUserText(content: string | unknown[]): string {
+  if (typeof content === 'string') return content
+  for (const block of content) {
+    const b = block as { type?: string; text?: string } | null
+    if (b?.type === 'text' && b.text) return b.text
+  }
+  return ''
+}
+
 function contentToPrompt(content: string | unknown[]): PromptPayload {
   if (typeof content === 'string') {
     return { prompt: [{ type: 'text', text: content }] }
@@ -831,11 +844,25 @@ function readFileSlice(path: string, line?: number, limit?: number): string {
 }
 
 function permissionOptionId(options: Array<Record<string, unknown>>, behavior: 'allow' | 'deny'): string | null {
-  const ids = options.map((option) => asString(option.optionId) ?? asString(option.option_id)).filter(Boolean) as string[]
+  const entries = options
+    .map((option) => ({
+      id: asString(option.optionId) ?? asString(option.option_id),
+      kind: asString(option.kind)
+    }))
+    .filter((entry): entry is { id: string; kind: string | undefined } => !!entry.id)
+  // kimi 实测：optionId 是 approve_once/approve_always/reject，语义在 kind 字段
+  // （allow_once/allow_always/reject_once）——优先按 kind 匹配，optionId 做兜底。
   if (behavior === 'allow') {
-    return ids.find((id) => id === 'allow_once') ?? ids.find((id) => id.startsWith('allow')) ?? null
+    const hit =
+      entries.find((e) => e.kind === 'allow_once') ??
+      entries.find((e) => e.kind?.startsWith('allow')) ??
+      entries.find((e) => e.id.startsWith('allow') || e.id.startsWith('approve'))
+    return hit?.id ?? null
   }
-  return ids.find((id) => id === 'deny') ?? ids.find((id) => id.startsWith('reject')) ?? null
+  const hit =
+    entries.find((e) => e.kind?.startsWith('reject')) ??
+    entries.find((e) => e.id === 'deny' || e.id.startsWith('reject'))
+  return hit?.id ?? null
 }
 
 function textFromContentBlock(value: unknown): string {

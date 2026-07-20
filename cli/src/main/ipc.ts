@@ -41,7 +41,7 @@ import {
 } from './runtimeDiagnostics'
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { listKimiSessions } from './kimiHistory'
-import { fetchPlanUsage } from './usageService'
+import { getPlanUsageCached } from './usageService'
 import * as gitModule from './git'
 import { log } from './logger'
 import type {
@@ -407,7 +407,7 @@ export function registerIpc(
     }
   })
 
-  ipcMain.handle('forge:getPlanUsage', async (): Promise<PlanUsageResult> => fetchPlanUsage())
+  ipcMain.handle('forge:getPlanUsage', async (): Promise<PlanUsageResult> => getPlanUsageCached())
 
   ipcMain.handle(
     'forge:listMarketplacePlugins',

@@ -156,3 +156,41 @@ export async function fetchPlanUsage(): Promise<PlanUsageResult> {
     return { ok: false, error: '云端返回数据无法解析' }
   }
 }
+
+/** --- 60s 缓存轮询：状态栏圆环/悬停预览共用，避免每次悬停都打云端接口。
+ *  <30s 直接回缓存；30–60s 先回缓存、后台刷新；>60s 等刷新。 */
+const CACHE_FRESH_MS = 30_000
+const CACHE_MAX_MS = 60_000
+
+let planUsageCache: { at: number; result: PlanUsageResult } | null = null
+let planUsageInflight: Promise<PlanUsageResult> | null = null
+
+function refreshPlanUsage(): Promise<PlanUsageResult> {
+  if (!planUsageInflight) {
+    planUsageInflight = fetchPlanUsage()
+      .then((result) => {
+        // 失败时保留旧缓存兜底（有缓存回缓存，没缓存回错误）。
+        if (result.ok) planUsageCache = { at: Date.now(), result }
+        planUsageInflight = null
+        return planUsageCache?.result ?? result
+      })
+      .catch((error) => {
+        planUsageInflight = null
+        log('usage', `plan usage refresh failed: ${error instanceof Error ? error.message : String(error)}`)
+        return planUsageCache?.result ?? { ok: false as const, error: NETWORK_ERROR_MESSAGE }
+      })
+  }
+  return planUsageInflight
+}
+
+export function getPlanUsageCached(): Promise<PlanUsageResult> {
+  const cached = planUsageCache
+  if (!cached) return refreshPlanUsage()
+  const age = Date.now() - cached.at
+  if (age < CACHE_FRESH_MS) return Promise.resolve(cached.result)
+  if (age < CACHE_MAX_MS) {
+    void refreshPlanUsage()
+    return Promise.resolve(cached.result)
+  }
+  return refreshPlanUsage()
+}

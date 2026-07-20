@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import { useUiStore } from '../store/uiStore'
 import type { TranscriptItem } from '../types'
 import SubagentMonitor from './SubagentMonitor'
+import UsageRings from './UsageRings'
 
 function fmt(n?: number): string {
   if (n == null) return '—'
@@ -122,14 +122,7 @@ export default function StatusBar(): JSX.Element {
           <span title="输入 / 输出 token">
             {fmt(inputTokens)} / {fmt(outputTokens)}
           </span>
-          <button
-            type="button"
-            onClick={() => useUiStore.getState().setUsageOpen(true)}
-            className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
-            title="查看用量（套餐额度 / 会话用量）"
-          >
-            用量
-          </button>
+          <UsageRings />
           {stopReason && (
             <span className="text-zinc-600">· 结束: {stopReason}</span>
           )}

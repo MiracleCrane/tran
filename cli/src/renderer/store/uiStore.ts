@@ -33,7 +33,7 @@ interface UiStore {
   blockingOverlay: BlockingOverlayState | null
   showBlockingOverlay: (label?: string) => string
   hideBlockingOverlay: (id: string) => void
-  /** 用量面板（UsageModal）开关。 */
+  /** 用量预览卡钉住开关（UsageRings；/usage 命令或点击圆环钉住，点别处关闭）。 */
   usageOpen: boolean
   setUsageOpen: (open: boolean) => void
 }

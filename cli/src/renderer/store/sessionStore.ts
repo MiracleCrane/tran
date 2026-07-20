@@ -162,6 +162,17 @@ interface SessionHistoryHydrationTask {
 let activeHistoryHydrationTask: SessionHistoryHydrationTask | null = null
 let transcriptScrolling = false
 
+/** turn 结束后刷新侧栏会话列表（防抖）：kimi 在会话产生内容后才持久化/更新
+ *  session/list 条目，只在 startSession 时刷新会漏掉"刚聊完"的会话。 */
+let sessionsRefreshTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleSessionsRefresh(get: () => SessionStore): void {
+  if (sessionsRefreshTimer) clearTimeout(sessionsRefreshTimer)
+  sessionsRefreshTimer = setTimeout(() => {
+    sessionsRefreshTimer = null
+    void get().refreshSessions()
+  }, 1500)
+}
+
 function sessionHistoryCacheKey(
   cwd: string,
   sdkSessionId: string,
@@ -1414,6 +1425,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         bridgeEnded: true,
         status: { ...s.status, running: false, error: endedError ?? s.status.error }
       }))
+      scheduleSessionsRefresh(get)
       return
     }
     const msg = e.message as Record<string, unknown> & { type: string }
@@ -1770,6 +1782,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           pendingQueue: s.pendingQueue.slice(1),
           currentStreamingMsgId: null
         }))
+        // turn 完成：kimi 此时已持久化会话，刷新侧栏"最近会话"（防抖）。
+        scheduleSessionsRefresh(get)
         break
       }
       default:

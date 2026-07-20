@@ -1,5 +1,6 @@
 import { AcpClient } from './agent/AcpClient'
 import { resolveWindowsKimiCommand } from './windowsKimi'
+import { localSessionTitle } from './sessionTitles'
 import { log } from './logger'
 import type { SessionListItem } from '../shared/ipc'
 
@@ -102,10 +103,13 @@ export async function listKimiSessions(
       const entryCwd = asString(entry.cwd)
       // 只列当前项目目录的会话（条目不带 cwd 时保守放行）。
       if (entryCwd && normalizeCwd(entryCwd) !== targetCwd) continue
+      // 标题兜底：kimi 未命名会话只回 "New Session"，用本地记录的首条用户消息补。
+      const kimiTitle = asString(entry.title) ?? asString(entry.summary) ?? asString(entry.name) ?? ''
+      const fallbackTitle = kimiTitle && kimiTitle !== 'New Session' ? kimiTitle : localSessionTitle(sessionId)
       sessions.push({
         sessionId,
         agentBackend: 'kimi',
-        summary: asString(entry.title) ?? asString(entry.summary) ?? asString(entry.name) ?? '',
+        summary: fallbackTitle ?? kimiTitle,
         lastModified: asTimestamp(entry.updatedAt) ?? asTimestamp(entry.lastModified) ?? 0,
         ...(entryCwd ? { cwd: entryCwd } : {}),
         runtimeBackend: 'windows'

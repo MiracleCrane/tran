@@ -2651,3 +2651,48 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* === 小面积动画渐变（fps 安全：只动 transform/opacity，实测 background-position
+ *  动画会强制逐帧重绘、掉到 ~31fps，已全部改成合成器友好的写法） === */
+
+/* 发送按钮：静态紫色渐变底 + hover 时一道高光扫过（transform，合成器动画）。 */
+@keyframes tran-sheen {
+  to { transform: translateX(110%); }
+}
+.composer-send {
+  position: relative;
+  overflow: hidden;
+  background-image:
+    radial-gradient(7rem circle at 22% 10%, rgba(255, 255, 255, 0.22), transparent 60%),
+    linear-gradient(100deg, rgba(139, 92, 246, 0.95), rgba(167, 139, 250, 0.98) 50%, rgba(139, 92, 246, 0.95));
+}
+.send-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent 25%, rgba(255, 255, 255, 0.32) 50%, transparent 75%);
+  transform: translateX(-110%);
+}
+.composer-send:hover:not(:disabled) .send-sheen {
+  animation: tran-sheen 1.6s linear infinite;
+}
+
+/* Composer 聚焦：静态渐变描边（mask 裁成 1.5px 描边层）+ 呼吸微光（opacity）。 */
+.composer-panel:focus-within .composer-focus-ring {
+  padding: 1.5px;
+  background-image: linear-gradient(100deg, rgba(139, 92, 246, 0.35), rgba(167, 139, 250, 0.85), rgba(139, 92, 246, 0.35));
+  animation: tran-glow-breathe 2.8s ease-in-out infinite;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}
+
+/* 侧栏选中指示条：静态紫色渐变 + 呼吸微光（opacity）。 */
+.session-active-bar {
+  background-image: linear-gradient(180deg, #8b5cf6, #a78bfa, #8b5cf6);
+  animation:
+    tran-bar-in var(--motion-med) var(--easing-out) both,
+    tran-glow-breathe 3.2s ease-in-out infinite;
+}

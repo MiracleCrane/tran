@@ -91,10 +91,12 @@ const STATUS_META: Record<
 }
 
 const ToolCallCard = memo(function ToolCallCard({ block }: { block: ToolBlock }): JSX.Element {
-  // 子代理（kimi 的 Agent tool_call）默认展开：输出是实时流式的，值得直接可见；
-  // 普通工具调用保持默认折叠，避免刷屏。
+  // 默认收起只显示一行摘要；运行中/排队中的卡片例外自动展开（输出值得直接可见），
+  // 完成后自动收回摘要；用户手动点击后以其选择为准。
   const isSubagent = block.name === 'Agent'
-  const [collapsed, setCollapsed] = useState(!isSubagent)
+  const active = block.status === 'running' || block.status === 'pending'
+  const [userToggled, setUserToggled] = useState<boolean | null>(null)
+  const collapsed = userToggled ?? !active
   const meta = STATUS_META[block.status]
   const summary = summaryForTool(block.name, block.input)
   const resultText = collapsed ? '' : normalizeResult(block.result)
@@ -111,7 +113,7 @@ const ToolCallCard = memo(function ToolCallCard({ block }: { block: ToolBlock })
       <button
         type="button"
         aria-expanded={!collapsed}
-        onClick={() => setCollapsed((c) => !c)}
+        onClick={() => setUserToggled(!collapsed)}
         className="flex w-full items-center gap-2 bg-[#14151b] px-3 py-2 text-left transition-colors hover:bg-[#1b1c23]"
       >
         <span className={`h-2 w-2 shrink-0 rounded-full ${isSubagent ? 'bg-accent' : meta.dot} ${streaming ? 'animate-pulse' : ''}`} />

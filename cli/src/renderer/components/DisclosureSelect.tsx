@@ -23,7 +23,8 @@ export default function DisclosureSelect({
   className,
   placement = 'bottom',
   disabled = false,
-  title
+  title,
+  compact = false
 }: {
   value: string
   options: DisclosureOption[]
@@ -34,6 +35,8 @@ export default function DisclosureSelect({
   placement?: 'bottom' | 'top'
   disabled?: boolean
   title?: string
+  /** 紧凑模式（Composer 底部药丸）：更小内边距与圆角。 */
+  compact?: boolean
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [elevated, setElevated] = useState(false)
@@ -108,7 +111,9 @@ export default function DisclosureSelect({
           shoving it; trigger + options share it, so opening reads as the frame
           itself growing, not a second frame appearing. */}
       <div
-        className={`glass-panel-soft disclosure-select-panel absolute inset-x-0 rounded-2xl p-1.5 ${
+        className={`glass-panel-soft disclosure-select-panel absolute inset-x-0 ${
+          compact ? 'rounded-xl p-1' : 'rounded-2xl p-1.5'
+        } ${
           elevated ? 'z-[90]' : 'z-50'
         } ${disabled ? 'opacity-60' : ''} ${placement === 'top' ? 'bottom-0' : 'top-0'}`}
         onClick={(event) => event.stopPropagation()}
@@ -120,7 +125,9 @@ export default function DisclosureSelect({
           onClick={() => setOpen((o) => !o)}
           disabled={disabled}
           title={title}
-          className="flex w-full items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-left text-xs text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-zinc-300"
+          className={`flex w-full items-center gap-1.5 rounded-lg text-left text-xs text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-zinc-300 ${
+            compact ? 'px-2 py-1' : 'px-2.5 py-1.5'
+          }`}
           aria-expanded={open}
         >
           {triggerLeading}
@@ -145,8 +152,8 @@ export default function DisclosureSelect({
           the flow (the absolute frame doesn't, by itself). Matches the
           frame's padding + a one-line trigger so heights line up. */}
       <div className="invisible" aria-hidden>
-        <div className="glass-panel-soft rounded-2xl p-1.5">
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs">
+        <div className={`glass-panel-soft ${compact ? 'rounded-xl p-1' : 'rounded-2xl p-1.5'}`}>
+          <div className={`flex items-center gap-1.5 text-xs ${compact ? 'px-2 py-1' : 'px-2.5 py-1.5'}`}>
             {triggerLeading ? <span className="w-[14px]" /> : null}
             <span className="flex-1 truncate">{label}</span>
             <span className="w-[13px]" />

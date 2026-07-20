@@ -723,7 +723,7 @@ export default function Composer(): JSX.Element {
               type="button"
               onClick={() => void pickAttachment()}
               disabled={!meta}
-              className="glass-control flex h-9 w-9 items-center justify-center rounded-xl text-zinc-300 transition hover:bg-white/[0.09] disabled:opacity-40"
+              className="glass-control flex h-8 w-8 items-center justify-center rounded-lg text-zinc-300 transition hover:bg-white/[0.09] disabled:opacity-40"
               title="添加附件(从工作目录选择文件)"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -740,14 +740,14 @@ export default function Composer(): JSX.Element {
               <kbd className="font-sans text-zinc-400">Enter</kbd> 发送 ·{' '}
               <kbd className="font-sans text-zinc-400">Shift+Enter</kbd> 换行
             </span>
-            <div className="composer-actions ml-auto flex items-end gap-2">
+            <div className="composer-actions ml-auto flex items-center gap-1.5">
               {meta && (
                 <button
                   type="button"
                   role="switch"
                   aria-checked={meta.permissionMode === 'plan'}
                   onClick={() => void setPermissionMode(meta.permissionMode === 'plan' ? 'default' : 'plan')}
-                  className={`glass-control flex h-10 shrink-0 items-center gap-2 rounded-xl px-3 text-xs transition ${
+                  className={`glass-control flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs transition ${
                     meta.permissionMode === 'plan' ? 'border-accent/50 text-accent' : 'text-zinc-300'
                   }`}
                   title="先让智能体梳理计划，再修改文件"
@@ -775,13 +775,14 @@ export default function Composer(): JSX.Element {
                     if (v !== meta.permissionMode) void setPermissionMode(v as PermissionMode)
                   }}
                   placement="top"
+                  compact
                   triggerLeading={
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="shrink-0 text-zinc-400">
                       <path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6l7.5-3z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
                       <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   }
-                  className="min-w-36"
+                  className="min-w-28"
                 />
               )}
               {meta && (
@@ -792,6 +793,7 @@ export default function Composer(): JSX.Element {
                     if (v !== effort) void setEffort(v as EffortLevel)
                   }}
                   placement="top"
+                  compact
                   triggerLeading={
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="shrink-0 text-zinc-400">
                       <path d="M5 20V14M12 20V8M19 20V4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -806,13 +808,14 @@ export default function Composer(): JSX.Element {
                   options={models.map((m) => ({ value: m.id, label: m.label }))}
                   onChange={(v) => void setModel(v)}
                   placement="top"
-                  className="min-w-36"
+                  compact
+                  className="min-w-28"
                 />
               )}
               {running && (
                 <button
                   onClick={() => void interrupt()}
-                  className="h-10 shrink-0 rounded-xl border border-red-900/60 bg-red-950/40 px-4 text-sm font-medium text-red-300 hover:bg-red-950/60"
+                  className="h-8 shrink-0 rounded-lg border border-red-900/60 bg-red-950/40 px-3 text-xs font-medium text-red-300 hover:bg-red-950/60"
                   title="中断当前处理"
                 >
                   停止
@@ -821,9 +824,10 @@ export default function Composer(): JSX.Element {
               <button
                 onClick={() => void submit()}
                 disabled={!text.trim() && attachments.length === 0}
-                className="composer-send accent-soft-button h-10 shrink-0 rounded-xl px-5 text-sm font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                className="composer-send accent-soft-button h-8 shrink-0 rounded-lg px-4 text-xs font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                发送
+                <span className="send-sheen" aria-hidden />
+                <span className="relative">发送</span>
               </button>
               <button
                 type="button"
@@ -831,7 +835,7 @@ export default function Composer(): JSX.Element {
                   setSlashContext(null)
                   setShowTemplates((open) => !open)
                 }}
-                className={`glass-control composer-template-button flex h-10 items-center justify-center rounded-xl px-3 text-xs text-zinc-300 transition ${
+                className={`glass-control composer-template-button flex h-8 items-center justify-center rounded-lg px-2.5 text-xs text-zinc-300 transition ${
                   showTemplates ? 'is-open' : ''
                 }`}
                 title="Prompt 模板"

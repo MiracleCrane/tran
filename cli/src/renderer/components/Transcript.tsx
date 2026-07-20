@@ -176,17 +176,47 @@ const UserMessage = memo(function UserMessage({ item }: { item: UserItem }): JSX
   )
 })
 
-const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }): JSX.Element {
+const ThinkingBlock = memo(function ThinkingBlock({
+  text,
+  streaming = false
+}: {
+  text: string
+  streaming?: boolean
+}): JSX.Element {
+  // 默认收起（一行摘要"思考过程 · N 字"）；流式生成期间自动展开，完成后收回；
+  // 用户手动点击后以其选择为准。展开态定高 200px 内部滚动，不把布局顶来顶去。
+  const [userToggled, setUserToggled] = useState<boolean | null>(null)
+  const open = userToggled ?? streaming
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+
+  // 流式期间内容自动滚到底部（跟随最新思考）。
+  useEffect(() => {
+    const body = bodyRef.current
+    if (open && streaming && body) body.scrollTop = body.scrollHeight
+  }, [text, open, streaming])
+
   if (!text) return <></>
   return (
-    <details open className="thinking-block glass-panel-soft my-1.5 rounded-xl px-3 py-2">
-      <summary className="cursor-pointer select-none text-xs font-medium text-zinc-500 hover:text-zinc-400">
-        思考过程
-      </summary>
-      <div className="mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap pl-1.5 text-xs leading-relaxed text-zinc-500">
-        {text}
-      </div>
-    </details>
+    <div className="thinking-block glass-panel-soft my-1.5 rounded-xl px-3 py-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setUserToggled(!open)}
+        className="flex w-full cursor-pointer select-none items-center gap-1.5 text-left text-xs font-medium text-zinc-500 hover:text-zinc-400"
+      >
+        <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
+        思考过程 · {text.length} 字
+        {streaming && <span className="stream-cursor-glow" />}
+      </button>
+      {open && (
+        <div
+          ref={bodyRef}
+          className="mt-1.5 max-h-[200px] overflow-auto whitespace-pre-wrap pl-1.5 text-xs leading-relaxed text-zinc-500"
+        >
+          {text}
+        </div>
+      )}
+    </div>
   )
 })
 
@@ -223,7 +253,7 @@ const AssistantMessage = memo(function AssistantMessage({
               </div>
             )
           }
-          if (block.kind === 'thinking') return <ThinkingBlock key={i} text={block.text} />
+          if (block.kind === 'thinking') return <ThinkingBlock key={i} text={block.text} streaming={isStreaming} />
           return <ToolCallCard key={i} block={block} />
         })}
       {isStreaming && (
