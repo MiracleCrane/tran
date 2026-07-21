@@ -549,7 +549,8 @@ function applyStreamEvent(
           name: cb.name ?? 'tool',
           input: {},
           status: 'pending',
-          inputRaw: ''
+          inputRaw: '',
+          startedAt: Date.now()
         }
       return { ...item, blocks }
     })
@@ -914,6 +915,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   async interrupt() {
     const meta = get().meta
     if (!meta) return
+    // 手动停止态：被中断轮次里仍 running/pending 的工具块标记 stopped（区别于"出错"）。
+    const now = Date.now()
+    set((s) => ({
+      items: s.items.map((it) =>
+        it.kind !== 'assistant'
+          ? it
+          : {
+              ...it,
+              blocks: it.blocks.map((b) =>
+                b && b.kind === 'tool' && (b.status === 'running' || b.status === 'pending')
+                  ? { ...b, status: 'stopped' as const, endedAt: now }
+                  : b
+              )
+            }
+      )
+    }))
     await window.api.interrupt(meta.sessionId)
   },
 
@@ -1632,7 +1649,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             items: mapTool(s.items, d.tool_use_id, (b) => ({
               ...b,
               status: 'denied',
-              errorMessage: d.message
+              errorMessage: d.message,
+              endedAt: Date.now()
             }))
           }))
         } else if (subtype === 'task_started') {
@@ -1770,7 +1788,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                   // partial=true 是执行中的流式内容（子代理输出等）：只更新内容。
                   status: tr.partial ? 'running' : tr.is_error ? 'error' : 'done',
                   result: tr.content,
-                  resultIsError: tr.partial ? b.resultIsError : !!tr.is_error
+                  resultIsError: tr.partial ? b.resultIsError : !!tr.is_error,
+                  // 终态打戳（任务面板耗时）；partial 中间态不打。
+                  ...(tr.partial ? {} : { endedAt: Date.now() })
                 }))
               }
               return { items }
@@ -1834,7 +1854,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               toolUseId: String(c.id ?? ''),
               name: String(c.name ?? 'tool'),
               input: c.input,
-              status: 'pending'
+              status: 'pending',
+              startedAt: Date.now()
             })
           }
         }

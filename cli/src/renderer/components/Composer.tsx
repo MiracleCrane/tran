@@ -13,7 +13,8 @@ import { useUiStore } from '../store/uiStore'
 import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, PermissionMode } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
 import ModePanel from './ModePanel'
-import { AGENT_TOOL_NAMES, BASH_TOOL_NAMES, countRunningTools } from '../utils/toolStats'
+import { AGENT_TOOL_NAMES, BASH_TOOL_NAMES, countRunningTools, countTotalTools } from '../utils/toolStats'
+import TaskPanel from './TaskPanel'
 import UsageRings from './UsageRings'
 import { defaultModelsForAgent, modelLabelForAgent } from '../../shared/models'
 import { onForgeEvent } from '../events'
@@ -140,13 +141,16 @@ export default function Composer(): JSX.Element {
   const effort = useSessionStore((s) => s.effort)
   const setEffort = useSessionStore((s) => s.setEffort)
   const pending = useSessionStore((s) => s.pendingQueue)
-  // 状态 chips（输入框上方一行）：运行中 Bash/子 Agent/待办进度，全为 0 不占高度。
+  // 状态 chips（常驻行）：计数=会话累计（含历史重放），运行中数用于高亮和 (r/N) 显示。
+  const bashTotal = useSessionStore((s) => countTotalTools(s.items, BASH_TOOL_NAMES))
   const runningBash = useSessionStore((s) => countRunningTools(s.items, BASH_TOOL_NAMES))
+  const agentTotal = useSessionStore((s) => countTotalTools(s.items, AGENT_TOOL_NAMES))
   const runningAgents = useSessionStore((s) => countRunningTools(s.items, AGENT_TOOL_NAMES))
   const planTotal = useSessionStore((s) => s.planEntries.length)
   const planDone = useSessionStore(
     (s) => s.planEntries.filter((e) => e.status === 'completed').length
   )
+  const [taskPanelOpen, setTaskPanelOpen] = useState(false)
   const statusError = useSessionStore((s) => s.status.error)
   const stopReason = useSessionStore((s) => s.status.stopReason)
   const [text, setText] = useState('')
@@ -587,29 +591,44 @@ export default function Composer(): JSX.Element {
             ))}
           </div>
         )}
-        {/* 状态 chips（kimi web 式，输入框上方一行；无活动时不占高度） */}
-        {/* 状态行（输入框上方）：左侧瞬态错误/活动 chips，右侧常驻 Usage 圆环。
-            圆环原在底部 StatusBar，bar 已退役上移至此。 */}
+        {/* 状态行（输入框上方）：左侧瞬态错误/常驻 chips（计数=会话累计，0 置灰，
+            点击展开任务面板），右侧常驻 Usage 圆环（自退役的 StatusBar 上移）。 */}
         <div className="mb-1.5 flex items-center gap-3 px-1 text-[11px] text-zinc-500">
           {statusError && <span className="truncate text-red-400">{statusError}</span>}
           {stopReason && !statusError && <span className="text-zinc-600">结束: {stopReason}</span>}
-          {runningBash > 0 && (
-            <span className="flex items-center gap-1" title="运行中的命令行工具调用">
-              <span className="text-blue-400">🕐</span>后台 Bash ({runningBash})
-            </span>
-          )}
-          {runningAgents > 0 && (
-            <span className="flex items-center gap-1" title="运行中的子 Agent 工具调用">
-              <span className="text-accent">✦</span>子 Agent ({runningAgents})
-            </span>
-          )}
-          {planTotal > 0 && (
-            <span className="flex items-center gap-1" title="待办清单完成进度">
-              <span className="text-zinc-400">☰</span>待办 ({planDone}/{planTotal})
-            </span>
-          )}
+          <button
+            type="button"
+            onClick={() => setTaskPanelOpen((o) => !o)}
+            className={`flex items-center gap-1 transition hover:brightness-125 ${
+              runningBash > 0 ? 'text-blue-300' : bashTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
+            }`}
+            title="后台命令（点击查看任务面板）"
+          >
+            <span>🕐</span>后台命令 ({bashTotal})
+          </button>
+          <button
+            type="button"
+            onClick={() => setTaskPanelOpen((o) => !o)}
+            className={`flex items-center gap-1 transition hover:brightness-125 ${
+              runningAgents > 0 ? 'text-accent' : agentTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
+            }`}
+            title="子 Agent（点击查看任务面板）"
+          >
+            <span>✦</span>子 Agent ({runningAgents > 0 ? `${runningAgents}/` : ''}{agentTotal})
+          </button>
+          <button
+            type="button"
+            onClick={() => setTaskPanelOpen((o) => !o)}
+            className={`flex items-center gap-1 transition hover:brightness-125 ${
+              planTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
+            }`}
+            title="待办清单（点击查看任务面板）"
+          >
+            <span>☰</span>待办 ({planDone}/{planTotal})
+          </button>
           <UsageRings />
         </div>
+        <TaskPanel open={taskPanelOpen} />
         <div
           className={`glass-panel composer-panel rounded-[18px] p-3 transition ${
             dragActive ? 'border-accent/60 bg-white/[0.035] shadow-[0_0_0_1px_rgba(139,92,246,0.28)]' : ''

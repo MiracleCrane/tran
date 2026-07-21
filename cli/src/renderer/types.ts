@@ -1,6 +1,6 @@
 import type { AgentBackendId, PickedDirectoryEntry, PermissionRequestPayload } from '../shared/ipc'
 
-export type ToolStatus = 'pending' | 'running' | 'done' | 'error' | 'denied'
+export type ToolStatus = 'pending' | 'running' | 'done' | 'error' | 'denied' | 'stopped'
 
 export interface TextBlock {
   kind: 'text'
@@ -22,6 +22,9 @@ export interface ToolBlock {
   errorMessage?: string
   /** Accumulated raw JSON while a tool_use block streams in. */
   inputRaw?: string
+  /** 创建/终态时间戳（任务面板耗时用；历史重放 items 无 ts，诚实缺省）。 */
+  startedAt?: number
+  endedAt?: number
 }
 export type AssistantBlock = TextBlock | ThinkingBlock | ToolBlock
 

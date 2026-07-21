@@ -738,7 +738,9 @@ export class KimiBackend {
     if (!replay) return
     const content: Array<Record<string, unknown>> = []
     if (replay.thinkingText) content.push({ type: 'thinking', thinking: replay.thinkingText })
-    if (replay.text) content.push({ type: 'text', text: replay.text })
+    // 重放也要剥 GOAL_STATUS 状态行——goal 会话的历史重放里状态行同样不该裸露
+    // （live 路径按 goal 激活态剥，重放路径无 goal 上下文，按模式匹配无条件剥）。
+    if (replay.text) content.push({ type: 'text', text: stripGoalStatusLine(replay.text) })
     if (content.length) {
       replay.messages.push({
         type: 'assistant',

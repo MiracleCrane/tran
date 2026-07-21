@@ -28,7 +28,7 @@ function normalizeResult(result: unknown): string {
 
 /** 子代理（Agent）工具输入的防御式解析：input 可能是对象或 JSON 字符串；
  *  取 description / subagent_type / prompt，解析不出对象时返回 null（走原始回落）。 */
-function parseSubagentInput(input: unknown): {
+export function parseSubagentInput(input: unknown): {
   description?: string
   subagentType?: string
   prompt?: string
@@ -53,7 +53,7 @@ function parseSubagentInput(input: unknown): {
 
 /** 折叠态摘要：按工具类型从 rawInput 提取关键信息（命令行/路径/pattern/
  *  description）。rawInput 可能是对象或 JSON 字符串，防御式解析；失败回落通用摘要。 */
-function summaryForTool(name: string, input: unknown): string {
+export function summaryForTool(name: string, input: unknown): string {
   let value = input
   if (typeof value === 'string') {
     const raw = value
@@ -101,16 +101,24 @@ const STATUS_META: Record<
   running: { label: '运行中', dot: 'bg-blue-400 animate-pulse', text: 'text-blue-400' },
   done: { label: '完成', dot: 'bg-green-500', text: 'text-green-500' },
   error: { label: '出错', dot: 'bg-red-500', text: 'text-red-400' },
-  denied: { label: '已拒绝', dot: 'bg-orange-500', text: 'text-orange-400' }
+  denied: { label: '已拒绝', dot: 'bg-orange-500', text: 'text-orange-400' },
+  stopped: { label: '手动停止', dot: 'bg-zinc-500', text: 'text-zinc-400' }
 }
 
-const ToolCallCard = memo(function ToolCallCard({ block }: { block: ToolBlock }): JSX.Element {
+const ToolCallCard = memo(function ToolCallCard({
+  block,
+  forceExpanded = false
+}: {
+  block: ToolBlock
+  /** 任务面板详情行用：强制展开（用户点击仍可覆盖）。 */
+  forceExpanded?: boolean
+}): JSX.Element {
   // 默认收起只显示一行摘要；运行中/排队中的卡片例外自动展开（输出值得直接可见），
   // 完成后自动收回摘要；用户手动点击后以其选择为准。
   const isSubagent = block.name === 'Agent'
   const active = block.status === 'running' || block.status === 'pending'
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
-  const collapsed = userToggled ?? !active
+  const collapsed = userToggled ?? (forceExpanded ? false : !active)
   const meta = STATUS_META[block.status]
   const summary = summaryForTool(block.name, block.input)
   const resultText = collapsed ? '' : normalizeResult(block.result)
