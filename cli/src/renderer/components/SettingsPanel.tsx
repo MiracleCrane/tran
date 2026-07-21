@@ -18,6 +18,7 @@ import {
 } from '../store/appearanceStore'
 import DisclosureSelect from './DisclosureSelect'
 import { useSessionStore } from '../store/sessionStore'
+import { useUiStore } from '../store/uiStore'
 import {
   createDownloadRequestId,
   formatProgressText,
@@ -34,9 +35,9 @@ const EFFORTS: { id: EffortLevel; label: string }[] = [
 ]
 
 const PERMISSION_MODES: { id: PermissionMode; label: string }[] = [
-  { id: 'default', label: '逐条确认' },
-  { id: 'auto', label: '自动通过' },
-  { id: 'yolo', label: '完全自主(慎用)' }
+  { id: 'default', label: '逐条确认 (default)' },
+  { id: 'auto', label: '自动通过 (auto)' },
+  { id: 'yolo', label: '完全自主 (yolo·慎用)' }
 ]
 
 function RangeControl({
@@ -415,7 +416,16 @@ export default function SettingsPanel(): JSX.Element {
   return (
     <div className="h-full overflow-y-auto bg-bg-base">
       <div className="mx-auto max-w-2xl space-y-6 px-6 py-6">
-        <h1 className="text-lg font-semibold text-zinc-100">设置</h1>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => useUiStore.getState().setView('chat')}
+            className="glass-control flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100"
+          >
+            ← 返回对话
+          </button>
+          <h1 className="text-lg font-semibold text-zinc-100">设置</h1>
+        </div>
 
         <section className="glass-panel-soft rounded-2xl p-4">
           <div className="mb-4 flex items-center justify-between gap-3">

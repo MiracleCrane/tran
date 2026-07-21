@@ -32,9 +32,9 @@ const PERMISSION_MODE_OPTIONS: {
   description: string
   accentClass?: string
 }[] = [
-  { value: 'default', label: '逐条确认', description: '每个工具操作都需要手动确认' },
-  { value: 'auto', label: '自动通过', description: '自动批准工具操作，但关键问题仍会询问', accentClass: 'text-amber-300' },
-  { value: 'yolo', label: '完全自主', description: '完全自主运行，不再询问', accentClass: 'text-red-300' }
+  { value: 'default', label: '逐条确认 (default)', description: '每个工具操作都需要手动确认' },
+  { value: 'auto', label: '自动通过 (auto)', description: '自动批准工具操作，但关键问题仍会询问', accentClass: 'text-amber-300' },
+  { value: 'yolo', label: '完全自主 (yolo)', description: '完全自主运行，不再询问', accentClass: 'text-red-300' }
 ]
 
 type PromptTemplate = { command: string; label: string; text: string }

@@ -3,6 +3,8 @@ interface CommandBlockProps {
   command: string
 }
 
+import { useUiStore } from '../store/uiStore'
+
 function CommandBlock({ label, command }: CommandBlockProps): JSX.Element {
   return (
     <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3">
@@ -33,16 +35,23 @@ export default function HelpPanel(): JSX.Element {
   return (
     <div className="h-full overflow-y-auto bg-bg-base">
       <div className="mx-auto max-w-3xl px-6 py-6">
-        <div className="mb-5">
+        <div className="mb-5 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => useUiStore.getState().setView('chat')}
+            className="glass-control flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[11px] text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100"
+          >
+            ← 返回对话
+          </button>
           <h1 className="text-lg font-semibold text-zinc-100">说明</h1>
-          <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+        </div>
+        <p className="mb-5 mt-1 text-xs leading-relaxed text-zinc-500">
             Tran 通过 ACP 驱动本机的 Kimi Code CLI。请先按下文安装并完成登录。官方文档：
             {' '}
             <ExternalLink href="https://www.kimi.com/code/docs/en/kimi-code-cli/getting-started.html">
               kimi.com/code/docs
             </ExternalLink>
           </p>
-        </div>
 
         <div className="space-y-4">
           <section className="glass-panel-soft rounded-2xl p-4">

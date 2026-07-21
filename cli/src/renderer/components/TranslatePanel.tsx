@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { TranslateEngine, TranslateTestResult } from '../../shared/ipc'
 import { ToolPanelAlert, ToolPanelButton } from './ToolPanelChrome'
+import { useUiStore } from '../store/uiStore'
 
 /** Translate engine management page. Pick which engine translateTexts()
  *  routes through (LLM provider vs Baidu) and configure/test Baidu credentials. */
@@ -79,12 +80,19 @@ export default function TranslatePanel(): JSX.Element {
   return (
     <div className="h-full overflow-y-auto bg-bg-base">
       <div className="mx-auto max-w-2xl space-y-6 px-6 py-6">
-        <div>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => useUiStore.getState().setView('chat')}
+            className="glass-control flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[11px] text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100"
+          >
+            ← 返回对话
+          </button>
           <h1 className="text-lg font-semibold text-zinc-100">翻译</h1>
-          <p className="mt-0.5 text-xs text-zinc-500">
-            技能 / 插件描述翻译所用引擎。百度翻译专用接口独立计费,不受大模型限流影响。
-          </p>
         </div>
+        <p className="mt-0.5 text-xs text-zinc-500">
+          技能 / 插件描述翻译所用引擎。百度翻译专用接口独立计费,不受大模型限流影响。
+        </p>
 
         {/* engine selector */}
         <section className="space-y-2">

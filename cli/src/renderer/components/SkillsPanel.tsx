@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
+import { useUiStore } from '../store/uiStore'
 import type { AgentBackendId, SkillInfo, MarketplacePlugin } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
 import { onForgeEvent } from '../events'
@@ -150,6 +151,13 @@ export default function SkillsPanel(): JSX.Element {
     <div ref={rootRef} className="h-full overflow-y-auto bg-bg-base">
       <div className="mx-auto max-w-3xl px-6 py-6">
         <div className="mb-4 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => useUiStore.getState().setView('chat')}
+            className="glass-control flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100"
+          >
+            ← 返回对话
+          </button>
           <h1 className="text-lg font-semibold text-zinc-100">技能</h1>
           <button
             onClick={() => setTranslate((v) => !v)}

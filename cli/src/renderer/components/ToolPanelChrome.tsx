@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { useUiStore } from '../store/uiStore'
 
 export function RefreshIcon({ spinning = false }: { spinning?: boolean }): JSX.Element {
   return (
@@ -33,7 +34,16 @@ export function ToolPanelHeader({
   return (
     <div className="mb-5 flex items-start justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="text-lg font-semibold text-zinc-100">{title}</h1>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => useUiStore.getState().setView('chat')}
+            className="glass-control flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[11px] text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100"
+          >
+            ← 返回对话
+          </button>
+          <h1 className="text-lg font-semibold text-zinc-100">{title}</h1>
+        </div>
         {description ? <p className="mt-0.5 text-xs text-zinc-500">{description}</p> : null}
       </div>
       {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
