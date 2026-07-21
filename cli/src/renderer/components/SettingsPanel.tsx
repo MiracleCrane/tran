@@ -34,10 +34,9 @@ const EFFORTS: { id: EffortLevel; label: string }[] = [
 ]
 
 const PERMISSION_MODES: { id: PermissionMode; label: string }[] = [
-  { id: 'default', label: '默认(每次询问)' },
-  { id: 'plan', label: '计划模式(只读)' },
-  { id: 'auto', label: '自动(批准安全操作)' },
-  { id: 'yolo', label: 'YOLO(全部自动批准·慎用)' }
+  { id: 'default', label: '逐条确认' },
+  { id: 'auto', label: '自动通过' },
+  { id: 'yolo', label: '完全自主(慎用)' }
 ]
 
 function RangeControl({
