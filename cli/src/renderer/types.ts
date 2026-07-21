@@ -55,6 +55,8 @@ export interface UserItem {
   attachments?: UserAttachment[]
   /** 该条发送时注入了 Swarm 指令前缀（气泡上显示小徽章）。 */
   swarm?: boolean
+  /** Ctrl+S 打断并发送（插队）：中断当前轮后立即发送，气泡上显示小徽章。 */
+  cutIn?: boolean
   /** 来自 session/load 重放的历史消息（分界线上方内容）。 */
   isHistory?: boolean
 }
@@ -67,6 +69,8 @@ export interface PendingMessage {
   attachments?: UserAttachment[]
   /** 见 UserItem.swarm。 */
   swarm?: boolean
+  /** 见 UserItem.cutIn。 */
+  cutIn?: boolean
 }
 export interface AssistantItem {
   id: string

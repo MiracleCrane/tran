@@ -2730,3 +2730,15 @@ html.scrollbars-active::-webkit-scrollbar-thumb:hover,
 html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   background-image: linear-gradient(180deg, rgba(167, 139, 250, 0.7), rgba(139, 92, 246, 0.45));
 }
+
+/* hljs 主题微调：对齐紫色系（注释灰、字符串绿、关键字紫）。 */
+.hljs { background: transparent; color: #d4d4d8; }
+.hljs-comment, .hljs-quote { color: #71717a; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-tag { color: #c4b5fd; }
+.hljs-string, .hljs-doctag { color: #86efac; }
+.hljs-number, .hljs-literal { color: #fbbf24; }
+.hljs-title, .hljs-title.function_, .hljs-name, .hljs-section { color: #93c5fd; }
+.hljs-built_in, .hljs-type, .hljs-class { color: #a78bfa; }
+.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable { color: #e4e4e7; }
+.hljs-addition { background: rgba(34, 197, 94, 0.12); color: #86efac; }
+.hljs-deletion { background: rgba(239, 68, 68, 0.12); color: #fca5a5; }

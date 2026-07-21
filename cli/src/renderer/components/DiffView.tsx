@@ -1,4 +1,5 @@
 import { Fragment, memo, useState } from 'react'
+import CodeBlock from './CodeBlock'
 
 type Mode = 'unified' | 'split'
 
@@ -60,7 +61,7 @@ function toSplitRows(lines: string[]): Row[] {
   return rows
 }
 
-const DiffView = memo(function DiffView({ text }: { text: string }): JSX.Element {
+const DiffView = memo(function DiffView({ text, lang }: { text: string; lang?: string }): JSX.Element {
   const lines = text.split('\n')
   const looksLikeDiff = lines.some(
     (l) => l.startsWith('+') || l.startsWith('-') || l.startsWith('@@')
@@ -68,7 +69,14 @@ const DiffView = memo(function DiffView({ text }: { text: string }): JSX.Element
   const [mode, setMode] = useState<Mode>('unified')
 
   if (!looksLikeDiff) {
-    return <pre className="overflow-auto rounded bg-[#0b0c10] p-2.5 text-xs text-zinc-300">{text}</pre>
+    // 非 diff 输出：按推断语言高亮（识别不了走纯文本，>50KB 跳过高亮）。
+    return (
+      <CodeBlock
+        text={text}
+        lang={lang}
+        className="overflow-auto rounded bg-[#0b0c10] p-2.5 text-xs text-zinc-300"
+      />
+    )
   }
 
   return (

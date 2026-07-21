@@ -1,6 +1,7 @@
 import { memo, useState } from 'react'
 import type { ToolBlock } from '../types'
 import Collapse from './Collapse'
+import CodeBlock, { langForTool } from './CodeBlock'
 import DiffView from './DiffView'
 
 function normalizeResult(result: unknown): string {
@@ -159,10 +160,11 @@ const ToolCallCard = memo(function ToolCallCard({
       <Collapse open={!collapsed}>
         <div className="border-t border-border-subtle bg-[#0f1015] px-3 py-2.5">
           {block.name === 'Bash' && inputText && (
-            <pre className="mb-2 overflow-auto rounded bg-[#0b0c10] p-2.5 text-xs text-zinc-300">
-              <span className="text-zinc-600">$ </span>
-              {inputText}
-            </pre>
+            <CodeBlock
+              text={inputText}
+              lang="bash"
+              className="mb-2 overflow-auto rounded bg-[#0b0c10] p-2.5 text-xs text-zinc-300"
+            />
           )}
 
           {!isSubagent && block.name !== 'Bash' && block.input != null && (
@@ -170,9 +172,11 @@ const ToolCallCard = memo(function ToolCallCard({
               <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300">
                 输入
               </summary>
-              <pre className="mt-1 overflow-auto rounded bg-[#0b0c10] p-2.5 text-xs text-zinc-400">
-                {JSON.stringify(block.input, null, 2)}
-              </pre>
+              <CodeBlock
+                text={JSON.stringify(block.input, null, 2)}
+                lang="json"
+                className="mt-1 overflow-auto rounded bg-[#0b0c10] p-2.5 text-xs text-zinc-400"
+              />
             </details>
           )}
 
@@ -227,12 +231,17 @@ const ToolCallCard = memo(function ToolCallCard({
           )}
 
           {isSubagent && resultText && (
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-[#0b0c10] p-2.5 text-xs leading-relaxed text-zinc-300">
-              {resultText}
+            <>
+              <CodeBlock
+                text={resultText}
+                className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-[#0b0c10] p-2.5 text-xs leading-relaxed text-zinc-300"
+              />
               {streaming && <span className="tran-stream-cursor" aria-hidden />}
-            </pre>
+            </>
           )}
-          {!isSubagent && resultText && <DiffView text={resultText} />}
+          {!isSubagent && resultText && (
+            <DiffView text={resultText} lang={langForTool(block.name, block.input)} />
+          )}
 
           {!resultText && block.status === 'running' && (
             <div className="text-xs text-zinc-600">{isSubagent ? '子代理运行中，等待输出…' : '等待输出…'}</div>

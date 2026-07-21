@@ -190,6 +190,8 @@ export default function Composer(): JSX.Element {
   const dragDepth = useRef(0)
   const [dragActive, setDragActive] = useState(false)
   const [dropError, setDropError] = useState<string | null>(null)
+  // 附件文件选择器等待指示（局部 spinner，不整屏转圈）。
+  const [pickingFile, setPickingFile] = useState(false)
   const textareaHeight = manualTextareaHeight ?? autoTextareaHeight
 
   useEffect(() => {
@@ -397,7 +399,14 @@ export default function Composer(): JSX.Element {
     if (!meta) return
     const actionSeq = ++attachmentActionSeqRef.current
     setDropError(null)
-    const files = await window.api.pickFiles(meta.cwd)
+    // 局部小指示（不整屏转圈）：按钮上 spinner，页面其余部分保持可操作。
+    setPickingFile(true)
+    let files: Awaited<ReturnType<typeof window.api.pickFiles>> = []
+    try {
+      files = await window.api.pickFiles(meta.cwd)
+    } finally {
+      setPickingFile(false)
+    }
     if (attachmentActionSeqRef.current !== actionSeq) return
     if (files.length) setAttachments((prev) => [...prev, ...files])
   }
@@ -515,7 +524,7 @@ export default function Composer(): JSX.Element {
     }
   }
 
-  const submit = async (): Promise<void> => {
+  const submit = async (cutIn = false): Promise<void> => {
     const value = text.trim()
     const atts = attachments
     if (!value && atts.length === 0) return
@@ -531,10 +540,22 @@ export default function Composer(): JSX.Element {
     setText('')
     setSlashContext(null)
     setAttachments([])
-    void sendMessage(finalText, atts.length ? atts : undefined)
+    void sendMessage(finalText, atts.length ? atts : undefined, cutIn ? { cutIn: true } : undefined)
+  }
+
+  /** Ctrl+S 打断并发送（插队）：运行中先中断（interrupt 乐观清 running），
+   *  再立即发送（不走 pendingQueue）；无文本则只中断。 */
+  const cutInSubmit = async (): Promise<void> => {
+    if (running) await interrupt()
+    await submit(true)
   }
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault() // 别触发浏览器保存
+      void cutInSubmit()
+      return
+    }
     if (slashMenuOpen) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -779,23 +800,28 @@ export default function Composer(): JSX.Element {
             <button
               type="button"
               onClick={() => void pickAttachment()}
-              disabled={!meta}
+              disabled={!meta || pickingFile}
               className="glass-control flex h-7 w-7 items-center justify-center rounded-md text-zinc-300 transition hover:bg-white/[0.09] disabled:opacity-40"
-              title="添加附件(从工作目录选择文件)"
+              title={pickingFile ? '正在打开文件选择器…' : '添加附件(从工作目录选择文件)'}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7l8.8-8.8a3.5 3.5 0 0 1 5 5L10.4 18a2 2 0 0 1-2.8-2.8l7.7-7.7"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              {pickingFile ? (
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border border-white/20 border-t-accent" />
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7l8.8-8.8a3.5 3.5 0 0 1 5 5L10.4 18a2 2 0 0 1-2.8-2.8l7.7-7.7"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
             </button>
             <span className="composer-shortcut-hint px-2 text-[11px] text-zinc-500">
               <kbd className="font-sans text-zinc-400">Enter</kbd> 发送 ·{' '}
-              <kbd className="font-sans text-zinc-400">Shift+Enter</kbd> 换行
+              <kbd className="font-sans text-zinc-400">Shift+Enter</kbd> 换行 ·{' '}
+              <kbd className="font-sans text-zinc-400">Ctrl+S</kbd> 打断并发送
             </span>
             <div className="composer-actions ml-auto flex items-center gap-1.5">
               {meta && <ModePanel />}

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import { useUiStore } from '../store/uiStore'
 import type { ClaudeExecutionBackend, Project } from '../../shared/ipc'
 import Collapse from './Collapse'
 import { isWslProjectPath } from '../../shared/paths'
@@ -65,8 +64,6 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   const meta = useSessionStore((s) => s.meta)
   const switchProject = useSessionStore((s) => s.switchProject)
   const reset = useSessionStore((s) => s.reset)
-  const showBlockingOverlay = useUiStore((s) => s.showBlockingOverlay)
-  const hideBlockingOverlay = useUiStore((s) => s.hideBlockingOverlay)
 
   const [projects, setProjects] = useState<Project[]>([])
   const [open, setOpen] = useState(false)
@@ -75,6 +72,8 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   const [editText, setEditText] = useState('')
   const [confirmPath, setConfirmPath] = useState<string | null>(null)
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
+  // 文件选择器等待指示（局部小字，替代整屏转圈）。
+  const [picking, setPicking] = useState(false)
   const elevationTimerRef = useRef<number | null>(null)
   const projectActionSeqRef = useRef(0)
 
@@ -141,12 +140,12 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   const addNew = async (backend: ClaudeExecutionBackend): Promise<void> => {
     const actionSeq = ++projectActionSeqRef.current
     setOpen(false)
-    const overlayId = showBlockingOverlay('正在等待资源管理器响应...')
+    setPicking(true)
     let dir: string | null = null
     try {
       dir = await window.api.pickDirectory({ backend })
     } finally {
-      hideBlockingOverlay(overlayId)
+      setPicking(false)
     }
     if (!dir) return
     if (projectActionSeqRef.current !== actionSeq) return
@@ -197,10 +196,14 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   const trigger = collapsed ? (
     <button
       onClick={() => setOpen((o) => !o)}
-      title={current?.path ?? meta?.cwd ?? ''}
+      title={picking ? '正在打开文件选择器…' : (current?.path ?? meta?.cwd ?? '')}
       className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200"
     >
-      <FolderIcon />
+      {picking ? (
+        <span className="h-3.5 w-3.5 animate-spin rounded-full border border-white/20 border-t-accent" />
+      ) : (
+        <FolderIcon />
+      )}
     </button>
   ) : (
     <button
@@ -209,7 +212,9 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
       className="flex h-8 w-full items-center gap-2 rounded-xl px-2.5 text-[11px] text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100"
     >
       <FolderIcon />
-      <span className="flex-1 truncate text-left">{currentLabel}</span>
+      <span className="flex-1 truncate text-left">
+        {picking ? '正在打开文件选择器…' : currentLabel}
+      </span>
       <ChevronIcon up={open} />
     </button>
   )

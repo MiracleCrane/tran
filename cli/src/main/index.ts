@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Notification, shell } from 'electron'
+import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   configureWindowsGpuBackend,
@@ -287,6 +288,13 @@ if (!hasSingleInstanceLock) {
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
+
+    // 文件对话框预热：Windows 首次 showOpenDialog 慢常因 shell/Quick Access
+    // 初始化。ready 后 3s 异步枚举用户目录（轻量、无副作用），让 shell 提前
+    // 起来；效果依赖系统状态，成本可忽略。
+    setTimeout(() => {
+      void readdir(app.getPath('home')).catch(() => {})
+    }, 3000)
   })
 }
 

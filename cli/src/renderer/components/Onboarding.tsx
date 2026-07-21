@@ -1,22 +1,21 @@
 import { useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import { useUiStore } from '../store/uiStore'
 
 export default function Onboarding(): JSX.Element {
   const startSession = useSessionStore((s) => s.startSession)
-  const showBlockingOverlay = useUiStore((s) => s.showBlockingOverlay)
-  const hideBlockingOverlay = useUiStore((s) => s.hideBlockingOverlay)
   const [cwd, setCwd] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [picking, setPicking] = useState(false)
 
   const pick = async (): Promise<void> => {
-    const overlayId = showBlockingOverlay('正在等待资源管理器响应...')
+    // 局部小指示（不整屏转圈）：按钮文案提示，页面其余部分保持可操作。
+    setPicking(true)
     let dir: string | null = null
     try {
       dir = await window.api.pickDirectory()
     } finally {
-      hideBlockingOverlay(overlayId)
+      setPicking(false)
     }
     if (!dir) return
     setCwd(dir)
@@ -62,9 +61,10 @@ export default function Onboarding(): JSX.Element {
           />
           <button
             onClick={pick}
-            className="rounded-lg border border-border-subtle bg-bg-elev px-3 py-2 text-sm text-zinc-200 hover:bg-bg-hover"
+            disabled={picking}
+            className="rounded-lg border border-border-subtle bg-bg-elev px-3 py-2 text-sm text-zinc-200 hover:bg-bg-hover disabled:opacity-60"
           >
-            浏览…
+            {picking ? '正在打开…' : '浏览…'}
           </button>
         </div>
 

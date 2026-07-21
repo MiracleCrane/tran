@@ -22,8 +22,18 @@ const CheckGlyph = (): JSX.Element => (
 
 /** 连续相邻的工具调用聚成的分组块（对齐 kimi web：左侧圆点+图标、右侧状态勾、
  *  可展开查看每个工具调用）。纯渲染层聚合，数据仍来自各自的 ToolBlock。 */
-const ToolGroupCard = memo(function ToolGroupCard({ blocks }: { blocks: ToolBlock[] }): JSX.Element {
-  const [collapsed, setCollapsed] = useState(true)
+const ToolGroupCard = memo(function ToolGroupCard({
+  blocks,
+  forceOpen = false,
+  expandedBlockKey = null
+}: {
+  blocks: ToolBlock[]
+  /** 组内含"最新块"时整组保持展开；用户手动点击后以其选择为准。 */
+  forceOpen?: boolean
+  expandedBlockKey?: string | null
+}): JSX.Element {
+  const [userToggled, setUserToggled] = useState<boolean | null>(null)
+  const collapsed = userToggled ?? !forceOpen
   const running = blocks.some((b) => b.status === 'running' || b.status === 'pending')
   const hasError = blocks.some((b) => b.status === 'error' || b.status === 'denied')
   // 折叠行摘要：去重后的工具名列表（如 `Bash, Read, Grep`）。
@@ -38,7 +48,7 @@ const ToolGroupCard = memo(function ToolGroupCard({ blocks }: { blocks: ToolBloc
       <button
         type="button"
         aria-expanded={!collapsed}
-        onClick={() => setCollapsed((c) => !c)}
+        onClick={() => setUserToggled(!collapsed)}
         className="flex w-full items-center gap-2 bg-[#14151b] px-3 py-2 text-left transition-colors hover:bg-[#1b1c23]"
       >
         <span
@@ -66,7 +76,11 @@ const ToolGroupCard = memo(function ToolGroupCard({ blocks }: { blocks: ToolBloc
       <Collapse open={!collapsed}>
         <div className="border-t border-border-subtle bg-[#0f1015] px-2 py-1.5">
           {blocks.map((block) => (
-            <ToolCallCard key={block.toolUseId} block={block} />
+            <ToolCallCard
+              key={block.toolUseId}
+              block={block}
+              forceExpanded={expandedBlockKey === block.toolUseId}
+            />
           ))}
         </div>
       </Collapse>

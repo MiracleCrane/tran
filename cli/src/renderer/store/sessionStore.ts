@@ -81,7 +81,7 @@ interface SessionStore {
   goal: GoalInfo | null
 
   startSession: (args: StartArgs) => Promise<void>
-  sendMessage: (text: string, attachments?: PickedFile[]) => Promise<void>
+  sendMessage: (text: string, attachments?: PickedFile[], opts?: { cutIn?: boolean }) => Promise<void>
   interrupt: () => Promise<void>
   /** Current thinking-depth (effort). Composer changes stay local until the
    *  next user message, when the bridge is silently resumed with new options. */
@@ -787,12 +787,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  async sendMessage(text, attachments) {
+  async sendMessage(text, attachments, opts) {
     let meta = get().meta
     if (!meta) return
     const value = text.trim()
     const atts = attachments ?? []
     if (!value && atts.length === 0) return
+    // Ctrl+S 插队标记（气泡显示"插队"徽章）。
+    const cutInProps = opts?.cutIn ? { cutIn: true } : {}
 
     const needsSessionRefresh =
       (get().sessionConfigDirty || get().sessionModelDirty || get().bridgeEnded) &&
@@ -889,10 +891,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     )
     const busy = get().status.running && !hasBackgroundSubagent
     if (busy) {
-      set((s) => ({ pendingQueue: [...s.pendingQueue, { id: uid(), text: value, ...attProps, ...swarmProps }] }))
+      set((s) => ({ pendingQueue: [...s.pendingQueue, { id: uid(), text: value, ...attProps, ...swarmProps, ...cutInProps }] }))
     } else {
       set((s) => ({
-        items: [...s.items, { id: uid(), kind: 'user', text: value, parentToolUseId: null, ...attProps, ...swarmProps }],
+        items: [...s.items, { id: uid(), kind: 'user', text: value, parentToolUseId: null, ...attProps, ...swarmProps, ...cutInProps }],
         status: { ...s.status, running: true, error: undefined }
       }))
     }
@@ -916,6 +918,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const meta = get().meta
     if (!meta) return
     // 手动停止态：被中断轮次里仍 running/pending 的工具块标记 stopped（区别于"出错"）。
+    // 同时乐观清空 running——Ctrl+S 插队依赖它让紧随的 sendMessage 直达（不排队）。
     const now = Date.now()
     set((s) => ({
       items: s.items.map((it) =>
@@ -929,7 +932,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                   : b
               )
             }
-      )
+      ),
+      status: { ...s.status, running: false }
     }))
     await window.api.interrupt(meta.sessionId)
   },
@@ -1953,7 +1957,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                 text: due.text,
                 parentToolUseId: null,
                 ...(due.attachments ? { attachments: due.attachments } : {}),
-                ...(due.swarm ? { swarm: true } : {})
+                ...(due.swarm ? { swarm: true } : {}),
+                ...(due.cutIn ? { cutIn: true } : {})
               }
             ]
           })(),

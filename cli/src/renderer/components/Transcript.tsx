@@ -174,14 +174,24 @@ const UserMessage = memo(function UserMessage({ item }: { item: UserItem }): JSX
   return (
     <div className="flex justify-end">
       <div className="max-w-[85%] rounded-[16px] rounded-tr-md border border-white/10 bg-gradient-to-br from-accent/[0.14] via-white/[0.06] to-white/[0.03] px-4 py-2.5 shadow-lg shadow-black/10">
-        {item.swarm && (
-          <div className="mb-1 flex justify-end">
-            <span
-              className="rounded bg-accent/15 px-1.5 py-0.5 text-[9px] font-medium text-accent"
-              title="该条发送时注入了 Swarm 并行指令前缀"
-            >
-              Swarm
-            </span>
+        {(item.swarm || item.cutIn) && (
+          <div className="mb-1 flex justify-end gap-1">
+            {item.swarm && (
+              <span
+                className="rounded bg-accent/15 px-1.5 py-0.5 text-[9px] font-medium text-accent"
+                title="该条发送时注入了 Swarm 并行指令前缀"
+              >
+                Swarm
+              </span>
+            )}
+            {item.cutIn && (
+              <span
+                className="rounded bg-white/[0.08] px-1.5 py-0.5 text-[9px] font-medium text-zinc-300"
+                title="Ctrl+S 打断并发送（插队）"
+              >
+                插队
+              </span>
+            )}
           </div>
         )}
         {item.text && (
@@ -229,15 +239,18 @@ const UserMessage = memo(function UserMessage({ item }: { item: UserItem }): JSX
 
 const ThinkingBlock = memo(function ThinkingBlock({
   text,
-  streaming = false
+  streaming = false,
+  forceExpanded = false
 }: {
   text: string
   streaming?: boolean
+  /** "最新块"保持展开（渲染期派生，见 Transcript 的 lastExpandableKey）。 */
+  forceExpanded?: boolean
 }): JSX.Element {
-  // 默认收起（一行摘要"思考过程 · N 字"）；流式生成期间自动展开，完成后收回；
-  // 用户手动点击后以其选择为准。展开态定高 200px 内部滚动，不把布局顶来顶去。
+  // 默认收起（一行摘要"思考过程 · N 字"）；流式期间或作为"最新块"时自动展开，
+  // 出现下一个块后收回；用户手动点击后以其选择为准。展开态定高 200px 内部滚动。
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
-  const open = userToggled ?? streaming
+  const open = userToggled ?? (forceExpanded || streaming)
   const bodyRef = useRef<HTMLDivElement | null>(null)
 
   // 流式期间内容自动滚到底部（跟随最新思考）。
@@ -282,11 +295,14 @@ const ThinkingBlock = memo(function ThinkingBlock({
 const AssistantMessage = memo(function AssistantMessage({
   item,
   depth,
-  deferHighlight = false
+  deferHighlight = false,
+  expandedBlockKey = null
 }: {
   item: AssistantItem
   depth: number
   deferHighlight?: boolean
+  /** "最新块"的 key（toolUseId 或 `${item.id}:thinking`），该块保持展开。 */
+  expandedBlockKey?: string | null
 }): JSX.Element {
   const isStreaming = !!item.streaming
 
@@ -309,8 +325,23 @@ const AssistantMessage = memo(function AssistantMessage({
               </div>
             )
           }
-          if (block.kind === 'thinking') return <ThinkingBlock key={i} text={block.text} streaming={isStreaming} />
-          return <ToolCallCard key={i} block={block} />
+          if (block.kind === 'thinking') {
+            return (
+              <ThinkingBlock
+                key={i}
+                text={block.text}
+                streaming={isStreaming}
+                forceExpanded={expandedBlockKey === `${item.id}:thinking`}
+              />
+            )
+          }
+          return (
+            <ToolCallCard
+              key={i}
+              block={block}
+              forceExpanded={expandedBlockKey === block.toolUseId}
+            />
+          )
         })}
       {isStreaming && (
         <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
@@ -361,6 +392,22 @@ export default function Transcript({
 
   const roots = useMemo(() => buildForest(items), [items])
   const displayRows = useMemo(() => buildDisplayRows(roots), [roots])
+  // "最新块"保持展开：最新一条 live（非历史）assistant 消息里的最后一个思考/
+  // 工具块。纯文本段落开头的消息 → 无最新块（上一个收起）；最新是历史 → 不收。
+  const lastExpandableKey = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i]
+      if (it.kind !== 'assistant') continue
+      if (it.isHistory) return null
+      for (let j = it.blocks.length - 1; j >= 0; j--) {
+        const b = it.blocks[j]
+        if (b && b.kind === 'tool') return b.toolUseId
+        if (b && b.kind === 'thinking') return `${it.id}:thinking`
+      }
+      return null
+    }
+    return null
+  }, [items])
   const scrollTuning = useMemo(
     () =>
       agentBackend === 'kimi'
@@ -613,10 +660,25 @@ export default function Transcript({
   }
 
   const renderRow = (row: DisplayRow): JSX.Element => {
-    if (row.kind === 'toolGroup') return <ToolGroupCard blocks={row.blocks} />
+    if (row.kind === 'toolGroup') {
+      return (
+        <ToolGroupCard
+          blocks={row.blocks}
+          forceOpen={row.blocks.some((b) => b.toolUseId === lastExpandableKey)}
+          expandedBlockKey={lastExpandableKey}
+        />
+      )
+    }
     if (row.node.item.kind === 'user') return <UserMessage item={row.node.item as UserItem} />
     if (row.node.item.kind === 'compaction') return <CompactionDivider item={row.node.item} />
-    return <AssistantMessage item={row.node.item as AssistantItem} depth={0} deferHighlight={deferHighlight} />
+    return (
+      <AssistantMessage
+        item={row.node.item as AssistantItem}
+        depth={0}
+        deferHighlight={deferHighlight}
+        expandedBlockKey={lastExpandableKey}
+      />
+    )
   }
 
   return (
