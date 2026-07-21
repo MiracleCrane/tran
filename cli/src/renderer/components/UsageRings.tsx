@@ -209,6 +209,14 @@ export default function UsageRings(): JSX.Element {
             </div>
           )}
           <div className="space-y-3">
+            {/* 数据加载中：骨架条（opacity 脉动） */}
+            {!error && !plan && (
+              <div className="animate-pulse space-y-2.5">
+                <div className="h-2.5 w-full rounded bg-white/[0.06]" />
+                <div className="h-2.5 w-2/3 rounded bg-white/[0.06]" />
+                <div className="h-2.5 w-full rounded bg-white/[0.06]" />
+              </div>
+            )}
             {/* 会话用量（隐藏 /usage 轮 Total 行：input/output/cache read） */}
             {contextUsage?.inputTokens !== undefined && (
               <div>
@@ -245,7 +253,7 @@ export default function UsageRings(): JSX.Element {
             {plan?.parallelLimit !== undefined && (
               <div className="text-xs text-zinc-500">并行任务上限：{plan.parallelLimit}</div>
             )}
-            {!error && !plan?.rolling && !plan?.weekly && (
+            {!error && plan && !plan.rolling && !plan.weekly && (
               <p className="text-xs text-zinc-600">云端未返回额度数据。</p>
             )}
           </div>

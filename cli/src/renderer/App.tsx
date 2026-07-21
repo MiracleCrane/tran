@@ -23,6 +23,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import ClosePromptDialog from './components/ClosePromptDialog'
 import UpdateAvailableDialog from './components/UpdateAvailableDialog'
 import { useApplyAppearanceSettings } from './store/appearanceStore'
+import AmbientCanvas from './components/AmbientCanvas'
 import { pushAgentEvent, flushAgentEvents } from './store/streamBatcher'
 import type { Provider, UpdateCheckResult } from '../shared/ipc'
 import { emitForgeEvent, onForgeEvent } from './events'
@@ -642,6 +643,7 @@ export default function App(): JSX.Element {
       <ErrorBoundary>
         <div className="app-shell flex h-screen flex-col overflow-hidden text-zinc-200">
           <div className="tran-ambient" aria-hidden />
+          <AmbientCanvas />
           <WindowTitlebar />
           <div className="min-h-0 flex-1">
             <Onboarding />
@@ -661,6 +663,7 @@ export default function App(): JSX.Element {
       <div className="app-shell flex h-screen flex-col overflow-hidden text-zinc-200">
         {/* 环境紫光漂移层（全应用仅一层，opacity ≤ 0.06，只动 transform） */}
         <div className="tran-ambient" aria-hidden />
+        <AmbientCanvas />
         <WindowTitlebar />
         <div
           className={`workspace-shell min-h-0 flex-1 p-4 ${

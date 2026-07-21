@@ -631,13 +631,19 @@ export default function Transcript({
       <div className="transcript-scroll h-full overflow-y-auto">
         <div className="mx-auto flex min-h-full max-w-5xl flex-col items-center justify-center px-6 py-6 text-center">
           {starting ? (
-            <>
-              <div className="glass-panel mb-7 flex h-20 w-20 items-center justify-center rounded-[18px] text-zinc-100 shadow-[0_0_34px_rgba(94,168,255,0.18)]">
-                <div className="h-9 w-9 animate-spin rounded-full border-2 border-white/15 border-t-accent" />
-              </div>
-              <h1 className="text-2xl font-semibold text-zinc-100">正在进入会话...</h1>
-              <p className="mt-2 text-sm text-zinc-500">历史和运行环境会在后台接上。</p>
-            </>
+            /* 会话打开骨架（replay 到达前）：气泡形占位 shimmer + 提示。 */
+            <div className="flex w-full max-w-3xl flex-col gap-4">
+              <div className="ml-auto h-9 w-2/5 animate-pulse rounded-2xl bg-white/[0.05]" />
+              <div
+                className="h-16 w-3/5 animate-pulse rounded-2xl bg-white/[0.04]"
+                style={{ animationDelay: '150ms' }}
+              />
+              <div
+                className="h-9 w-1/2 animate-pulse rounded-2xl bg-white/[0.05]"
+                style={{ animationDelay: '300ms' }}
+              />
+              <p className="pt-2 text-center text-xs text-zinc-600">正在进入会话，历史在后台接上…</p>
+            </div>
           ) : (
             <>
           <div className="glass-panel mb-7 flex h-20 w-20 items-center justify-center rounded-[18px] text-zinc-100 shadow-[0_0_34px_rgba(94,168,255,0.18)]">

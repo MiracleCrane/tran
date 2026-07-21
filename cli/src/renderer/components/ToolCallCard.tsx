@@ -150,7 +150,9 @@ const ToolCallCard = memo(function ToolCallCard({
         {summary && (
           <span className="truncate font-mono text-xs text-zinc-500">{summary}</span>
         )}
-        <span className={`ml-auto shrink-0 text-[11px] ${meta.text}`}>
+        <span key={block.status} className={`ml-auto shrink-0 text-[11px] ${meta.text}`}>
+          {/* 完成瞬间：状态勾弹入（key 随状态重挂载，动画只播一次） */}
+          {block.status === 'done' && <span className="tran-check-pop mr-1">✓</span>}
           {meta.label}
           {block.elapsed ? ` · ${block.elapsed.toFixed(1)}s` : ''}
         </span>

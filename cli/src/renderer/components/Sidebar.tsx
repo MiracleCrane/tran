@@ -1130,6 +1130,21 @@ export default function Sidebar(): JSX.Element {
               onScroll={handleSessionListScroll}
               className={`sidebar-deferred-content is-ready session-live-list min-h-0 h-full overflow-y-auto px-3 pb-3 ${liveSessionListClass}`}
             >
+        {!hideLiveSessionList && !hasAnimatedSessionRows && loading && sessions.length === 0 && (
+          /* 会话列表加载骨架：灰紫条带 opacity 脉动（1.2s）。 */
+          <div className="space-y-2 px-2 py-2">
+            {[0, 1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="animate-pulse rounded-xl border border-white/[0.05] bg-white/[0.04] px-2.5 py-2"
+                style={{ animationDelay: `${i * 150}ms` }}
+              >
+                <div className="h-3 w-3/4 rounded bg-white/[0.07]" />
+                <div className="mt-1.5 h-2 w-1/3 rounded bg-white/[0.05]" />
+              </div>
+            ))}
+          </div>
+        )}
         {!hideLiveSessionList && !hasAnimatedSessionRows && !loading && sessions.length === 0 && (
           <div className="px-2 py-3 text-xs text-zinc-600">还没有对话。</div>
         )}

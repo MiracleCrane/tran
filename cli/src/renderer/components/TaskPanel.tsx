@@ -41,7 +41,8 @@ function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
         className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs transition hover:bg-white/[0.03]"
         onClick={() => setOpen((o) => !o)}
       >
-        <span className={`shrink-0 ${icon.cls}`}>{icon.glyph}</span>
+        {/* 状态图标：颜色/态过渡 150ms（运行中→完成/失败）。 */}
+        <span className={`shrink-0 transition-colors duration-150 ${icon.cls}`}>{icon.glyph}</span>
         {isAgent ? (
           <>
             <span className="shrink-0 rounded bg-accent/15 px-1 py-0.5 text-[9px] font-medium text-accent">
@@ -82,15 +83,16 @@ function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
   )
 }
 
-function PlanRow({ entry }: { entry: PlanEntry }): JSX.Element {
+function PlanRow({ entry, index }: { entry: PlanEntry; index: number }): JSX.Element {
   const active = entry.status === 'in_progress'
   const completed = entry.status === 'completed'
   return (
-    <div className="flex items-start gap-2 px-2 py-1">
+    // key 带状态：完成瞬间重挂载，打勾弹入 + 划线动画只播一次。
+    <div key={`${index}-${entry.status}`} className="flex items-start gap-2 px-2 py-1">
       <span
         className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border text-[9px] ${
           completed
-            ? 'border-green-500/60 bg-green-500/20 text-green-400'
+            ? 'tran-check-pop border-green-500/60 bg-green-500/20 text-green-400'
             : active
               ? 'border-accent/70 bg-accent/25 text-accent'
               : 'border-white/20 text-transparent'
@@ -100,10 +102,12 @@ function PlanRow({ entry }: { entry: PlanEntry }): JSX.Element {
       </span>
       <span
         className={`min-w-0 flex-1 break-words text-[11px] leading-relaxed ${
-          completed ? 'text-zinc-500 line-through' : active ? 'text-accent' : 'text-zinc-300'
+          completed ? 'text-zinc-500' : active ? 'text-accent' : 'text-zinc-300'
         }`}
       >
-        {active && entry.activeForm ? entry.activeForm : entry.content}
+        <span className={completed ? 'plan-strike' : undefined}>
+          {active && entry.activeForm ? entry.activeForm : entry.content}
+        </span>
       </span>
     </div>
   )
@@ -150,7 +154,7 @@ const TaskPanel = memo(function TaskPanel({ open }: { open: boolean }): JSX.Elem
         </Section>
         <Section title={`待办 (${planDone}/${planEntries.length})`} empty={planEntries.length === 0}>
           {planEntries.map((entry, i) => (
-            <PlanRow key={i} entry={entry} />
+            <PlanRow key={i} entry={entry} index={i} />
           ))}
         </Section>
       </div>
