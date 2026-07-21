@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useUiStore } from '../store/uiStore'
+import { useSessionStore } from '../store/sessionStore'
 import type { PlanUsageInfo, UsageLimitWindow } from '../../shared/ipc'
 
 /** 状态栏迷你用量圆环（kimi web 式）：5h 滚动窗口 + 每周额度两个小 SVG 环，
@@ -117,6 +119,10 @@ export default function UsageRings(): JSX.Element {
   const [plan, setPlan] = useState<PlanUsageInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const cardRef = useRef<HTMLDivElement | null>(null)
+  // 预览卡通过 portal 挂到 body 并用 fixed 定位——状态栏容器是 overflow:hidden
+  // 的 40px 高药丸，absolute 定位的卡会被整条裁掉（用户实测"悬停无反应"的 root cause）。
+  const [anchor, setAnchor] = useState<{ right: number; bottom: number } | null>(null)
 
   const refresh = useCallback((): void => {
     void window.api
@@ -136,14 +142,25 @@ export default function UsageRings(): JSX.Element {
   useEffect(() => refresh(), [refresh])
   const open = hover || pinned
   useEffect(() => {
-    if (open) refresh()
+    if (open) {
+      refresh()
+      const rect = rootRef.current?.getBoundingClientRect()
+      if (rect) {
+        setAnchor({
+          right: Math.max(8, window.innerWidth - rect.right),
+          bottom: window.innerHeight - rect.top + 8
+        })
+      }
+    }
   }, [open, refresh])
 
   // 钉住状态下点击组件外任意处关闭（无 backdrop，不阻断对话）。
   useEffect(() => {
     if (!pinned) return
     const onPointerDown = (event: PointerEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setPinned(false)
+      const target = event.target as Node
+      if (rootRef.current?.contains(target) || cardRef.current?.contains(target)) return
+      setPinned(false)
     }
     document.addEventListener('pointerdown', onPointerDown, true)
     return () => document.removeEventListener('pointerdown', onPointerDown, true)
@@ -152,6 +169,9 @@ export default function UsageRings(): JSX.Element {
   const rollingPct = windowPct(plan?.rolling)
   const weeklyPct = windowPct(plan?.weekly)
   const membership = membershipLabel(plan?.membershipLevel)
+  // 上下文用量：隐藏 /usage 轮推送（system/context_usage），无数据置灰。
+  const contextUsage = useSessionStore((s) => s.contextUsage)
+  const contextPct = contextUsage ? Math.min(100, Math.round(contextUsage.pct)) : null
 
   return (
     <div
@@ -164,15 +184,21 @@ export default function UsageRings(): JSX.Element {
         type="button"
         onClick={() => setPinned(!pinned)}
         className="flex items-center gap-2 rounded px-1.5 py-0.5 transition hover:bg-white/[0.06]"
-        title="套餐用量（悬停预览，点击钉住）"
         aria-expanded={open}
       >
         <Ring pct={rollingPct} label="5h" danger={rollingPct !== null && rollingPct >= 80} />
         <Ring pct={weeklyPct} label="周" danger={weeklyPct !== null && weeklyPct >= 80} />
+        <Ring pct={contextPct} label="上下文" danger={contextPct !== null && contextPct >= 80} />
       </button>
 
-      {open && (
-        <div className="glass-panel tran-enter absolute bottom-full right-0 z-[90] mb-2 w-72 rounded-2xl p-4 shadow-2xl">
+      {open && anchor && createPortal(
+        <div
+          ref={cardRef}
+          className="glass-panel tran-enter fixed z-[90] w-72 rounded-2xl p-4 shadow-2xl"
+          style={{ right: anchor.right, bottom: anchor.bottom }}
+          onPointerEnter={() => setHover(true)}
+          onPointerLeave={() => setHover(false)}
+        >
           <div className="mb-3 flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-accent" />
             <span className="flex-1 text-xs font-semibold text-zinc-100">套餐用量</span>
@@ -188,6 +214,17 @@ export default function UsageRings(): JSX.Element {
             </div>
           )}
           <div className="space-y-3">
+            {/* 上下文窗口（隐藏 /usage 轮数据，ACP 不下发 usage_update 的替代） */}
+            <div>
+              <div className="mb-1 flex items-baseline justify-between text-xs">
+                <span className="text-zinc-400">上下文窗口</span>
+                <span className="text-zinc-500">{contextPct !== null ? `${contextPct}%` : '—'}</span>
+              </div>
+              <UsageBar pct={contextPct} />
+              <div className="mt-1 text-[11px] text-zinc-600">
+                {contextUsage ? `${contextUsage.usedText} / ${contextUsage.total.toLocaleString()}` : '暂无数据（下个 turn 结束后更新）'}
+              </div>
+            </div>
             {plan?.rolling && <LimitRow title={`${plan.rolling.label}滚动窗口`} window={plan.rolling} />}
             {plan?.weekly && <LimitRow title="每周额度" window={plan.weekly} />}
             {plan?.parallelLimit !== undefined && (
@@ -197,7 +234,11 @@ export default function UsageRings(): JSX.Element {
               <p className="text-xs text-zinc-600">云端未返回额度数据。</p>
             )}
           </div>
-        </div>
+          <div className="mt-3 border-t border-white/[0.06] pt-2 text-center text-[10px] text-zinc-600">
+            悬停预览 · 点击钉住
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   )

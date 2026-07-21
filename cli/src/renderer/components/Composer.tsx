@@ -748,7 +748,9 @@ export default function Composer(): JSX.Element {
                   aria-checked={meta.permissionMode === 'plan'}
                   onClick={() => void setPermissionMode(meta.permissionMode === 'plan' ? 'default' : 'plan')}
                   className={`glass-control flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs transition ${
-                    meta.permissionMode === 'plan' ? 'border-accent/50 text-accent' : 'text-zinc-300'
+                    meta.permissionMode === 'plan'
+                      ? 'border-accent/50 bg-gradient-to-r from-accent/[0.18] to-accent/[0.05] text-accent'
+                      : 'text-zinc-300'
                   }`}
                   title="先让智能体梳理计划，再修改文件"
                 >

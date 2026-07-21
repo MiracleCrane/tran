@@ -42,6 +42,8 @@ import {
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { listKimiSessions } from './kimiHistory'
 import { getPlanUsageCached } from './usageService'
+import { deleteKimiSession } from './sessionDelete'
+import { removeSessionTitle } from './sessionTitles'
 import * as gitModule from './git'
 import { log } from './logger'
 import type {
@@ -674,11 +676,13 @@ export function registerIpc(
       sessionId: string,
       cwd: string,
       backend?: ClaudeExecutionBackend
-    ): Promise<void> => {
-      // TODO(kimi-history): Kimi ACP 暂无删除接口；会话会在下次刷新时重新出现。
-      void sessionId
+    ): Promise<{ ok: boolean; error?: string }> => {
+      // 永久删除：移除 session_index.jsonl 行 + 删 sessions/ 下会话目录（严格路径校验）。
       void cwd
       void backend
+      const result = deleteKimiSession(sessionId)
+      if (result.ok) removeSessionTitle(sessionId)
+      return result
     }
   )
 

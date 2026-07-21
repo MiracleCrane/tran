@@ -78,6 +78,13 @@ export interface PlanEntry {
   activeForm?: string
 }
 
+/** 隐藏 /usage 轮解析出的上下文用量（system/context_usage）。 */
+export interface ContextUsage {
+  usedText: string
+  total: number
+  pct: number
+}
+
 /** A transcript item plus its nested children (the subagent conversation under
  *  each of its tool_use blocks, linked by parent_tool_use_id). The Transcript
  *  builds a forest of these from the flat `items` list and renders recursively. */

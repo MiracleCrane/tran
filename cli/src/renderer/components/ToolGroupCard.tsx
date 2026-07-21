@@ -26,6 +26,8 @@ const ToolGroupCard = memo(function ToolGroupCard({ blocks }: { blocks: ToolBloc
   const [collapsed, setCollapsed] = useState(true)
   const running = blocks.some((b) => b.status === 'running' || b.status === 'pending')
   const hasError = blocks.some((b) => b.status === 'error' || b.status === 'denied')
+  // 折叠行摘要：去重后的工具名列表（如 `Bash, Read, Grep`）。
+  const toolNames = [...new Set(blocks.map((b) => b.name))].join(', ')
 
   return (
     <div
@@ -48,7 +50,8 @@ const ToolGroupCard = memo(function ToolGroupCard({ blocks }: { blocks: ToolBloc
           <WrenchGlyph />
         </span>
         <span className="shrink-0 text-xs font-medium text-zinc-200">{blocks.length} 个工具调用</span>
-        <span className={`text-[11px] ${hasError ? 'text-red-400' : 'text-zinc-500'}`}>
+        <span className="min-w-0 truncate font-mono text-[11px] text-zinc-500">{toolNames}</span>
+        <span className={`shrink-0 text-[11px] ${hasError ? 'text-red-400' : 'text-zinc-500'}`}>
           {running ? '进行中' : hasError ? '已完成（含失败）' : '已完成'}
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">

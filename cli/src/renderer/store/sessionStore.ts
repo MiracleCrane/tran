@@ -24,7 +24,8 @@ import type {
   SubagentStatus,
   UserAttachment,
   PendingMessage,
-  PlanEntry
+  PlanEntry,
+  ContextUsage
 } from '../types'
 import { pickedFileToUserAttachment } from '../utils/attachments'
 import { DEFAULT_KIMI_MODEL_ID } from '../../shared/models'
@@ -71,6 +72,8 @@ interface SessionStore {
   slashCommands: SkillInfo[]
   /** ACP plan 事件推送的待办清单（system/plan，全量替换；空数组表示无）。 */
   planEntries: PlanEntry[]
+  /** 隐藏 /usage 轮解析出的上下文用量（system/context_usage；null 表示无数据）。 */
+  contextUsage: ContextUsage | null
 
   startSession: (args: StartArgs) => Promise<void>
   sendMessage: (text: string, attachments?: PickedFile[]) => Promise<void>
@@ -689,6 +692,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   bridgeEnded: false,
   slashCommands: [],
   planEntries: [],
+  contextUsage: null,
 
   async startSession(args) {
     if (get().starting) return
@@ -730,6 +734,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         sessionModelDirty: false,
         bridgeEnded: false,
         planEntries: [],
+        contextUsage: null,
         status: { running: false },
         currentStreamingMsgId: null
       })
@@ -884,7 +889,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   reset() {
     cancelActiveHistoryHydration(0)
-    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [] })
+    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], contextUsage: null })
   },
 
   async bootstrap() {
@@ -929,6 +934,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessions: [],
       sessionsHasMore: false,
       planEntries: [],
+      contextUsage: null,
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1085,6 +1091,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessionModelDirty: false,
       bridgeEnded: false,
       planEntries: [],
+      contextUsage: null,
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1151,6 +1158,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessionModelDirty: false,
       bridgeEnded: false,
       planEntries: [],
+      contextUsage: null,
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1284,7 +1292,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const meta = get().meta
     if (!meta) return
     try {
-      await window.api.deleteSession(sessionId, meta.cwd, backend)
+      const result = await window.api.deleteSession(sessionId, meta.cwd, backend)
+      // 主进程校验失败（路径穿越防护等）：不删列表项，提示错误。
+      if (result && result.ok === false) {
+        set((s) => ({ status: { ...s.status, error: result.error ?? '删除会话失败' } }))
+        return
+      }
     } catch {
       /* ignore */
     }
@@ -1294,6 +1307,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (meta.sdkSessionId === sessionId) {
       await get().newChat()
     }
+    void get().refreshSessions()
   },
 
   async backgroundTask(taskId: string) {
@@ -1458,6 +1472,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             bridgeEnded: false,
             // 新会话/恢复会话时清空上一会话残留的待办清单（新 plan 事件会重建）。
             planEntries: [],
+            contextUsage: null,
             status: { ...s.status }
           }))
         } else if (subtype === 'status') {
@@ -1470,6 +1485,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           // ACP plan：kimi 全量推送待办清单，直接整体替换（实时更新）。
           const entries = (msg as unknown as { entries?: PlanEntry[] }).entries
           set({ planEntries: Array.isArray(entries) ? entries : [] })
+        } else if (subtype === 'context_usage') {
+          // 隐藏 /usage 轮解析出的上下文用量（UsageRings 第三环）。
+          const usage = (msg as unknown as { contextUsage?: ContextUsage }).contextUsage
+          set({ contextUsage: usage ?? null })
         } else if (subtype === 'permission_denied') {
           const d = msg as unknown as { tool_use_id: string; message: string }
           set((s) => ({

@@ -483,8 +483,12 @@ export interface ForgeApi {
     cwd: string,
     backend?: ClaudeExecutionBackend
   ): Promise<void>
-  /** Delete a session's transcript file. */
-  deleteSession(sessionId: string, cwd: string, backend?: ClaudeExecutionBackend): Promise<void>
+  /** 永久删除会话（移除索引行 + 删除会话目录，不可恢复）。 */
+  deleteSession(
+    sessionId: string,
+    cwd: string,
+    backend?: ClaudeExecutionBackend
+  ): Promise<{ ok: boolean; error?: string }>
   /** Read a subagent's own conversation transcript (for the monitor popover). */
   getSubagentMessages(sessionId: string, agentId: string, cwd: string): Promise<HistoryMessage[]>
 

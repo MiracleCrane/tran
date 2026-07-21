@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore, type View } from '../store/uiStore'
 import Collapse from './Collapse'
+import ConfirmDialog from './ConfirmDialog'
 import ProjectSwitcher from './ProjectSwitcher'
 import type { ClaudeExecutionBackend, SessionListItem } from '../../shared/ipc'
 import { onForgeEvent } from '../events'
@@ -723,6 +724,9 @@ export default function Sidebar(): JSX.Element {
     const target = sessions.find((session) => sessionKey(session) === key)
     if (target) void deleteSession(target.sessionId, target.runtimeBackend)
   }
+  const confirmDeleteTarget = confirmDeleteId
+    ? sessions.find((session) => sessionKey(session) === confirmDeleteId)
+    : undefined
 
   const filteredSessions = useMemo(() => {
     const q = sessionSearch.trim().toLowerCase()
@@ -1055,7 +1059,7 @@ export default function Sidebar(): JSX.Element {
         <div className="accent-soft-button flex h-8 w-8 items-center justify-center rounded-xl text-sm font-bold text-white">
           T
         </div>
-        <div className="flex-1 text-sm font-semibold text-zinc-100">Tran</div>
+        <div className="text-brand-gradient flex-1 text-sm font-semibold">Tran</div>
         <button
           onClick={handleToggleSidebar}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
@@ -1146,7 +1150,6 @@ export default function Sidebar(): JSX.Element {
               const key = sessionKey(s)
               const active = s.sessionId === meta.sdkSessionId && view === 'chat'
               const editing = editingId === key
-              const confirming = confirmDeleteId === key
               const pinned = pinnedSessionKeys.has(key)
               const inserting = newlyInsertedSessionKeys.has(key)
               const exiting = item.exiting
@@ -1205,67 +1208,43 @@ export default function Sidebar(): JSX.Element {
                   )}
 
                   {!editing && !exiting && (
-                    <div
-                      className={`absolute bottom-1 right-1 z-10 flex items-center gap-0.5 ${
-                        confirming
-                          ? 'pointer-events-auto opacity-100'
-                          : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
-                      } transition-opacity duration-150`}
-                    >
-                      {confirming ? (
-                        <>
-                          <button
-                            onClick={() => doDelete(key)}
-                            className="rounded bg-red-950/80 px-1.5 py-0.5 text-[10px] text-red-300 hover:bg-red-900/80"
-                          >
-                            删除
-                          </button>
-                          <button
-                            onClick={() => setConfirmDeleteId(null)}
-                            className="rounded bg-bg-elev/90 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-bg-hover"
-                          >
-                            取消
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              togglePinnedSession(s)
-                            }}
-                            className={`flex h-6 w-6 items-center justify-center overflow-hidden rounded-lg p-1 text-[11px] transition ${
-                              pinned
-                                ? 'text-accent hover:bg-white/[0.06]'
-                                : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200'
-                            }`}
-                            title={pinned ? '取消置顶' : '置顶'}
-                          >
-                            <PinIcon active={pinned} />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setEditingId(key)
-                              setEditText(s.summary || '')
-                            }}
-                            className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
-                            title="重命名"
-                          >
-                            <EditIcon />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setConfirmDeleteId(key)
-                            }}
-                            className="rounded-lg p-1 text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
-                            title="删除"
-                          >
-                            <TrashIcon />
-                          </button>
-                        </>
-                      )}
+                    <div className="absolute bottom-1 right-1 z-10 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                      {/* 会话操作组（预留扩展位：以后加"归档"等操作就往这里加） */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          togglePinnedSession(s)
+                        }}
+                        className={`flex h-6 w-6 items-center justify-center overflow-hidden rounded-lg p-1 text-[11px] transition ${
+                          pinned
+                            ? 'text-accent hover:bg-white/[0.06]'
+                            : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200'
+                        }`}
+                        title={pinned ? '取消置顶' : '置顶'}
+                      >
+                        <PinIcon active={pinned} />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setEditingId(key)
+                          setEditText(s.summary || '')
+                        }}
+                        className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
+                        title="重命名"
+                      >
+                        <EditIcon />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setConfirmDeleteId(key)
+                        }}
+                        className="rounded-lg p-1 text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
+                        title="删除"
+                      >
+                        <TrashIcon />
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1362,6 +1341,19 @@ export default function Sidebar(): JSX.Element {
           </Collapse>
         </div>
       </div>
+
+      {/* 永久删除确认（红色调； ConfirmDialog 复用） */}
+      <ConfirmDialog
+        open={confirmDeleteId !== null}
+        danger
+        title="永久删除会话"
+        message={`「${confirmDeleteTarget?.summary || '(未命名)'}」将被永久删除，不可恢复。`}
+        confirmLabel="永久删除"
+        onConfirm={() => {
+          if (confirmDeleteId) doDelete(confirmDeleteId)
+        }}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   )
 }

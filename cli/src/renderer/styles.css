@@ -2696,3 +2696,37 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
     tran-bar-in var(--motion-med) var(--easing-out) both,
     tran-glow-breathe 3.2s ease-in-out infinite;
 }
+
+/* === 静态紫色渐变美化（无逐帧动画，fps 安全） === */
+
+/* 玻璃面板：极淡紫色系静态渐变底（不动 ::before/::after 玻璃镜头层，保可读性）。 */
+.glass-panel {
+  background:
+    linear-gradient(155deg, rgba(139, 92, 246, 0.055), rgba(139, 92, 246, 0) 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.008)),
+    rgba(10, 11, 15, var(--glass-panel-alpha));
+}
+.glass-panel-soft {
+  background:
+    linear-gradient(155deg, rgba(139, 92, 246, 0.045), rgba(139, 92, 246, 0) 40%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.024), rgba(255, 255, 255, 0.006)),
+    rgba(12, 13, 17, var(--glass-soft-alpha));
+}
+
+/* 品牌/标题渐变文字（侧栏 Tran 标识、空状态页标题）。 */
+.text-brand-gradient {
+  background-image: linear-gradient(100deg, #c4b5fd, #8b5cf6 55%, #a78bfa);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* 滚动条滑块：淡紫渐变（静态，替代纯色 var）。 */
+html.scrollbars-active::-webkit-scrollbar-thumb,
+html.scrollbars-active *::-webkit-scrollbar-thumb {
+  background-image: linear-gradient(180deg, rgba(167, 139, 250, 0.5), rgba(139, 92, 246, 0.28));
+}
+html.scrollbars-active::-webkit-scrollbar-thumb:hover,
+html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
+  background-image: linear-gradient(180deg, rgba(167, 139, 250, 0.7), rgba(139, 92, 246, 0.45));
+}

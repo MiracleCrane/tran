@@ -132,7 +132,7 @@ const UserMessage = memo(function UserMessage({ item }: { item: UserItem }): JSX
   }
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] rounded-[16px] rounded-tr-md border border-white/10 bg-white/[0.07] px-4 py-2.5 shadow-lg shadow-black/10">
+      <div className="max-w-[85%] rounded-[16px] rounded-tr-md border border-white/10 bg-gradient-to-br from-accent/[0.14] via-white/[0.06] to-white/[0.03] px-4 py-2.5 shadow-lg shadow-black/10">
         {item.text && (
           <div className="whitespace-pre-wrap break-words text-sm text-zinc-200">{item.text}</div>
         )}
@@ -196,6 +196,8 @@ const ThinkingBlock = memo(function ThinkingBlock({
   }, [text, open, streaming])
 
   if (!text) return <></>
+  // 折叠态摘要：正文前 ~60 字符单行截断（流式期间随 text 实时更新）。
+  const preview = text.replace(/\s+/g, ' ').trim().slice(0, 60)
   return (
     <div className="thinking-block glass-panel-soft my-1.5 rounded-xl px-3 py-2">
       <button
@@ -205,7 +207,10 @@ const ThinkingBlock = memo(function ThinkingBlock({
         className="flex w-full cursor-pointer select-none items-center gap-1.5 text-left text-xs font-medium text-zinc-500 hover:text-zinc-400"
       >
         <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
-        思考过程 · {text.length} 字
+        <span className="shrink-0">思考过程 · {text.length} 字</span>
+        {!open && (
+          <span className="min-w-0 truncate font-normal text-zinc-600">{preview}</span>
+        )}
         {streaming && <span className="stream-cursor-glow" />}
       </button>
       {open && (
@@ -540,7 +545,7 @@ export default function Transcript({
           <div className="glass-panel mb-7 flex h-20 w-20 items-center justify-center rounded-[18px] text-zinc-100 shadow-[0_0_34px_rgba(94,168,255,0.18)]">
             <TerminalGlyph />
           </div>
-          <h1 className="text-2xl font-semibold text-zinc-100">发送消息开始对话</h1>
+          <h1 className="text-brand-gradient text-2xl font-semibold">发送消息开始对话</h1>
           <p className="mt-2 text-sm text-zinc-500">我可以帮助你编写代码、分析问题、执行任务</p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">
             {['列出文件', '总结项目', '查找代码', '修复问题'].map((label) => (

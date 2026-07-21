@@ -54,6 +54,11 @@ interface ActiveKimiSession {
   toolResults: Set<string>
   skills: SkillInfo[]
   lastUsage?: TokenUsage
+  /** 隐藏轮（/usage）：标志置位期间该会话所有流式事件不转发渲染层，只累积文本。 */
+  hiddenTurn: boolean
+  hiddenText: string
+  /** 隐藏轮解析出的上下文用量（Context: X / Y (Z%)）。 */
+  contextUsage?: ContextUsage
 }
 
 interface PendingPermission {
@@ -68,6 +73,13 @@ interface TokenUsage {
   totalTokens?: number
   contextUsed?: number
   contextSize?: number
+}
+
+/** 隐藏轮解析出的上下文用量（渲染层圆环/预览卡用）。 */
+interface ContextUsage {
+  usedText: string
+  total: number
+  pct: number
 }
 
 interface PromptPayload {
@@ -120,7 +132,9 @@ export class KimiBackend {
       thinkingBlockIndex: null,
       nextBlockIndex: 0,
       toolResults: new Set(),
-      skills: []
+      skills: [],
+      hiddenTurn: false,
+      hiddenText: ''
     }
     session.ready = this.prepareSession(session, opts)
     this.sessions.set(sessionId, session)
@@ -335,6 +349,40 @@ export class KimiBackend {
       session.nextBlockIndex = 0
       session.toolResults.clear()
       if (!session.closed && session.queue.length) void this.drain(session)
+      // 正常 turn 完成且队列空了：发一个隐藏 /usage 轮更新上下文用量
+      // （kimi 宿主直接返回、不调模型、零额度消耗）。
+      else if (!session.closed) void this.runHiddenUsageTurn(session)
+    }
+  }
+
+  /** 隐藏轮：向 ACP 会话发 '/usage'，该轮的流式事件全部吞掉（hiddenTurn 标志），
+   *  只累积文本，结束后解析 Context 行推给渲染层。标志在 prompt 响应到达后才
+   *  清除——kimi 侧 FIFO，用户轮排在隐藏轮之后，其事件到达时标志已清。 */
+  private async runHiddenUsageTurn(session: ActiveKimiSession): Promise<void> {
+    if (session.closed || !session.acpSessionId || session.hiddenTurn) return
+    session.hiddenTurn = true
+    session.hiddenText = ''
+    try {
+      const client = await this.ensureClient()
+      await client.request('session/prompt', {
+        sessionId: session.acpSessionId,
+        prompt: [{ type: 'text', text: '/usage' }],
+        messageId: cryptoId()
+      }, 60000)
+      const usage = parseContextUsage(session.hiddenText)
+      if (usage && !session.closed) {
+        session.contextUsage = usage
+        this.h.onMessage(session.id, {
+          type: 'system',
+          subtype: 'context_usage',
+          contextUsage: usage
+        } as unknown as SDKMessage)
+      }
+    } catch (error) {
+      log('kimi', `hidden /usage turn failed: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      session.hiddenTurn = false
+      session.hiddenText = ''
     }
   }
 
@@ -425,6 +473,11 @@ export class KimiBackend {
 
   private handleSessionUpdate(session: ActiveKimiSession, update: Record<string, unknown>): void {
     const type = asString(update.sessionUpdate)
+    // 隐藏轮：吞掉该轮所有事件，只累积 agent_message_chunk 文本供解析。
+    if (session.hiddenTurn) {
+      if (type === 'agent_message_chunk') session.hiddenText += textFromContentBlock(update.content)
+      return
+    }
     if (type === 'agent_message_chunk') {
       const text = textFromContentBlock(update.content)
       if (text) this.emitAssistantDelta(session, asString(update.messageId), text)
@@ -780,6 +833,17 @@ function firstUserText(content: string | unknown[]): string {
     if (b?.type === 'text' && b.text) return b.text
   }
   return ''
+}
+
+/** 解析 /usage 隐藏轮文本里的 Context 行：
+ *  `- Context: 45.6k / 1,048,576 (5.0%)` → { usedText: '45.6k', total: 1048576, pct: 5 } */
+function parseContextUsage(text: string): ContextUsage | null {
+  const match = text.match(/Context:\s*([\d.,a-zA-Z]+)\s*\/\s*([\d,]+)\s*\(\s*([\d.]+)\s*%\)/)
+  if (!match) return null
+  const total = Number(match[2].replace(/,/g, ''))
+  const pct = Number(match[3])
+  if (!Number.isFinite(total) || !Number.isFinite(pct)) return null
+  return { usedText: match[1], total, pct }
 }
 
 function contentToPrompt(content: string | unknown[]): PromptPayload {

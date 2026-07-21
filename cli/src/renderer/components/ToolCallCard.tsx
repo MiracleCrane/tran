@@ -51,22 +51,35 @@ function parseSubagentInput(input: unknown): {
   }
 }
 
+/** 折叠态摘要：按工具类型从 rawInput 提取关键信息（命令行/路径/pattern/
+ *  description）。rawInput 可能是对象或 JSON 字符串，防御式解析；失败回落通用摘要。 */
 function summaryForTool(name: string, input: unknown): string {
-  const inp = (input ?? {}) as Record<string, unknown>
+  let value = input
+  if (typeof value === 'string') {
+    const raw = value
+    try {
+      value = JSON.parse(raw)
+    } catch {
+      return raw.slice(0, 80) // 非 JSON 字符串：直接截断当摘要
+    }
+  }
+  const inp = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>
   const s = (v: unknown): string => (typeof v === 'string' ? v : '')
   switch (name) {
     case 'Bash':
+    case 'terminal':
       return s(inp.command)
     case 'Read':
-      return s(inp.file_path)
+    case 'read_file':
+      return s(inp.file_path) || s(inp.path)
     case 'Write':
-      return s(inp.file_path)
     case 'Edit':
-      return s(inp.file_path)
+    case 'patch':
+      return s(inp.file_path) || s(inp.path)
     case 'Glob':
-      return s(inp.pattern)
     case 'Grep':
-      return s(inp.pattern)
+    case 'search':
+      return s(inp.pattern) || s(inp.query)
     case 'WebSearch':
       return s(inp.query)
     case 'WebFetch':
@@ -75,7 +88,8 @@ function summaryForTool(name: string, input: unknown): string {
     case 'Task':
       return s(inp.description)
     default:
-      return ''
+      // 通用回落：title → command → file_path/path
+      return s(inp.title) || s(inp.command) || s(inp.file_path) || s(inp.path)
   }
 }
 

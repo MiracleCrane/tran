@@ -43,3 +43,16 @@ export function recordSessionTitle(sessionId: string, text: string): void {
 export function localSessionTitle(sessionId: string): string | undefined {
   return load()[sessionId]
 }
+
+/** 会话删除后清掉本地标题记录。 */
+export function removeSessionTitle(sessionId: string): void {
+  const map = load()
+  if (!(sessionId in map)) return
+  delete map[sessionId]
+  try {
+    mkdirSync(dirname(storePath()), { recursive: true })
+    writeFileSync(storePath(), JSON.stringify(map, null, 1), 'utf8')
+  } catch (error) {
+    log('titles', `save failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
