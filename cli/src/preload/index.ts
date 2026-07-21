@@ -27,6 +27,9 @@ const api: ForgeApi = {
   setModel: (sessionId, model) => ipcRenderer.invoke('forge:setModel', sessionId, model),
   setPermissionMode: (sessionId, mode) =>
     ipcRenderer.invoke('forge:setPermissionMode', sessionId, mode),
+  goalStart: (sessionId, opts) => ipcRenderer.invoke('forge:goalStart', sessionId, opts),
+  goalControl: (sessionId, action) => ipcRenderer.invoke('forge:goalControl', sessionId, action),
+  goalGet: (sessionId) => ipcRenderer.invoke('forge:goalGet', sessionId),
   closeSession: (sessionId) => ipcRenderer.invoke('forge:closeSession', sessionId),
   listSessions: (cwd, opts) => ipcRenderer.invoke('forge:listSessions', cwd, opts),
   getSessionMessages: (sessionId, cwd, backend) =>

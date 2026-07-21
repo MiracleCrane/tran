@@ -10,7 +10,8 @@ import type {
   PermissionMode,
   AgentBackendId,
   ClaudeExecutionBackend,
-  SkillInfo
+  SkillInfo,
+  GoalInfo
 } from '../../shared/ipc'
 import type {
   TranscriptItem,
@@ -76,6 +77,8 @@ interface SessionStore {
   contextUsage: ContextUsage | null
   /** 模式面板状态（计划/权限互斥恢复 + Swarm/目标开关），per session。 */
   modePanel: ModePanelState
+  /** goal 循环状态（system/goal 推送；null 表示无目标），per session。 */
+  goal: GoalInfo | null
 
   startSession: (args: StartArgs) => Promise<void>
   sendMessage: (text: string, attachments?: PickedFile[]) => Promise<void>
@@ -725,6 +728,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   planEntries: [],
   contextUsage: null,
   modePanel: defaultModePanel(),
+  goal: null,
 
   async startSession(args) {
     if (get().starting) return
@@ -768,6 +772,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         planEntries: [],
         contextUsage: null,
         modePanel: defaultModePanel(),
+        goal: null,
         status: { running: false },
         currentStreamingMsgId: null
       })
@@ -832,6 +837,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
 
     if (meta.sdkSessionId) deleteSessionHistoryCache(meta.cwd, meta.sdkSessionId)
+    // 目标模式：goalEnabled 且无进行中的目标时，用本条消息文本创建目标（本条即第 1 轮）。
+    if (get().modePanel.goalEnabled && value) {
+      const currentGoal = get().goal
+      if (!currentGoal || (currentGoal.status !== 'active' && currentGoal.status !== 'paused')) {
+        void window.api.goalStart(meta.sessionId, { objective: value }).catch(() => {})
+      }
+    }
     // Swarm 模式：发送时在用户文本前隐藏拼接指令前缀（气泡显示原文 + Swarm 徽章）。
     const swarmOn = get().modePanel.swarmEnabled
     const wireValue = swarmOn ? SWARM_PROMPT_PREFIX + value : value
@@ -953,7 +965,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   reset() {
     cancelActiveHistoryHydration(0)
-    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], contextUsage: null, modePanel: defaultModePanel() })
+    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], contextUsage: null, modePanel: defaultModePanel(), goal: null })
   },
 
   async bootstrap() {
@@ -1000,6 +1012,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       planEntries: [],
       contextUsage: null,
       modePanel: defaultModePanel(),
+      goal: null,
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1158,6 +1171,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       planEntries: [],
       contextUsage: null,
       modePanel: defaultModePanel(),
+      goal: null,
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1226,6 +1240,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       planEntries: [],
       contextUsage: null,
       modePanel: defaultModePanel(),
+      goal: null,
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1541,6 +1556,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             planEntries: [],
             contextUsage: null,
             modePanel: defaultModePanel(),
+            goal: null,
             status: { ...s.status }
           }))
         } else if (subtype === 'status') {
@@ -1557,6 +1573,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           // 隐藏 /usage 轮解析出的上下文用量（UsageRings 第三环）。
           const usage = (msg as unknown as { contextUsage?: ContextUsage }).contextUsage
           set({ contextUsage: usage ?? null })
+        } else if (subtype === 'goal') {
+          // goal 循环状态推送（GoalCard 进度 / ModePanel 开关激活态）。
+          const g = (msg as unknown as { goal?: GoalInfo | null }).goal
+          set({ goal: g ?? null })
         } else if (subtype === 'history') {
           // session/load 重放的历史：整批转换成 items 前置拼接（不走流式管道，
           // 避免"逐字打出历史"）；与现有内容按 id 去重（重放期间发的消息保留在后）。

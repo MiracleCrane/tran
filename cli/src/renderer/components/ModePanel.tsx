@@ -102,6 +102,7 @@ function ModeRow({
 export default function ModePanel(): JSX.Element | null {
   const meta = useSessionStore((s) => s.meta)
   const modePanel = useSessionStore((s) => s.modePanel)
+  const goal = useSessionStore((s) => s.goal)
   const setPlanEnabled = useSessionStore((s) => s.setPlanEnabled)
   const setSwarmEnabled = useSessionStore((s) => s.setSwarmEnabled)
   const setGoalEnabled = useSessionStore((s) => s.setGoalEnabled)
@@ -109,7 +110,14 @@ export default function ModePanel(): JSX.Element | null {
   if (!meta) return null
 
   const planOn = meta.permissionMode === 'plan'
-  const anyOn = planOn || modePanel.swarmEnabled
+  const goalOn = modePanel.goalEnabled || goal?.status === 'active'
+  const anyOn = planOn || modePanel.swarmEnabled || goalOn
+
+  // 目标开关：开 → goalEnabled（下一条用户消息创建目标）；关 → 停止循环。
+  const toggleGoal = (on: boolean): void => {
+    void setGoalEnabled(on)
+    if (!on) void window.api.goalControl(meta.sessionId, 'stop').catch(() => {})
+  }
 
   return (
     <div className="relative shrink-0">
@@ -147,10 +155,9 @@ export default function ModePanel(): JSX.Element | null {
             <ModeRow
               icon={<GoalIcon />}
               title="目标"
-              desc="持续跟踪一个目标，直到任务完成 · 下一版本提供"
-              checked={modePanel.goalEnabled}
-              disabled
-              onChange={(on) => void setGoalEnabled(on)}
+              desc="持续跟踪一个目标，直到任务完成"
+              checked={goalOn}
+              onChange={toggleGoal}
             />
           </div>
         </>

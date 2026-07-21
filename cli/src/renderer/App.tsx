@@ -6,7 +6,7 @@ import Sidebar from './components/Sidebar'
 import Transcript from './components/Transcript'
 import Composer from './components/Composer'
 import PlanCard from './components/PlanCard'
-import StatusBar from './components/StatusBar'
+import GoalCard from './components/GoalCard'
 import RuntimeStatusStrip from './components/RuntimeStatusStrip'
 import ErrorDiagnosticPanel from './components/ErrorDiagnosticPanel'
 import GitToolbar, { requestCloseGitDrawer } from './components/GitToolbar'
@@ -303,6 +303,7 @@ function MainViewContent({
   return (
     <>
       <ChatTopbar collapsed={chatTopbarCollapsed} onToggle={onToggleChatTopbar} />
+      <GoalCard />
       <PlanCard />
       <div className="min-h-0 flex-1 overflow-hidden" onPointerDownCapture={requestCloseGitDrawer}>
         <Transcript
@@ -314,7 +315,6 @@ function MainViewContent({
       </div>
       <Composer />
       <ErrorDiagnosticPanel />
-      <StatusBar />
     </>
   )
 }

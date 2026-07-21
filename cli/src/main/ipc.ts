@@ -44,6 +44,7 @@ import { listKimiSessions } from './kimiHistory'
 import { getPlanUsageCached } from './usageService'
 import { deleteKimiSession } from './sessionDelete'
 import { removeSessionTitle } from './sessionTitles'
+import type { GoalControlAction, GoalStartOptions } from './goalStore'
 import * as gitModule from './git'
 import { log } from './logger'
 import type {
@@ -321,6 +322,14 @@ export function registerIpc(
   ipcMain.handle('forge:setPermissionMode', async (_e, sessionId: string, mode: string): Promise<void> => {
     await bridge.setPermissionMode(sessionId, mode)
   })
+
+  ipcMain.handle('forge:goalStart', async (_e, sessionId: string, opts: GoalStartOptions) =>
+    bridge.goalStart(sessionId, opts)
+  )
+  ipcMain.handle('forge:goalControl', async (_e, sessionId: string, action: GoalControlAction) =>
+    bridge.goalControl(sessionId, action)
+  )
+  ipcMain.handle('forge:goalGet', async (_e, sessionId: string) => bridge.goalGet(sessionId))
 
   ipcMain.handle('forge:closeSession', async (_e, sessionId: string): Promise<void> => {
     await bridge.close(sessionId)

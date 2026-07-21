@@ -15,6 +15,7 @@ import {
 import { getPreferences } from '../preferences'
 import { log } from '../logger'
 import { KimiBackend } from './KimiBackend'
+import type { GoalControlAction, GoalInfo, GoalStartOptions } from '../goalStore'
 import type { PermissionRequestPayload, SDKMessage } from '../../shared/ipc'
 
 /** Events every backend adapter emits toward the IPC layer. */
@@ -39,6 +40,10 @@ interface AgentBackendAdapter {
   listSkills(sessionId: string): Promise<SkillInfo[]>
   /** 可选：会话级 token/上下文用量（后端不上报时返回缺省值）。 */
   getSessionUsage?(sessionId: string): Promise<SessionUsageInfo>
+  /** 可选：goal 循环（目标模式，客户端侧目标引擎）。 */
+  goalStart?(sessionId: string, opts: GoalStartOptions): Promise<GoalInfo | null>
+  goalControl?(sessionId: string, action: GoalControlAction): Promise<GoalInfo | null>
+  goalGet?(sessionId: string): Promise<GoalInfo | null>
   listModels(): Promise<ComposerModel[]>
   listMarketplacePlugins(cwd?: string): Promise<MarketplacePlugin[]>
   respondPermission(resp: PermissionResponsePayload): boolean
@@ -94,6 +99,18 @@ export class AgentBridge {
 
   setPermissionMode(sessionId: string, mode: string): Promise<void> {
     return this.maybeBackendForSession(sessionId)?.setPermissionMode(sessionId, mode) ?? Promise.resolve()
+  }
+
+  goalStart(sessionId: string, opts: GoalStartOptions): Promise<GoalInfo | null> {
+    return this.maybeBackendForSession(sessionId)?.goalStart?.(sessionId, opts) ?? Promise.resolve(null)
+  }
+
+  goalControl(sessionId: string, action: GoalControlAction): Promise<GoalInfo | null> {
+    return this.maybeBackendForSession(sessionId)?.goalControl?.(sessionId, action) ?? Promise.resolve(null)
+  }
+
+  goalGet(sessionId: string): Promise<GoalInfo | null> {
+    return this.maybeBackendForSession(sessionId)?.goalGet?.(sessionId) ?? Promise.resolve(null)
   }
 
   async close(sessionId: string): Promise<void> {

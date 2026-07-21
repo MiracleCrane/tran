@@ -14,7 +14,7 @@ import type {
 import { AGENT_BACKEND_IDS } from '../shared/agentBackends'
 
 const SETTINGS_SCHEMA_VERSION = 1
-const EFFORT_LEVELS = new Set<EffortLevel>(['low', 'medium', 'high', 'xhigh', 'max'])
+const EFFORT_LEVELS = new Set<EffortLevel>(['low', 'high', 'max'])
 const PERMISSION_MODES = new Set<PermissionMode>([
   'default',
   'plan',

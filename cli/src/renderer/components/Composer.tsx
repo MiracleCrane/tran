@@ -14,14 +14,13 @@ import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, Permission
 import DisclosureSelect from './DisclosureSelect'
 import ModePanel from './ModePanel'
 import { AGENT_TOOL_NAMES, BASH_TOOL_NAMES, countRunningTools } from '../utils/toolStats'
+import UsageRings from './UsageRings'
 import { defaultModelsForAgent, modelLabelForAgent } from '../../shared/models'
 import { onForgeEvent } from '../events'
 
 const EFFORTS: { id: EffortLevel; label: string }[] = [
   { id: 'low', label: '低' },
-  { id: 'medium', label: '中' },
   { id: 'high', label: '高' },
-  { id: 'xhigh', label: '很高' },
   { id: 'max', label: '最大' }
 ]
 
@@ -148,6 +147,8 @@ export default function Composer(): JSX.Element {
   const planDone = useSessionStore(
     (s) => s.planEntries.filter((e) => e.status === 'completed').length
   )
+  const statusError = useSessionStore((s) => s.status.error)
+  const stopReason = useSessionStore((s) => s.status.stopReason)
   const [text, setText] = useState('')
   const [models, setModels] = useState(defaultModelsForAgent(undefined))
   const [attachments, setAttachments] = useState<PickedFile[]>([])
@@ -587,25 +588,28 @@ export default function Composer(): JSX.Element {
           </div>
         )}
         {/* 状态 chips（kimi web 式，输入框上方一行；无活动时不占高度） */}
-        {(runningBash > 0 || runningAgents > 0 || planTotal > 0) && (
-          <div className="mb-1.5 flex items-center gap-3 px-1 text-[11px] text-zinc-500">
-            {runningBash > 0 && (
-              <span className="flex items-center gap-1" title="运行中的命令行工具调用">
-                <span className="text-blue-400">🕐</span>后台 Bash ({runningBash})
-              </span>
-            )}
-            {runningAgents > 0 && (
-              <span className="flex items-center gap-1" title="运行中的子 Agent 工具调用">
-                <span className="text-accent">✦</span>子 Agent ({runningAgents})
-              </span>
-            )}
-            {planTotal > 0 && (
-              <span className="flex items-center gap-1" title="待办清单完成进度">
-                <span className="text-zinc-400">☰</span>待办 ({planDone}/{planTotal})
-              </span>
-            )}
-          </div>
-        )}
+        {/* 状态行（输入框上方）：左侧瞬态错误/活动 chips，右侧常驻 Usage 圆环。
+            圆环原在底部 StatusBar，bar 已退役上移至此。 */}
+        <div className="mb-1.5 flex items-center gap-3 px-1 text-[11px] text-zinc-500">
+          {statusError && <span className="truncate text-red-400">{statusError}</span>}
+          {stopReason && !statusError && <span className="text-zinc-600">结束: {stopReason}</span>}
+          {runningBash > 0 && (
+            <span className="flex items-center gap-1" title="运行中的命令行工具调用">
+              <span className="text-blue-400">🕐</span>后台 Bash ({runningBash})
+            </span>
+          )}
+          {runningAgents > 0 && (
+            <span className="flex items-center gap-1" title="运行中的子 Agent 工具调用">
+              <span className="text-accent">✦</span>子 Agent ({runningAgents})
+            </span>
+          )}
+          {planTotal > 0 && (
+            <span className="flex items-center gap-1" title="待办清单完成进度">
+              <span className="text-zinc-400">☰</span>待办 ({planDone}/{planTotal})
+            </span>
+          )}
+          <UsageRings />
+        </div>
         <div
           className={`glass-panel composer-panel rounded-[18px] p-3 transition ${
             dragActive ? 'border-accent/60 bg-white/[0.035] shadow-[0_0_0_1px_rgba(139,92,246,0.28)]' : ''

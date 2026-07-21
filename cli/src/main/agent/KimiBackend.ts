@@ -23,10 +23,21 @@ import {
 } from './AcpClient'
 import { resolveWindowsKimiCommand } from '../windowsKimi'
 import { recordSessionTitle } from '../sessionTitles'
+import {
+  controlGoal,
+  getGoal,
+  startGoal,
+  updateGoal,
+  type GoalControlAction,
+  type GoalInfo,
+  type GoalStartOptions
+} from '../goalStore'
 import { log } from '../logger'
 
 interface QueuedMessage {
   content: string | unknown[]
+  /** 目标续跑轮（goal 循环注入的提醒 prompt）：结束后不再触发隐藏 /usage 轮。 */
+  goal?: boolean
 }
 
 interface ActiveKimiSession {
@@ -61,6 +72,14 @@ interface ActiveKimiSession {
   contextUsage?: ContextUsage
   /** session/load 历史重放累积器（仅 resume 的 replaying 窗口内存在）。 */
   replay?: ReplayAccumulator
+  /** 本轮最终正文（goal 循环终止判定用，runTurn 封停前捕获）。 */
+  lastTurnText: string
+  /** 本轮是否发生过 tool_call（goal 无进展保护用）。 */
+  turnHadToolCall: boolean
+  /** 连续无 tool_call 的 goal 轮数（≥3 暂停）。 */
+  noProgressTurns: number
+  /** 本轮是否出错（goal 循环遇错暂停）。 */
+  lastTurnFailed: boolean
 }
 
 interface PendingPermission {
@@ -151,7 +170,11 @@ export class KimiBackend {
       toolResults: new Set(),
       skills: [],
       hiddenTurn: false,
-      hiddenText: ''
+      hiddenText: '',
+      lastTurnText: '',
+      turnHadToolCall: false,
+      noProgressTurns: 0,
+      lastTurnFailed: false
     }
     session.ready = this.prepareSession(session, opts)
     this.sessions.set(sessionId, session)
@@ -174,6 +197,11 @@ export class KimiBackend {
   async interrupt(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session?.acpSessionId) return
+    // 手停闸：用户中断时 goal 循环一并暂停（防止取消后轮次继续烧）。
+    if (getGoal(sessionId)?.status === 'active') {
+      controlGoal(sessionId, 'pause')
+      this.emitGoal(session)
+    }
     const client = await this.ensureClient()
     client.notify('session/cancel', { sessionId: session.acpSessionId })
   }
@@ -340,6 +368,15 @@ export class KimiBackend {
     this.rememberConfigOptions(response?.configOptions)
     const model = currentConfigValue(response?.configOptions, 'model') ?? session.model ?? DEFAULT_KIMI_MODEL_ID
     session.model = kimiModel(model) ?? undefined
+    // 思考等级映射：kimi 0.26 ACP 的 thinking 配置恒为 "on"（设值不报错也不生效），
+    // 照发不误——kimi 未来开放后自动生效。UI 三档：low/high/max。
+    if (opts.effort) {
+      void client.request('session/set_config_option', {
+        sessionId: session.acpSessionId,
+        configId: 'thinking',
+        value: opts.effort
+      }).catch((error) => log('kimi', `set thinking failed: ${userFacingError(error)}`))
+    }
     if (session.permissionMode) {
       await this.setPermissionMode(session.id, session.permissionMode)
     }
@@ -358,10 +395,12 @@ export class KimiBackend {
     if (!next) return
     session.running = true
     session.turn += 1
+    session.turnHadToolCall = false
     try {
       await session.ready
       await this.runTurn(session, next)
     } catch (error) {
+      session.lastTurnFailed = true
       this.emitResult(session, {
         subtype: 'error',
         error: userFacingError(error)
@@ -377,10 +416,109 @@ export class KimiBackend {
       session.nextBlockIndex = 0
       session.toolResults.clear()
       if (!session.closed && session.queue.length) void this.drain(session)
-      // 正常 turn 完成且队列空了：发一个隐藏 /usage 轮更新上下文用量
-      // （kimi 宿主直接返回、不调模型、零额度消耗）。
-      else if (!session.closed) void this.runHiddenUsageTurn(session)
+      // turn 完成且队列空了：隐藏 /usage 轮 + goal 续跑（串行，见 afterTurn）。
+      else if (!session.closed) void this.afterTurn(session, next)
     }
+  }
+
+  /** turn 结束后的串行钩子：先隐藏 /usage 轮（快；goal 续跑轮跳过，避免每轮
+   *  双倍 /usage），再判定 goal 循环是否续跑。 */
+  private async afterTurn(session: ActiveKimiSession, finished: QueuedMessage): Promise<void> {
+    if (!finished.goal) await this.runHiddenUsageTurn(session)
+    if (session.closed) return
+    if (session.queue.length) {
+      void this.drain(session)
+      return
+    }
+    // 上轮出错：goal 循环不再续跑（防连续报错烧额度），置 paused。
+    if (session.lastTurnFailed) {
+      session.lastTurnFailed = false
+      const goal = getGoal(session.id)
+      if (goal?.status === 'active') {
+        updateGoal(session.id, { status: 'paused', blockedReason: '上轮执行出错' })
+        this.emitGoal(session)
+      }
+      return
+    }
+    await this.maybeContinueGoal(session)
+    if (!session.closed && session.queue.length) void this.drain(session)
+  }
+
+  /** goal 循环钩子：解析上轮最终文本的状态行决定 停/续；续跑时注入改写的
+   *  active-reminder（untrusted_objective + 纪律 + GOAL_STATUS 文本协议）。 */
+  private async maybeContinueGoal(session: ActiveKimiSession, force = false): Promise<void> {
+    const goal = getGoal(session.id)
+    if (!goal || goal.status !== 'active') return
+
+    if (!force) {
+      // 终止判定：状态行（大小写不敏感，容许 markdown 行内形式）。
+      const verdict = parseGoalStatus(session.lastTurnText)
+      if (verdict?.action === 'complete') {
+        updateGoal(session.id, { status: 'complete' })
+        this.emitGoal(session)
+        return
+      }
+      if (verdict?.action === 'blocked') {
+        updateGoal(session.id, { status: 'blocked', blockedReason: verdict.reason ?? 'agent 宣告阻塞' })
+        this.emitGoal(session)
+        return
+      }
+      // 无进展保护：连续 3 轮 continue（或状态行缺失）且无任何 tool_call → 暂停。
+      session.noProgressTurns = session.turnHadToolCall ? 0 : session.noProgressTurns + 1
+      if (session.noProgressTurns >= 3) {
+        session.noProgressTurns = 0
+        updateGoal(session.id, { status: 'paused', blockedReason: '连续 3 轮无进展' })
+        this.emitGoal(session)
+        return
+      }
+    } else {
+      session.noProgressTurns = 0
+    }
+
+    // 预算闸：耗尽则暂停（防烧额度第一道闸）。
+    if (goal.turnCount >= goal.maxTurns) {
+      updateGoal(session.id, { status: 'paused', blockedReason: '预算耗尽' })
+      this.emitGoal(session)
+      return
+    }
+    const next = updateGoal(session.id, { turnCount: goal.turnCount + 1 })
+    this.emitGoal(session)
+    session.queue.push({ content: buildGoalReminder(next ?? goal), goal: true })
+  }
+
+  private emitGoal(session: ActiveKimiSession): void {
+    this.h.onMessage(session.id, {
+      type: 'system',
+      subtype: 'goal',
+      goal: getGoal(session.id)
+    } as unknown as SDKMessage)
+  }
+
+  async goalStart(sessionId: string, opts: GoalStartOptions): Promise<GoalInfo | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    const goal = startGoal(sessionId, opts)
+    this.emitGoal(session)
+    return goal
+  }
+
+  async goalControl(sessionId: string, action: GoalControlAction): Promise<GoalInfo | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    const goal = controlGoal(sessionId, action)
+    this.emitGoal(session)
+    // resume：立即续跑一轮（跳过状态行判定，预算闸仍然生效）。
+    if (action === 'resume' && goal?.status === 'active' && !session.running) {
+      void (async () => {
+        await this.maybeContinueGoal(session, true)
+        if (!session.closed && session.queue.length) void this.drain(session)
+      })()
+    }
+    return goal
+  }
+
+  async goalGet(sessionId: string): Promise<GoalInfo | null> {
+    return getGoal(sessionId)
   }
 
   /** 隐藏轮：向 ACP 会话发 '/usage'，该轮的流式事件全部吞掉（hiddenTurn 标志），
@@ -425,6 +563,8 @@ export class KimiBackend {
       prompt: payload.prompt,
       messageId: cryptoId()
     }, 900000)
+    // goal 循环终止判定用：封停前捕获本轮最终正文。
+    session.lastTurnText = session.streamedText
     this.sealStreamMessage(session)
     const usage = asRecord(response.usage)
     this.emitResult(session, {
@@ -632,6 +772,7 @@ export class KimiBackend {
     }
     if (type === 'tool_call') {
       const toolUseId = asString(update.toolCallId) ?? cryptoId()
+      session.turnHadToolCall = true
       // 工具调用是独立的 assistant 消息；先封停当前流式消息（思考/正文），
       // 否则渲染层会把工具卡覆盖到正在流式的那条消息上。
       this.sealStreamMessage(session)
@@ -833,7 +974,12 @@ export class KimiBackend {
     }
     const content: Array<Record<string, unknown>> = []
     if (session.thinkingText) content.push({ type: 'thinking', thinking: session.thinkingText })
-    if (session.streamedText) content.push({ type: 'text', text: session.streamedText })
+    // goal 激活时：最终消息剥掉末尾的 GOAL_STATUS 状态行（流式期间短暂可见可接受）。
+    const displayText =
+      getGoal(session.id)?.status === 'active'
+        ? stripGoalStatusLine(session.streamedText)
+        : session.streamedText
+    if (displayText) content.push({ type: 'text', text: displayText })
     if (content.length) this.emitAssistant(session, session.currentMessageId ?? cryptoId(), content)
     session.streamStarted = false
     session.currentMessageId = undefined
@@ -975,6 +1121,43 @@ function firstUserText(content: string | unknown[]): string {
     if (b?.type === 'text' && b.text) return b.text
   }
   return ''
+}
+
+/** GOAL_STATUS 状态行匹配（大小写不敏感，容许 `…`/**…** 等 markdown 行内形式）。 */
+const GOAL_STATUS_LINE_RE = /^[*`>\s]*GOAL_STATUS\s*:\s*(continue|complete|blocked)\b\s*:?\s*([^`*]*?)\s*[`*]*$/i
+
+/** 解析本轮最终文本最后一行的 GOAL_STATUS 状态行（goal 循环的终止协议——
+ *  ACP 没有 UpdateGoal 工具，用文本行替代）。 */
+function parseGoalStatus(text: string): { action: 'continue' | 'complete' | 'blocked'; reason?: string } | null {
+  const lines = text.trimEnd().split('\n')
+  const last = lines[lines.length - 1]?.trim()
+  if (!last) return null
+  const match = last.match(GOAL_STATUS_LINE_RE)
+  if (!match) return null
+  const action = match[1].toLowerCase() as 'continue' | 'complete' | 'blocked'
+  const reason = match[2]?.trim()
+  return { action, ...(reason ? { reason } : {}) }
+}
+
+/** 从最终展示文本里剥掉末尾的 GOAL_STATUS 状态行（流式期间短暂可见可接受）。 */
+function stripGoalStatusLine(text: string): string {
+  const lines = text.trimEnd().split('\n')
+  if (lines.length && GOAL_STATUS_LINE_RE.test(lines[lines.length - 1].trim())) {
+    return lines.slice(0, -1).join('\n').trimEnd()
+  }
+  return text
+}
+
+/** 改写的官方 active-reminder：untrusted_objective 防注入 + 状态/进度行 +
+ *  预算纪律 + 文本状态行协议（替代官方 UpdateGoal 工具调用）。 */
+function buildGoalReminder(goal: GoalInfo): string {
+  return [
+    `<untrusted_objective>${goal.objective}</untrusted_objective>`,
+    ...(goal.completionCriterion ? [`完成判据：${goal.completionCriterion}`] : []),
+    `Status: ${goal.status} · Progress: turn ${goal.turnCount}/${goal.maxTurns}`,
+    '纪律：每轮只推进一个小切片，不要试图一轮全部做完；证据不足不要宣告完成；同一阻塞连续 3 轮才允许宣告 blocked。',
+    '在回复的最后一行输出状态行（不要省略）：GOAL_STATUS: continue / GOAL_STATUS: complete / GOAL_STATUS: blocked: <原因>'
+  ].join('\n')
 }
 
 /** 往重放累积器追加一条 tool_result 用户消息（HistoryMessage 形状）。 */

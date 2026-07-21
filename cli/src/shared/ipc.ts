@@ -9,7 +9,7 @@ export type SDKMessage = Record<string, unknown> & { type: string }
 /** 权限建议的不透明负载（原 SDK 的 PermissionUpdate），仅透传到 UI。 */
 export type PermissionUpdate = Record<string, unknown>
 
-export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type EffortLevel = 'low' | 'high' | 'max'
 /** Kimi ACP 的真实模式（session/new configOptions.mode 实测值）：
  *  default=每次询问, plan=只读计划, auto=自动批准安全操作, yolo=全部自动批准。 */
 export type PermissionMode =
@@ -392,6 +392,27 @@ export interface HistoryMessage {
   parent_tool_use_id: string | null
 }
 
+/** --- Goal mode（客户端侧目标引擎；ACP 无 goal 工具，循环在 Tran 实现） --- */
+export type GoalStatus = 'active' | 'paused' | 'blocked' | 'complete'
+
+export interface GoalInfo {
+  objective: string
+  completionCriterion?: string
+  status: GoalStatus
+  turnCount: number
+  maxTurns: number
+  blockedReason?: string
+  createdAt: number
+}
+
+export interface GoalStartOptions {
+  objective: string
+  completionCriterion?: string
+  maxTurns?: number
+}
+
+export type GoalControlAction = 'pause' | 'resume' | 'stop'
+
 /** --- Usage panel (UsageModal) --- */
 export interface SessionUsageInfo {
   /** 本会话累计 token。kimi 0.26.0 的 ACP 不上报会话用量（实测），
@@ -469,6 +490,10 @@ export interface ForgeApi {
   interrupt(sessionId: string): Promise<void>
   setModel(sessionId: string, model: string): Promise<void>
   setPermissionMode(sessionId: string, mode: PermissionMode): Promise<void>
+  /** --- Goal mode --- */
+  goalStart(sessionId: string, opts: GoalStartOptions): Promise<GoalInfo | null>
+  goalControl(sessionId: string, action: GoalControlAction): Promise<GoalInfo | null>
+  goalGet(sessionId: string): Promise<GoalInfo | null>
   closeSession(sessionId: string): Promise<void>
   listSessions(cwd: string, opts?: SessionListOptions): Promise<SessionListItem[]>
   getSessionMessages(

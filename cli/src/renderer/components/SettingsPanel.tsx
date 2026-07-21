@@ -29,9 +29,7 @@ import { emitForgeEvent, onForgeEvent } from '../events'
 
 const EFFORTS: { id: EffortLevel; label: string }[] = [
   { id: 'low', label: '低' },
-  { id: 'medium', label: '中' },
   { id: 'high', label: '高' },
-  { id: 'xhigh', label: '很高' },
   { id: 'max', label: '最大' }
 ]
 
