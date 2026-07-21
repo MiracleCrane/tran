@@ -117,10 +117,50 @@ function buildDisplayRows(roots: ItemNode[]): DisplayRow[] {
  *  that used to be here was removed — it stacked a backdrop-filter surface per
  *  message (cost grew with message count) for a barely-visible effect over the
  *  already-frosted shell. */
+/** kimi CLI 注入会话历史的系统信封（后台任务通知/cron/系统提醒等），
+ *  重放时按原文会糊出一坨 XML——解析成克制的系统卡片。 */
+const ENVELOPE_RE = /^<(notification|cron-fire|system-reminder|kimi-skill-loaded)[\s>]/
+
+function SystemEnvelope({ text }: { text: string }): JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const title = /title="([^"]*)"/.exec(text)?.[1]
+  const kind = /(completed|failed|lost)/.exec(text)?.[1]
+  const label = title ?? (text.startsWith('<cron-fire') ? '定时任务触发' : '系统消息')
+  return (
+    <div className="flex justify-center">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="max-w-[85%] rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-1.5 text-left transition hover:bg-white/[0.04]"
+        title={expanded ? '收起' : '展开原文'}
+      >
+        <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+          <span aria-hidden>⚙</span>
+          <span className="truncate">{label}</span>
+          {kind && (
+            <span className={kind === 'completed' ? 'text-emerald-400/80' : 'text-red-300/80'}>
+              {kind === 'completed' ? '完成' : kind === 'failed' ? '失败' : '丢失'}
+            </span>
+          )}
+        </div>
+        {expanded && (
+          <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[10px] leading-relaxed text-zinc-600">
+            {text}
+          </pre>
+        )}
+      </button>
+    </div>
+  )
+}
+
 const UserMessage = memo(function UserMessage({ item }: { item: UserItem }): JSX.Element {
   const atts = item.attachments ?? []
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
   const openAttachmentPreview = useUiStore((s) => s.openAttachmentPreview)
+  // kimi CLI 系统信封（后台任务通知等）：渲染成系统卡片而不是原始 XML 气泡
+  if (item.text && ENVELOPE_RE.test(item.text.trimStart())) {
+    return <SystemEnvelope text={item.text} />
+  }
   const handleAttachmentClick = (
     event: MouseEvent<HTMLButtonElement>,
     attachment: NonNullable<UserItem['attachments']>[number]
