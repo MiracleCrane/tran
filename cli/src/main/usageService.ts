@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { log } from './logger'
@@ -11,27 +11,95 @@ import type { PlanUsageInfo, PlanUsageResult, UsageLimitWindow } from '../shared
  * 系统代理，与 CLI 行为一致）。access_token 绝不写日志、绝不进渲染层——
  * 返回给渲染层的只有算好的展示数据（PlanUsageInfo）。
  *
- * TODO(auth): token 过期后目前只提示重新登录；refresh_token 自动刷新未实现。
+ * token 自动续期：access_token 过期（或 /usages 回 401）时，用 refresh_token 走
+ * 标准 OAuth2 刷新（POST auth.kimi.com/api/oauth/token，form: client_id +
+ * grant_type=refresh_token），新 token 写回 credentials 文件（refresh_token
+ * 会轮换，必须写回）。刷新失败才提示重新登录。
  */
 
 const USAGES_URL = 'https://api.kimi.com/coding/v1/usages'
+const OAUTH_TOKEN_URL = 'https://auth.kimi.com/api/oauth/token'
+const OAUTH_CLIENT_ID = '17e5f671-d194-4dfb-9706-5516cb48c098'
 const REQUEST_TIMEOUT_MS = 15000
+const EXPIRY_SKEW_MS = 60_000
 
 const AUTH_EXPIRED_MESSAGE = '登录态已过期，请在终端运行 kimi login 后重试'
 const NETWORK_ERROR_MESSAGE = '网络错误，无法连接 Kimi 云端接口'
+
+interface OAuthCredentials {
+  access_token?: string
+  refresh_token?: string
+  expires_at?: string | number
+  token_type?: string
+  scope?: string
+  expires_in?: number
+}
 
 function credentialsPath(): string {
   return join(homedir(), '.kimi-code', 'credentials', 'kimi-code.json')
 }
 
-function readAccessToken(): string | null {
+function readCredentials(): OAuthCredentials | null {
   try {
-    const raw = JSON.parse(readFileSync(credentialsPath(), 'utf8')) as unknown
-    const token = (raw as { access_token?: unknown } | null)?.access_token
-    return typeof token === 'string' && token ? token : null
+    return JSON.parse(readFileSync(credentialsPath(), 'utf8')) as OAuthCredentials
   } catch {
     return null
   }
+}
+
+function expiryMs(creds: OAuthCredentials): number {
+  const parsed = Date.parse(String(creds.expires_at ?? ''))
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+async function refreshAccessToken(refreshToken: string): Promise<OAuthCredentials | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    const response = await fetch(OAUTH_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: OAUTH_CLIENT_ID,
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken
+      }),
+      signal: controller.signal
+    })
+    if (!response.ok) {
+      log('usage', `token refresh rejected: ${response.status}`)
+      return null
+    }
+    return (await response.json()) as OAuthCredentials
+  } catch (error) {
+    log('usage', `token refresh failed: ${error instanceof Error ? error.message : String(error)}`)
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** 取有效 access_token：未过期直接用；过期则 refresh 并写回（refresh_token 轮换）。
+ *  forceRefresh 用于 /usages 401 后的重试。 */
+async function getValidAccessToken(forceRefresh = false): Promise<string | null> {
+  const creds = readCredentials()
+  if (!creds?.access_token) return null
+  const expired = expiryMs(creds) - EXPIRY_SKEW_MS < Date.now()
+  if (!expired && !forceRefresh) return creds.access_token
+  if (!creds.refresh_token) return null
+  const refreshed = await refreshAccessToken(creds.refresh_token)
+  if (!refreshed?.access_token) return null
+  const next: OAuthCredentials = {
+    ...creds,
+    ...refreshed,
+    expires_at: new Date(Date.now() + (refreshed.expires_in ?? 900) * 1000).toISOString()
+  }
+  try {
+    writeFileSync(credentialsPath(), JSON.stringify(next, null, 2), 'utf8')
+  } catch (error) {
+    log('usage', `credentials write-back failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  return next.access_token ?? null
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -122,7 +190,7 @@ function parsePlanUsage(payload: unknown): PlanUsageInfo {
 }
 
 export async function fetchPlanUsage(): Promise<PlanUsageResult> {
-  const token = readAccessToken()
+  let token = await getValidAccessToken()
   if (!token) return { ok: false, error: AUTH_EXPIRED_MESSAGE }
 
   const controller = new AbortController()
@@ -141,8 +209,27 @@ export async function fetchPlanUsage(): Promise<PlanUsageResult> {
     clearTimeout(timer)
   }
 
+  // 401/403：强制刷新一次 token 重试（时钟偏差/服务端提前失效等情况）。
   if (response.status === 401 || response.status === 403) {
-    return { ok: false, error: AUTH_EXPIRED_MESSAGE }
+    token = await getValidAccessToken(true)
+    if (!token) return { ok: false, error: AUTH_EXPIRED_MESSAGE }
+    const retryController = new AbortController()
+    const retryTimer = setTimeout(() => retryController.abort(), REQUEST_TIMEOUT_MS)
+    try {
+      response = await fetch(USAGES_URL, {
+        method: 'GET',
+        headers: { authorization: `Bearer ${token}` },
+        signal: retryController.signal
+      })
+    } catch (error) {
+      log('usage', `plan usage retry failed: ${error instanceof Error ? error.message : String(error)}`)
+      return { ok: false, error: NETWORK_ERROR_MESSAGE }
+    } finally {
+      clearTimeout(retryTimer)
+    }
+    if (response.status === 401 || response.status === 403) {
+      return { ok: false, error: AUTH_EXPIRED_MESSAGE }
+    }
   }
   if (!response.ok) {
     return { ok: false, error: `云端接口返回 ${response.status}` }
