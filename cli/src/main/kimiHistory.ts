@@ -13,10 +13,9 @@ import type { SessionListItem } from '../shared/ipc'
  * for history queries — separate from the AgentBridge's session client.
  *
  * TODO(history): ACP has no "read messages of an old session" method — history
- * is replayed by `session/load` when a session is resumed (KimiBackend swallows
- * the replay). getSessionMessages therefore returns [] and the sidebar resume
- * opens an empty transcript whose agent-side context is still intact. Revisit
- * rendering the replayed history into the transcript.
+ * is replayed by `session/load` when a session is resumed, and KimiBackend now
+ * accumulates the replay into transcript items (system/history). getSessionMessages
+ * therefore still returns []; the sidebar resume view is driven by the replay.
  */
 
 let client: AcpClient | null = null

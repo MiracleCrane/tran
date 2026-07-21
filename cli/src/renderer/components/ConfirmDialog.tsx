@@ -29,24 +29,24 @@ export default function ConfirmDialog({
     // z-[60] sits above GitToolbar popups, while active permission prompts stay above it.
     <div className="tran-modal-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6" onClick={onCancel}>
       <div
-        className="tran-modal-panel w-full max-w-md rounded-2xl border border-border-subtle bg-bg-panel p-6 shadow-2xl"
+        className="tran-modal-panel w-full max-w-xs rounded-xl border border-border-subtle bg-bg-panel p-4 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-2 flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 rounded-full ${danger ? 'bg-red-400' : 'bg-amber-400'}`} />
-          <h2 className="text-base font-semibold text-zinc-100">{title}</h2>
+        <div className="mb-1.5 flex items-center gap-2">
+          <span className={`h-2 w-2 rounded-full ${danger ? 'bg-red-400' : 'bg-amber-400'}`} />
+          <h2 className="text-sm font-semibold text-zinc-100">{title}</h2>
         </div>
-        <p className="mb-5 whitespace-pre-wrap break-words text-sm text-zinc-400">{message}</p>
+        <p className="mb-4 whitespace-pre-wrap break-words text-xs text-zinc-400">{message}</p>
         <div className="flex justify-end gap-2">
           <button
             onClick={onCancel}
-            className="rounded-lg border border-border-subtle bg-bg-elev px-4 py-2 text-sm text-zinc-300 hover:bg-bg-hover"
+            className="rounded-lg border border-border-subtle bg-bg-elev px-3 py-1.5 text-xs text-zinc-300 hover:bg-bg-hover"
           >
             {cancelLabel}
           </button>
           <button
             onClick={onConfirm}
-            className={`rounded-lg px-5 py-2 text-sm font-medium text-white hover:brightness-110 ${
+            className={`rounded-lg px-3.5 py-1.5 text-xs font-medium text-white hover:brightness-110 ${
               danger ? 'bg-red-500' : 'bg-accent'
             }`}
           >

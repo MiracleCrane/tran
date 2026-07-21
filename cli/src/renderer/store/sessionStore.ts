@@ -74,6 +74,8 @@ interface SessionStore {
   planEntries: PlanEntry[]
   /** 隐藏 /usage 轮解析出的上下文用量（system/context_usage；null 表示无数据）。 */
   contextUsage: ContextUsage | null
+  /** 模式面板状态（计划/权限互斥恢复 + Swarm/目标开关），per session。 */
+  modePanel: ModePanelState
 
   startSession: (args: StartArgs) => Promise<void>
   sendMessage: (text: string, attachments?: PickedFile[]) => Promise<void>
@@ -87,6 +89,12 @@ interface SessionStore {
    *  query.setPermissionMode immediately so it takes effect mid-session, no
    *  resume needed (unlike model/effort which apply lazily next message). */
   setPermissionMode: (mode: PermissionMode) => Promise<void>
+  /** 计划开关：开 → mode='plan'（本地记住当前权限档）；关 → 恢复之前的权限档。 */
+  setPlanEnabled: (on: boolean) => Promise<void>
+  /** Swarm 开关（本地 per-session 偏好，sendMessage 时注入指令前缀）。 */
+  setSwarmEnabled: (on: boolean) => Promise<void>
+  /** 目标开关（占位，下一版本提供）。 */
+  setGoalEnabled: (on: boolean) => Promise<void>
   reset: () => void
 
   /** On app start: auto-enter the last-used project if any, else leave meta null
@@ -134,6 +142,29 @@ interface SessionStore {
 }
 
 const emptyStatus: SessionStatus = { running: false }
+
+/** Swarm 模式注入前缀（本地 per-session 偏好，发送时隐藏拼在用户文本前）。 */
+export const SWARM_PROMPT_PREFIX =
+  '[Swarm 模式] 请优先使用 AgentSwarm 并行子代理拆分独立子任务。原始消息：'
+
+/** 模式面板状态（per session，随会话切换重置）。 */
+export interface ModePanelState {
+  swarmEnabled: boolean
+  /** 目标模式：占位开关（下一版本提供），状态先留口。 */
+  goalEnabled: boolean
+  /** 开启计划前的权限档（关闭计划时恢复；ACP 单 mode 配置，计划与权限互斥）。 */
+  modeBeforePlan: PermissionMode | null
+}
+function defaultModePanel(): ModePanelState {
+  return { swarmEnabled: false, goalEnabled: false, modeBeforePlan: null }
+}
+
+/** 用户消息回显去重：Swarm 注入后 SDK 回显的是带前缀文本，剥掉前缀再比。 */
+function isOwnMessageEcho(last: TranscriptItem | undefined, echoText: string): boolean {
+  if (!last || last.kind !== 'user') return false
+  if (last.text === echoText) return true
+  return !!last.swarm && echoText === SWARM_PROMPT_PREFIX + last.text
+}
 const SESSION_PAGE_SIZE = 24
 const HISTORY_PRELOAD_CHUNK_SIZE = 50
 const HISTORY_HYDRATION_IDLE_TIMEOUT_MS = 700
@@ -693,6 +724,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   slashCommands: [],
   planEntries: [],
   contextUsage: null,
+  modePanel: defaultModePanel(),
 
   async startSession(args) {
     if (get().starting) return
@@ -735,6 +767,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         bridgeEnded: false,
         planEntries: [],
         contextUsage: null,
+        modePanel: defaultModePanel(),
         status: { running: false },
         currentStreamingMsgId: null
       })
@@ -799,12 +832,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
 
     if (meta.sdkSessionId) deleteSessionHistoryCache(meta.cwd, meta.sdkSessionId)
+    // Swarm 模式：发送时在用户文本前隐藏拼接指令前缀（气泡显示原文 + Swarm 徽章）。
+    const swarmOn = get().modePanel.swarmEnabled
+    const wireValue = swarmOn ? SWARM_PROMPT_PREFIX + value : value
+    const swarmProps = swarmOn ? { swarm: true } : {}
     // Build the wire content: plain text, or content blocks when there are
     // attachments (image → image block, text → inlined, other → path ref).
     let content: string | unknown[]
     if (atts.length) {
       const blocks: unknown[] = []
-      if (value) blocks.push({ type: 'text', text: value })
+      if (wireValue) blocks.push({ type: 'text', text: wireValue })
       for (const a of atts) {
         if (a.kind === 'image') {
           blocks.push({
@@ -822,7 +859,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
       content = blocks
     } else {
-      content = value
+      content = wireValue
     }
     const displayAttachments: UserAttachment[] | undefined = atts.length
       ? atts.map(pickedFileToUserAttachment)
@@ -837,10 +874,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     )
     const busy = get().status.running && !hasBackgroundSubagent
     if (busy) {
-      set((s) => ({ pendingQueue: [...s.pendingQueue, { id: uid(), text: value, ...attProps }] }))
+      set((s) => ({ pendingQueue: [...s.pendingQueue, { id: uid(), text: value, ...attProps, ...swarmProps }] }))
     } else {
       set((s) => ({
-        items: [...s.items, { id: uid(), kind: 'user', text: value, parentToolUseId: null, ...attProps }],
+        items: [...s.items, { id: uid(), kind: 'user', text: value, parentToolUseId: null, ...attProps, ...swarmProps }],
         status: { ...s.status, running: true, error: undefined }
       }))
     }
@@ -887,9 +924,36 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     await window.api.setPermissionMode(meta.sessionId, mode).catch(() => {})
   },
 
+  async setPlanEnabled(on) {
+    const meta = get().meta
+    if (!meta) return
+    const current = meta.permissionMode
+    if (on) {
+      if (current === 'plan') return
+      // 记住当前权限档，关计划时恢复（ACP 单 mode 配置，计划与权限互斥）。
+      set((s) => ({
+        modePanel: { ...s.modePanel, modeBeforePlan: (current as PermissionMode) ?? 'default' }
+      }))
+      await get().setPermissionMode('plan')
+    } else {
+      if (current !== 'plan') return
+      const restore = get().modePanel.modeBeforePlan ?? 'default'
+      set((s) => ({ modePanel: { ...s.modePanel, modeBeforePlan: null } }))
+      await get().setPermissionMode(restore)
+    }
+  },
+
+  async setSwarmEnabled(on) {
+    set((s) => ({ modePanel: { ...s.modePanel, swarmEnabled: on } }))
+  },
+
+  async setGoalEnabled(on) {
+    set((s) => ({ modePanel: { ...s.modePanel, goalEnabled: on } }))
+  },
+
   reset() {
     cancelActiveHistoryHydration(0)
-    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], contextUsage: null })
+    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], contextUsage: null, modePanel: defaultModePanel() })
   },
 
   async bootstrap() {
@@ -935,6 +999,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessionsHasMore: false,
       planEntries: [],
       contextUsage: null,
+      modePanel: defaultModePanel(),
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1092,6 +1157,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       bridgeEnded: false,
       planEntries: [],
       contextUsage: null,
+      modePanel: defaultModePanel(),
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1159,6 +1225,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       bridgeEnded: false,
       planEntries: [],
       contextUsage: null,
+      modePanel: defaultModePanel(),
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1473,6 +1540,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             // 新会话/恢复会话时清空上一会话残留的待办清单（新 plan 事件会重建）。
             planEntries: [],
             contextUsage: null,
+            modePanel: defaultModePanel(),
             status: { ...s.status }
           }))
         } else if (subtype === 'status') {
@@ -1489,6 +1557,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           // 隐藏 /usage 轮解析出的上下文用量（UsageRings 第三环）。
           const usage = (msg as unknown as { contextUsage?: ContextUsage }).contextUsage
           set({ contextUsage: usage ?? null })
+        } else if (subtype === 'history') {
+          // session/load 重放的历史：整批转换成 items 前置拼接（不走流式管道，
+          // 避免"逐字打出历史"）；与现有内容按 id 去重（重放期间发的消息保留在后）。
+          const msgs = (msg as unknown as { messages?: HistoryMessage[] }).messages
+          if (Array.isArray(msgs) && msgs.length) {
+            const historyItems = historyToItems(msgs).map((it) => ({ ...it, isHistory: true }))
+            set((s) => {
+              const existing = new Set(s.items.map((i) => i.id))
+              const fresh = historyItems.filter((i) => !existing.has(i.id))
+              return { items: [...fresh, ...s.items] }
+            })
+          }
         } else if (subtype === 'permission_denied') {
           const d = msg as unknown as { tool_use_id: string; message: string }
           set((s) => ({
@@ -1608,7 +1688,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           // if the SDK echoes our own message back, don't add it a second time.
           set((s) => {
             const last = s.items[s.items.length - 1]
-            if (last && last.kind === 'user' && last.text === content) {
+            if (isOwnMessageEcho(last, content)) {
               return { status: { ...s.status, running: true } }
             }
             return {
@@ -1651,7 +1731,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                 // De-dupe: sendMessage already rendered this optimistically
                 // (incl. attachments), so don't add the text-only echo again.
                 const last = s.items[s.items.length - 1]
-                if (last && last.kind === 'user' && last.text === text) {
+                if (isOwnMessageEcho(last, text)) {
                   return { status: { ...s.status, running: true } }
                 }
                 return {
@@ -1794,7 +1874,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                 kind: 'user' as const,
                 text: due.text,
                 parentToolUseId: null,
-                ...(due.attachments ? { attachments: due.attachments } : {})
+                ...(due.attachments ? { attachments: due.attachments } : {}),
+                ...(due.swarm ? { swarm: true } : {})
               }
             ]
           })(),

@@ -4,6 +4,10 @@ import Collapse from './Collapse'
 export interface DisclosureOption {
   value: string
   label: string
+  /** 下拉项里的一行小字说明（对齐 kimi web 的双行选项）。 */
+  description?: string
+  /** 当前值在触发按钮上的着色 class（如 auto 金色、yolo 红色）。 */
+  accentClass?: string
 }
 
 const DISCLOSURE_CLOSE_ELEVATION_MS = 180
@@ -97,7 +101,12 @@ export default function DisclosureSelect({
               }`}
             >
               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? 'bg-accent' : 'bg-transparent'}`} />
-              <span className="truncate">{o.label}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{o.label}</span>
+                {o.description && (
+                  <span className="block truncate text-[10px] text-zinc-600">{o.description}</span>
+                )}
+              </span>
             </button>
           )
         })}
@@ -125,13 +134,13 @@ export default function DisclosureSelect({
           onClick={() => setOpen((o) => !o)}
           disabled={disabled}
           title={title}
-          className={`flex w-full items-center gap-1.5 rounded-lg text-left text-xs text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-zinc-300 ${
-            compact ? 'px-2 py-1' : 'px-2.5 py-1.5'
+          className={`flex w-full items-center gap-1.5 rounded-md text-left text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-zinc-300 ${
+            compact ? 'px-1.5 py-0.5 text-[11px]' : 'px-2.5 py-1.5 text-xs'
           }`}
           aria-expanded={open}
         >
           {triggerLeading}
-          <span className="min-w-0 flex-1 truncate">{label}</span>
+          <span className={`min-w-0 flex-1 truncate ${current?.accentClass ?? ''}`}>{label}</span>
           <svg
             width="13"
             height="13"
@@ -153,7 +162,7 @@ export default function DisclosureSelect({
           frame's padding + a one-line trigger so heights line up. */}
       <div className="invisible" aria-hidden>
         <div className={`glass-panel-soft ${compact ? 'rounded-xl p-1' : 'rounded-2xl p-1.5'}`}>
-          <div className={`flex items-center gap-1.5 text-xs ${compact ? 'px-2 py-1' : 'px-2.5 py-1.5'}`}>
+          <div className={`flex items-center gap-1.5 ${compact ? 'px-1.5 py-0.5 text-[11px]' : 'px-2.5 py-1.5 text-xs'}`}>
             {triggerLeading ? <span className="w-[14px]" /> : null}
             <span className="flex-1 truncate">{label}</span>
             <span className="w-[13px]" />

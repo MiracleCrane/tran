@@ -12,6 +12,8 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, PermissionMode } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
+import ModePanel from './ModePanel'
+import { AGENT_TOOL_NAMES, BASH_TOOL_NAMES, countRunningTools } from '../utils/toolStats'
 import { defaultModelsForAgent, modelLabelForAgent } from '../../shared/models'
 import { onForgeEvent } from '../events'
 
@@ -23,11 +25,15 @@ const EFFORTS: { id: EffortLevel; label: string }[] = [
   { id: 'max', label: '最大' }
 ]
 
-const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string }[] = [
-  { value: 'default', label: '默认' },
-  { value: 'plan', label: '计划模式' },
-  { value: 'auto', label: '自动' },
-  { value: 'yolo', label: 'YOLO(慎用)' }
+const PERMISSION_MODE_OPTIONS: {
+  value: PermissionMode
+  label: string
+  description: string
+  accentClass?: string
+}[] = [
+  { value: 'default', label: '逐条确认', description: '每个工具操作都需要手动确认' },
+  { value: 'auto', label: '自动通过', description: '自动批准工具操作，但关键问题仍会询问', accentClass: 'text-amber-300' },
+  { value: 'yolo', label: '完全自主', description: '完全自主运行，不再询问', accentClass: 'text-red-300' }
 ]
 
 type PromptTemplate = { command: string; label: string; text: string }
@@ -131,9 +137,17 @@ export default function Composer(): JSX.Element {
   const interrupt = useSessionStore((s) => s.interrupt)
   const setModel = useSessionStore((s) => s.setModel)
   const setPermissionMode = useSessionStore((s) => s.setPermissionMode)
+  const modeBeforePlan = useSessionStore((s) => s.modePanel.modeBeforePlan)
   const effort = useSessionStore((s) => s.effort)
   const setEffort = useSessionStore((s) => s.setEffort)
   const pending = useSessionStore((s) => s.pendingQueue)
+  // 状态 chips（输入框上方一行）：运行中 Bash/子 Agent/待办进度，全为 0 不占高度。
+  const runningBash = useSessionStore((s) => countRunningTools(s.items, BASH_TOOL_NAMES))
+  const runningAgents = useSessionStore((s) => countRunningTools(s.items, AGENT_TOOL_NAMES))
+  const planTotal = useSessionStore((s) => s.planEntries.length)
+  const planDone = useSessionStore(
+    (s) => s.planEntries.filter((e) => e.status === 'completed').length
+  )
   const [text, setText] = useState('')
   const [models, setModels] = useState(defaultModelsForAgent(undefined))
   const [attachments, setAttachments] = useState<PickedFile[]>([])
@@ -572,6 +586,26 @@ export default function Composer(): JSX.Element {
             ))}
           </div>
         )}
+        {/* 状态 chips（kimi web 式，输入框上方一行；无活动时不占高度） */}
+        {(runningBash > 0 || runningAgents > 0 || planTotal > 0) && (
+          <div className="mb-1.5 flex items-center gap-3 px-1 text-[11px] text-zinc-500">
+            {runningBash > 0 && (
+              <span className="flex items-center gap-1" title="运行中的命令行工具调用">
+                <span className="text-blue-400">🕐</span>后台 Bash ({runningBash})
+              </span>
+            )}
+            {runningAgents > 0 && (
+              <span className="flex items-center gap-1" title="运行中的子 Agent 工具调用">
+                <span className="text-accent">✦</span>子 Agent ({runningAgents})
+              </span>
+            )}
+            {planTotal > 0 && (
+              <span className="flex items-center gap-1" title="待办清单完成进度">
+                <span className="text-zinc-400">☰</span>待办 ({planDone}/{planTotal})
+              </span>
+            )}
+          </div>
+        )}
         <div
           className={`glass-panel composer-panel rounded-[18px] p-3 transition ${
             dragActive ? 'border-accent/60 bg-white/[0.035] shadow-[0_0_0_1px_rgba(139,92,246,0.28)]' : ''
@@ -723,7 +757,7 @@ export default function Composer(): JSX.Element {
               type="button"
               onClick={() => void pickAttachment()}
               disabled={!meta}
-              className="glass-control flex h-8 w-8 items-center justify-center rounded-lg text-zinc-300 transition hover:bg-white/[0.09] disabled:opacity-40"
+              className="glass-control flex h-7 w-7 items-center justify-center rounded-md text-zinc-300 transition hover:bg-white/[0.09] disabled:opacity-40"
               title="添加附件(从工作目录选择文件)"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -741,43 +775,18 @@ export default function Composer(): JSX.Element {
               <kbd className="font-sans text-zinc-400">Shift+Enter</kbd> 换行
             </span>
             <div className="composer-actions ml-auto flex items-center gap-1.5">
-              {meta && (
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={meta.permissionMode === 'plan'}
-                  onClick={() => void setPermissionMode(meta.permissionMode === 'plan' ? 'default' : 'plan')}
-                  className={`glass-control flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs transition ${
-                    meta.permissionMode === 'plan'
-                      ? 'border-accent/50 bg-gradient-to-r from-accent/[0.18] to-accent/[0.05] text-accent'
-                      : 'text-zinc-300'
-                  }`}
-                  title="先让智能体梳理计划，再修改文件"
-                >
-                  <span>计划</span>
-                  {/* 开关滑块：只动 transform，200ms */}
-                  <span
-                    className={`relative h-4 w-7 rounded-full ${
-                      meta.permissionMode === 'plan' ? 'bg-accent/70' : 'bg-white/15'
-                    }`}
-                  >
-                    <span
-                      className={`absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white transition-transform duration-200 ${
-                        meta.permissionMode === 'plan' ? 'translate-x-3' : 'translate-x-0'
-                      }`}
-                    />
-                  </span>
-                </button>
-              )}
+              {meta && <ModePanel />}
               {meta && (
                 <DisclosureSelect
-                  value={meta.permissionMode}
+                  value={meta.permissionMode === 'plan' ? (modeBeforePlan ?? 'default') : meta.permissionMode}
                   options={PERMISSION_MODE_OPTIONS}
                   onChange={(v) => {
                     if (v !== meta.permissionMode) void setPermissionMode(v as PermissionMode)
                   }}
                   placement="top"
                   compact
+                  disabled={meta.permissionMode === 'plan'}
+                  title={meta.permissionMode === 'plan' ? '计划模式下权限由计划接管' : undefined}
                   triggerLeading={
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="shrink-0 text-zinc-400">
                       <path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6l7.5-3z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
@@ -817,7 +826,7 @@ export default function Composer(): JSX.Element {
               {running && (
                 <button
                   onClick={() => void interrupt()}
-                  className="h-8 shrink-0 rounded-lg border border-red-900/60 bg-red-950/40 px-3 text-xs font-medium text-red-300 hover:bg-red-950/60"
+                  className="h-7 shrink-0 rounded-md border border-red-900/60 bg-red-950/40 px-2.5 text-[11px] font-medium text-red-300 hover:bg-red-950/60"
                   title="中断当前处理"
                 >
                   停止
@@ -826,7 +835,7 @@ export default function Composer(): JSX.Element {
               <button
                 onClick={() => void submit()}
                 disabled={!text.trim() && attachments.length === 0}
-                className="composer-send accent-soft-button h-8 shrink-0 rounded-lg px-4 text-xs font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                className="composer-send accent-soft-button h-7 shrink-0 rounded-md px-3 text-[11px] font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <span className="send-sheen" aria-hidden />
                 <span className="relative">发送</span>
@@ -837,7 +846,7 @@ export default function Composer(): JSX.Element {
                   setSlashContext(null)
                   setShowTemplates((open) => !open)
                 }}
-                className={`glass-control composer-template-button flex h-8 items-center justify-center rounded-lg px-2.5 text-xs text-zinc-300 transition ${
+                className={`glass-control composer-template-button flex h-7 items-center justify-center rounded-md px-2 text-[11px] text-zinc-300 transition ${
                   showTemplates ? 'is-open' : ''
                 }`}
                 title="Prompt 模板"

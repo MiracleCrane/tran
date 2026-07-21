@@ -133,6 +133,16 @@ const UserMessage = memo(function UserMessage({ item }: { item: UserItem }): JSX
   return (
     <div className="flex justify-end">
       <div className="max-w-[85%] rounded-[16px] rounded-tr-md border border-white/10 bg-gradient-to-br from-accent/[0.14] via-white/[0.06] to-white/[0.03] px-4 py-2.5 shadow-lg shadow-black/10">
+        {item.swarm && (
+          <div className="mb-1 flex justify-end">
+            <span
+              className="rounded bg-accent/15 px-1.5 py-0.5 text-[9px] font-medium text-accent"
+              title="该条发送时注入了 Swarm 并行指令前缀"
+            >
+              Swarm
+            </span>
+          </div>
+        )}
         {item.text && (
           <div className="whitespace-pre-wrap break-words text-sm text-zinc-200">{item.text}</div>
         )}
@@ -601,11 +611,23 @@ export default function Transcript({
           const rowKey = row.kind === 'item' ? row.node.item.id : row.id
           const isNew = !seenItemIdsRef.current.has(rowKey)
           if (isNew) seenItemIdsRef.current.add(rowKey)
+          // 历史/实况分界：上一行是重放历史、当前行不是 → 加分隔小字。
+          const prevRow = index > 0 ? displayRows[index - 1] : null
+          const prevItem = prevRow && prevRow.kind === 'item' ? prevRow.node.item : null
+          const curItem = row.kind === 'item' ? row.node.item : null
+          const showHistoryDivider = !!prevItem?.isHistory && !!curItem && !curItem.isHistory
           return (
             <div
               className={`mx-auto w-full max-w-5xl px-6 py-2 ${isNew ? 'tran-msg-enter' : ''}`}
               style={isNew ? { animationDelay: `${Math.min(index * 24, 280)}ms` } : undefined}
             >
+              {showHistoryDivider && (
+                <div className="mb-2 flex items-center gap-2 text-[10px] text-zinc-600">
+                  <span className="h-px flex-1 bg-white/[0.06]" />
+                  以上为历史消息
+                  <span className="h-px flex-1 bg-white/[0.06]" />
+                </div>
+              )}
               {renderRow(row)}
             </div>
           )

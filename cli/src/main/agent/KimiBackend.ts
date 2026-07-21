@@ -59,6 +59,8 @@ interface ActiveKimiSession {
   hiddenText: string
   /** 隐藏轮解析出的上下文用量（Context: X / Y (Z%)）。 */
   contextUsage?: ContextUsage
+  /** session/load 历史重放累积器（仅 resume 的 replaying 窗口内存在）。 */
+  replay?: ReplayAccumulator
 }
 
 interface PendingPermission {
@@ -80,6 +82,21 @@ interface ContextUsage {
   usedText: string
   total: number
   pct: number
+}
+
+/** 历史重放累积器：replaying 窗口内把重放事件流攒成 HistoryMessage 形状的
+ *  消息数组，session/load 响应到达后整批推给渲染层（不走流式管道）。 */
+interface ReplayAccumulator {
+  sessionId: string
+  messages: Array<Record<string, unknown>>
+  /** toolUseId → 最新非终态结果（flush 时补一条 done 结果，防卡片永远"排队中"）。 */
+  pendingToolResults: Map<string, { content: string; isError: boolean }>
+  /** 已出终态（completed/failed）的 toolUseId。 */
+  terminalToolCalls: Set<string>
+  thinkingText: string
+  text: string
+  /** 当前用户消息的 messageId（user_message_chunk 分块追加用）。 */
+  userMsgId: string | null
 }
 
 interface PromptPayload {
@@ -278,10 +295,20 @@ export class KimiBackend {
     const client = await this.ensureClient()
     let response: Record<string, unknown> | null = null
     if (opts.resume) {
-      // session/load 恢复会话并回放历史；回放产生的 session/update 通知在
-      // replaying 窗口内被吞掉（UI 的历史预览走 getSessionMessages，ACP 侧
-      // 暂无逐条消息读取 —— 见 main/kimiHistory.ts 的 TODO）。
+      // session/load 恢复会话并回放历史；重放事件（响应返回前到达）在 replaying
+      // 窗口内累积成 HistoryMessage 数组，窗口结束后经 system/history 整批推给
+      // 渲染层（不走流式管道，避免"逐字打出历史"）。已知瑕疵：每轮最后一条
+      // agent 回复可能缺席（~90% 保真），可接受。
       session.replaying = true
+      session.replay = {
+        sessionId: opts.resume,
+        messages: [],
+        pendingToolResults: new Map(),
+        terminalToolCalls: new Set(),
+        thinkingText: '',
+        text: '',
+        userMsgId: null
+      }
       session.acpSessionId = opts.resume
       this.acpToSession.set(opts.resume, session.id)
       // resume 路径注册在请求之前，理论上不会有缓冲；防御性 flush（通常空转）。
@@ -294,6 +321,7 @@ export class KimiBackend {
         }, 120000)
       } finally {
         session.replaying = false
+        this.flushReplay(session)
       }
     } else {
       response = await client.request<Record<string, unknown>>('session/new', {
@@ -456,10 +484,124 @@ export class KimiBackend {
     }
     const update = asRecord(params?.update)
     if (!update) return
-    // 回放（session/load）期间吞掉历史内容，但 available_commands_update 是
-    // 会话级配置推送，照常处理（否则 resume 的会话拿不到斜杠命令）。
-    if (session.replaying && asString(update.sessionUpdate) !== 'available_commands_update') return
+    // 回放（session/load）期间：历史内容累积成 transcript（见 handleReplayUpdate），
+    // 会话级配置推送（斜杠命令/plan/usage）在累积器内分流、照常处理。
+    if (session.replaying) {
+      this.handleReplayUpdate(session, update)
+      return
+    }
     this.handleSessionUpdate(session, update)
+  }
+
+  /** replaying 窗口内的事件路由：配置类推送走正常逻辑，历史内容累积成
+   *  HistoryMessage 形状的消息数组（flushReplay 时整批发出）。 */
+  private handleReplayUpdate(session: ActiveKimiSession, update: Record<string, unknown>): void {
+    const replay = session.replay
+    if (!replay) return
+    const type = asString(update.sessionUpdate)
+    if (type === 'available_commands_update' || type === 'plan' || type === 'usage_update') {
+      this.handleSessionUpdate(session, update)
+      return
+    }
+    if (type === 'user_message_chunk') {
+      // 用户消息原文（可能分块）：同 messageId 追加，否则开新用户消息。
+      this.sealReplayStream(session)
+      const text = textFromContentBlock(update.content)
+      if (!text) return
+      const msgId = asString(update.messageId)
+      const last = replay.messages[replay.messages.length - 1]
+      if (msgId && msgId === replay.userMsgId && last?.type === 'user') {
+        const m = last.message as { content: string }
+        m.content += text
+      } else {
+        replay.userMsgId = msgId ?? `kimi-replay-user-${cryptoId()}`
+        replay.messages.push({
+          type: 'user',
+          uuid: `kimi-replay-${cryptoId()}`,
+          session_id: session.acpSessionId ?? '',
+          message: { content: text },
+          parent_tool_use_id: null
+        })
+      }
+      return
+    }
+    replay.userMsgId = null
+    if (type === 'agent_thought_chunk') {
+      replay.thinkingText += textFromContentBlock(update.content)
+      return
+    }
+    if (type === 'agent_message_chunk') {
+      replay.text += textFromContentBlock(update.content)
+      return
+    }
+    if (type === 'tool_call') {
+      this.sealReplayStream(session)
+      const toolUseId = asString(update.toolCallId) ?? cryptoId()
+      replay.messages.push({
+        type: 'assistant',
+        uuid: `kimi-replay-${cryptoId()}`,
+        session_id: session.acpSessionId ?? '',
+        message: {
+          id: `kimi-replay-toolmsg-${toolUseId}`,
+          content: [{ type: 'tool_use', id: toolUseId, name: toolName(update), input: toolInput(update) }]
+        },
+        parent_tool_use_id: null
+      })
+      return
+    }
+    if (type === 'tool_call_update') {
+      const toolUseId = asString(update.toolCallId)
+      if (!toolUseId || replay.terminalToolCalls.has(toolUseId)) return
+      const status = asString(update.status)
+      const content = stringifyToolResult(update.rawOutput ?? update.content ?? update.title ?? status ?? '')
+      if (status === 'completed' || status === 'failed') {
+        replay.terminalToolCalls.add(toolUseId)
+        replay.pendingToolResults.delete(toolUseId)
+        pushReplayToolResult(replay, toolUseId, content, status === 'failed')
+      } else {
+        replay.pendingToolResults.set(toolUseId, { content, isError: false })
+      }
+      return
+    }
+  }
+
+  /** 把累积的思考+正文封停成一条 assistant 历史消息（工具调用/用户消息边界处调用）。 */
+  private sealReplayStream(session: ActiveKimiSession): void {
+    const replay = session.replay
+    if (!replay) return
+    const content: Array<Record<string, unknown>> = []
+    if (replay.thinkingText) content.push({ type: 'thinking', thinking: replay.thinkingText })
+    if (replay.text) content.push({ type: 'text', text: replay.text })
+    if (content.length) {
+      replay.messages.push({
+        type: 'assistant',
+        uuid: `kimi-replay-${cryptoId()}`,
+        session_id: session.acpSessionId ?? '',
+        message: { id: `kimi-replay-msg-${cryptoId()}`, content },
+        parent_tool_use_id: null
+      })
+    }
+    replay.thinkingText = ''
+    replay.text = ''
+  }
+
+  /** 重放窗口结束：封停流、补齐无终态的工具结果，整批经 system/history 发出。 */
+  private flushReplay(session: ActiveKimiSession): void {
+    const replay = session.replay
+    if (!replay) return
+    this.sealReplayStream(session)
+    for (const [toolUseId, r] of replay.pendingToolResults) {
+      pushReplayToolResult(replay, toolUseId, r.content, r.isError)
+    }
+    replay.pendingToolResults.clear()
+    session.replay = undefined
+    if (!replay.messages.length) return
+    log('kimi', `history replay: ${replay.messages.length} messages session=${session.id}`)
+    this.h.onMessage(session.id, {
+      type: 'system',
+      subtype: 'history',
+      messages: replay.messages
+    } as unknown as SDKMessage)
   }
 
   /** 注册完成后回放该 acpSessionId 在竞争窗口里缓冲的通知（到达顺序）。
@@ -833,6 +975,24 @@ function firstUserText(content: string | unknown[]): string {
     if (b?.type === 'text' && b.text) return b.text
   }
   return ''
+}
+
+/** 往重放累积器追加一条 tool_result 用户消息（HistoryMessage 形状）。 */
+function pushReplayToolResult(
+  replay: ReplayAccumulator,
+  toolUseId: string,
+  content: string,
+  isError: boolean
+): void {
+  replay.messages.push({
+    type: 'user',
+    uuid: `kimi-replay-${cryptoId()}`,
+    session_id: replay.sessionId,
+    message: {
+      content: [{ type: 'tool_result', tool_use_id: toolUseId, content, is_error: isError }]
+    },
+    parent_tool_use_id: null
+  })
 }
 
 /** 解析 /usage 隐藏轮文本里的 Context 行：
