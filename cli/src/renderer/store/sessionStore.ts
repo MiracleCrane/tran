@@ -1838,7 +1838,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                   result: tr.content,
                   resultIsError: tr.partial ? b.resultIsError : !!tr.is_error,
                   // 终态打戳（任务面板耗时）；partial 中间态不打。
-                  ...(tr.partial ? {} : { endedAt: Date.now() })
+                  ...(tr.partial ? {} : { endedAt: Date.now() }),
+                  // rawInput 补丁（后台任务标记 run_in_background 在中间态才到）：
+                  // 合并进 block.input，不覆盖已有键值以外的字段。
+                  ...((tr as { input?: unknown }).input && typeof (tr as { input?: unknown }).input === 'object'
+                    ? {
+                        input: {
+                          ...((b.input && typeof b.input === 'object' ? b.input : {}) as Record<string, unknown>),
+                          ...((tr as { input?: Record<string, unknown> }).input ?? {})
+                        }
+                      }
+                    : {})
                 }))
               }
               return { items }

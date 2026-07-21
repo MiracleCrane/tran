@@ -33,3 +33,29 @@ export function countRunningTools(items: TranscriptItem[], names: Set<string>): 
 export function countTotalTools(items: TranscriptItem[], names: Set<string>): number {
   return collectToolBlocks(items, names).length
 }
+
+/** 后台任务信息（实证形态：rawInput.run_in_background=true 在 tool_call_update
+ *  中间态到达；launch 结果里 task_id + status: running）。 */
+export interface BackgroundTaskInfo {
+  isBackground: boolean
+  taskId?: string
+  /** 后台任务仍在跑（launch 结果 status: running；完成通知另行到达）。 */
+  running: boolean
+}
+
+export function backgroundTaskInfo(block: ToolBlock): BackgroundTaskInfo {
+  let value: unknown = block.input
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      value = null
+    }
+  }
+  const input = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>
+  if (input.run_in_background !== true) return { isBackground: false, running: false }
+  const resultText = typeof block.result === 'string' ? block.result : ''
+  const taskId = resultText.match(/task_id:\s*(\S+)/)?.[1]
+  const running = /status:\s*running/.test(resultText)
+  return { isBackground: true, ...(taskId ? { taskId } : {}), running }
+}

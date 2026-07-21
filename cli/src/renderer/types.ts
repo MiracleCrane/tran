@@ -112,6 +112,8 @@ export interface ElicitationRequest {
   toolUseID: string
   question: string
   options: Array<{ optionId: string; name: string; kind?: string }>
+  /** 多选题（toolCall 里解析到 multiSelect）；缺省按单选（radio 式）。 */
+  multiSelect?: boolean
 }
 
 /** 隐藏 /usage 轮解析出的上下文用量（system/context_usage）。 */

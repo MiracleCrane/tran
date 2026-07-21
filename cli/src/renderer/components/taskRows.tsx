@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { PlanEntry, ToolBlock, ToolStatus } from '../types'
-import { AGENT_TOOL_NAMES } from '../utils/toolStats'
+import { AGENT_TOOL_NAMES, backgroundTaskInfo } from '../utils/toolStats'
 import ToolCallCard, { parseSubagentInput, summaryForTool } from './ToolCallCard'
 
 /** 任务行组件（chips 独立浮层共用；原 TaskPanel 合并面板拆出）。 */
@@ -26,10 +26,15 @@ const STATUS_ICON: Record<ToolStatus, { glyph: string; cls: string }> = {
 
 export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
   const interrupt = useSessionStore((s) => s.interrupt)
+  const sendMessage = useSessionStore((s) => s.sendMessage)
   const [open, setOpen] = useState(false)
   const icon = STATUS_ICON[block.status]
-  const running = block.status === 'running' || block.status === 'pending'
   const isAgent = AGENT_TOOL_NAMES.has(block.name)
+  // 后台任务（实证形态见 toolStats.backgroundTaskInfo）：完成=已挂后台。
+  const bg = isAgent ? backgroundTaskInfo(block) : null
+  const bgRunning = !!bg?.isBackground && bg.running
+  // 前台阻塞语义只给非后台任务。
+  const running = (block.status === 'running' || block.status === 'pending') && !bg?.isBackground
   const sub = isAgent ? parseSubagentInput(block.input) : null
   const summary = summaryForTool(block.name, block.input)
 
@@ -46,6 +51,14 @@ export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
             <span className="shrink-0 rounded bg-accent/15 px-1 py-0.5 text-[9px] font-medium text-accent">
               子代理
             </span>
+            {bg?.isBackground && (
+              <span
+                className="shrink-0 rounded bg-blue-950/50 px-1 py-0.5 text-[9px] font-medium text-blue-300"
+                title="后台任务：派出后不阻塞对话"
+              >
+                后台
+              </span>
+            )}
             {sub?.subagentType && (
               <span className="shrink-0 rounded bg-white/[0.06] px-1 py-0.5 text-[9px] text-zinc-400">
                 {sub.subagentType}
@@ -58,6 +71,19 @@ export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500">
           {summary || sub?.prompt || ''}
         </span>
+        {bgRunning && bg?.taskId && (
+          <button
+            type="button"
+            title="软停：让 agent 用 TaskStop 停掉该后台任务（不中断整轮）"
+            onClick={(e) => {
+              e.stopPropagation()
+              void sendMessage(`请使用 TaskStop 停止任务 ${bg.taskId}`)
+            }}
+            className="shrink-0 rounded px-1 text-[10px] text-red-400 transition hover:bg-red-950/40"
+          >
+            停止
+          </button>
+        )}
         {running && (
           <button
             type="button"

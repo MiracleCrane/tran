@@ -872,9 +872,11 @@ export class KimiBackend {
         return
       }
       // in_progress 等中间态：转发流式内容（子代理输出等），partial 标记让
-      // 渲染层保持 running 状态、只更新卡片内容。
+      // 渲染层保持 running 状态、只更新卡片内容。rawInput（后台任务标记
+      //  run_in_background 在这里才到）一并下传，渲染层合并进 block.input。
       const partialText = stringifyToolResult(update.rawOutput ?? update.content)
-      if (partialText) this.emitToolPartial(session, toolUseId, partialText)
+      const rawInput = asRecord(update.rawInput)
+      if (partialText || rawInput) this.emitToolPartial(session, toolUseId, partialText, rawInput ?? undefined)
       return
     }
     if (type === 'available_commands_update') {
@@ -978,7 +980,14 @@ export class KimiBackend {
         this.h.onMessage(session.id, {
           type: 'system',
           subtype: 'elicitation',
-          elicitation: { toolUseID, question: elicitationQuestion(toolCall), options: choices }
+          elicitation: {
+            toolUseID,
+            question: elicitationQuestion(toolCall),
+            options: choices,
+            // multiSelect 尽量从 toolCall 解析（content/input 里的布尔标记），
+            // 解析不到按单选（渲染层 radio 式）。
+            ...(elicitationMultiSelect(toolCall) ? { multiSelect: true } : {})
+          }
         } as unknown as SDKMessage)
       }
       return
@@ -1158,18 +1167,19 @@ export class KimiBackend {
   }
 
   /** 工具执行中的流式中间内容（如子代理输出）：partial=true，渲染层只更新
-   *  卡片内容、不翻完成态。 */
+   *  卡片内容、不翻完成态。rawInput 可能在此刻才到达（后台任务标记），随包下传。 */
   private emitToolPartial(
     session: ActiveKimiSession,
     toolUseId: string,
-    content: string
+    content: string,
+    input?: Record<string, unknown>
   ): void {
     this.h.onMessage(session.id, {
       type: 'user',
       uuid: `kimi-tool-partial-${toolUseId}`,
       parent_tool_use_id: null,
       message: {
-        content: [{ type: 'tool_result', tool_use_id: toolUseId, content, is_error: false, partial: true }]
+        content: [{ type: 'tool_result', tool_use_id: toolUseId, content, is_error: false, partial: true, ...(input ? { input } : {}) }]
       }
     } as unknown as SDKMessage)
   }
@@ -1321,6 +1331,21 @@ function elicitationQuestion(toolCall: Record<string, unknown>): string {
     }
   }
   return asString(toolCall.title) ?? ''
+}
+
+/** multiSelect 标记的防御式解析：toolCall 及其 content/input 嵌套里找
+ *  multiSelect / multi_select 布尔（找不到按单选）。 */
+function elicitationMultiSelect(toolCall: Record<string, unknown>): boolean {
+  const seen = new Set<unknown>()
+  const walk = (value: unknown, depth: number): boolean => {
+    if (!value || typeof value !== 'object' || depth > 4 || seen.has(value)) return false
+    seen.add(value)
+    if (Array.isArray(value)) return value.some((item) => walk(item, depth + 1))
+    const record = value as Record<string, unknown>
+    if (record.multiSelect === true || record.multi_select === true) return true
+    return Object.values(record).some((item) => walk(item, depth + 1))
+  }
+  return walk(toolCall.content, 0) || walk(toolCall.rawInput, 0)
 }
 
 /** usedText（"45.6k"/"1.2M"/"782"）换算成数值。 */

@@ -33,8 +33,9 @@ function membershipLabel(level: string | undefined): string | null {
 
 function windowPct(window: UsageLimitWindow | undefined): number | null {
   if (!window || window.used === undefined || !window.limit) return null
-  // 两位小数精度（5h/周额度占比；纯计算无性能影响），环弧度取整仍够用。
-  return Math.min(100, Math.round((window.used / window.limit) * 10000) / 100)
+  // 整数百分点：云端 used/limit 就是整数百分点（used: 42/100），诚实显示整数；
+  // 控制台的两位小数来自 cookie 鉴权的另一数据源，token 拿不到。
+  return Math.min(100, Math.round((window.used / window.limit) * 100))
 }
 
 function UsageBar({ pct }: { pct: number | null }): JSX.Element {
@@ -62,7 +63,7 @@ function LimitRow({ title, window }: { title: string; window: UsageLimitWindow }
       <div className="mb-1 flex items-baseline justify-between text-xs">
         <span className="text-zinc-400">{title}</span>
         <span className="text-zinc-500">
-          {pct !== null ? `${pct.toFixed(2)}%` : '—'}
+          {pct !== null ? `${pct}%` : '—'}
           {reset ? ` · ${reset}` : ''}
         </span>
       </div>

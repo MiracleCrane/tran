@@ -1,5 +1,6 @@
 import { memo, useState } from 'react'
 import type { ToolBlock } from '../types'
+import { backgroundTaskInfo } from '../utils/toolStats'
 import Collapse from './Collapse'
 import CodeBlock, { langForTool } from './CodeBlock'
 import DiffView from './DiffView'
@@ -121,6 +122,9 @@ const ToolCallCard = memo(function ToolCallCard({
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const collapsed = userToggled ?? (forceExpanded ? false : !active)
   const meta = STATUS_META[block.status]
+  // 后台子代理（rawInput.run_in_background，实证见 toolStats）：完成=已挂后台。
+  const bg = isSubagent ? backgroundTaskInfo(block) : null
+  const statusLabel = bg?.isBackground && bg.running && block.status === 'done' ? '已挂后台' : meta.label
   const summary = summaryForTool(block.name, block.input)
   const resultText = collapsed ? '' : normalizeResult(block.result)
   const inputText =
@@ -141,9 +145,19 @@ const ToolCallCard = memo(function ToolCallCard({
       >
         <span className={`h-2 w-2 shrink-0 rounded-full ${isSubagent ? 'bg-accent' : meta.dot} ${streaming ? 'animate-pulse' : ''}`} />
         {isSubagent ? (
-          <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent">
-            子代理
-          </span>
+          <>
+            <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+              子代理
+            </span>
+            {bg?.isBackground && (
+              <span
+                className="shrink-0 rounded bg-blue-950/50 px-1.5 py-0.5 text-[10px] font-medium text-blue-300"
+                title="后台任务：派出后不阻塞对话，完成通知稍后到达"
+              >
+                后台
+              </span>
+            )}
+          </>
         ) : (
           <span className="shrink-0 font-mono text-xs font-medium text-zinc-300">{block.name}</span>
         )}
@@ -152,8 +166,8 @@ const ToolCallCard = memo(function ToolCallCard({
         )}
         <span key={block.status} className={`ml-auto shrink-0 text-[11px] ${meta.text}`}>
           {/* 完成瞬间：状态勾弹入（key 随状态重挂载，动画只播一次） */}
-          {block.status === 'done' && <span className="tran-check-pop mr-1">✓</span>}
-          {meta.label}
+          {block.status === 'done' && !bg?.running && <span className="tran-check-pop mr-1">✓</span>}
+          {statusLabel}
           {block.elapsed ? ` · ${block.elapsed.toFixed(1)}s` : ''}
         </span>
         <span className="shrink-0 text-xs text-zinc-600">{collapsed ? '▸' : '▾'}</span>
