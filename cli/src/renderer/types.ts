@@ -106,15 +106,27 @@ export interface PlanEntry {
   activeForm?: string
 }
 
+/** AskUserQuestion（elicitation）：区别于工具审批的提问卡片。
+ *  options 原样来自 ACP；回答时原样回传 optionId。 */
+export interface ElicitationRequest {
+  toolUseID: string
+  question: string
+  options: Array<{ optionId: string; name: string; kind?: string }>
+}
+
 /** 隐藏 /usage 轮解析出的上下文用量（system/context_usage）。 */
 export interface ContextUsage {
   usedText: string
+  /** usedText 的数值形式（两位小数百分比 = used/total 自算）。 */
+  used: number
   total: number
   pct: number
   /** /usage 的 Total 行：会话累计 token（可选）。 */
   inputTokens?: number
   outputTokens?: number
   cacheReadTokens?: number
+  /** 渲染层接收时间（悬停刷新判断 >30s 陈旧用）。 */
+  at?: number
 }
 
 /** A transcript item plus its nested children (the subagent conversation under

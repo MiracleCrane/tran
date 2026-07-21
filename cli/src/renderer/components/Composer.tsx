@@ -14,7 +14,8 @@ import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, Permission
 import DisclosureSelect from './DisclosureSelect'
 import ModePanel from './ModePanel'
 import { AGENT_TOOL_NAMES, BASH_TOOL_NAMES, countRunningTools, countTotalTools } from '../utils/toolStats'
-import TaskPanel from './TaskPanel'
+import { userAttachmentToPickedFile } from '../utils/attachments'
+import ChipPopover, { type ChipAnchor, type ChipKind } from './ChipPopover'
 import UsageRings from './UsageRings'
 import { defaultModelsForAgent, modelLabelForAgent } from '../../shared/models'
 import { onForgeEvent } from '../events'
@@ -150,7 +151,40 @@ export default function Composer(): JSX.Element {
   const planDone = useSessionStore(
     (s) => s.planEntries.filter((e) => e.status === 'completed').length
   )
-  const [taskPanelOpen, setTaskPanelOpen] = useState(false)
+  // chips 独立浮层：openChip=哪个 chip 的浮层开着 + 锚点（portal fixed 定位）。
+  const [openChip, setOpenChip] = useState<ChipKind | null>(null)
+  const [chipAnchor, setChipAnchor] = useState<ChipAnchor | null>(null)
+  const chipRowRef = useRef<HTMLDivElement | null>(null)
+
+  const toggleChip = (kind: ChipKind): void => {
+    if (openChip === kind) {
+      setOpenChip(null)
+      return
+    }
+    const row = chipRowRef.current
+    const btn = row?.querySelector<HTMLElement>(`[data-chip="${kind}"]`)
+    const rect = btn?.getBoundingClientRect()
+    if (rect) {
+      setChipAnchor({
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - 336)),
+        bottom: window.innerHeight - rect.top + 8
+      })
+    }
+    setOpenChip(kind)
+  }
+
+  // 排队卡片：× 从队列删除；点击卡片取回编辑（文本回 textarea、附件回附件区）。
+  const removePendingMessage = useSessionStore((s) => s.removePendingMessage)
+  const takePendingMessage = useSessionStore((s) => s.takePendingMessage)
+  const restorePending = (id: string): void => {
+    const msg = takePendingMessage(id)
+    if (!msg) return
+    setText(msg.text)
+    if (msg.attachments?.length) {
+      setAttachments((prev) => [...prev, ...msg.attachments!.map(userAttachmentToPickedFile)])
+    }
+    window.requestAnimationFrame(() => textareaRef.current?.focus())
+  }
   const statusError = useSessionStore((s) => s.status.error)
   const stopReason = useSessionStore((s) => s.status.stopReason)
   const [text, setText] = useState('')
@@ -598,58 +632,86 @@ export default function Composer(): JSX.Element {
     <div className="composer-shell bg-transparent px-6 pb-3 pt-2">
       <div className="mx-auto max-w-5xl">
         {pending.length > 0 && (
-          <div className="mb-2 flex flex-col items-end gap-1.5">
-            {pending.map((p) => (
-              <div
-                key={p.id}
-                className="glass-panel flex max-w-[80%] items-center gap-2 rounded-xl border border-dashed border-white/15 px-3 py-1.5 text-xs text-zinc-400"
-              >
-                <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-zinc-500" />
-                <span className="truncate">
-                  排队中 · {p.text || (p.attachments?.length ? `${p.attachments.length} 个附件` : '…')}
-                </span>
-              </div>
-            ))}
+          <div className="mb-1.5">
+            <div className="mb-1 px-1 text-[10px] text-zinc-600">
+              队列 · {pending.length}　当前回合结束后自动逐条发送
+            </div>
+            <div className="flex max-h-32 flex-col gap-1.5 overflow-y-auto">
+              {pending.map((p, i) => (
+                <div
+                  key={p.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => restorePending(p.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') restorePending(p.id)
+                  }}
+                  className="glass-panel flex cursor-pointer items-start gap-2 rounded-xl border border-dashed border-white/15 px-3 py-1.5 text-xs text-zinc-400 transition hover:border-accent/40"
+                  title="点击取回编辑"
+                >
+                  <span className="shrink-0 pt-0.5 text-[10px] text-zinc-600">{i + 1}.</span>
+                  <span className="line-clamp-2 min-w-0 flex-1 break-words">
+                    {p.text || (p.attachments?.length ? `${p.attachments.length} 个附件` : '…')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      removePendingMessage(p.id)
+                    }}
+                    className="shrink-0 text-zinc-500 transition hover:text-red-300"
+                    title="从队列删除"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
         {/* 状态行（输入框上方）：左侧瞬态错误/常驻 chips（计数=会话累计，0 置灰，
             点击展开任务面板），右侧常驻 Usage 圆环（自退役的 StatusBar 上移）。 */}
-        <div className="mb-1.5 flex items-center gap-3 px-1 text-[11px] text-zinc-500">
+        <div ref={chipRowRef} data-chip-row className="mb-1.5 flex items-center gap-3 px-1 text-[11px] text-zinc-500">
           {statusError && <span className="truncate text-red-400">{statusError}</span>}
           {stopReason && !statusError && <span className="text-zinc-600">结束: {stopReason}</span>}
           <button
             type="button"
-            onClick={() => setTaskPanelOpen((o) => !o)}
+            data-chip="bash"
+            onClick={() => toggleChip('bash')}
             className={`flex items-center gap-1 transition hover:brightness-125 ${
               runningBash > 0 ? 'text-blue-300' : bashTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
             }`}
-            title="后台命令（点击查看任务面板）"
+            title="后台命令（点击查看面板）"
           >
             <span>🕐</span>后台命令 ({bashTotal})
           </button>
           <button
             type="button"
-            onClick={() => setTaskPanelOpen((o) => !o)}
+            data-chip="agent"
+            onClick={() => toggleChip('agent')}
             className={`flex items-center gap-1 transition hover:brightness-125 ${
               runningAgents > 0 ? 'text-accent' : agentTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
             }`}
-            title="子 Agent（点击查看任务面板）"
+            title="子 Agent（点击查看面板）"
           >
             <span>✦</span>子 Agent ({runningAgents > 0 ? `${runningAgents}/` : ''}{agentTotal})
           </button>
           <button
             type="button"
-            onClick={() => setTaskPanelOpen((o) => !o)}
+            data-chip="plan"
+            onClick={() => toggleChip('plan')}
             className={`flex items-center gap-1 transition hover:brightness-125 ${
               planTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
             }`}
-            title="待办清单（点击查看任务面板）"
+            title="待办清单（点击查看面板）"
           >
             <span>☰</span>待办 ({planDone}/{planTotal})
           </button>
           <UsageRings />
         </div>
-        <TaskPanel open={taskPanelOpen} />
+        {openChip && chipAnchor && (
+          <ChipPopover kind={openChip} anchor={chipAnchor} onClose={() => setOpenChip(null)} />
+        )}
         <div
           className={`glass-panel composer-panel rounded-[18px] p-3 transition ${
             dragActive ? 'border-accent/60 bg-white/[0.035] shadow-[0_0_0_1px_rgba(139,92,246,0.28)]' : ''

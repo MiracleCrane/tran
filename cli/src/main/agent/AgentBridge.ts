@@ -40,6 +40,8 @@ interface AgentBackendAdapter {
   listSkills(sessionId: string): Promise<SkillInfo[]>
   /** 可选：会话级 token/上下文用量（后端不上报时返回缺省值）。 */
   getSessionUsage?(sessionId: string): Promise<SessionUsageInfo>
+  /** 可选：触发一次隐藏 /usage 轮刷新上下文用量（悬停上下文环时）。 */
+  requestUsageRefresh?(sessionId: string): Promise<void>
   /** 可选：goal 循环（目标模式，客户端侧目标引擎）。 */
   goalStart?(sessionId: string, opts: GoalStartOptions): Promise<GoalInfo | null>
   goalControl?(sessionId: string, action: GoalControlAction): Promise<GoalInfo | null>
@@ -111,6 +113,10 @@ export class AgentBridge {
 
   goalGet(sessionId: string): Promise<GoalInfo | null> {
     return this.maybeBackendForSession(sessionId)?.goalGet?.(sessionId) ?? Promise.resolve(null)
+  }
+
+  requestUsageRefresh(sessionId: string): Promise<void> {
+    return this.maybeBackendForSession(sessionId)?.requestUsageRefresh?.(sessionId) ?? Promise.resolve()
   }
 
   async close(sessionId: string): Promise<void> {

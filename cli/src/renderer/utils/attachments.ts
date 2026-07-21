@@ -46,3 +46,32 @@ export function pathToUserAttachment(
     ...options
   }
 }
+
+/** 逆向转换：排队消息取回编辑时把 UserAttachment 恢复成 PickedFile
+ *  （image: dataUrl→base64；text: text→data；directory: entries 保留）。 */
+export function userAttachmentToPickedFile(attachment: UserAttachment): PickedFile {
+  const base = {
+    name: attachment.name,
+    kind: attachment.kind,
+    path: attachment.path ?? '',
+    mimeType: attachment.mimeType ?? 'application/octet-stream',
+    size: attachment.size ?? 0
+  }
+  if (attachment.kind === 'image') {
+    const dataUrl = attachment.dataUrl ?? ''
+    const comma = dataUrl.indexOf(',')
+    return { ...base, data: comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl }
+  }
+  if (attachment.kind === 'text') {
+    return { ...base, data: attachment.text ?? '' }
+  }
+  if (attachment.kind === 'directory') {
+    return {
+      ...base,
+      data: '',
+      entries: attachment.entries ?? [],
+      entriesTruncated: attachment.entriesTruncated
+    }
+  }
+  return { ...base, data: '' }
+}

@@ -634,6 +634,8 @@ export interface ForgeApi {
   /** --- Usage panel --- */
   /** 本会话 token / 上下文用量（ACP 侧；kimi 暂未上报时返回缺省值）。 */
   getSessionUsage(sessionId: string): Promise<SessionUsageInfo>
+  /** 触发一次隐藏 /usage 轮刷新上下文用量（悬停上下文环时调用）。 */
+  refreshSessionUsage(sessionId: string): Promise<void>
   /** 套餐额度 / 会员 / 加油包（Kimi 云端 API，主进程直连）。 */
   getPlanUsage(): Promise<PlanUsageResult>
 

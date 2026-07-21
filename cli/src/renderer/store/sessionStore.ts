@@ -26,7 +26,8 @@ import type {
   UserAttachment,
   PendingMessage,
   PlanEntry,
-  ContextUsage
+  ContextUsage,
+  ElicitationRequest
 } from '../types'
 import { pickedFileToUserAttachment } from '../utils/attachments'
 import { DEFAULT_KIMI_MODEL_ID } from '../../shared/models'
@@ -79,6 +80,8 @@ interface SessionStore {
   modePanel: ModePanelState
   /** goal 循环状态（system/goal 推送；null 表示无目标），per session。 */
   goal: GoalInfo | null
+  /** AskUserQuestion 队列（system/elicitation；逐条处理，多问题顺序到达）。 */
+  elicitationQueue: ElicitationRequest[]
 
   startSession: (args: StartArgs) => Promise<void>
   sendMessage: (text: string, attachments?: PickedFile[], opts?: { cutIn?: boolean }) => Promise<void>
@@ -109,6 +112,11 @@ interface SessionStore {
 
   /** Sidebar actions */
   refreshSessions: () => Promise<void>
+  /** 排队消息：从队列删除（×）/ 取出并返回（点击卡片取回编辑）。 */
+  removePendingMessage: (id: string) => void
+  takePendingMessage: (id: string) => PendingMessage | null
+  /** AskUserQuestion 回答：原样回传 optionId 并从队列移除。 */
+  answerElicitation: (toolUseID: string, optionId: string) => Promise<void>
   loadMoreSessions: () => Promise<void>
   newChat: () => Promise<void>
   openSession: (sdkSessionId: string, backend?: ClaudeExecutionBackend) => Promise<void>
@@ -732,6 +740,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   contextUsage: null,
   modePanel: defaultModePanel(),
   goal: null,
+  elicitationQueue: [],
 
   async startSession(args) {
     if (get().starting) return
@@ -776,6 +785,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         contextUsage: null,
         modePanel: defaultModePanel(),
         goal: null,
+        elicitationQueue: [],
         status: { running: false },
         currentStreamingMsgId: null
       })
@@ -988,7 +998,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   reset() {
     cancelActiveHistoryHydration(0)
-    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], contextUsage: null, modePanel: defaultModePanel(), goal: null })
+    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], contextUsage: null, modePanel: defaultModePanel(), goal: null, elicitationQueue: [] })
   },
 
   async bootstrap() {
@@ -1036,6 +1046,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       contextUsage: null,
       modePanel: defaultModePanel(),
       goal: null,
+      elicitationQueue: [],
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1103,6 +1114,26 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ starting: false })
     void get().refreshSessions()
     scheduleInitWatchdog(get, set, newId)
+  },
+
+  removePendingMessage(id) {
+    set((s) => ({ pendingQueue: s.pendingQueue.filter((p) => p.id !== id) }))
+  },
+
+  takePendingMessage(id) {
+    const msg = get().pendingQueue.find((p) => p.id === id) ?? null
+    if (msg) set((s) => ({ pendingQueue: s.pendingQueue.filter((p) => p.id !== id) }))
+    return msg
+  },
+
+  async answerElicitation(toolUseID, optionId) {
+    // elicitation：原样回传用户点选的 optionId（answers 通道），从队列移除。
+    set((s) => ({ elicitationQueue: s.elicitationQueue.filter((q) => q.toolUseID !== toolUseID) }))
+    await window.api.respondPermission({
+      toolUseID,
+      behavior: 'allow',
+      answers: { optionId }
+    })
   },
 
   async refreshSessions() {
@@ -1195,6 +1226,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       contextUsage: null,
       modePanel: defaultModePanel(),
       goal: null,
+      elicitationQueue: [],
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1264,6 +1296,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       contextUsage: null,
       modePanel: defaultModePanel(),
       goal: null,
+      elicitationQueue: [],
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1580,6 +1613,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             contextUsage: null,
             modePanel: defaultModePanel(),
             goal: null,
+            elicitationQueue: [],
             status: { ...s.status }
           }))
         } else if (subtype === 'status') {
@@ -1595,11 +1629,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         } else if (subtype === 'context_usage') {
           // 隐藏 /usage 轮解析出的上下文用量（UsageRings 第三环）。
           const usage = (msg as unknown as { contextUsage?: ContextUsage }).contextUsage
-          set({ contextUsage: usage ?? null })
+          set({ contextUsage: usage ? { ...usage, at: Date.now() } : null })
         } else if (subtype === 'goal') {
           // goal 循环状态推送（GoalCard 进度 / ModePanel 开关激活态）。
           const g = (msg as unknown as { goal?: GoalInfo | null }).goal
           set({ goal: g ?? null })
+        } else if (subtype === 'elicitation') {
+          // AskUserQuestion：问题卡片入队（多问题 q0/q1… 顺序逐条处理）。
+          const req = (msg as unknown as { elicitation?: ElicitationRequest }).elicitation
+          if (req?.toolUseID) {
+            set((s) => ({
+              elicitationQueue: s.elicitationQueue.some((q) => q.toolUseID === req.toolUseID)
+                ? s.elicitationQueue
+                : [...s.elicitationQueue, req]
+            }))
+          }
         } else if (subtype === 'compaction') {
           // 压缩轮（/compact 或自动压缩）：插入分界线 item；剔除可能已流式进
           // transcript 的压缩原文（未标记的自动压缩兜底路径会短暂流出）。

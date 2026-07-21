@@ -330,6 +330,9 @@ export function registerIpc(
     bridge.goalControl(sessionId, action)
   )
   ipcMain.handle('forge:goalGet', async (_e, sessionId: string) => bridge.goalGet(sessionId))
+  ipcMain.handle('forge:refreshSessionUsage', async (_e, sessionId: string): Promise<void> => {
+    await bridge.requestUsageRefresh(sessionId)
+  })
 
   ipcMain.handle('forge:closeSession', async (_e, sessionId: string): Promise<void> => {
     await bridge.close(sessionId)

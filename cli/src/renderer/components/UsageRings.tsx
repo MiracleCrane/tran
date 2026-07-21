@@ -75,12 +75,12 @@ function LimitRow({ title, window }: { title: string; window: UsageLimitWindow }
 }
 
 /** 单个小圆环：pct 为 null 时置灰显示"—"（无数据）。 */
-function Ring({ pct, label, danger }: { pct: number | null; label: string; danger: boolean }): JSX.Element {
+function Ring({ pct, label, danger, title }: { pct: number | null; label: string; danger: boolean; title?: string }): JSX.Element {
   const r = 6.5
   const c = 2 * Math.PI * r
   const frac = (pct ?? 0) / 100
   return (
-    <span className="flex items-center gap-1" aria-hidden>
+    <span className="flex items-center gap-1" aria-hidden title={title}>
       <svg width="18" height="18" viewBox="0 0 20 20" className="shrink-0">
         <circle cx="10" cy="10" r={r} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="2.4" />
         {pct !== null && (
@@ -146,6 +146,13 @@ export default function UsageRings(): JSX.Element {
           bottom: window.innerHeight - rect.top + 8
         })
       }
+      // 上下文用量即时化：无数据或 >30s 陈旧时触发一次隐藏 /usage 轮
+      // （有轮在跑则 main 侧标记 pending 轮末补跑）。
+      const sessionId = useSessionStore.getState().meta?.sessionId
+      const cu = useSessionStore.getState().contextUsage
+      if (sessionId && (!cu || !cu.at || Date.now() - cu.at > 30_000)) {
+        void window.api.refreshSessionUsage(sessionId).catch(() => {})
+      }
     }
   }, [open, refresh])
 
@@ -167,6 +174,11 @@ export default function UsageRings(): JSX.Element {
   // 上下文用量：隐藏 /usage 轮推送（system/context_usage），无数据置灰。
   const contextUsage = useSessionStore((s) => s.contextUsage)
   const contextPct = contextUsage ? Math.min(100, Math.round(contextUsage.pct)) : null
+  // 两位小数：用解析出的 used/total 自算（环 tooltip 与预览卡同步）。
+  const contextPct2 =
+    contextUsage && contextUsage.total > 0
+      ? ((contextUsage.used / contextUsage.total) * 100).toFixed(2)
+      : null
 
   return (
     <div
@@ -183,7 +195,12 @@ export default function UsageRings(): JSX.Element {
       >
         <Ring pct={rollingPct} label="5h" danger={rollingPct !== null && rollingPct >= 80} />
         <Ring pct={weeklyPct} label="周" danger={weeklyPct !== null && weeklyPct >= 80} />
-        <Ring pct={contextPct} label="上下文" danger={contextPct !== null && contextPct >= 80} />
+        <Ring
+          pct={contextPct}
+          label="上下文"
+          danger={contextPct !== null && contextPct >= 80}
+          title={contextPct2 !== null ? `上下文 ${contextPct2}%` : undefined}
+        />
       </button>
 
       {open && anchor && createPortal(
@@ -241,7 +258,7 @@ export default function UsageRings(): JSX.Element {
             <div>
               <div className="mb-1 flex items-baseline justify-between text-xs">
                 <span className="text-zinc-400">上下文窗口</span>
-                <span className="text-zinc-500">{contextPct !== null ? `${contextPct}%` : '—'}</span>
+                <span className="text-zinc-500">{contextPct2 !== null ? `${contextPct2}%` : '—'}</span>
               </div>
               <UsageBar pct={contextPct} />
               <div className="mt-1 text-[11px] text-zinc-600">

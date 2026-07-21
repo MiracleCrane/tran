@@ -84,12 +84,16 @@ interface ActiveKimiSession {
    *  turn 结束解析后经 system/compaction 合成消息推渲染层。 */
   compactTurn: boolean
   compactText: string
+  /** 隐藏 /usage 轮进行中又收到刷新请求：轮末补跑一次。 */
+  usageRefreshPending: boolean
 }
 
 interface PendingPermission {
   client: AcpClient
   requestId: AcpRpcId
   options: Array<Record<string, unknown>>
+  /** AskUserQuestion（elicitation）：回传用户点选的原样 optionId，不走模糊匹配。 */
+  elicitation?: boolean
 }
 
 interface TokenUsage {
@@ -103,6 +107,8 @@ interface TokenUsage {
 /** 隐藏轮解析出的上下文用量（渲染层圆环/预览卡用）。 */
 interface ContextUsage {
   usedText: string
+  /** usedText 的数值形式（k/M 后缀已换算），两位小数百分比用它算。 */
+  used: number
   total: number
   pct: number
   /** /usage 的 Total 行：会话累计 token（cache creation 忽略）。 */
@@ -184,7 +190,8 @@ export class KimiBackend {
       noProgressTurns: 0,
       lastTurnFailed: false,
       compactTurn: false,
-      compactText: ''
+      compactText: '',
+      usageRefreshPending: false
     }
     session.ready = this.prepareSession(session, opts)
     this.sessions.set(sessionId, session)
@@ -312,6 +319,18 @@ export class KimiBackend {
     const pending = this.pendingPermissions.get(resp.toolUseID)
     if (!pending) return false
     this.pendingPermissions.delete(resp.toolUseID)
+    if (pending.elicitation) {
+      // elicitation：原样返回用户点选的 optionId（不做 allow/deny 模糊匹配）。
+      const chosen = asString(resp.answers?.optionId)
+      try {
+        pending.client.respond(pending.requestId, {
+          outcome: chosen ? { outcome: 'selected', optionId: chosen } : { outcome: 'cancelled' }
+        })
+      } catch (error) {
+        log('kimi', `elicitation response failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      return true
+    }
     const optionId = permissionOptionId(pending.options, resp.behavior)
     try {
       pending.client.respond(
@@ -392,6 +411,11 @@ export class KimiBackend {
     }
     this.emitInit(session, session.acpSessionId ?? opts.resume ?? session.id, session.model ?? model)
     void this.drain(session)
+    // 会话打开即刷新上下文用量（session/new、session/load 各一次；有轮在跑
+    // 则 turn 末的 afterTurn 会补，这里只在空转时触发，保持串行）。
+    if (!session.closed && !session.running && session.queue.length === 0) {
+      void this.runHiddenUsageTurn(session)
+    }
   }
 
   private rememberConfigOptions(value: unknown): void {
@@ -562,7 +586,23 @@ export class KimiBackend {
     } finally {
       session.hiddenTurn = false
       session.hiddenText = ''
+      // 轮进行中收到的刷新请求：轮末补跑一次。
+      if (session.usageRefreshPending && !session.closed) {
+        session.usageRefreshPending = false
+        void this.runHiddenUsageTurn(session)
+      }
     }
+  }
+
+  /** 渲染层悬停上下文环触发的即时刷新：无轮直接跑，有轮标记 pending 轮末补。 */
+  async requestUsageRefresh(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.closed) return
+    if (session.hiddenTurn) {
+      session.usageRefreshPending = true
+      return
+    }
+    void this.runHiddenUsageTurn(session)
   }
 
   private async runTurn(session: ActiveKimiSession, message: QueuedMessage): Promise<void> {
@@ -918,6 +958,31 @@ export class KimiBackend {
     const options = Array.isArray(params.options)
       ? params.options.filter((option): option is Record<string, unknown> => !!asRecord(option))
       : []
+    // AskUserQuestion：走 elicitation 通道（区别于工具审批）——问题+选项原样
+    // 经 system/elicitation 推渲染层，回答时原样返回 optionId。
+    if (asString(toolCall.title) === 'AskUserQuestion') {
+      this.pendingPermissions.set(toolUseID, { client, requestId, options, elicitation: true })
+      const session = this.sessionForAcp(asString(params.sessionId))
+      const choices = options
+        .map((option) => {
+          const optionId = asString(option.optionId)
+          if (!optionId) return null
+          return {
+            optionId,
+            name: asString(option.name) ?? optionId,
+            ...(asString(option.kind) ? { kind: asString(option.kind)! } : {})
+          }
+        })
+        .filter((option): option is NonNullable<typeof option> => !!option)
+      if (session) {
+        this.h.onMessage(session.id, {
+          type: 'system',
+          subtype: 'elicitation',
+          elicitation: { toolUseID, question: elicitationQuestion(toolCall), options: choices }
+        } as unknown as SDKMessage)
+      }
+      return
+    }
     this.pendingPermissions.set(toolUseID, { client, requestId, options })
     this.h.onPermissionRequest({
       toolUseID,
@@ -1245,6 +1310,29 @@ function parseCompaction(text: string): {
   }
 }
 
+/** AskUserQuestion 的问题文本：toolCall.content[].content.text 防御式下钻。 */
+function elicitationQuestion(toolCall: Record<string, unknown>): string {
+  const content = toolCall.content
+  if (Array.isArray(content)) {
+    for (const item of content) {
+      const record = asRecord(item)
+      const text = asString(asRecord(record?.content)?.text) ?? asString(record?.text)
+      if (text) return text
+    }
+  }
+  return asString(toolCall.title) ?? ''
+}
+
+/** usedText（"45.6k"/"1.2M"/"782"）换算成数值。 */
+function parseUsedText(text: string): number | undefined {
+  const match = text.trim().match(/^([\d.,]+)\s*([kKmM]?)$/)
+  if (!match) return undefined
+  const base = Number(match[1].replace(/,/g, ''))
+  if (!Number.isFinite(base)) return undefined
+  const suffix = match[2].toLowerCase()
+  return suffix === 'k' ? base * 1000 : suffix === 'm' ? base * 1_000_000 : base
+}
+
 /** 解析 /usage 隐藏轮文本：
  *  `- Context: 45.6k / 1,048,576 (5.0%)` → usedText/total/pct
  *  `- Total: input 6,465, output 1,911, cache read 199,168` → 会话 token（可选） */
@@ -1253,8 +1341,9 @@ function parseContextUsage(text: string): ContextUsage | null {
   if (!match) return null
   const total = Number(match[2].replace(/,/g, ''))
   const pct = Number(match[3])
-  if (!Number.isFinite(total) || !Number.isFinite(pct)) return null
-  const usage: ContextUsage = { usedText: match[1], total, pct }
+  const used = parseUsedText(match[1])
+  if (!Number.isFinite(total) || !Number.isFinite(pct) || used === undefined) return null
+  const usage: ContextUsage = { usedText: match[1], used, total, pct }
   const totalMatch = text.match(/Total:\s*input\s*([\d,]+),\s*output\s*([\d,]+),\s*cache read\s*([\d,]+)/i)
   if (totalMatch) {
     const parse = (v: string): number | undefined => {

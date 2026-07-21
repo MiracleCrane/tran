@@ -5,6 +5,7 @@ import Onboarding from './components/Onboarding'
 import Sidebar from './components/Sidebar'
 import Transcript from './components/Transcript'
 import Composer from './components/Composer'
+import ElicitationCard from './components/ElicitationCard'
 import PlanCard from './components/PlanCard'
 import GoalCard from './components/GoalCard'
 import RuntimeStatusStrip from './components/RuntimeStatusStrip'
@@ -314,6 +315,7 @@ function MainViewContent({
           onAtBottomChange={onTranscriptAtBottomChange}
         />
       </div>
+      <ElicitationCard />
       <Composer />
       <ErrorDiagnosticPanel />
     </>
