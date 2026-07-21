@@ -51,6 +51,8 @@ function SubagentConversation({ items }: { items: TranscriptItem[] }): JSX.Eleme
             </div>
           )
         }
+        // compaction 分界线在子代理转录里不出现，跳过。
+        if (it.kind !== 'assistant') return null
         return (
           <div key={it.id} className="space-y-1">
             {it.blocks.map((b, i) => {

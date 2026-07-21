@@ -76,7 +76,20 @@ export interface AssistantItem {
   /** 来自 session/load 重放的历史消息（分界线上方内容）。 */
   isHistory?: boolean
 }
-export type TranscriptItem = UserItem | AssistantItem
+export type TranscriptItem = UserItem | AssistantItem | CompactionItem
+
+/** 上下文压缩分界线（/compact 或自动压缩；system/compaction → TranscriptItem）。 */
+export interface CompactionItem {
+  id: string
+  kind: 'compaction'
+  parentToolUseId: string | null
+  messagesCompacted?: number
+  tokensBefore?: number
+  tokensAfter?: number
+  at: number
+  /** 见 UserItem.isHistory（历史重放里不会出现，占位兼容）。 */
+  isHistory?: boolean
+}
 
 /** ACP session/update 'plan' 的待办条目（kimi 全量推送，整体替换）。 */
 export interface PlanEntry {
@@ -91,6 +104,10 @@ export interface ContextUsage {
   usedText: string
   total: number
   pct: number
+  /** /usage 的 Total 行：会话累计 token（可选）。 */
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
 }
 
 /** A transcript item plus its nested children (the subagent conversation under

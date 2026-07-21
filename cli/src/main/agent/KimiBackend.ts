@@ -80,6 +80,10 @@ interface ActiveKimiSession {
   noProgressTurns: number
   /** 本轮是否出错（goal 循环遇错暂停）。 */
   lastTurnFailed: boolean
+  /** 压缩轮标记（/compact prompt 或自动压缩检出）：该轮压缩文本累积不转发，
+   *  turn 结束解析后经 system/compaction 合成消息推渲染层。 */
+  compactTurn: boolean
+  compactText: string
 }
 
 interface PendingPermission {
@@ -101,6 +105,10 @@ interface ContextUsage {
   usedText: string
   total: number
   pct: number
+  /** /usage 的 Total 行：会话累计 token（cache creation 忽略）。 */
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
 }
 
 /** 历史重放累积器：replaying 窗口内把重放事件流攒成 HistoryMessage 形状的
@@ -174,7 +182,9 @@ export class KimiBackend {
       lastTurnText: '',
       turnHadToolCall: false,
       noProgressTurns: 0,
-      lastTurnFailed: false
+      lastTurnFailed: false,
+      compactTurn: false,
+      compactText: ''
     }
     session.ready = this.prepareSession(session, opts)
     this.sessions.set(sessionId, session)
@@ -415,6 +425,9 @@ export class KimiBackend {
       session.thinkingBlockIndex = null
       session.nextBlockIndex = 0
       session.toolResults.clear()
+      // 压缩轮标志随轮重置（runTurn 正常结束已清；这里是出错兜底）。
+      session.compactTurn = false
+      session.compactText = ''
       if (!session.closed && session.queue.length) void this.drain(session)
       // turn 完成且队列空了：隐藏 /usage 轮 + goal 续跑（串行，见 afterTurn）。
       else if (!session.closed) void this.afterTurn(session, next)
@@ -556,6 +569,10 @@ export class KimiBackend {
     if (!session.acpSessionId) throw new Error('Kimi session is not ready.')
     // 侧栏标题兜底：kimi 对未命名会话只回 "New Session"，用首条用户消息补。
     recordSessionTitle(session.acpSessionId, firstUserText(message.content))
+    // 压缩轮标记：/compact（含参数形式）——该轮压缩文本不渲染，结束统一解析。
+    if (firstUserText(message.content).trimStart().startsWith('/compact')) {
+      session.compactTurn = true
+    }
     const client = await this.ensureClient()
     const payload = contentToPrompt(message.content)
     const response = await client.request<Record<string, unknown>>('session/prompt', {
@@ -565,6 +582,16 @@ export class KimiBackend {
     }, 900000)
     // goal 循环终止判定用：封停前捕获本轮最终正文。
     session.lastTurnText = session.streamedText
+    // 压缩轮：解析统计数据，经 system/compaction 推渲染层（原始文本不渲染）。
+    if (session.compactTurn) {
+      this.h.onMessage(session.id, {
+        type: 'system',
+        subtype: 'compaction',
+        compaction: { ...parseCompaction(session.compactText), at: Date.now() }
+      } as unknown as SDKMessage)
+      session.compactTurn = false
+      session.compactText = ''
+    }
     this.sealStreamMessage(session)
     const usage = asRecord(response.usage)
     this.emitResult(session, {
@@ -762,7 +789,15 @@ export class KimiBackend {
     }
     if (type === 'agent_message_chunk') {
       const text = textFromContentBlock(update.content)
-      if (text) this.emitAssistantDelta(session, asString(update.messageId), text)
+      if (!text) return
+      // 压缩轮（/compact 标记；或自动压缩：chunk 文本出现压缩标记即检出并置位，
+      // 后续 chunk 一并吞掉）：累积不转发，turn 结束经 system/compaction 推送。
+      if (session.compactTurn || isCompactionText(session.compactText + text)) {
+        session.compactTurn = true
+        session.compactText += text
+        return
+      }
+      this.emitAssistantDelta(session, asString(update.messageId), text)
       return
     }
     if (type === 'agent_thought_chunk') {
@@ -1178,15 +1213,60 @@ function pushReplayToolResult(
   })
 }
 
-/** 解析 /usage 隐藏轮文本里的 Context 行：
- *  `- Context: 45.6k / 1,048,576 (5.0%)` → { usedText: '45.6k', total: 1048576, pct: 5 } */
+/** 压缩文本检出：kimi 宿主直返的压缩提示（/compact 或自动压缩）。 */
+function isCompactionText(text: string): boolean {
+  return text.includes('Compacting conversation context') || text.includes('Compaction completed')
+}
+
+/** 解析压缩统计：`Messages compacted: 16` / `Tokens before: 1,906` / `Tokens after: 782`。 */
+function parseCompaction(text: string): {
+  messagesCompacted?: number
+  tokensBefore?: number
+  tokensAfter?: number
+} {
+  const num = (pattern: RegExp): number | undefined => {
+    const match = text.match(pattern)
+    if (!match) return undefined
+    const value = Number(match[1].replace(/,/g, ''))
+    return Number.isFinite(value) ? value : undefined
+  }
+  return {
+    ...(num(/Messages compacted:\s*(\d+)/) !== undefined
+      ? { messagesCompacted: num(/Messages compacted:\s*(\d+)/) }
+      : {}),
+    ...(num(/Tokens before:\s*([\d,]+)/) !== undefined
+      ? { tokensBefore: num(/Tokens before:\s*([\d,]+)/) }
+      : {}),
+    ...(num(/Tokens after:\s*([\d,]+)/) !== undefined
+      ? { tokensAfter: num(/Tokens after:\s*([\d,]+)/) }
+      : {})
+  }
+}
+
+/** 解析 /usage 隐藏轮文本：
+ *  `- Context: 45.6k / 1,048,576 (5.0%)` → usedText/total/pct
+ *  `- Total: input 6,465, output 1,911, cache read 199,168` → 会话 token（可选） */
 function parseContextUsage(text: string): ContextUsage | null {
   const match = text.match(/Context:\s*([\d.,a-zA-Z]+)\s*\/\s*([\d,]+)\s*\(\s*([\d.]+)\s*%\)/)
   if (!match) return null
   const total = Number(match[2].replace(/,/g, ''))
   const pct = Number(match[3])
   if (!Number.isFinite(total) || !Number.isFinite(pct)) return null
-  return { usedText: match[1], total, pct }
+  const usage: ContextUsage = { usedText: match[1], total, pct }
+  const totalMatch = text.match(/Total:\s*input\s*([\d,]+),\s*output\s*([\d,]+),\s*cache read\s*([\d,]+)/i)
+  if (totalMatch) {
+    const parse = (v: string): number | undefined => {
+      const n = Number(v.replace(/,/g, ''))
+      return Number.isFinite(n) ? n : undefined
+    }
+    const inputTokens = parse(totalMatch[1])
+    const outputTokens = parse(totalMatch[2])
+    const cacheReadTokens = parse(totalMatch[3])
+    if (inputTokens !== undefined) usage.inputTokens = inputTokens
+    if (outputTokens !== undefined) usage.outputTokens = outputTokens
+    if (cacheReadTokens !== undefined) usage.cacheReadTokens = cacheReadTokens
+  }
+  return usage
 }
 
 function contentToPrompt(content: string | unknown[]): PromptPayload {

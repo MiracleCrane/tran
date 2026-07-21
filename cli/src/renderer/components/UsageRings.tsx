@@ -2,17 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useUiStore } from '../store/uiStore'
 import { useSessionStore } from '../store/sessionStore'
+import { fmtK } from '../utils/format'
 import type { PlanUsageInfo, UsageLimitWindow } from '../../shared/ipc'
 
 /** 状态栏迷你用量圆环（kimi web 式）：5h 滚动窗口 + 每周额度两个小 SVG 环，
  *  悬停浮出非模态预览卡（无 backdrop、不阻断对话、移走即关），点击钉住。
  *  数据走 forge:getPlanUsage（主进程 60s 缓存，悬停刷新门槛低）。 */
-
-function fmtK(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
-  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`
-  return String(n)
-}
 
 function resetLabel(resetAt?: number): string | null {
   if (!resetAt) return null
@@ -214,6 +209,26 @@ export default function UsageRings(): JSX.Element {
             </div>
           )}
           <div className="space-y-3">
+            {/* 会话用量（隐藏 /usage 轮 Total 行：input/output/cache read） */}
+            {contextUsage?.inputTokens !== undefined && (
+              <div>
+                <div className="mb-1 text-xs text-zinc-400">会话用量</div>
+                <div className="grid grid-cols-3 gap-1.5 text-center">
+                  {([
+                    ['输入', contextUsage.inputTokens],
+                    ['输出', contextUsage.outputTokens],
+                    ['缓存命中', contextUsage.cacheReadTokens]
+                  ] as const).map(([label, value]) => (
+                    <div key={label} className="rounded-lg border border-white/[0.06] bg-black/20 px-1.5 py-1.5">
+                      <div className="text-xs font-semibold text-zinc-100">
+                        {value !== undefined ? fmtK(value) : '—'}
+                      </div>
+                      <div className="mt-0.5 text-[9px] text-zinc-500">{label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {/* 上下文窗口（隐藏 /usage 轮数据，ACP 不下发 usage_update 的替代） */}
             <div>
               <div className="mb-1 flex items-baseline justify-between text-xs">

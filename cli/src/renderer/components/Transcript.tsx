@@ -6,6 +6,7 @@ import type { AssistantBlock, AssistantItem, UserItem, TranscriptItem, ItemNode,
 import MessageText from './MessageText'
 import ToolCallCard from './ToolCallCard'
 import ToolGroupCard from './ToolGroupCard'
+import CompactionDivider from './CompactionDivider'
 
 const INITIAL_HIGHLIGHT_DELAY_MS = 420
 const SCROLL_HIGHLIGHT_RESUME_MS = 180
@@ -574,6 +575,7 @@ export default function Transcript({
   const renderRow = (row: DisplayRow): JSX.Element => {
     if (row.kind === 'toolGroup') return <ToolGroupCard blocks={row.blocks} />
     if (row.node.item.kind === 'user') return <UserMessage item={row.node.item as UserItem} />
+    if (row.node.item.kind === 'compaction') return <CompactionDivider item={row.node.item} />
     return <AssistantMessage item={row.node.item as AssistantItem} depth={0} deferHighlight={deferHighlight} />
   }
 

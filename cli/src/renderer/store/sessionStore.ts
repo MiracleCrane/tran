@@ -226,6 +226,8 @@ function cloneTranscriptItems(items: TranscriptItem[]): TranscriptItem[] {
         ...(item.attachments ? { attachments: item.attachments.map((a) => ({ ...a })) } : {})
       }
     }
+    // compaction 分界线 item 没有 blocks，浅拷贝即可。
+    if (item.kind !== 'assistant') return { ...item }
     return {
       ...item,
       blocks: item.blocks.map((block) => ({ ...block }))
@@ -1577,6 +1579,41 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           // goal 循环状态推送（GoalCard 进度 / ModePanel 开关激活态）。
           const g = (msg as unknown as { goal?: GoalInfo | null }).goal
           set({ goal: g ?? null })
+        } else if (subtype === 'compaction') {
+          // 压缩轮（/compact 或自动压缩）：插入分界线 item；剔除可能已流式进
+          // transcript 的压缩原文（未标记的自动压缩兜底路径会短暂流出）。
+          const c = (msg as unknown as {
+            compaction?: { messagesCompacted?: number; tokensBefore?: number; tokensAfter?: number; at?: number }
+          }).compaction
+          if (c) {
+            set((s) => ({
+              items: [
+                ...s.items.filter(
+                  (it) =>
+                    !(
+                      it.kind === 'assistant' &&
+                      it.streaming &&
+                      it.blocks.some(
+                        (b) =>
+                          b &&
+                          b.kind === 'text' &&
+                          /Compacting conversation context|Compaction completed/.test(b.text)
+                      )
+                    )
+                ),
+                {
+                  id: uid(),
+                  kind: 'compaction' as const,
+                  parentToolUseId: null,
+                  ...(c.messagesCompacted !== undefined ? { messagesCompacted: c.messagesCompacted } : {}),
+                  ...(c.tokensBefore !== undefined ? { tokensBefore: c.tokensBefore } : {}),
+                  ...(c.tokensAfter !== undefined ? { tokensAfter: c.tokensAfter } : {}),
+                  at: c.at ?? Date.now()
+                }
+              ],
+              status: { ...s.status, compacting: false }
+            }))
+          }
         } else if (subtype === 'history') {
           // session/load 重放的历史：整批转换成 items 前置拼接（不走流式管道，
           // 避免"逐字打出历史"）；与现有内容按 id 去重（重放期间发的消息保留在后）。
