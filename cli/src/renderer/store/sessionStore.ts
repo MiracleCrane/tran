@@ -125,6 +125,11 @@ interface SessionStore {
   setTranscriptScrolling: (scrolling: boolean) => void
   renameSession: (sessionId: string, title: string, backend?: ClaudeExecutionBackend) => Promise<void>
   deleteSession: (sessionId: string, backend?: ClaudeExecutionBackend) => Promise<void>
+  /** 批量永久删除（侧栏多选）：串行逐个 IPC，个别失败不中断整批，
+   *  完成后统一刷新；返回成功/失败计数。 */
+  deleteSessions: (
+    targets: Array<{ sessionId: string; backend?: ClaudeExecutionBackend }>
+  ) => Promise<{ deleted: number; failed: number }>
   /** Move a running subagent to the background (frees the main agent's turn). */
   backgroundTask: (taskId: string) => Promise<void>
   /** Close the current session and re-spawn it (resuming when possible) so that
@@ -1446,6 +1451,42 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       await get().newChat()
     }
     void get().refreshSessions()
+  },
+
+  async deleteSessions(targets) {
+    const meta = get().meta
+    if (!meta || targets.length === 0) return { deleted: 0, failed: 0 }
+    let deleted = 0
+    let failed = 0
+    const deletedIds = new Set<string>()
+    // 串行逐个删：单个失败只计数、不中断整批。
+    for (const target of targets) {
+      try {
+        const result = await window.api.deleteSession(target.sessionId, meta.cwd, target.backend)
+        if (result && result.ok === false) {
+          failed += 1
+          continue
+        }
+        deleted += 1
+        deletedIds.add(target.sessionId)
+        deleteSessionHistoryCache(meta.cwd, target.sessionId, target.backend)
+      } catch {
+        failed += 1
+      }
+    }
+    if (deletedIds.size > 0) {
+      set((s) => ({ sessions: s.sessions.filter((x) => !deletedIds.has(x.sessionId)) }))
+      if (meta.sdkSessionId && deletedIds.has(meta.sdkSessionId)) {
+        await get().newChat()
+      }
+      void get().refreshSessions()
+    }
+    if (failed > 0) {
+      set((s) => ({
+        status: { ...s.status, error: `批量删除完成：成功 ${deleted} 个，失败 ${failed} 个` }
+      }))
+    }
+    return { deleted, failed }
   },
 
   async backgroundTask(taskId: string) {

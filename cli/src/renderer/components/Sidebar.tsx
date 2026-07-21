@@ -728,6 +728,61 @@ export default function Sidebar(): JSX.Element {
     ? sessions.find((session) => sessionKey(session) === confirmDeleteId)
     : undefined
 
+  // ---- 多选模式（批量删除）----
+  const deleteSessions = useSessionStore((s) => s.deleteSessions)
+  const [multiMode, setMultiMode] = useState(false)
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+  const [batchDeleting, setBatchDeleting] = useState(false)
+  const [confirmBatch, setConfirmBatch] = useState(false)
+
+  const exitMultiMode = (): void => {
+    setMultiMode(false)
+    setSelectedKeys(new Set())
+    setConfirmBatch(false)
+  }
+  const toggleSelected = (key: string): void => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+  // 全选 = 当前过滤结果（搜索/分组照常生效）。
+  const selectAllFiltered = (): void => {
+    setSelectedKeys(new Set(filteredSessions.map(sessionKey)))
+  }
+  const doBatchDelete = async (): Promise<void> => {
+    setConfirmBatch(false)
+    const targets = sessions
+      .filter((s) => selectedKeys.has(sessionKey(s)))
+      .map((s) => ({ sessionId: s.sessionId, backend: s.runtimeBackend }))
+    if (!targets.length) return
+    setBatchDeleting(true)
+    try {
+      await deleteSessions(targets)
+    } finally {
+      setBatchDeleting(false)
+      exitMultiMode()
+    }
+  }
+
+  // Esc 退出多选；切换项目/视图时退出。
+  useEffect(() => {
+    if (!multiMode) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') exitMultiMode()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [multiMode])
+
+  useEffect(() => {
+    setMultiMode(false)
+    setSelectedKeys(new Set())
+  }, [meta?.cwd, view])
+
   const filteredSessions = useMemo(() => {
     const q = sessionSearch.trim().toLowerCase()
     return sessions
@@ -1088,14 +1143,48 @@ export default function Sidebar(): JSX.Element {
         <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500/80">
           最近会话
         </span>
-        <button
-          onClick={startSessionRefreshTransition}
-          className="rounded-md px-1 text-xs text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
-          title="刷新"
-        >
-          ↻
-        </button>
+        <span className="flex items-center gap-1">
+          <button
+            onClick={() => (multiMode ? exitMultiMode() : setMultiMode(true))}
+            className={`rounded-md px-1.5 py-0.5 text-[10px] transition ${
+              multiMode ? 'bg-accent/20 text-accent' : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
+            }`}
+            title="多选管理（批量删除）"
+          >
+            多选
+          </button>
+          <button
+            onClick={startSessionRefreshTransition}
+            className="rounded-md px-1 text-xs text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
+            title="刷新"
+          >
+            ↻
+          </button>
+        </span>
       </div>
+
+      {/* 多选操作条：已选 N / 全选（当前过滤结果）/ 清空 / 删除所选 / 退出（Esc 同效） */}
+      {multiMode && (
+        <div className="flex items-center gap-2 px-4 py-1 text-[11px] text-zinc-500">
+          <span className="tabular-nums">已选 {selectedKeys.size} 项</span>
+          <button onClick={selectAllFiltered} className="rounded px-1 transition hover:text-zinc-300">
+            全选
+          </button>
+          <button onClick={() => setSelectedKeys(new Set())} className="rounded px-1 transition hover:text-zinc-300">
+            清空
+          </button>
+          <button
+            onClick={() => setConfirmBatch(true)}
+            disabled={selectedKeys.size === 0 || batchDeleting}
+            className="rounded px-1 text-red-400 transition hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {batchDeleting ? '删除中…' : '删除所选'}
+          </button>
+          <button onClick={exitMultiMode} className="ml-auto rounded px-1 transition hover:text-zinc-300" title="退出多选（Esc）">
+            退出
+          </button>
+        </div>
+      )}
 
       <div className="min-h-0 flex flex-1 flex-col">
         {/* grouped sessions */}
@@ -1197,32 +1286,56 @@ export default function Sidebar(): JSX.Element {
                     <button
                       onClick={() => {
                         if (exiting) return
+                        // 多选模式：点击行任意处 = 切换选中（不打开会话）。
+                        if (multiMode) {
+                          toggleSelected(key)
+                          return
+                        }
                         void openSession(s.sessionId, s.runtimeBackend)
                         setView('chat')
                       }}
                       onPointerEnter={handleSidebarPointerGlow}
                       onPointerMove={handleSidebarPointerGlow}
-                      className={`sidebar-session-row relative w-full rounded-xl border px-2.5 py-2 pr-20 text-left ${
+                      className={`sidebar-session-row relative w-full rounded-xl border px-2.5 py-2 text-left ${
+                        multiMode ? '' : 'pr-20'
+                      } ${
                         active
                           ? 'is-active glass-active text-zinc-100'
-                          : 'border-transparent text-zinc-400'
+                          : multiMode && selectedKeys.has(key)
+                            ? 'border-accent/40 bg-accent/[0.08] text-zinc-200'
+                            : 'border-transparent text-zinc-400'
                       }`}
                       disabled={exiting}
                     >
-                      {active && (
+                      {active && !multiMode && (
                         <span className="session-active-bar absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-accent" />
                       )}
-                      <div className="truncate text-xs">{s.summary || '(未命名)'}</div>
-                      <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-zinc-600">
-                        <span>{relTime(s.lastModified)}</span>
-                        <span className={`session-runtime-badge ${wslSupportEnabled ? 'is-visible' : ''}`}>
-                          {backendLabel(s.runtimeBackend)}
+                      <span className="flex items-start">
+                        {multiMode && (
+                          <span
+                            className={`mr-2 mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border text-[9px] ${
+                              selectedKeys.has(key)
+                                ? 'border-accent bg-accent/70 text-white'
+                                : 'border-white/25 text-transparent'
+                            }`}
+                          >
+                            ✓
+                          </span>
+                        )}
+                        <span className="min-w-0 flex-1">
+                          <div className="truncate text-xs">{s.summary || '(未命名)'}</div>
+                          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-zinc-600">
+                            <span>{relTime(s.lastModified)}</span>
+                            <span className={`session-runtime-badge ${wslSupportEnabled ? 'is-visible' : ''}`}>
+                              {backendLabel(s.runtimeBackend)}
+                            </span>
+                          </div>
                         </span>
-                      </div>
+                      </span>
                     </button>
                   )}
 
-                  {!editing && !exiting && (
+                  {!editing && !exiting && !multiMode && (
                     <div className="absolute bottom-1 right-1 z-10 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
                       {/* 会话操作组（预留扩展位：以后加"归档"等操作就往这里加） */}
                       <button
@@ -1368,6 +1481,17 @@ export default function Sidebar(): JSX.Element {
           if (confirmDeleteId) doDelete(confirmDeleteId)
         }}
         onCancel={() => setConfirmDeleteId(null)}
+      />
+
+      {/* 多选批量删除确认 */}
+      <ConfirmDialog
+        open={confirmBatch}
+        danger
+        title="批量删除会话"
+        message={`将永久删除 ${selectedKeys.size} 个会话，不可恢复。`}
+        confirmLabel="永久删除"
+        onConfirm={() => void doBatchDelete()}
+        onCancel={() => setConfirmBatch(false)}
       />
     </div>
   )
