@@ -74,7 +74,7 @@ function LimitRow({ title, window }: { title: string; window: UsageLimitWindow }
     <div>
       <div className="mb-1 flex items-baseline justify-between text-xs">
         <span className="text-zinc-400">{title}</span>
-        <span className="text-zinc-500">
+        <span className="whitespace-nowrap text-zinc-500">
           {pct !== null ? `${pct}%` : '—'}
           {reset ? ` · ${reset}` : ''}
           {resetAbs && <span className="text-zinc-600">{` (${resetAbs})`}</span>}
@@ -221,7 +221,7 @@ export default function UsageRings(): JSX.Element {
       {open && anchor && createPortal(
         <div
           ref={cardRef}
-          className="glass-panel tran-enter fixed z-[90] w-72 rounded-2xl p-4 shadow-2xl"
+          className="glass-panel tran-enter fixed z-[90] w-80 rounded-2xl p-4 shadow-2xl"
           style={{ right: anchor.right, bottom: anchor.bottom }}
           onPointerEnter={() => setHover(true)}
           onPointerLeave={() => setHover(false)}
