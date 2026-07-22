@@ -1124,7 +1124,7 @@ export default function Sidebar(): JSX.Element {
   const renderSessionSnapshot = (snapshot: SessionListSnapshot): JSX.Element[] =>
     snapshot.groups.map((g) => (
       <div key={g.label} className="mb-2">
-        <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500/70">
+        <div className="px-2 py-1 text-[10px] font-medium tracking-wide text-zinc-500/70">
           {g.label}
         </div>
         {g.items.map((s) => {
@@ -1331,7 +1331,7 @@ export default function Sidebar(): JSX.Element {
                 <span className="ml-auto shrink-0">{g.items.length}</span>
               </button>
             ) : (
-              <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500/70">
+              <div className="px-2 py-1 text-[10px] font-medium tracking-wide text-zinc-500/70">
                 {g.label}
               </div>
             )}
