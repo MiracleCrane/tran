@@ -70,11 +70,13 @@ function buildForest(items: TranscriptItem[]): ItemNode[] {
   return roots
 }
 
-/** 顶层渲染行：普通消息节点，或"连续相邻的纯工具调用消息"聚成的分组块
- *  （纯渲染层聚合，不改后端事件；单个工具调用仍按普通消息渲染）。 */
+/** 顶层渲染行：普通消息节点，或"连续相邻的纯工具调用消息"聚成的分组块，
+ *  或"连续相邻的系统信封"聚成的折叠组（纯渲染层聚合，不改后端事件；
+ *  单个工具调用/单个信封仍按普通消息渲染）。 */
 type DisplayRow =
   | { kind: 'item'; node: ItemNode }
   | { kind: 'toolGroup'; id: string; blocks: ToolBlock[] }
+  | { kind: 'envelopeGroup'; id: string; entries: Array<{ id: string; text: string }> }
 
 /** 该节点是否"整条消息只有工具调用块"（可聚合）。 */
 function toolBlocksOf(node: ItemNode): ToolBlock[] | null {
@@ -84,30 +86,62 @@ function toolBlocksOf(node: ItemNode): ToolBlock[] | null {
   return item.blocks as ToolBlock[]
 }
 
+/** 该节点是否系统信封（后台任务通知/cron/系统提醒等注入的 user 消息）。 */
+function envelopeTextOf(node: ItemNode): string | null {
+  const item = node.item
+  if (item.kind !== 'user' || !item.text) return null
+  return ENVELOPE_RE.test(item.text.trimStart()) ? item.text : null
+}
+
 function buildDisplayRows(roots: ItemNode[]): DisplayRow[] {
   const rows: DisplayRow[] = []
-  let run: { node: ItemNode; blocks: ToolBlock[] }[] = []
-  const flush = (): void => {
-    if (run.length >= 2) {
+  let toolRun: { node: ItemNode; blocks: ToolBlock[] }[] = []
+  let envelopeRun: ItemNode[] = []
+  const flushTools = (): void => {
+    if (toolRun.length >= 2) {
       rows.push({
         kind: 'toolGroup',
-        id: `tool-group-${run[0].blocks[0].toolUseId}`,
-        blocks: run.flatMap((r) => r.blocks)
+        id: `tool-group-${toolRun[0].blocks[0].toolUseId}`,
+        blocks: toolRun.flatMap((r) => r.blocks)
       })
     } else {
-      for (const r of run) rows.push({ kind: 'item', node: r.node })
+      for (const r of toolRun) rows.push({ kind: 'item', node: r.node })
     }
-    run = []
+    toolRun = []
+  }
+  const flushEnvelopes = (): void => {
+    // 连续 ≥2 个信封才折叠；单个维持单张卡。组 id 取首条 id——live 期间新到
+    // 的信封进尾部已有组时组 id 不变，展开状态和位置都不闪。
+    if (envelopeRun.length >= 2) {
+      rows.push({
+        kind: 'envelopeGroup',
+        id: `envelope-group-${envelopeRun[0].item.id}`,
+        entries: envelopeRun.map((n) => ({ id: n.item.id, text: envelopeTextOf(n) ?? '' }))
+      })
+    } else {
+      for (const n of envelopeRun) rows.push({ kind: 'item', node: n })
+    }
+    envelopeRun = []
   }
   for (const node of roots) {
     const blocks = toolBlocksOf(node)
-    if (blocks) run.push({ node, blocks })
-    else {
-      flush()
-      rows.push({ kind: 'item', node })
+    if (blocks) {
+      flushEnvelopes()
+      toolRun.push({ node, blocks })
+      continue
     }
+    if (envelopeTextOf(node) !== null) {
+      flushTools()
+      envelopeRun.push(node)
+      continue
+    }
+    // 正常消息：两类 run 都在此断开，不跨消息合并。
+    flushTools()
+    flushEnvelopes()
+    rows.push({ kind: 'item', node })
   }
-  flush()
+  flushTools()
+  flushEnvelopes()
   return rows
 }
 
@@ -149,6 +183,44 @@ function SystemEnvelope({ text }: { text: string }): JSX.Element {
           </pre>
         )}
       </button>
+    </div>
+  )
+}
+
+/** 连续系统信封的折叠汇总行：比单张卡更克制（text-[11px] text-zinc-600），
+ *  展开后内部列表 max-h 滚动，子项复用 SystemEnvelope。 */
+function EnvelopeGroupRow({ entries }: { entries: Array<{ id: string; text: string }> }): JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  let completed = 0
+  let failed = 0
+  for (const entry of entries) {
+    const kind = /(completed|failed|lost)/.exec(entry.text)?.[1]
+    if (kind === 'completed') completed++
+    else if (kind === 'failed' || kind === 'lost') failed++
+  }
+  return (
+    <div className="flex justify-center">
+      <div className="max-w-[85%]">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] text-zinc-600 transition hover:bg-white/[0.04] hover:text-zinc-500"
+          title={expanded ? '收起' : '展开'}
+        >
+          <span aria-hidden>⚙</span>
+          <span>系统消息 ×{entries.length}</span>
+          {completed > 0 && <span className="text-emerald-400/70">{completed} 完成</span>}
+          {failed > 0 && <span className="text-red-300/70">{failed} 失败</span>}
+          <span className="text-[9px]">{expanded ? '▾' : '▸'}</span>
+        </button>
+        {expanded && (
+          <div className="mt-1 max-h-64 space-y-1 overflow-y-auto">
+            {entries.map((entry) => (
+              <SystemEnvelope key={entry.id} text={entry.text} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -674,6 +746,9 @@ export default function Transcript({
           expandedBlockKey={lastExpandableKey}
         />
       )
+    }
+    if (row.kind === 'envelopeGroup') {
+      return <EnvelopeGroupRow entries={row.entries} />
     }
     if (row.node.item.kind === 'user') return <UserMessage item={row.node.item as UserItem} />
     if (row.node.item.kind === 'compaction') return <CompactionDivider item={row.node.item} />
