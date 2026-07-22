@@ -691,7 +691,7 @@ export default function Composer(): JSX.Element {
             type="button"
             data-chip="agent"
             onClick={() => toggleChip('agent')}
-            className={`flex items-center gap-1 transition hover:brightness-125 ${
+            className={`flex min-w-[92px] shrink-0 items-center gap-1 transition hover:brightness-125 ${
               runningAgents > 0 ? 'text-accent' : agentTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
             }`}
             title="子 Agent（点击查看面板）"

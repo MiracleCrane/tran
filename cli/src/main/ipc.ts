@@ -296,6 +296,9 @@ export function registerIpc(
     },
     onPermissionRequest: (req: PermissionRequestPayload) => {
       send('forge:permission-request', req)
+    },
+    onSessionsChanged: () => {
+      send('forge:sessions-changed', {})
     }
   })
 
@@ -470,6 +473,7 @@ export function registerIpc(
     async (_e, cwd: string): Promise<WslHealthReport> => repairWslEnvironment(cwd)
   )
   ipcMain.handle('forge:getDiagnosticLog', async (): Promise<string> => getDiagnosticLog())
+  ipcMain.handle('forge:getAppVersion', async (): Promise<string> => app.getVersion())
   ipcMain.handle('forge:checkForUpdates', async (): Promise<UpdateCheckResult> => checkForUpdates())
   ipcMain.handle(
     'forge:downloadAndInstallUpdate',

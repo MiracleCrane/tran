@@ -318,6 +318,11 @@ export default function Sidebar(): JSX.Element {
   const [groupMode, setGroupMode] = useState<SessionGroupMode>('time')
   /** 「全部」视图里被折叠的 cwd 组（label = 完整路径）。 */
   const [collapsedGroupLabels, setCollapsedGroupLabels] = useState<Set<string>>(() => new Set())
+  const [appVersion, setAppVersion] = useState('')
+
+  useEffect(() => {
+    void window.api.getAppVersion().then(setAppVersion).catch(() => {})
+  }, [])
   const [pinnedSessionKeys, setPinnedSessionKeys] = useState<Set<string>>(() => readPinnedSessions())
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   const [wslNavRevealPhase, setWslNavRevealPhase] = useState<WslNavRevealPhase>('hidden')
@@ -863,11 +868,11 @@ export default function Sidebar(): JSX.Element {
 
   const sessionGroups = useMemo(
     () =>
-      sessionScope === 'all'
-        ? groupSessionsByCwd(filteredSessions, meta?.cwd ?? '')
-        : groupMode === 'project'
-          ? groupSessionsByProject(filteredSessions, meta?.cwd ?? '')
-          : groupSessionsByTime(filteredSessions),
+      groupMode === 'project'
+        ? sessionScope === 'all'
+          ? groupSessionsByCwd(filteredSessions, meta?.cwd ?? '')
+          : groupSessionsByProject(filteredSessions, meta?.cwd ?? '')
+        : groupSessionsByTime(filteredSessions),
     [filteredSessions, groupMode, meta?.cwd, sessionScope]
   )
   sessionGroupsRef.current = sessionGroups
@@ -1238,13 +1243,16 @@ export default function Sidebar(): JSX.Element {
       <div className="min-h-0 flex flex-1 flex-col">
         {/* grouped sessions */}
         <div className="space-y-2 px-4 pb-2 pt-1">
-          {/* 视图切换：当前项目 / 全部（跨项目按 cwd 分组） */}
+          {/* 视图切换：当前项目 / 全部（跨项目）。进「全部」默认按项目分组。 */}
           <div className="flex rounded-lg border border-white/[0.08] bg-white/[0.025] p-0.5 text-[11px]">
             {(['project', 'all'] as const).map((value) => (
               <button
                 key={value}
                 type="button"
-                onClick={() => void setSessionScope(value)}
+                onClick={() => {
+                  void setSessionScope(value)
+                  if (value === 'all') setGroupMode('project')
+                }}
                 className={`flex-1 rounded-md px-2 py-1 transition ${
                   sessionScope === value
                     ? 'bg-accent/20 text-accent'
@@ -1261,18 +1269,18 @@ export default function Sidebar(): JSX.Element {
             placeholder="搜索会话"
             className="h-8 w-full rounded-lg border border-white/[0.08] bg-bg-elev/60 px-2.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-accent/60"
           />
-          {sessionScope === 'project' && (
-            <div className="flex items-center">
-              <button
-                type="button"
-                onClick={() => setGroupMode((mode) => (mode === 'time' ? 'project' : 'time'))}
-                className="ml-auto rounded-md px-1.5 py-1 text-[10px] text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
-                title="切换分组"
-              >
-                {groupMode === 'time' ? '按时间' : '按项目'}
-              </button>
-            </div>
-          )}
+          {/* 分组切换：两个视图共用 —— 「当前项目」按时间/按项目（目录名）；
+              「全部」按项目（完整 cwd 可折叠）/按时间（混排）。 */}
+          <div className="flex items-center">
+            <button
+              type="button"
+              onClick={() => setGroupMode((mode) => (mode === 'time' ? 'project' : 'time'))}
+              className="ml-auto rounded-md px-1.5 py-1 text-[10px] text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
+              title="切换分组"
+            >
+              {groupMode === 'time' ? '按时间' : '按项目'}
+            </button>
+          </div>
         </div>
 
         {/* grouped sessions */}
@@ -1309,14 +1317,16 @@ export default function Sidebar(): JSX.Element {
           <div className="px-2 py-3 text-xs text-zinc-600">没有匹配的会话。</div>
         )}
         {groups.map((g, groupIndex) => {
-          const groupCollapsed = sessionScope === 'all' && collapsedGroupLabels.has(g.label)
+          // cwd 折叠组头只在「全部 + 按项目」下启用；其余情况用纯文本组头。
+          const cwdGroupHeader = sessionScope === 'all' && groupMode === 'project'
+          const groupCollapsed = cwdGroupHeader && collapsedGroupLabels.has(g.label)
           return (
           <div
             key={g.label}
             className="session-list-grow-group mb-2"
             style={{ '--session-grow-delay': `${Math.min(groupIndex * 28, 120)}ms` } as CSSProperties}
           >
-            {sessionScope === 'all' ? (
+            {cwdGroupHeader ? (
               <button
                 type="button"
                 onClick={() => toggleGroupCollapsed(g.label)}
@@ -1554,6 +1564,9 @@ export default function Sidebar(): JSX.Element {
             </div>
           </Collapse>
         </div>
+        {appVersion && (
+          <div className="mt-2 text-center text-[10px] text-zinc-600">Tran v{appVersion}</div>
+        )}
       </div>
 
       {/* 永久删除确认（红色调； ConfirmDialog 复用） */}

@@ -174,7 +174,13 @@ const api: ForgeApi = {
     ): void => cb(payload)
     ipcRenderer.on('forge:permission-request', listener)
     return () => ipcRenderer.removeListener('forge:permission-request', listener)
-  }
+  },
+  onSessionsChanged: (cb) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('forge:sessions-changed', listener)
+    return () => ipcRenderer.removeListener('forge:sessions-changed', listener)
+  },
+  getAppVersion: () => ipcRenderer.invoke('forge:getAppVersion')
 }
 
 try {

@@ -1110,6 +1110,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         ...(modelForAgent(agentBackend, model) ? { model: modelForAgent(agentBackend, model) } : {}),
         ...(agentBackend ? { agentBackend } : {}),
         effort: get().effort,
+        // 新项目 = 全新会话：同样应用设置里的默认权限模式（此前漏传，chip 被
+        // init 覆盖回 default）。
+        permissionMode: prefs?.defaultPermissionMode ?? 'default',
         bridgeSessionId: newId
       })
       startGate.resolve()
@@ -1247,12 +1250,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const meta = get().meta
     if (!meta) return
     cancelActiveHistoryHydration()
-    const { cwd, model, permissionMode, agentBackend } = meta
+    const { cwd, model, agentBackend } = meta
     const oldSessionId = meta.sessionId
     const newId = uid()
     const requestSeq = nextSessionNavigationSeq()
     const startGate = createSessionStartGate(newId)
     const isLatestRequest = (): boolean => isCurrentSessionNavigation(get, requestSeq, newId)
+    // 根因修复：此前 newChat 沿用旧会话的 permissionMode 做乐观值、且不传给
+    // 后端（opts 里根本没有 permissionMode），ACP 侧停留在 CLI default，init
+    // 事件随后把 chip 覆盖回 default —— 设置里的默认权限模式就此丢失。
+    // 全新会话应用设置里的默认档；resume 历史会话仍走原模式（见 openSession）。
+    const prefs = await window.api.getPreferences().catch(() => null)
+    const permissionMode = prefs?.defaultPermissionMode ?? 'default'
+    if (!isLatestRequest()) {
+      startGate.resolve()
+      return
+    }
     // Switch the UI to a fresh session instantly (unlocked). claude.exe spawns
     // in the background; any messages sent now queue and flush once ready.
     set({
@@ -1285,6 +1298,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         ...(modelForAgent(agentBackend, model) ? { model: modelForAgent(agentBackend, model) } : {}),
         ...(agentBackend ? { agentBackend } : {}),
         effort: get().effort,
+        permissionMode,
         bridgeSessionId: newId
       })
       startGate.resolve()

@@ -667,6 +667,10 @@ export interface ForgeApi {
 
   onAgentEvent(cb: (e: AgentEvent) => void): () => void
   onPermissionRequest(cb: (r: PermissionRequestPayload) => void): () => void
+  /** 历史会话列表外部变化（空壳删除等）——订阅后应刷新侧栏列表。 */
+  onSessionsChanged(cb: () => void): () => void
+  /** 应用版本号（app.getVersion()），设置页/侧栏展示用。 */
+  getAppVersion(): Promise<string>
 }
 
 declare global {

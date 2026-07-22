@@ -23,6 +23,8 @@ export interface AgentBackendHandlers {
   onMessage: (sessionId: string, message: SDKMessage) => void
   onEnded: (sessionId: string, error?: string) => void
   onPermissionRequest: (req: PermissionRequestPayload) => void
+  /** 历史会话列表有外部变化（如空壳会话被删除）——渲染层应刷新侧栏列表。 */
+  onSessionsChanged?(): void
 }
 
 interface AgentBackendAdapter {

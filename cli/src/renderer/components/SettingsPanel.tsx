@@ -129,6 +129,7 @@ export default function SettingsPanel(): JSX.Element {
   const [exportingDiagnostic, setExportingDiagnostic] = useState(false)
   const [diagnosticMessage, setDiagnosticMessage] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [appVersion, setAppVersion] = useState('')
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState(false)
   const importInputRef = useRef<HTMLInputElement | null>(null)
@@ -140,6 +141,7 @@ export default function SettingsPanel(): JSX.Element {
   const reloadForBackendSwitch = useSessionStore((s) => s.reloadForBackendSwitch)
 
   useEffect(() => {
+    void window.api.getAppVersion().then(setAppVersion).catch(() => {})
     void Promise.all([
       window.api.getPreferences(),
       window.api.listAgentBackends().catch(() => [] as AgentBackendInfo[])
@@ -425,6 +427,11 @@ export default function SettingsPanel(): JSX.Element {
             ← 返回对话
           </button>
           <h1 className="text-lg font-semibold text-zinc-100">设置</h1>
+          {appVersion && (
+            <span className="rounded bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent">
+              Tran v{appVersion}
+            </span>
+          )}
         </div>
 
         <section className="glass-panel-soft rounded-2xl p-4">

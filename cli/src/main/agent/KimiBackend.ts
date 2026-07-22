@@ -288,6 +288,9 @@ export class KimiBackend {
     if (result.ok) {
       removeSessionTitle(session.acpSessionId)
       log('kimi', `discarded empty session shell ${session.acpSessionId}`)
+      // 通知渲染层刷新侧栏（空壳条目立即消失）；删除失败不发。15 秒的补刀
+      // 删除（见下）不再通知——条目在首次刷新后已不可见。
+      this.h.onSessionsChanged?.()
       // kimi ACP 进程在删除后会异步重建目录壳（空的 agents/ 残留，实测）。
       // 延迟补一刀：仍在索引外就直接再删；兜底扫尾交给启动时的孤儿清扫。
       const acpSessionId = session.acpSessionId
@@ -421,10 +424,31 @@ export class KimiBackend {
       const acpSessionId = asString(response?.sessionId)
       if (!acpSessionId) throw new Error('Kimi ACP did not return a session id.')
       session.acpSessionId = acpSessionId
+      // 竞态修复：session/new 在途期间会话已被关闭/取代（典型：新建对话 → 1 秒
+      // 内切走）。close 时 acpSessionId 还没就绪，discardEmptyShell 当时直接
+      // return，磁盘空壳无人清理——这里补删（含 removeSessionTitle +
+      // onSessionsChanged 通知，与 close 路径一致），不注册映射、不做后续初始化。
+      if (session.closed) {
+        this.discardEmptyShell(session)
+        return
+      }
       this.acpToSession.set(acpSessionId, session.id)
       // kimi 在 session/new 响应后立即推 available_commands_update 等通知，此时
       // 注册刚完成——把竞争窗口里缓冲的通知按序回放（见 handleNotification）。
       this.flushPendingNotifications(acpSessionId)
+    }
+
+    // resume 路径同理早退：session/load 在途（或 ensureClient 在途）被 close 时
+    // 不删（是有内容的真实会话），但若映射是在 close 之后才注册的，清掉防悬挂。
+    // 同样跳过后续初始化（thinking/mode 下发、emitInit、drain、隐藏 /usage 轮）
+    // ——会话已被取代，渲染层不再等它的 init。
+    if (session.closed) {
+      const lateAcpSessionId = session.acpSessionId
+      if (lateAcpSessionId) {
+        this.acpToSession.delete(lateAcpSessionId)
+        this.pendingNotifications.delete(lateAcpSessionId)
+      }
+      return
     }
 
     this.rememberConfigOptions(response?.configOptions)
@@ -438,6 +462,12 @@ export class KimiBackend {
         configId: 'thinking',
         value: opts.effort
       }).catch((error) => log('kimi', `set thinking failed: ${userFacingError(error)}`))
+    }
+    // resume 路径不传 permissionMode：从 configOptions 回填 ACP 侧真实 mode，
+    // 保证 resume 历史会话保持原有模式（否则 emitInit 把它显示成 default）。
+    if (!session.permissionMode) {
+      const acpMode = currentConfigValue(response?.configOptions, 'mode')
+      if (acpMode) session.permissionMode = acpMode
     }
     if (session.permissionMode) {
       await this.setPermissionMode(session.id, session.permissionMode)

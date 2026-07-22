@@ -576,6 +576,14 @@ export default function App(): JSX.Element {
   }, [addPerm])
 
   useEffect(() => {
+    // 空壳会话被主进程删除（或外部变化）后刷新侧栏列表。刷新本身不触发
+    // 删除，无循环；删除失败时主进程不发此事件。
+    return window.api.onSessionsChanged(() => {
+      void useSessionStore.getState().refreshSessions()
+    })
+  }, [])
+
+  useEffect(() => {
     const off = window.api.onClosePrompt(() => setClosePromptOpen(true))
     return off
   }, [])
