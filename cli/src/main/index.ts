@@ -7,8 +7,10 @@ import {
   markGpuBackendWindowReady
 } from './gpuBackend'
 import { registerIpc } from './ipc'
+import type { AgentBridge } from './agent/AgentBridge'
 import { log, scheduleLogMaintenance } from './logger'
 import { seedDefaultIfNeeded } from './providers'
+import { sweepOrphanSessionDirs } from './sessionDelete'
 import { loadSettings, saveSettings } from './settings'
 import { createTray, type ForgeTray } from './tray'
 import { checkForUpdates } from './updater'
@@ -16,6 +18,7 @@ import type { UpdateCheckResult } from '../shared/ipc'
 
 let mainWindow: BrowserWindow | null = null
 let forgeTray: ForgeTray | null = null
+let agentBridge: AgentBridge | null = null
 /** Bypass flag: when true the window-close handler lets the app exit instead of
  *  hiding to tray. Set by tray "Quit" and before-quit so a true quit isn't
  *  intercepted. */
@@ -262,9 +265,11 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(() => {
     seedDefaultIfNeeded()
+    // 空壳治理收尾：清理上次运行留下的孤儿会话目录（被强杀、kimi 重建的壳）。
+    sweepOrphanSessionDirs()
     // Tray is created after the window; pass a getter so registerIpc's closures
     // pick up the live tray (used for tooltip updates on session end).
-    registerIpc(
+    agentBridge = registerIpc(
       () => mainWindow,
       () => isQuitting,
       (v) => {
@@ -300,6 +305,9 @@ if (!hasSingleInstanceLock) {
 
 app.on('before-quit', () => {
   isQuitting = true
+  // 空壳治理：退出前清理本次运行中 Tran 新建但没发过消息的空会话（同步
+  // 文件删除立即生效；ACP 通知尽力而为，进程随即退出）。
+  if (agentBridge) void agentBridge.shutdown()
 })
 
 // When the window is actually destroyed, tear down the tray so no icon lingers.

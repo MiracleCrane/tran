@@ -31,6 +31,7 @@ import type {
 } from '../types'
 import { pickedFileToUserAttachment } from '../utils/attachments'
 import { DEFAULT_KIMI_MODEL_ID } from '../../shared/models'
+import { normalizeCwdForCompare } from '../../shared/paths'
 import { emitForgeEvent } from '../events'
 
 /** A buffered `content_block_delta` waiting to be folded into the store in a
@@ -112,6 +113,15 @@ interface SessionStore {
 
   /** Sidebar actions */
   refreshSessions: () => Promise<void>
+  /** 侧栏历史列表范围：当前项目 / 全部（跨项目，按 cwd 分组）。 */
+  sessionScope: 'project' | 'all'
+  setSessionScope: (scope: 'project' | 'all') => Promise<void>
+  /** 「全部」视图点其他项目的会话：先切到该会话的 cwd 再 resume。 */
+  openSessionCrossProject: (
+    sdkSessionId: string,
+    cwd: string | undefined,
+    backend?: ClaudeExecutionBackend
+  ) => Promise<void>
   /** 排队消息：从队列删除（×）/ 取出并返回（点击卡片取回编辑）。 */
   removePendingMessage: (id: string) => void
   takePendingMessage: (id: string) => PendingMessage | null
@@ -182,6 +192,8 @@ function isOwnMessageEcho(last: TranscriptItem | undefined, echoText: string): b
   return !!last.swarm && echoText === SWARM_PROMPT_PREFIX + last.text
 }
 const SESSION_PAGE_SIZE = 24
+/** 「全部」视图一次拉取的上限（跨项目不做分页）。 */
+const ALL_SESSIONS_LIMIT = 200
 const HISTORY_PRELOAD_CHUNK_SIZE = 50
 const HISTORY_HYDRATION_IDLE_TIMEOUT_MS = 700
 const HISTORY_HYDRATION_SCROLL_PAUSE_MS = 140
@@ -736,6 +748,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
   sessionsLoading: false,
   sessionsHasMore: false,
+  sessionScope: 'project',
   tasks: [], pendingQueue: [],
   sessionConfigDirty: false,
   sessionModelDirty: false,
@@ -1146,18 +1159,40 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (!meta) return
     const requestSeq = ++sessionListRequestSeq
     const cwd = meta.cwd
+    const scope = get().sessionScope
     set({ sessionsLoading: true })
     try {
       // kimi-only：不再有 windows/wsl 之分，后端忽略 backend 参数。
+      // 「全部」视图跨项目一次拉 200 条（不做分页）；「当前项目」按页加载。
       const sessions = await window.api.listSessions(cwd, {
-        limit: SESSION_PAGE_SIZE,
-        offset: 0
+        limit: scope === 'all' ? ALL_SESSIONS_LIMIT : SESSION_PAGE_SIZE,
+        offset: 0,
+        scope
       })
       if (sessionListRequestSeq !== requestSeq || get().meta?.cwd !== cwd) return
-      set({ sessions, sessionsHasMore: sessions.length === SESSION_PAGE_SIZE })
+      set({
+        sessions,
+        sessionsHasMore: scope === 'all' ? false : sessions.length === SESSION_PAGE_SIZE
+      })
     } finally {
       if (sessionListRequestSeq === requestSeq) set({ sessionsLoading: false })
     }
+  },
+
+  async setSessionScope(scope) {
+    if (get().sessionScope === scope) return
+    set({ sessionScope: scope, sessions: [], sessionsHasMore: false })
+    await get().refreshSessions()
+  },
+
+  async openSessionCrossProject(sdkSessionId, cwd, backend) {
+    const meta = get().meta
+    if (!meta) return
+    // 先切到该会话所属项目，再 resume（不在原项目里跨 cwd load）。
+    if (cwd && normalizeCwdForCompare(cwd) !== normalizeCwdForCompare(meta.cwd)) {
+      await get().switchProject(cwd)
+    }
+    await get().openSession(sdkSessionId, backend)
   },
 
   async loadMoreSessions() {

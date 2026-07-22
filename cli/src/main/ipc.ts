@@ -645,9 +645,11 @@ export function registerIpc(
   ipcMain.handle('forge:getStartupProject', async (): Promise<Project | null> => getStartupProject())
 
   ipcMain.handle('forge:listSessions', async (_e, cwd: string, opts?: SessionListOptions): Promise<SessionListItem[]> => {
-    const limit = opts?.limit && opts.limit > 0 ? opts.limit : 50
+    // 「全部」视图：跨项目返回，limit 放大到 200；「当前项目」行为不变。
+    const all = opts?.scope === 'all'
+    const limit = all ? 200 : opts?.limit && opts.limit > 0 ? opts.limit : 50
     const offset = opts?.offset && opts.offset > 0 ? opts.offset : 0
-    return listKimiSessions(cwd, { limit, offset })
+    return listKimiSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' })
   })
 
   ipcMain.handle('forge:getSessionMessages', async (

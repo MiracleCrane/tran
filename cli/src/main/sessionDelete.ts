@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join, resolve, sep } from 'node:path'
 import { log } from './logger'
@@ -107,4 +107,48 @@ export function deleteKimiSession(sessionId: string): DeleteResult {
   }
   log('session-delete', `deleted ${sessionId}`)
   return { ok: true }
+}
+
+/** 孤儿目录清扫：删除 sessions 根下**不在索引里**的 session_* 目录。
+ *
+ *  来源：Tran 删除空壳后，仍在跑的 kimi ACP 进程会异步重建目录壳（只有空的
+ *  agents/ 子目录，无 state.json、无索引行）；进程被强杀时也会留下残骸。
+ *  这些目录不进 session/list（kimi 按索引列举），对 UI 不可见，但会占磁盘。
+ *
+ *  安全约束：只删 mtime 超过 1 小时的目录——kimi 先建目录后写索引，新目录
+ *  可能还没来得及入索引，时间窗兜底避免误删别的 kimi 实例的活跃会话。 */
+export function sweepOrphanSessionDirs(maxAgeMs = 60 * 60 * 1000): void {
+  try {
+    const indexed = new Set<string>()
+    try {
+      for (const line of readFileSync(indexPath(), 'utf8').split(/\r?\n/)) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        try {
+          const entry = JSON.parse(trimmed) as { sessionId?: unknown }
+          if (typeof entry.sessionId === 'string') indexed.add(entry.sessionId)
+        } catch { /* 跳过坏行 */ }
+      }
+    } catch { /* 索引不可读时按空集合处理，仍靠路径+时间窗约束 */ }
+
+    const cutoff = Date.now() - maxAgeMs
+    let swept = 0
+    for (const wd of readdirSync(sessionsRoot(), { withFileTypes: true })) {
+      if (!wd.isDirectory()) continue
+      const wdDir = join(sessionsRoot(), wd.name)
+      for (const entry of readdirSync(wdDir, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !/^session_[\w-]+$/.test(entry.name)) continue
+        if (indexed.has(entry.name)) continue
+        const dir = join(wdDir, entry.name)
+        try {
+          if (statSync(dir).mtimeMs > cutoff) continue
+          rmSync(dir, { recursive: true, force: true })
+          swept++
+        } catch { /* 单个失败不阻塞整体清扫 */ }
+      }
+    }
+    if (swept) log('session-delete', `swept ${swept} orphan session dir(s)`)
+  } catch (error) {
+    log('session-delete', `sweep failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }

@@ -126,6 +126,14 @@ export class AgentBridge {
     this.sessionBackends.delete(sessionId)
   }
 
+  /** 退出前清理：逐个 close 活跃会话（触发后端的空壳删除等离场逻辑）。
+   *  同步部分（文件删除）立即生效，ACP 通知尽力而为。 */
+  async shutdown(): Promise<void> {
+    for (const sessionId of [...this.sessionBackends.keys()]) {
+      await this.close(sessionId).catch(() => {})
+    }
+  }
+
   listMcpServers(sessionId: string): Promise<McpServerEntry[]> {
     return this.backendForSession(sessionId).listMcpServers(sessionId)
   }

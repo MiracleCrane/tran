@@ -73,6 +73,8 @@ export interface SessionListOptions {
   limit?: number
   offset?: number
   backend?: ClaudeExecutionBackend | 'all'
+  /** 列表范围：project=仅当前项目目录；all=跨全部项目（空会话过滤两种都生效）。 */
+  scope?: 'project' | 'all'
 }
 
 /** Connection state of an MCP server, as reported by the Claude Agent SDK. */

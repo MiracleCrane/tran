@@ -5,6 +5,7 @@ import Collapse from './Collapse'
 import ConfirmDialog from './ConfirmDialog'
 import ProjectSwitcher from './ProjectSwitcher'
 import type { ClaudeExecutionBackend, SessionListItem } from '../../shared/ipc'
+import { normalizeCwdForCompare } from '../../shared/paths'
 import { onForgeEvent } from '../events'
 
 type SessionGroupMode = 'time' | 'project'
@@ -112,6 +113,23 @@ function groupSessionsByProject(
   }
   return [...map.entries()]
     .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+    .map(([label, items]) => ({ label, items }))
+}
+
+/** 「全部」视图：按完整 cwd 分组，组间按组内最新会话倒序（组内已按时间倒序）。 */
+function groupSessionsByCwd(
+  sessions: SessionListItem[],
+  fallbackCwd: string
+): SessionGroup[] {
+  const map = new Map<string, SessionListItem[]>()
+  for (const session of sessions) {
+    const label = session.cwd ?? fallbackCwd
+    const arr = map.get(label)
+    if (arr) arr.push(session)
+    else map.set(label, [session])
+  }
+  return [...map.entries()]
+    .sort(([, a], [, b]) => (b[0]?.lastModified ?? 0) - (a[0]?.lastModified ?? 0))
     .map(([label, items]) => ({ label, items }))
 }
 
@@ -275,10 +293,13 @@ export default function Sidebar(): JSX.Element {
   const loading = useSessionStore((s) => s.sessionsLoading)
   const sessionsHasMore = useSessionStore((s) => s.sessionsHasMore)
   const refresh = useSessionStore((s) => s.refreshSessions)
+  const sessionScope = useSessionStore((s) => s.sessionScope)
+  const setSessionScope = useSessionStore((s) => s.setSessionScope)
   const reloadForBackendSwitch = useSessionStore((s) => s.reloadForBackendSwitch)
   const loadMoreSessions = useSessionStore((s) => s.loadMoreSessions)
   const newChat = useSessionStore((s) => s.newChat)
   const openSession = useSessionStore((s) => s.openSession)
+  const openSessionCrossProject = useSessionStore((s) => s.openSessionCrossProject)
   const prefetchSessionHistory = useSessionStore((s) => s.prefetchSessionHistory)
   const pruneSessionHistoryCache = useSessionStore((s) => s.pruneSessionHistoryCache)
   const renameSession = useSessionStore((s) => s.renameSession)
@@ -295,6 +316,8 @@ export default function Sidebar(): JSX.Element {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [sessionSearch, setSessionSearch] = useState('')
   const [groupMode, setGroupMode] = useState<SessionGroupMode>('time')
+  /** 「全部」视图里被折叠的 cwd 组（label = 完整路径）。 */
+  const [collapsedGroupLabels, setCollapsedGroupLabels] = useState<Set<string>>(() => new Set())
   const [pinnedSessionKeys, setPinnedSessionKeys] = useState<Set<string>>(() => readPinnedSessions())
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   const [wslNavRevealPhase, setWslNavRevealPhase] = useState<WslNavRevealPhase>('hidden')
@@ -712,6 +735,30 @@ export default function Sidebar(): JSX.Element {
     })
   }
 
+  const toggleGroupCollapsed = (label: string): void => {
+    setCollapsedGroupLabels((prev) => {
+      const next = new Set(prev)
+      if (next.has(label)) next.delete(label)
+      else next.add(label)
+      return next
+    })
+  }
+
+  /** 「全部」视图点其他项目的会话：先切项目再 resume；本项目内直接打开。 */
+  const handleOpenSession = (s: SessionListItem): void => {
+    if (
+      sessionScope === 'all' &&
+      s.cwd &&
+      meta &&
+      normalizeCwdForCompare(s.cwd) !== normalizeCwdForCompare(meta.cwd)
+    ) {
+      void openSessionCrossProject(s.sessionId, s.cwd, s.runtimeBackend)
+    } else {
+      void openSession(s.sessionId, s.runtimeBackend)
+    }
+    setView('chat')
+  }
+
   const commitEdit = (): void => {
     if (editingId && editText.trim()) {
       const target = sessions.find((session) => sessionKey(session) === editingId)
@@ -816,10 +863,12 @@ export default function Sidebar(): JSX.Element {
 
   const sessionGroups = useMemo(
     () =>
-      groupMode === 'project'
-        ? groupSessionsByProject(filteredSessions, meta?.cwd ?? '')
-        : groupSessionsByTime(filteredSessions),
-    [filteredSessions, groupMode, meta?.cwd]
+      sessionScope === 'all'
+        ? groupSessionsByCwd(filteredSessions, meta?.cwd ?? '')
+        : groupMode === 'project'
+          ? groupSessionsByProject(filteredSessions, meta?.cwd ?? '')
+          : groupSessionsByTime(filteredSessions),
+    [filteredSessions, groupMode, meta?.cwd, sessionScope]
   )
   sessionGroupsRef.current = sessionGroups
 
@@ -1189,22 +1238,41 @@ export default function Sidebar(): JSX.Element {
       <div className="min-h-0 flex flex-1 flex-col">
         {/* grouped sessions */}
         <div className="space-y-2 px-4 pb-2 pt-1">
+          {/* 视图切换：当前项目 / 全部（跨项目按 cwd 分组） */}
+          <div className="flex rounded-lg border border-white/[0.08] bg-white/[0.025] p-0.5 text-[11px]">
+            {(['project', 'all'] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => void setSessionScope(value)}
+                className={`flex-1 rounded-md px-2 py-1 transition ${
+                  sessionScope === value
+                    ? 'bg-accent/20 text-accent'
+                    : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
+                }`}
+              >
+                {value === 'project' ? '当前项目' : '全部'}
+              </button>
+            ))}
+          </div>
           <input
             value={sessionSearch}
             onChange={(event) => setSessionSearch(event.target.value)}
             placeholder="搜索会话"
             className="h-8 w-full rounded-lg border border-white/[0.08] bg-bg-elev/60 px-2.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-accent/60"
           />
-          <div className="flex items-center">
-            <button
-              type="button"
-              onClick={() => setGroupMode((mode) => (mode === 'time' ? 'project' : 'time'))}
-              className="ml-auto rounded-md px-1.5 py-1 text-[10px] text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
-              title="切换分组"
-            >
-              {groupMode === 'time' ? '按时间' : '按项目'}
-            </button>
-          </div>
+          {sessionScope === 'project' && (
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => setGroupMode((mode) => (mode === 'time' ? 'project' : 'time'))}
+                className="ml-auto rounded-md px-1.5 py-1 text-[10px] text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
+                title="切换分组"
+              >
+                {groupMode === 'time' ? '按时间' : '按项目'}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* grouped sessions */}
@@ -1240,16 +1308,34 @@ export default function Sidebar(): JSX.Element {
         {!hideLiveSessionList && !hasAnimatedSessionRows && !loading && sessions.length > 0 && filteredSessions.length === 0 && (
           <div className="px-2 py-3 text-xs text-zinc-600">没有匹配的会话。</div>
         )}
-        {groups.map((g, groupIndex) => (
+        {groups.map((g, groupIndex) => {
+          const groupCollapsed = sessionScope === 'all' && collapsedGroupLabels.has(g.label)
+          return (
           <div
             key={g.label}
             className="session-list-grow-group mb-2"
             style={{ '--session-grow-delay': `${Math.min(groupIndex * 28, 120)}ms` } as CSSProperties}
           >
-            <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500/70">
-              {g.label}
-            </div>
-            {g.items.map((item, rowIndex) => {
+            {sessionScope === 'all' ? (
+              <button
+                type="button"
+                onClick={() => toggleGroupCollapsed(g.label)}
+                className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-zinc-500/70 transition hover:text-zinc-400"
+                title={g.label}
+              >
+                <span className="text-[8px]">{groupCollapsed ? '▸' : '▾'}</span>
+                <span className="truncate">{g.label}</span>
+                {meta && normalizeCwdForCompare(g.label) === normalizeCwdForCompare(meta.cwd) && (
+                  <span className="shrink-0 rounded bg-accent/15 px-1 text-accent">当前</span>
+                )}
+                <span className="ml-auto shrink-0">{g.items.length}</span>
+              </button>
+            ) : (
+              <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500/70">
+                {g.label}
+              </div>
+            )}
+            {!groupCollapsed && g.items.map((item, rowIndex) => {
               const s = item.session
               const key = sessionKey(s)
               const active = s.sessionId === meta.sdkSessionId && view === 'chat'
@@ -1291,8 +1377,7 @@ export default function Sidebar(): JSX.Element {
                           toggleSelected(key)
                           return
                         }
-                        void openSession(s.sessionId, s.runtimeBackend)
-                        setView('chat')
+                        handleOpenSession(s)
                       }}
                       onPointerEnter={handleSidebarPointerGlow}
                       onPointerMove={handleSidebarPointerGlow}
@@ -1379,7 +1464,8 @@ export default function Sidebar(): JSX.Element {
               )
             })}
           </div>
-        ))}
+          )
+        })}
         {!hideLiveSessionList && sessions.length > 0 && (sessionsHasMore || loading) && (
           <div className="px-2 py-3 text-center text-[11px] text-zinc-600">
             继续下滑加载更多

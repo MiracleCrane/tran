@@ -22,7 +22,8 @@ import {
   type AcpRpcMessage
 } from './AcpClient'
 import { resolveWindowsKimiCommand } from '../windowsKimi'
-import { recordSessionTitle } from '../sessionTitles'
+import { recordSessionTitle, removeSessionTitle } from '../sessionTitles'
+import { deleteKimiSession } from '../sessionDelete'
 import {
   controlGoal,
   getGoal,
@@ -86,6 +87,11 @@ interface ActiveKimiSession {
   compactText: string
   /** 隐藏 /usage 轮进行中又收到刷新请求：轮末补跑一次。 */
   usageRefreshPending: boolean
+  /** 空壳治理：本次运行由 Tran 新建（session/new，非 resume）的会话。 */
+  createdViaNew: boolean
+  /** 空壳治理：是否收到过真实用户 prompt（sendMessage 的用户消息；
+   *  隐藏 /usage 轮不算）。 */
+  gotRealPrompt: boolean
 }
 
 interface PendingPermission {
@@ -191,7 +197,9 @@ export class KimiBackend {
       lastTurnFailed: false,
       compactTurn: false,
       compactText: '',
-      usageRefreshPending: false
+      usageRefreshPending: false,
+      createdViaNew: !opts.resume,
+      gotRealPrompt: false
     }
     session.ready = this.prepareSession(session, opts)
     this.sessions.set(sessionId, session)
@@ -207,6 +215,8 @@ export class KimiBackend {
 
   send(sessionId: string, content: string | unknown[]): void {
     const session = this.requireSession(sessionId)
+    // 真实用户 prompt 标记（空壳治理用；隐藏 /usage 轮不走这里，不会误标）。
+    session.gotRealPrompt = true
     session.queue.push({ content })
     void this.drain(session)
   }
@@ -259,12 +269,35 @@ export class KimiBackend {
     if (!session) return
     session.closed = true
     if (session.acpSessionId) {
+      // 空壳治理：Tran 新建但没发过消息的会话，离开时直接从磁盘删掉。
+      this.discardEmptyShell(session)
       this.acpToSession.delete(session.acpSessionId)
       this.pendingNotifications.delete(session.acpSessionId)
       // Kimi ACP 未实现 session/close —— 只取消当前 turn 并丢弃本地映射。
       this.client?.notify('session/cancel', { sessionId: session.acpSessionId })
     }
     this.sessions.delete(sessionId)
+  }
+
+  /** 空壳治理：本次运行由 Tran 新建（非 resume）且从未收到真实用户 prompt 的
+   *  会话，在离开（切对话/切项目/退出）时删除并清掉本地标题记录。
+   *  删除失败只记日志、不阻塞导航。 */
+  private discardEmptyShell(session: ActiveKimiSession): void {
+    if (!session.createdViaNew || session.gotRealPrompt || !session.acpSessionId) return
+    const result = deleteKimiSession(session.acpSessionId)
+    if (result.ok) {
+      removeSessionTitle(session.acpSessionId)
+      log('kimi', `discarded empty session shell ${session.acpSessionId}`)
+      // kimi ACP 进程在删除后会异步重建目录壳（空的 agents/ 残留，实测）。
+      // 延迟补一刀：仍在索引外就直接再删；兜底扫尾交给启动时的孤儿清扫。
+      const acpSessionId = session.acpSessionId
+      setTimeout(() => {
+        const retry = deleteKimiSession(acpSessionId)
+        if (!retry.ok) log('kimi', `empty shell re-delete failed: ${retry.error ?? 'unknown'}`)
+      }, 15_000).unref()
+    } else {
+      log('kimi', `discard empty shell failed: ${result.error ?? 'unknown'}`)
+    }
   }
 
   // TODO(kimi-mcp): 接入 Kimi 的 MCP 配置（session/new 的 mcpServers 转发已获

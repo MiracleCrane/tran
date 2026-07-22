@@ -80,9 +80,13 @@ function normalizeCwd(value: string): string {
   return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
 }
 
+/** 空会话豁免窗口：最近 10 分钟内更新过的 "New Session" 不过滤（用户刚发
+ *  首条消息、kimi title 未刷新时，活跃对话不能从侧栏消失）。 */
+const EMPTY_SESSION_EXEMPTION_MS = 10 * 60 * 1000
+
 export async function listKimiSessions(
   cwd: string,
-  opts: { limit: number; offset: number }
+  opts: { limit: number; offset: number; scope?: 'project' | 'all' }
 ): Promise<SessionListItem[]> {
   try {
     const acp = await ensureClient()
@@ -93,6 +97,7 @@ export async function listKimiSessions(
         ? response
         : []
     const targetCwd = normalizeCwd(cwd)
+    const allProjects = opts.scope === 'all'
     const sessions: SessionListItem[] = []
     for (const raw of rawSessions) {
       const entry = asRecord(raw)
@@ -100,16 +105,20 @@ export async function listKimiSessions(
       const sessionId = asString(entry.sessionId) ?? asString(entry.id)
       if (!sessionId) continue
       const entryCwd = asString(entry.cwd)
-      // 只列当前项目目录的会话（条目不带 cwd 时保守放行）。
-      if (entryCwd && normalizeCwd(entryCwd) !== targetCwd) continue
+      // 「当前项目」只列本目录的会话（条目不带 cwd 时保守放行）；「全部」不过滤。
+      if (!allProjects && entryCwd && normalizeCwd(entryCwd) !== targetCwd) continue
       // 标题兜底：kimi 未命名会话只回 "New Session"，用本地记录的首条用户消息补。
       const kimiTitle = asString(entry.title) ?? asString(entry.summary) ?? asString(entry.name) ?? ''
       const fallbackTitle = kimiTitle && kimiTitle !== 'New Session' ? kimiTitle : localSessionTitle(sessionId)
+      const lastModified = asTimestamp(entry.updatedAt) ?? asTimestamp(entry.lastModified) ?? 0
+      // 空壳治理：kimi 对从没发过消息的会话 title 恒为 "New Session"。无有效标题
+      // （kimi 未命名 + 本地无兜底 = 没发过消息）且超出豁免窗口的空会话不显示。
+      if (!fallbackTitle && Date.now() - lastModified > EMPTY_SESSION_EXEMPTION_MS) continue
       sessions.push({
         sessionId,
         agentBackend: 'kimi',
         summary: fallbackTitle ?? kimiTitle,
-        lastModified: asTimestamp(entry.updatedAt) ?? asTimestamp(entry.lastModified) ?? 0,
+        lastModified,
         ...(entryCwd ? { cwd: entryCwd } : {}),
         runtimeBackend: 'windows'
       })
