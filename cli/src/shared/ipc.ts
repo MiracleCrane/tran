@@ -458,6 +458,24 @@ export type PlanUsageResult =
   | { ok: true; data: PlanUsageInfo }
   | { ok: false; error: string }
 
+/** kimi 本地 server 的任务条目（tasks API，子代理/后台 Bash）。 */
+export interface KimiTaskInfo {
+  id: string
+  kind: string
+  description?: string
+  status?: string
+  command?: string
+  createdAt?: string
+  startedAt?: string
+  completedAt?: string
+}
+
+/** main → renderer：swarm tasks 轮询结果（tasks=null 表示 server 不可用，降级）。 */
+export interface SwarmTasksEvent {
+  sessionId: string
+  tasks: KimiTaskInfo[] | null
+}
+
 /** AI 命名批量补全的结果计数。 */
 export interface AiTitlesBatchResult {
   generated: number
@@ -694,6 +712,13 @@ export interface ForgeApi {
   generateAiTitles(sessionIds: string[]): Promise<AiTitlesBatchResult>
   /** 侧栏条目悬停预览（零 token，读磁盘 state.json）。 */
   getSessionPreview(sessionId: string): Promise<SessionPreview>
+
+  /** --- Swarm tasks 轮询（kimi 本地 server；server 不可用静默降级） --- */
+  /** 订阅某 ACP 会话（session_<uuid>）的 tasks 推送：有 running 子代理 2s 一次，
+   *  空闲 15s 降频。 */
+  subscribeSwarmTasks(sessionId: string): Promise<void>
+  unsubscribeSwarmTasks(): Promise<void>
+  onSwarmTasks(cb: (e: SwarmTasksEvent) => void): () => void
 }
 
 declare global {

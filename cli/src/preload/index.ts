@@ -7,6 +7,7 @@ import type {
   GitBranchInfo,
   GitCommit,
   GitStatus,
+  SwarmTasksEvent,
   UpdateCheckResult,
   UpdateDownloadProgress
 } from '../shared/ipc'
@@ -183,7 +184,14 @@ const api: ForgeApi = {
   getAppVersion: () => ipcRenderer.invoke('forge:getAppVersion'),
   getAiTitles: () => ipcRenderer.invoke('forge:getAiTitles'),
   generateAiTitles: (sessionIds) => ipcRenderer.invoke('forge:generateAiTitles', sessionIds),
-  getSessionPreview: (sessionId) => ipcRenderer.invoke('forge:getSessionPreview', sessionId)
+  getSessionPreview: (sessionId) => ipcRenderer.invoke('forge:getSessionPreview', sessionId),
+  subscribeSwarmTasks: (sessionId) => ipcRenderer.invoke('forge:subscribeSwarmTasks', sessionId),
+  unsubscribeSwarmTasks: () => ipcRenderer.invoke('forge:unsubscribeSwarmTasks'),
+  onSwarmTasks: (cb) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: SwarmTasksEvent): void => cb(payload)
+    ipcRenderer.on('forge:swarm-tasks', listener)
+    return () => ipcRenderer.removeListener('forge:swarm-tasks', listener)
+  }
 }
 
 try {

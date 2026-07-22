@@ -4,6 +4,7 @@ import { backgroundTaskInfo } from '../utils/toolStats'
 import Collapse from './Collapse'
 import CodeBlock, { langForTool } from './CodeBlock'
 import DiffView from './DiffView'
+import SwarmCard from './SwarmCard'
 
 function normalizeResult(result: unknown): string {
   if (result == null) return ''
@@ -130,6 +131,10 @@ const ToolCallCard = memo(function ToolCallCard({
   const inputText =
     !collapsed && block.name === 'Bash' ? ((block.input as { command?: string })?.command ?? '') : ''
   const streaming = isSubagent && block.status === 'running'
+
+  // AgentSwarm（kimi 并行子代理）：专门的可视化卡片（进度条 + 子代理行）。
+  // 分支在 hooks 之后，同实例块名变化不违反 hooks 规则。
+  if (block.name === 'AgentSwarm') return <SwarmCard block={block} />
 
   return (
     <div

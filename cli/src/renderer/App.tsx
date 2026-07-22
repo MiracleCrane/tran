@@ -583,6 +583,22 @@ export default function App(): JSX.Element {
     })
   }, [])
 
+  // Swarm 可视化：订阅当前 ACP 会话（session_<uuid>）的 tasks 轮询。
+  // server 不可用时主进程推 tasks=null，SwarmCard 自动降级为静态卡。
+  const sdkSessionId = meta?.sdkSessionId
+  useEffect(() => {
+    useSessionStore.setState({ swarmTasks: null })
+    if (!sdkSessionId) return
+    void window.api.subscribeSwarmTasks(sdkSessionId).catch(() => {})
+    const off = window.api.onSwarmTasks((e) => {
+      if (e.sessionId === sdkSessionId) useSessionStore.setState({ swarmTasks: e.tasks })
+    })
+    return () => {
+      off()
+      void window.api.unsubscribeSwarmTasks().catch(() => {})
+    }
+  }, [sdkSessionId])
+
   useEffect(() => {
     const off = window.api.onClosePrompt(() => setClosePromptOpen(true))
     return off

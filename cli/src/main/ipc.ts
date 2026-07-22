@@ -45,6 +45,7 @@ import { getPlanUsageCached } from './usageService'
 import { deleteKimiSession } from './sessionDelete'
 import { removeSessionTitle, recordManualTitle } from './sessionTitles'
 import { allAiTitles, generateAiTitlesBatch, getSessionPreview } from './aiTitles'
+import { getSessionTasks } from './kimiServerApi'
 import type { GoalControlAction, GoalStartOptions } from './goalStore'
 import * as gitModule from './git'
 import { log } from './logger'
@@ -705,6 +706,58 @@ export function registerIpc(
     'forge:getSessionPreview',
     async (_e, sessionId: string): Promise<SessionPreview> => getSessionPreview(sessionId)
   )
+
+  // --- Swarm tasks 轮询（kimi 本地 server；连接失败静默降级，绝不影响聊天） ---
+  let swarmTimer: ReturnType<typeof setTimeout> | null = null
+  let swarmSessionId: string | null = null
+  let swarmFailures = 0
+
+  const stopSwarmPolling = (): void => {
+    if (swarmTimer !== null) {
+      clearTimeout(swarmTimer)
+      swarmTimer = null
+    }
+    swarmSessionId = null
+  }
+
+  const scheduleSwarmPoll = (delayMs: number): void => {
+    swarmTimer = setTimeout(() => void pollSwarmTasks(), delayMs)
+  }
+
+  const pollSwarmTasks = async (): Promise<void> => {
+    const sessionId = swarmSessionId
+    if (!sessionId) return
+    const tasks = await getSessionTasks(sessionId).catch(() => null)
+    if (swarmSessionId !== sessionId) return
+    if (tasks === null) {
+      swarmFailures += 1
+      // server 持续不可用：推一次降级态后停轮（下次订阅再重试）。
+      if (swarmFailures >= 3) {
+        send('forge:swarm-tasks', { sessionId, tasks: null })
+        stopSwarmPolling()
+        return
+      }
+      scheduleSwarmPoll(15000)
+      return
+    }
+    swarmFailures = 0
+    send('forge:swarm-tasks', { sessionId, tasks })
+    // 有 running 子代理时 2s 高频轮询，否则 15s 降频。
+    const active = tasks.some((t) => t.kind === 'subagent' && t.status === 'running')
+    scheduleSwarmPoll(active ? 2000 : 15000)
+  }
+
+  ipcMain.handle('forge:subscribeSwarmTasks', async (_e, sessionId: string): Promise<void> => {
+    if (swarmSessionId === sessionId && swarmTimer !== null) return
+    stopSwarmPolling()
+    swarmFailures = 0
+    swarmSessionId = sessionId
+    void pollSwarmTasks()
+  })
+
+  ipcMain.handle('forge:unsubscribeSwarmTasks', async (): Promise<void> => {
+    stopSwarmPolling()
+  })
 
   ipcMain.handle(
     'forge:deleteSession',

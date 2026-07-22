@@ -11,7 +11,8 @@ import type {
   AgentBackendId,
   ClaudeExecutionBackend,
   SkillInfo,
-  GoalInfo
+  GoalInfo,
+  KimiTaskInfo
 } from '../../shared/ipc'
 import type {
   TranscriptItem,
@@ -75,6 +76,8 @@ interface SessionStore {
   slashCommands: SkillInfo[]
   /** ACP plan 事件推送的待办清单（system/plan，全量替换；空数组表示无）。 */
   planEntries: PlanEntry[]
+  /** kimi 本地 server 轮询到的会话 tasks（Swarm 可视化；null = server 不可用降级）。 */
+  swarmTasks: KimiTaskInfo[] | null
   /** 隐藏 /usage 轮解析出的上下文用量（system/context_usage；null 表示无数据）。 */
   contextUsage: ContextUsage | null
   /** 模式面板状态（计划/权限互斥恢复 + Swarm/目标开关），per session。 */
@@ -755,6 +758,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   bridgeEnded: false,
   slashCommands: [],
   planEntries: [],
+  swarmTasks: null,
   contextUsage: null,
   modePanel: defaultModePanel(),
   goal: null,

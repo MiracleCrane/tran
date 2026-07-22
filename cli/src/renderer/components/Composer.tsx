@@ -195,6 +195,18 @@ export default function Composer(): JSX.Element {
   const [showTemplates, setShowTemplates] = useState(false)
   // Kimi ACP 推送的斜杠命令（available_commands_update → sessionStore）。
   const slashSkills = useSessionStore((s) => s.slashCommands)
+  // Swarm 状态：server tasks 有 running 子代理，或 ACP 侧有 running/pending 的
+  // AgentSwarm 工具调用（server 不可用时的兜底检测）。
+  const swarmRunning = useSessionStore((s) =>
+    (s.swarmTasks?.some((t) => t.kind === 'subagent' && t.status === 'running') ?? false) ||
+    s.items.some(
+      (item) =>
+        item.kind === 'assistant' &&
+        item.blocks.some(
+          (b) => b && b.kind === 'tool' && b.name === 'AgentSwarm' && (b.status === 'running' || b.status === 'pending')
+        )
+    )
+  )
 
   // 兜底：订阅仍为空时通过 listSkills IPC 主动拉一次（后端 listSkills 返回
   // session.skills，缓冲队列修复后它在 start 期间已被正确赋值）。订阅优先，
@@ -889,6 +901,18 @@ export default function Composer(): JSX.Element {
             </span>
             <div className="composer-actions ml-auto flex items-center gap-1.5">
               {meta && <ModePanel />}
+              {/* Swarm 状态徽章：检测到本会话有进行中的 AgentSwarm（server tasks
+                  有 running 子代理，或 ACP 侧有 running 的 AgentSwarm 工具调用）
+                  时亮起，结束后自动消失。 */}
+              {meta && swarmRunning && (
+                <span
+                  className="flex h-7 items-center gap-1.5 rounded-md border border-accent/50 px-2 text-[11px] text-accent"
+                  title="Swarm 并行子代理运行中"
+                >
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+                  Swarm
+                </span>
+              )}
               {meta && (
                 <DisclosureSelect
                   value={meta.permissionMode === 'plan' ? (modeBeforePlan ?? 'default') : meta.permissionMode}
