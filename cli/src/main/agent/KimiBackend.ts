@@ -92,6 +92,8 @@ interface ActiveKimiSession {
   /** 空壳治理：是否收到过真实用户 prompt（sendMessage 的用户消息；
    *  隐藏 /usage 轮不算）。 */
   gotRealPrompt: boolean
+  /** AI 命名：本运行内是否已触发过自动生成（每会话至多一次，控制 token 成本）。 */
+  aiTitleRequested: boolean
 }
 
 interface PendingPermission {

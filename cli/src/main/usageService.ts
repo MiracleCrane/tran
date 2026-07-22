@@ -80,8 +80,8 @@ async function refreshAccessToken(refreshToken: string): Promise<OAuthCredential
 }
 
 /** 取有效 access_token：未过期直接用；过期则 refresh 并写回（refresh_token 轮换）。
- *  forceRefresh 用于 /usages 401 后的重试。 */
-async function getValidAccessToken(forceRefresh = false): Promise<string | null> {
+ *  forceRefresh 用于 /usages 401 后的重试。aiTitles 模块复用同一凭证链。 */
+export async function getValidAccessToken(forceRefresh = false): Promise<string | null> {
   const creds = readCredentials()
   if (!creds?.access_token) return null
   const expired = expiryMs(creds) - EXPIRY_SKEW_MS < Date.now()

@@ -1,6 +1,7 @@
 import { AcpClient } from './agent/AcpClient'
 import { resolveWindowsKimiCommand } from './windowsKimi'
-import { localSessionTitle } from './sessionTitles'
+import { localSessionTitle, manualSessionTitle } from './sessionTitles'
+import { aiSessionTitle } from './aiTitles'
 import { log } from './logger'
 import type { SessionListItem } from '../shared/ipc'
 
@@ -107,17 +108,19 @@ export async function listKimiSessions(
       const entryCwd = asString(entry.cwd)
       // 「当前项目」只列本目录的会话（条目不带 cwd 时保守放行）；「全部」不过滤。
       if (!allProjects && entryCwd && normalizeCwd(entryCwd) !== targetCwd) continue
-      // 标题兜底：kimi 未命名会话只回 "New Session"，用本地记录的首条用户消息补。
+      // 标题优先级：手动重命名 > AI 命名 > kimi 原标题 > 本地首条消息兜底。
       const kimiTitle = asString(entry.title) ?? asString(entry.summary) ?? asString(entry.name) ?? ''
-      const fallbackTitle = kimiTitle && kimiTitle !== 'New Session' ? kimiTitle : localSessionTitle(sessionId)
+      const kimiTitleValid = kimiTitle && kimiTitle !== 'New Session' ? kimiTitle : undefined
+      const displayTitle =
+        manualSessionTitle(sessionId) ?? aiSessionTitle(sessionId) ?? kimiTitleValid ?? localSessionTitle(sessionId)
       const lastModified = asTimestamp(entry.updatedAt) ?? asTimestamp(entry.lastModified) ?? 0
       // 空壳治理：kimi 对从没发过消息的会话 title 恒为 "New Session"。无有效标题
-      // （kimi 未命名 + 本地无兜底 = 没发过消息）且超出豁免窗口的空会话不显示。
-      if (!fallbackTitle && Date.now() - lastModified > EMPTY_SESSION_EXEMPTION_MS) continue
+      // （无任何一级标题来源 = 没发过消息）且超出豁免窗口的空会话不显示。
+      if (!displayTitle && Date.now() - lastModified > EMPTY_SESSION_EXEMPTION_MS) continue
       sessions.push({
         sessionId,
         agentBackend: 'kimi',
-        summary: fallbackTitle ?? kimiTitle,
+        summary: displayTitle ?? kimiTitle,
         lastModified,
         ...(entryCwd ? { cwd: entryCwd } : {}),
         runtimeBackend: 'windows'

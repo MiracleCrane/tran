@@ -55,4 +55,52 @@ export function removeSessionTitle(sessionId: string): void {
   } catch (error) {
     log('titles', `save failed: ${error instanceof Error ? error.message : String(error)}`)
   }
+  removeManualTitle(sessionId)
+}
+
+/** --- 手动重命名（用户编辑的标题，优先级最高，AI/兜底都不覆盖） --- */
+
+let manualCache: Record<string, string> | null = null
+
+function manualStorePath(): string {
+  return join(app.getPath('userData'), 'session-titles-manual.json')
+}
+
+function loadManual(): Record<string, string> {
+  if (manualCache) return manualCache
+  try {
+    const raw = JSON.parse(readFileSync(manualStorePath(), 'utf8')) as unknown
+    manualCache = raw && typeof raw === 'object' ? (raw as Record<string, string>) : {}
+  } catch {
+    manualCache = {}
+  }
+  return manualCache
+}
+
+function saveManual(): void {
+  try {
+    mkdirSync(dirname(manualStorePath()), { recursive: true })
+    writeFileSync(manualStorePath(), JSON.stringify(loadManual(), null, 1), 'utf8')
+  } catch (error) {
+    log('titles', `save manual failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/** 记录用户手动重命名（覆盖式，用户改几次都以最后一次为准）。 */
+export function recordManualTitle(sessionId: string, title: string): void {
+  const clean = title.replace(/\s+/g, ' ').trim().slice(0, MAX_TITLE_LEN)
+  if (!sessionId || !clean) return
+  loadManual()[sessionId] = clean
+  saveManual()
+}
+
+export function manualSessionTitle(sessionId: string): string | undefined {
+  return loadManual()[sessionId]
+}
+
+function removeManualTitle(sessionId: string): void {
+  const map = loadManual()
+  if (!(sessionId in map)) return
+  delete map[sessionId]
+  saveManual()
 }
