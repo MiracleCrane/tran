@@ -180,7 +180,10 @@ const api: ForgeApi = {
     ipcRenderer.on('forge:sessions-changed', listener)
     return () => ipcRenderer.removeListener('forge:sessions-changed', listener)
   },
-  getAppVersion: () => ipcRenderer.invoke('forge:getAppVersion')
+  getAppVersion: () => ipcRenderer.invoke('forge:getAppVersion'),
+  getAiTitles: () => ipcRenderer.invoke('forge:getAiTitles'),
+  generateAiTitles: (sessionIds) => ipcRenderer.invoke('forge:generateAiTitles', sessionIds),
+  getSessionPreview: (sessionId) => ipcRenderer.invoke('forge:getSessionPreview', sessionId)
 }
 
 try {

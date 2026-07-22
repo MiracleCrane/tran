@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore, type View } from '../store/uiStore'
 import Collapse from './Collapse'
 import ConfirmDialog from './ConfirmDialog'
 import ProjectSwitcher from './ProjectSwitcher'
-import type { ClaudeExecutionBackend, SessionListItem } from '../../shared/ipc'
+import type { ClaudeExecutionBackend, SessionListItem, SessionPreview } from '../../shared/ipc'
 import { normalizeCwdForCompare } from '../../shared/paths'
 import { onForgeEvent } from '../events'
 
@@ -319,10 +320,75 @@ export default function Sidebar(): JSX.Element {
   /** 「全部」视图里被折叠的 cwd 组（label = 完整路径）。 */
   const [collapsedGroupLabels, setCollapsedGroupLabels] = useState<Set<string>>(() => new Set())
   const [appVersion, setAppVersion] = useState('')
+  const [aiNamingBusy, setAiNamingBusy] = useState(false)
+  /** 会话条目悬停预览（零 token，磁盘读 state.json）。 */
+  const [preview, setPreview] = useState<{
+    key: string
+    top: number
+    left: number
+    summary: string
+    cwd?: string
+    lastModified: number
+    firstPrompt?: string
+  } | null>(null)
+  const previewTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     void window.api.getAppVersion().then(setAppVersion).catch(() => {})
   }, [])
+
+  /** 一键补全 AI 标题：当前列表里还没有 AI 标题的会话，串行生成（主进程
+   *  内部间隔 ~300ms、有缓存/手动命名自动跳过；开关关闭时不发请求）。 */
+  const handleAiNaming = async (): Promise<void> => {
+    if (aiNamingBusy) return
+    setAiNamingBusy(true)
+    try {
+      const [aiTitles, prefs] = await Promise.all([
+        window.api.getAiTitles().catch(() => ({} as Record<string, string>)),
+        window.api.getPreferences().catch(() => null)
+      ])
+      if (prefs && prefs.aiNamingEnabled === false) return
+      const ids = sessions.map((s) => s.sessionId).filter((id) => !aiTitles[id])
+      if (!ids.length) return
+      await window.api.generateAiTitles(ids)
+    } finally {
+      setAiNamingBusy(false)
+    }
+  }
+
+  const cancelPreviewTimer = (): void => {
+    if (previewTimerRef.current !== null) {
+      window.clearTimeout(previewTimerRef.current)
+      previewTimerRef.current = null
+    }
+  }
+
+  const schedulePreview = (key: string, s: SessionListItem, el: HTMLElement): void => {
+    cancelPreviewTimer()
+    previewTimerRef.current = window.setTimeout(() => {
+      previewTimerRef.current = null
+      const rect = el.getBoundingClientRect()
+      void window.api
+        .getSessionPreview(s.sessionId)
+        .catch(() => ({} as SessionPreview))
+        .then((data) => {
+          setPreview({
+            key,
+            top: Math.max(8, rect.top - 4),
+            left: rect.right + 8,
+            summary: s.summary || '(未命名)',
+            ...(s.cwd ? { cwd: s.cwd } : {}),
+            lastModified: s.lastModified,
+            ...(data.firstPrompt ? { firstPrompt: data.firstPrompt } : {})
+          })
+        })
+    }, 350)
+  }
+
+  const hidePreview = (): void => {
+    cancelPreviewTimer()
+    setPreview(null)
+  }
   const [pinnedSessionKeys, setPinnedSessionKeys] = useState<Set<string>>(() => readPinnedSessions())
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   const [wslNavRevealPhase, setWslNavRevealPhase] = useState<WslNavRevealPhase>('hidden')
@@ -683,6 +749,7 @@ export default function Sidebar(): JSX.Element {
   const handleSessionListScroll = (): void => {
     const root = sessionListRef.current
     if (!root) return
+    hidePreview()
 
     scheduleSessionCacheRelease()
     maybeLoadMoreSessions()
@@ -725,6 +792,7 @@ export default function Sidebar(): JSX.Element {
       clearSessionExitTimer()
       clearSessionCacheReleaseTimer()
       clearPrefetchResumeTimer()
+      cancelPreviewTimer()
       document.documentElement.classList.remove('sidebar-motion')
     }
   }, [])
@@ -1199,6 +1267,14 @@ export default function Sidebar(): JSX.Element {
         </span>
         <span className="flex items-center gap-1">
           <button
+            onClick={() => void handleAiNaming()}
+            disabled={aiNamingBusy}
+            className="rounded-md px-1.5 py-0.5 text-[10px] text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300 disabled:opacity-50"
+            title="为列表里还没有 AI 标题的会话逐个生成短标题（串行、有缓存跳过）"
+          >
+            {aiNamingBusy ? '命名中…' : 'AI 命名'}
+          </button>
+          <button
             onClick={() => (multiMode ? exitMultiMode() : setMultiMode(true))}
             className={`rounded-md px-1.5 py-0.5 text-[10px] transition ${
               multiMode ? 'bg-accent/20 text-accent' : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
@@ -1389,8 +1465,12 @@ export default function Sidebar(): JSX.Element {
                         }
                         handleOpenSession(s)
                       }}
-                      onPointerEnter={handleSidebarPointerGlow}
+                      onPointerEnter={(e) => {
+                        handleSidebarPointerGlow(e)
+                        if (!multiMode) schedulePreview(key, s, e.currentTarget)
+                      }}
                       onPointerMove={handleSidebarPointerGlow}
+                      onPointerLeave={hidePreview}
                       className={`sidebar-session-row relative w-full rounded-xl border px-2.5 py-2 text-left ${
                         multiMode ? '' : 'pr-20'
                       } ${
@@ -1592,6 +1672,31 @@ export default function Sidebar(): JSX.Element {
         onConfirm={() => void doBatchDelete()}
         onCancel={() => setConfirmBatch(false)}
       />
+
+      {/* 会话条目悬停预览（零 token：标题 / 首条消息 / 更新时间 / 目录） */}
+      {preview &&
+        createPortal(
+          <div
+            className="glass-panel tran-enter fixed z-[90] w-64 rounded-2xl p-3 shadow-2xl"
+            style={{ top: preview.top, left: preview.left }}
+            onPointerEnter={cancelPreviewTimer}
+            onPointerLeave={hidePreview}
+          >
+            <div className="truncate text-xs font-medium text-zinc-100">{preview.summary}</div>
+            {preview.firstPrompt && (
+              <div className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-zinc-400">
+                {preview.firstPrompt}
+              </div>
+            )}
+            <div className="mt-1.5 text-[10px] text-zinc-600">{relTime(preview.lastModified)}</div>
+            {preview.cwd && (
+              <div className="mt-0.5 truncate font-mono text-[10px] text-zinc-600" title={preview.cwd}>
+                {preview.cwd}
+              </div>
+            )}
+          </div>,
+          document.body
+        )}
     </div>
   )
 }

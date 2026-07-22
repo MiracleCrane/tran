@@ -120,6 +120,7 @@ export default function SettingsPanel(): JSX.Element {
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   const [minimizeToTray, setMinimizeToTray] = useState(false)
   const [nativeNotifications, setNativeNotifications] = useState(true)
+  const [aiNaming, setAiNaming] = useState(true)
   const [askOnClose, setAskOnClose] = useState(true)
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
@@ -156,6 +157,7 @@ export default function SettingsPanel(): JSX.Element {
       setWslSupportEnabled(!!p.wslSupportEnabled)
       setMinimizeToTray(!!p.minimizeToTray)
       setNativeNotifications(p.nativeNotifications !== false)
+      setAiNaming(p.aiNamingEnabled !== false)
       setAskOnClose(!p.closePromptDismissed)
       setLoaded(true)
     })
@@ -202,6 +204,18 @@ export default function SettingsPanel(): JSX.Element {
       setTimeout(() => setSavedAt(false), 1500)
     } catch {
       setNativeNotifications(!next)
+    }
+  }
+
+  /** AI 自动命名开关（默认开）：立即生效；关闭后主进程任何路径都不调命名 API。 */
+  const toggleAiNaming = async (next: boolean): Promise<void> => {
+    setAiNaming(next)
+    try {
+      await window.api.savePreferences({ aiNamingEnabled: next })
+      setSavedAt(true)
+      setTimeout(() => setSavedAt(false), 1500)
+    } catch {
+      setAiNaming(!next)
     }
   }
 
@@ -623,6 +637,12 @@ export default function SettingsPanel(): JSX.Element {
             <h2 className="text-sm font-semibold text-zinc-200">系统</h2>
           </div>
           <div className="space-y-4">
+            <ToggleControl
+              label="AI 自动命名"
+              description="新会话发第一条消息后自动生成短标题（每次约消耗一两百 token）；侧栏可一键补全老会话。关闭后不做任何命名调用。"
+              checked={aiNaming}
+              onChange={(checked) => void toggleAiNaming(checked)}
+            />
             <ToggleControl
               label="最小化到系统托盘"
               description="关闭窗口时最小化到托盘而非退出应用。点击托盘图标可恢复窗口。"

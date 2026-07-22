@@ -245,6 +245,8 @@ export interface Preferences {
   /** When false, Tran re-shows the close prompt (minimize vs. quit) on every
    *  window close. Default false = always ask until the user picks. */
   closePromptDismissed?: boolean
+  /** AI 自动命名（会话短标题，默认开；关闭后不做任何云端命名调用）。 */
+  aiNamingEnabled?: boolean
 }
 
 export interface ProviderProfile {
@@ -455,6 +457,19 @@ export interface PlanUsageInfo {
 export type PlanUsageResult =
   | { ok: true; data: PlanUsageInfo }
   | { ok: false; error: string }
+
+/** AI 命名批量补全的结果计数。 */
+export interface AiTitlesBatchResult {
+  generated: number
+  skipped: number
+  failed: number
+}
+
+/** 侧栏悬停预览（零 token，从磁盘 state.json 读）。 */
+export interface SessionPreview {
+  /** 首条/最近用户消息（截断 80 字）；读不到则缺省。 */
+  firstPrompt?: string
+}
 
 /** --- Git integration types --- */
 export interface GitBranchInfo {
@@ -671,6 +686,14 @@ export interface ForgeApi {
   onSessionsChanged(cb: () => void): () => void
   /** 应用版本号（app.getVersion()），设置页/侧栏展示用。 */
   getAppVersion(): Promise<string>
+
+  /** --- AI 会话命名 --- */
+  /** 已有 AI 标题的会话映射（sessionId → 标题），侧栏"一键补全"用。 */
+  getAiTitles(): Promise<Record<string, string>>
+  /** 为给定会话批量生成 AI 标题（串行 ~300ms 间隔，有缓存/手动命名跳过）。 */
+  generateAiTitles(sessionIds: string[]): Promise<AiTitlesBatchResult>
+  /** 侧栏条目悬停预览（零 token，读磁盘 state.json）。 */
+  getSessionPreview(sessionId: string): Promise<SessionPreview>
 }
 
 declare global {

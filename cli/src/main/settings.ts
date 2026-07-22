@@ -65,6 +65,8 @@ interface PersistedSettings {
   minimizeToTray?: boolean
   /** User has already answered the first-close prompt (don't ask again). */
   closePromptDismissed?: boolean
+  /** AI 自动命名（会话短标题，云端生成；默认开，关闭后任何路径不调 API）。 */
+  aiNamingEnabled?: boolean
   /** Show OS native notifications when a session ends while window is inactive
    *  (default true). */
   nativeNotifications?: boolean
@@ -235,6 +237,7 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.vulkanBackend = optionalBoolean(source.vulkanBackend)
   settings.minimizeToTray = optionalBoolean(source.minimizeToTray)
   settings.closePromptDismissed = optionalBoolean(source.closePromptDismissed)
+  settings.aiNamingEnabled = optionalBoolean(source.aiNamingEnabled)
   settings.nativeNotifications = optionalBoolean(source.nativeNotifications)
 
   settings.composerModels = normalizeComposerModels(source.composerModels)

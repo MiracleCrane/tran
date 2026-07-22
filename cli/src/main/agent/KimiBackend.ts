@@ -23,6 +23,7 @@ import {
 } from './AcpClient'
 import { resolveWindowsKimiCommand } from '../windowsKimi'
 import { recordSessionTitle, removeSessionTitle } from '../sessionTitles'
+import { generateAiTitle } from '../aiTitles'
 import { deleteKimiSession } from '../sessionDelete'
 import {
   controlGoal,
@@ -201,7 +202,8 @@ export class KimiBackend {
       compactText: '',
       usageRefreshPending: false,
       createdViaNew: !opts.resume,
-      gotRealPrompt: false
+      gotRealPrompt: false,
+      aiTitleRequested: false
     }
     session.ready = this.prepareSession(session, opts)
     this.sessions.set(sessionId, session)
@@ -706,6 +708,15 @@ export class KimiBackend {
       outputTokens: asNumber(usage?.outputTokens),
       totalTokens: asNumber(usage?.totalTokens)
     })
+    // AI 会话命名：Tran 新建会话的首个真实用户 turn 结束后触发一次（resume 的
+    // 老会话不自动生成）。输入只给首条消息（截断 ~500 字符），单次调用
+    // ≈100-200 token，失败静默回退原标题，不重试。
+    if (session.createdViaNew && !session.aiTitleRequested && session.acpSessionId) {
+      session.aiTitleRequested = true
+      void generateAiTitle(session.acpSessionId, firstUserText(message.content)).then((title) => {
+        if (title) this.h.onSessionsChanged?.()
+      })
+    }
   }
 
   private async ensureClient(): Promise<AcpClient> {

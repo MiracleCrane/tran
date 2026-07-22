@@ -43,7 +43,8 @@ import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { listKimiSessions } from './kimiHistory'
 import { getPlanUsageCached } from './usageService'
 import { deleteKimiSession } from './sessionDelete'
-import { removeSessionTitle } from './sessionTitles'
+import { removeSessionTitle, recordManualTitle } from './sessionTitles'
+import { allAiTitles, generateAiTitlesBatch, getSessionPreview } from './aiTitles'
 import type { GoalControlAction, GoalStartOptions } from './goalStore'
 import * as gitModule from './git'
 import { log } from './logger'
@@ -85,7 +86,9 @@ import type {
   DiagnosticReportOptions,
   DiagnosticReportResult,
   SessionUsageInfo,
-  PlanUsageResult
+  PlanUsageResult,
+  AiTitlesBatchResult,
+  SessionPreview
 } from '../shared/ipc'
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
@@ -679,12 +682,28 @@ export function registerIpc(
       cwd: string,
       backend?: ClaudeExecutionBackend
     ): Promise<void> => {
-      // TODO(kimi-history): Kimi ACP 暂无重命名接口；渲染层只做本地乐观更新。
-      void sessionId
-      void title
+      // 手动重命名：持久化到本地 manual titles（显示优先级最高，AI/兜底不覆盖）。
       void cwd
       void backend
+      recordManualTitle(sessionId, title)
     }
+  )
+
+  ipcMain.handle('forge:getAiTitles', async (): Promise<Record<string, string>> => allAiTitles())
+
+  ipcMain.handle(
+    'forge:generateAiTitles',
+    async (_e, sessionIds: string[]): Promise<AiTitlesBatchResult> => {
+      const result = await generateAiTitlesBatch(Array.isArray(sessionIds) ? sessionIds : [])
+      // 有新标题产生就通知渲染层刷新侧栏（复用 sessions-changed 通道）。
+      if (result.generated > 0) send('forge:sessions-changed', {})
+      return result
+    }
+  )
+
+  ipcMain.handle(
+    'forge:getSessionPreview',
+    async (_e, sessionId: string): Promise<SessionPreview> => getSessionPreview(sessionId)
   )
 
   ipcMain.handle(

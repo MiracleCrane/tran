@@ -61,7 +61,8 @@ export function getPreferences(): Preferences {
     vulkanBackend: s.vulkanBackend,
     minimizeToTray: s.minimizeToTray,
     nativeNotifications: s.nativeNotifications,
-    closePromptDismissed: s.closePromptDismissed
+    closePromptDismissed: s.closePromptDismissed,
+    aiNamingEnabled: s.aiNamingEnabled
   }
 }
 
@@ -97,6 +98,7 @@ export function savePreferences(prefs: Preferences): Preferences {
   if (prefs.minimizeToTray !== undefined) s.minimizeToTray = prefs.minimizeToTray
   if (prefs.nativeNotifications !== undefined) s.nativeNotifications = prefs.nativeNotifications
   if (prefs.closePromptDismissed !== undefined) s.closePromptDismissed = prefs.closePromptDismissed
+  if (prefs.aiNamingEnabled !== undefined) s.aiNamingEnabled = prefs.aiNamingEnabled
   saveSettings(s)
   return getPreferences()
 }
