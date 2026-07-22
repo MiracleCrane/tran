@@ -1,6 +1,6 @@
 {
   "name": "@tran/cli",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "private": true,
   "productName": "Tran",
   "description": "Tran — a Windows desktop GUI for local CLI agents (currently Kimi Code CLI)",
