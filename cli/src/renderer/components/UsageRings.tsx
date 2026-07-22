@@ -19,6 +19,17 @@ function resetLabel(resetAt?: number): string | null {
   return `${hours}h ${minutes}m后重置`
 }
 
+/** 重置的绝对时间（本地时区）：MM-DD HH:mm；重置时间跨年时带年份
+ *  YYYY-MM-DD HH:mm。相对时间（resetLabel）保留，本函数做弱化补充。 */
+function resetAbsLabel(resetAt?: number): string | null {
+  if (!resetAt) return null
+  const date = new Date(resetAt)
+  if (Number.isNaN(date.getTime())) return null
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const body = `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return date.getFullYear() !== new Date().getFullYear() ? `${date.getFullYear()}-${body}` : body
+}
+
 const MEMBERSHIP_LABELS: Record<string, string> = {
   LEVEL_FREE: '免费版',
   LEVEL_BASIC: '基础会员',
@@ -58,6 +69,7 @@ function UsageBar({ pct }: { pct: number | null }): JSX.Element {
 function LimitRow({ title, window }: { title: string; window: UsageLimitWindow }): JSX.Element {
   const pct = windowPct(window)
   const reset = resetLabel(window.resetAt)
+  const resetAbs = resetAbsLabel(window.resetAt)
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between text-xs">
@@ -65,6 +77,7 @@ function LimitRow({ title, window }: { title: string; window: UsageLimitWindow }
         <span className="text-zinc-500">
           {pct !== null ? `${pct}%` : '—'}
           {reset ? ` · ${reset}` : ''}
+          {resetAbs && <span className="text-zinc-600">{` (${resetAbs})`}</span>}
         </span>
       </div>
       <UsageBar pct={pct} />
