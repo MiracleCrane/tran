@@ -130,6 +130,12 @@ function createWindow(): void {
     transparent: false,
     accentColor: process.platform === 'win32' ? WINDOW_FRAME_COLOR : undefined,
     title: 'Tran',
+    // 显式给窗口装 ICO：不设时 Windows 用 exe 的 32px 句柄放大到任务栏 48px
+    // （200% 缩放），这就是任务栏图标发虚的来源。ICO 里有多档尺寸，系统自
+    // 动挑 48px 原档，不再放大。打包后经 extraResources 带在 resources 根。
+    icon: app.isPackaged
+      ? join(process.resourcesPath, 'icon.ico')
+      : join(__dirname, '../../build/icon.ico'),
     show: false,
     autoHideMenuBar: true,
     frame: false,

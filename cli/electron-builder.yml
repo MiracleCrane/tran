@@ -10,6 +10,8 @@ files:
 extraResources:
   - from: build/desktopShortcutIcon.ico
     to: desktopShortcutIcon.ico
+  - from: build/icon.ico
+    to: icon.ico
 asar: true
 compression: maximum
 electronLanguages:
