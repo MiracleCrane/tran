@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.23 - 2026-07-23
+
+### 中文
+
+- 优化:图标"修斑"。kimi 克隆图标的月壤纹理在 T 竖笔正下方有一片亮颗粒,任务栏小尺寸下糊成一坨白渍(与 Kimi 桌面版对比明显,其纹理紧贴底边)。现调暗 T 下方区域的亮颗粒(羽化过渡,纹理整体上移出字母周围),并保持底边纹理带不变。
+- 优化:ICO 改为尺寸自适应——16~48px 使用无纹理扁平渲染(黑底 + 白 T + 紫点,小尺寸零污渍);64~256px 使用修斑后的纹理母版高质量缩小。任务栏、桌面、安装器图标在小尺寸下彻底干净。
+- 新增:`scripts/touchup-icon.ps1` 图标修斑/重建脚本,可重复执行。
+
+### English
+
+- Improved: icon "de-smudge". The regolith texture in the Kimi-clone icon had a bright grain clump right under the T stem, which blurred into a white smudge at taskbar sizes (unlike the Kimi desktop icon, whose texture hugs the bottom edge). The bright grain under the T is now dimmed with a feathered falloff; the bottom texture band is unchanged.
+- Improved: size-adaptive ICO — 16–48px entries render a texture-free flat design (near-black tile, white T, purple dot) so small sizes are spotless; 64–256px entries downscale the touched-up textured master.
+- Added: `scripts/touchup-icon.ps1` to re-apply the touch-up and rebuild the icon set.
+
+#### 验证
+
+- 母版与 ICO 各尺寸逐项目检(48px 扁平干净,128px 纹理贴底)
+
 ## v1.0.22 - 2026-07-23
 
 ### 中文
