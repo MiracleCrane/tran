@@ -4,6 +4,7 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore, type View } from '../store/uiStore'
 import Collapse from './Collapse'
 import ConfirmDialog from './ConfirmDialog'
+import { AppLogo } from './AppLogo'
 import ProjectSwitcher from './ProjectSwitcher'
 import type { ClaudeExecutionBackend, SessionListItem, SessionPreview } from '../../shared/ipc'
 import { normalizeCwdForCompare } from '../../shared/paths'
@@ -1094,9 +1095,7 @@ export default function Sidebar(): JSX.Element {
         >
           <ChevronIcon collapsed />
         </button>
-        <div className="accent-soft-button mt-2 flex h-8 w-8 items-center justify-center rounded-xl text-sm font-bold text-white">
-          T
-        </div>
+        <AppLogo size={30} className="mt-2" />
         <div className="mt-2">
           <ProjectSwitcher collapsed />
         </div>
@@ -1233,9 +1232,7 @@ export default function Sidebar(): JSX.Element {
     <div key="sidebar-expanded" className="sidebar-expand glass-sidebar flex w-64 shrink-0 flex-col rounded-[18px] border">
       {/* brand + collapse */}
       <div className="flex items-center gap-2 px-4 pt-3">
-        <div className="accent-soft-button flex h-8 w-8 items-center justify-center rounded-xl text-sm font-bold text-white">
-          T
-        </div>
+        <AppLogo size={30} className="shrink-0" />
         <div className="text-brand-gradient flex-1 text-sm font-semibold">Tran</div>
         <button
           onClick={handleToggleSidebar}

@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.0.17 - 2026-07-22
+
+### 中文
+
+- 优化:全套应用图标重绘为干净的扁平高分辨率设计(黑底圆角方块 + 白色 T + 紫点),去除噪点纹理;ICO 内含 16~256 共 10 个独立优化的尺寸,任务栏、桌面快捷方式、安装器/卸载器图标在高分屏下均清晰。
+- 统一:标题栏、启动页、侧边栏(展开/收起)的应用 logo 统一为与任务栏图标一致的 SVG 组件,替换原先不协调的紫色文字块。
+- 优化:系统托盘图标改为与主图标一致的设计,并新增 64px @2x 表示,高 DPI 显示器下不再模糊。
+- 新增:`scripts/generate-icon.ps1` 图标生成脚本,设计调整后重跑即可再生成全套图标。
+
+### English
+
+- Improved: redrawn the full icon set as a clean flat high-resolution design (near-black rounded square, white "T", purple dot) with the grain texture removed; the ICO now packs 10 individually optimized sizes (16–256) so taskbar, shortcut, installer and uninstaller icons stay crisp on high-DPI displays.
+- Unified: titlebar, splash and sidebar (expanded/collapsed) logos now share one SVG component identical to the taskbar icon, replacing the mismatched purple text tile.
+- Improved: system tray icon now matches the app icon and ships a 64px @2x representation for high-DPI displays.
+- Added: `scripts/generate-icon.ps1` to regenerate the whole icon set after design tweaks.
+
+#### 验证
+
+- `npm run typecheck`
+- `npm run build:win`(安装包 exe 图标提取确认;托盘图标渲染确认)
+
 ## v1.0.4 - 2026-06-18
 
 ### 中文

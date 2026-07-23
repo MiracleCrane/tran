@@ -25,6 +25,7 @@ import ClosePromptDialog from './components/ClosePromptDialog'
 import UpdateAvailableDialog from './components/UpdateAvailableDialog'
 import { useApplyAppearanceSettings } from './store/appearanceStore'
 import AmbientCanvas from './components/AmbientCanvas'
+import { AppLogo } from './components/AppLogo'
 import { pushAgentEvent, flushAgentEvents } from './store/streamBatcher'
 import type { Provider, UpdateCheckResult } from '../shared/ipc'
 import { emitForgeEvent, onForgeEvent } from './events'
@@ -91,9 +92,7 @@ function WindowTitlebar(): JSX.Element {
   return (
     <div className="window-titlebar flex shrink-0 items-center text-[13px] text-zinc-200/80">
       <div className="window-titlebar-drag flex min-w-0 flex-1 items-center gap-2 px-4">
-        <div className="flex h-5 w-5 items-center justify-center rounded-md border border-white/15 bg-accent/70 text-[10px] font-semibold text-white shadow-sm shadow-black/20">
-          T
-        </div>
+        <AppLogo size={16} className="shrink-0 rounded-[4px]" />
         <span className="font-medium">Tran</span>
       </div>
       <div className="window-controls flex h-full shrink-0 items-stretch">
@@ -655,9 +654,7 @@ export default function App(): JSX.Element {
       <div className="app-shell flex h-screen flex-col overflow-hidden">
         <WindowTitlebar />
         <div className="flex min-h-0 flex-1 items-center justify-center">
-          <div className="accent-soft-button flex h-10 w-10 items-center justify-center rounded-xl text-lg font-bold text-white">
-            T
-          </div>
+          <AppLogo size={40} />
         </div>
         {blockingOverlay && <BlockingOverlay label={blockingOverlay.label} />}
       </div>
