@@ -118,7 +118,7 @@ export function PlanRow({ entry, index }: { entry: PlanEntry; index: number }): 
     // key 带状态：完成瞬间重挂载，打勾弹入 + 划线动画只播一次。
     <div key={`${index}-${entry.status}`} className="flex items-start gap-2 px-2 py-1">
       <span
-        className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border text-[9px] ${
+        className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border ${
           completed
             ? 'tran-check-pop border-green-500/60 bg-green-500/20 text-green-400'
             : active
@@ -126,7 +126,10 @@ export function PlanRow({ entry, index }: { entry: PlanEntry; index: number }): 
               : 'border-white/20 text-transparent'
         }`}
       >
-        ✓
+        {/* SVG 打勾：文本字形 ✓ 在小圆圈里基线对不齐（看着是歪的）。 */}
+        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </span>
       <span
         className={`min-w-0 flex-1 break-words text-[11px] leading-relaxed ${

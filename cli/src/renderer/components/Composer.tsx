@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent
@@ -572,6 +573,43 @@ export default function Composer(): JSX.Element {
     }
   }
 
+  /** 剪贴板粘贴图片（截图工具/复制的图片）：与拖拽走同一附件管线，
+   *  无图片时保持默认文本粘贴行为。 */
+  const onPaste = async (e: ClipboardEvent<HTMLTextAreaElement>): Promise<void> => {
+    if (!meta) return
+    const images = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'))
+    if (!images.length) return
+    e.preventDefault()
+    setDropError(null)
+    const actionSeq = ++attachmentActionSeqRef.current
+    const picked: PickedFile[] = []
+    for (const file of images) {
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(String(reader.result))
+          reader.onerror = () => reject(reader.error)
+          reader.readAsDataURL(file)
+        })
+        const comma = dataUrl.indexOf(',')
+        const ext = file.type.split('/')[1]?.split(';')[0] || 'png'
+        const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, '')
+        picked.push({
+          path: '',
+          name: `粘贴图片-${stamp}${picked.length ? `-${picked.length + 1}` : ''}.${ext}`,
+          kind: 'image',
+          mimeType: file.type,
+          data: comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl,
+          size: file.size
+        })
+      } catch {
+        /* 单个文件读取失败不影响其余 */
+      }
+    }
+    if (attachmentActionSeqRef.current !== actionSeq) return
+    if (picked.length) setAttachments((prev) => [...prev, ...picked])
+  }
+
   const submit = async (cutIn = false): Promise<void> => {
     const value = text.trim()
     const atts = attachments
@@ -829,6 +867,7 @@ export default function Composer(): JSX.Element {
             }}
             onClick={refreshSlashContextFromTextarea}
             onSelect={refreshSlashContextFromTextarea}
+            onPaste={(e) => void onPaste(e)}
             rows={1}
             placeholder={
               running

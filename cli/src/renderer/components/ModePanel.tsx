@@ -112,6 +112,10 @@ export default function ModePanel(): JSX.Element | null {
   const planOn = meta.permissionMode === 'plan'
   const goalOn = modePanel.goalEnabled || goal?.status === 'active'
   const anyOn = planOn || modePanel.swarmEnabled || goalOn
+  // 激活的模式直接体现在按钮上（模式·计划 / 模式·Swarm / …），不用展开可见。
+  const activeModes = [planOn && '计划', modePanel.swarmEnabled && 'Swarm', goalOn && '目标'].filter(
+    (m): m is string => typeof m === 'string'
+  )
 
   // 目标开关：开 → goalEnabled（下一条用户消息创建目标）；关 → 停止循环。
   const toggleGoal = (on: boolean): void => {
@@ -130,7 +134,7 @@ export default function ModePanel(): JSX.Element | null {
         }`}
         title="模式：计划 / Swarm / 目标"
       >
-        模式
+        {anyOn ? `模式·${activeModes.join('/')}` : '模式'}
         {anyOn && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
       </button>
       {open && (

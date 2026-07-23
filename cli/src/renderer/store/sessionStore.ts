@@ -35,6 +35,30 @@ import { DEFAULT_KIMI_MODEL_ID } from '../../shared/models'
 import { normalizeCwdForCompare } from '../../shared/paths'
 import { emitForgeEvent } from '../events'
 
+/** 每个会话（按 sdkSessionId）最近使用的权限模式。kimi CLI 的 session/load
+ *  不会恢复会话模式（init 恒报 default），Tran 侧持久化并在 resume 时重放，
+ *  否则切走再切回来 chip 会被 init 覆盖回 default。 */
+const PERMISSION_MODE_KEY_PREFIX = 'forge.permissionMode.'
+
+function readStoredPermissionMode(sdkSessionId: string | undefined): PermissionMode | null {
+  if (!sdkSessionId) return null
+  try {
+    const v = window.localStorage.getItem(PERMISSION_MODE_KEY_PREFIX + sdkSessionId)
+    return v ? (v as PermissionMode) : null
+  } catch {
+    return null
+  }
+}
+
+function storePermissionMode(sdkSessionId: string | undefined, mode: string): void {
+  if (!sdkSessionId) return
+  try {
+    window.localStorage.setItem(PERMISSION_MODE_KEY_PREFIX + sdkSessionId, mode)
+  } catch {
+    /* ignore */
+  }
+}
+
 /** A buffered `content_block_delta` waiting to be folded into the store in a
  *  single batched update (one per animation frame). See streamBatcher.ts. */
 export interface StreamDeltaBatch {
@@ -988,6 +1012,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // so it takes effect immediately rather than on the next message. Keep meta
     // in sync optimistically; the next init event confirms the SDK's real mode.
     set({ meta: { ...meta, permissionMode: mode } })
+    storePermissionMode(meta.sdkSessionId, mode)
     await window.api.setPermissionMode(meta.sessionId, mode).catch(() => {})
   },
 
@@ -1333,6 +1358,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (meta.sdkSessionId === sdkSessionId) return
     cancelActiveHistoryHydration()
     const { cwd, model, permissionMode, agentBackend } = meta
+    // resume 不会带回会话模式（init 恒报 default）：优先用本地记住的该会话
+    // 模式，其次沿用当前会话的模式，并在 startSession 时显式下发。
+    const restoredMode: PermissionMode = readStoredPermissionMode(sdkSessionId) ?? (permissionMode as PermissionMode)
     const oldSessionId = meta.sessionId
     const newId = uid()
     const requestSeq = nextSessionNavigationSeq()
@@ -1363,7 +1391,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         sdkSessionId,
         cwd,
         model,
-        permissionMode,
+        permissionMode: restoredMode,
         tools: []
       }
     })
@@ -1423,6 +1451,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           ...(modelForAgent(agentBackend, runtime.model) ? { model: modelForAgent(agentBackend, runtime.model) } : {}),
           ...(agentBackend ? { agentBackend } : {}),
           effort: get().effort,
+          permissionMode: restoredMode,
           resume: sdkSessionId,
           bridgeSessionId: newId
         })
@@ -1607,6 +1636,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               ...(modelForAgent(agentBackend, model) ? { model: modelForAgent(agentBackend, model) } : {}),
               ...(agentBackend ? { agentBackend } : {}),
               effort,
+              permissionMode: permissionMode as PermissionMode,
               resume: sdkSessionId,
               bridgeSessionId: newId
             }
@@ -1615,6 +1645,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               ...(modelForAgent(agentBackend, model) ? { model: modelForAgent(agentBackend, model) } : {}),
               ...(agentBackend ? { agentBackend } : {}),
               effort,
+              permissionMode: permissionMode as PermissionMode,
               bridgeSessionId: newId
             }
       )

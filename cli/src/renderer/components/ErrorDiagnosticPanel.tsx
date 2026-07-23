@@ -26,6 +26,13 @@ function diagnose(error: string): Diagnosis {
       detail: '当前 Agent 找不到这条历史会话的运行记录。Tran 会尝试自动开启新会话继续。'
     }
   }
+  // 必须排在通用 invalid 规则之前：该错误文案含 "Invalid request"。
+  if (text.includes('another turn') || text.includes('turn.agent_busy')) {
+    return {
+      title: '上一轮仍在进行中',
+      detail: '上一条消息还没处理完，后端仍处于忙碌状态。稍等片刻再发送，或用 Ctrl+S 打断当前轮后继续。'
+    }
+  }
   if (text.includes('is archived')) {
     return {
       title: '历史会话已归档',

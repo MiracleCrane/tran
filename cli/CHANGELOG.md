@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.0.22 - 2026-07-23
+
+### 中文
+
+- 修复:权限模式按会话保持。此前在会话 A 选了 yolo 等模式后,切到别的对话再切回来会被重置回 default——resume 历史会话的两条路径(openSession/restartSession)都没有把权限模式传给后端,而 kimi CLI 的 session/load 不恢复会话模式(init 恒报 default)。现按 sdkSessionId 把模式持久化到 localStorage,resume 时显式下发并重放。
+- 修复: Composer 的"模式"按钮现在直接显示激活的模式(模式·计划 / 模式·Swarm / 模式·目标),不用展开即可见。
+- 修复:错误诊断误分类。"Cannot launch a new turn while another turn is active"(上一轮未结束时发送)此前因文案含 "Invalid" 被误判为"模型名可能无效",现正确识别为"上一轮仍在进行中"并给出等待/打断建议。
+- 修复:待办清单完成态的打勾在小圆圈里视觉偏移(文本字形基线问题),改用 SVG 勾选,居中稳定。
+- 新增:输入框支持直接粘贴剪贴板图片(截图工具/复制的图片),与拖拽同一附件管线,无图片时保持默认文本粘贴行为。
+- 修复:历史会话打不开(Internal error)的自恢复。会话在计划模式中被中断会留下"wire 引用了 plan 文件但文件未保存"的残缺状态,kimi CLI 的 session/load 遇缺失 plan 文件直接整体失败。现 Tran 检测到这类 ENOENT 时自动补建占位 plan 文件并重试(白名单校验路径,最多 4 个缺失文件)。
+
+### English
+
+- Fixed: permission mode now sticks per session. Switching away and back to a conversation reset the mode to default because neither resume path (openSession/restartSession) passed the mode to the backend, and kimi CLI's session/load does not restore it (init always reports default). The mode is now persisted per sdkSessionId in localStorage and replayed on resume.
+- Fixed: the Composer "模式" button now shows the active modes inline (模式·计划 / 模式·Swarm / 模式·目标) without expanding.
+- Fixed: error diagnosis misclassification — "Cannot launch a new turn while another turn is active" was misread as a model-name error; it is now correctly identified as "previous turn still running".
+- Fixed: the todo check mark was visually off-center in its circle (text glyph baseline); replaced with an SVG check.
+- Added: paste clipboard images (screenshots/copied images) directly into the composer, using the same attachment pipeline as drag-and-drop.
+- Fixed: self-recovery for history sessions failing to open with "Internal error". Sessions killed mid plan-mode can reference a plan file that was never saved, and kimi CLI's session/load fails hard on the missing file. Tran now recreates a placeholder plan file (path-whitelisted) and retries, up to 4 missing files.
+
+#### 验证
+
+- `npm run typecheck`
+
 ## v1.0.21 - 2026-07-23
 
 ### 中文
