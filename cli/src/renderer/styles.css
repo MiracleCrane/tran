@@ -1924,7 +1924,10 @@ html.composer-resizing * {
   animation-duration: var(--motion-sidebar);
   animation-fill-mode: both;
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: width, transform, opacity;
+  /* 不要在这里永久挂 will-change：类常驻在侧边栏根节点上，会让面板永远
+     占据独立合成层；而 width 动画跑在主线程，窗口最大化/还原时合成器可能
+     把过期图层纹理按旧缩放贴回屏幕，形成"幽灵侧边框"残影。动画期间
+     Chromium 会自动提升图层，无需手动声明。 */
   contain: layout paint;
 }
 .sidebar-expand { animation-name: sidebar-expand; }
@@ -1937,7 +1940,8 @@ html.composer-resizing * {
   transition:
     opacity 180ms ease,
     transform 220ms cubic-bezier(0.18, 1, 0.28, 1);
-  will-change: opacity, transform;
+  /* 同上：常驻元素不永久挂 will-change，避免窗口状态切换时合成器回贴
+     过期图层纹理。 */
 }
 
 .sidebar-deferred-content.is-ready {

@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.18 - 2026-07-23
+
+### 中文
+
+- 修复:窗口最大化/还原时侧边栏区域偶发"幽灵框"残影(反复操作会越缩越小直至消失)。根因是 `.sidebar-expand` / `.sidebar-collapse` / `.sidebar-deferred-content` 常驻类上永久挂着 `will-change`,使侧边栏长期占据独立 GPU 合成层,而 width 动画跑在主线程,窗口状态切换时合成器可能把过期图层纹理按旧缩放贴回屏幕。移除常驻 `will-change`(动画期间 Chromium 会自动提升图层,动效不受影响)。
+
+### English
+
+- Fixed: intermittent "ghost panel" artifact near the sidebar after window maximize/restore (shrinking away over repeated toggles). Root cause: permanent `will-change` on the always-present `.sidebar-expand` / `.sidebar-collapse` / `.sidebar-deferred-content` classes kept the sidebar on a dedicated GPU layer while its width animation ran on the main thread, so the compositor could re-blit a stale layer texture at an old scale on window state changes. The permanent `will-change` declarations are removed (Chromium still auto-promotes during the animation, so motion is unaffected).
+
+#### 验证
+
+- `npm run build`
+
 ## v1.0.17 - 2026-07-22
 
 ### 中文
