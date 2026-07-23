@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.20 - 2026-07-23
+
+### 中文
+
+- 回退:全套图标恢复为 v1.0.16 的 Kimi 克隆设计(黑底圆角方块 + 白色 T + 紫点、带颗粒质感)——任务栏/exe/安装器/托盘图标原样恢复,应用内 logo(标题栏/启动页/侧边栏)也改为直接渲染同一张图标图片,窗内窗外完全一致。移除 v1.0.17 的扁平重绘及 `scripts/generate-icon.ps1`。
+- 修复:启动时屏幕左上角/品牌区偶发紫色光晕残影,物理屏可见但 CDP 抓屏不可见,手动缩放窗口后消失。根因有二:一是 `.tran-ambient` 静态光晕层与 `AmbientCanvas` 粒子层两个 z-index 30 的紫色覆盖层压在全部 UI 之上,残影内容均来自它们;二是 Windows 无边框窗口首次呈现时 DWM/DirectComposition 可能把某合成层旧纹理卡在屏幕上。现已整体移除这两个覆盖层(保留 body 背景渐变,氛围基本不变且更省性能),并在启动后自动做一次 ±1px 窗口尺寸微抖,强制重建合成树,等效于用户手动缩放一次。
+
+### English
+
+- Reverted: the entire icon set back to the v1.0.16 Kimi-clone design (near-black rounded square, white "T", purple dot, grain texture) — taskbar/exe/installer/tray icons restored as-is, and in-app logos (titlebar/splash/sidebar) now render the very same icon image so window and taskbar match exactly. Removed the v1.0.17 flat redraw and `scripts/generate-icon.ps1`.
+- Fixed: intermittent purple haze artifact near the top-left/brand area at startup, visible on the physical screen but not in CDP screenshots, cleared by manually resizing the window. Two root causes: (1) the two z-index-30 purple overlay layers (`.tran-ambient` static glow and `AmbientCanvas` particles) painting above all UI — the source of every artifact's content; (2) Windows frameless windows can get a stale composited layer stuck on screen at first present by DWM/DirectComposition. Both overlays are removed (body background gradients remain, so the ambience barely changes and rendering is cheaper), and the window now performs a one-time ±1px size nudge shortly after startup to force the composition tree to rebuild — equivalent to a manual resize.
+
+#### 验证
+
+- `npm run typecheck`
+- 诊断:OS 级物理截屏复现残影,CDP `captureScreenshot` 同时刻无残影,确认为显示链路残留层
+
 ## v1.0.19 - 2026-07-23
 
 ### 中文

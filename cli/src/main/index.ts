@@ -190,6 +190,22 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
+    if (process.platform === 'win32' && mainWindow) {
+      // Windows 无边框窗口 + DWM：首次呈现可能把某个合成层的旧纹理"卡"在
+      // 屏幕上（物理屏可见、CDP 抓屏不可见），用户手动缩放窗口后消失。
+      // 启动后做一次 ±1px 尺寸微抖，强制重建 DirectComposition 视觉树，
+      // 效果等同于用户手动缩放一次。
+      const win = mainWindow
+      const nudgeTimer = setTimeout(() => {
+        if (win.isDestroyed() || win.isMaximized() || win.isFullScreen()) return
+        const bounds = win.getBounds()
+        win.setBounds({ ...bounds, width: bounds.width + 1 })
+        setTimeout(() => {
+          if (!win.isDestroyed() && !win.isMaximized() && !win.isFullScreen()) win.setBounds(bounds)
+        }, 80)
+      }, 1200)
+      nudgeTimer.unref?.()
+    }
     const readyTimer = setTimeout(markGpuBackendWindowReady, vulkanBackend ? 4000 : 0)
     readyTimer.unref?.()
     scheduleAutoUpdateCheck()

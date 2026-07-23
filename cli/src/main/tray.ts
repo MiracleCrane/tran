@@ -5,19 +5,14 @@ import { log } from './logger'
 /* ------------------------------------------------------------------ *
  * Tray icon — generated at runtime so no binary asset is needed.
  *
- * We rasterize an anti-aliased RGBA pixel grid and encode it as a PNG via
- * Node's zlib + a tiny CRC/PNG chunk writer. The shape mirrors the packaged
- * Tran app icon exactly: near-black rounded square, white geometric "T",
- * purple dot. Rendered at several sizes so the tray stays crisp on
- * high-DPI displays.
+ * We rasterize an anti-aliased RGBA pixel grid (accent rounded square + a
+ * white geometric "T" glyph) and encode it as a PNG via Node's zlib + a tiny
+ * CRC/PNG chunk writer. The shape mirrors the packaged Tran app icon.
  * ------------------------------------------------------------------ */
 
-const BG_R = 0x10
-const BG_G = 0x10
-const BG_B = 0x14
-const DOT_R = 0x8b
-const DOT_G = 0x5c
-const DOT_B = 0xf6
+const ACCENT_R = 0x8b
+const ACCENT_G = 0x5c
+const ACCENT_B = 0xf6
 const ICON_SUPERSAMPLE = 4
 
 function clamp(v: number, min: number, max: number): number {
@@ -73,50 +68,49 @@ function over(sample: PaintSample, r: number, g: number, b: number, a: number): 
 }
 
 function inTranGlyph(x: number, y: number, size: number): boolean {
-  // "T"：居中的竖笔 + 顶部横笔（几何与打包的应用图标一致，整体偏左，给紫点留位）。
+  // "T"：居中的竖笔 + 顶部横笔。
   const stem = inRoundedRect(
     x,
     y,
-    0.411 * size,
-    0.280 * size,
-    0.509 * size,
-    0.660 * size,
-    0.022 * size
+    (0.5 - 0.091 / 2) * size,
+    (0.518 - 0.418 / 2) * size,
+    (0.5 + 0.091 / 2) * size,
+    (0.518 + 0.418 / 2) * size,
+    0.023 * size
   )
   const top = inRoundedRect(
     x,
     y,
-    0.305 * size,
-    0.280 * size,
-    0.615 * size,
-    0.370 * size,
-    0.022 * size
+    (0.5 - 0.287 / 2) * size,
+    (0.331 - 0.087 / 2) * size,
+    (0.5 + 0.287 / 2) * size,
+    (0.331 + 0.087 / 2) * size,
+    0.023 * size
   )
   return stem || top
 }
 
-function inDot(x: number, y: number, size: number): boolean {
-  // 右上角的紫色圆点。
-  const dx = x - 0.723 * size
-  const dy = y - 0.293 * size
-  const r = 0.055 * size
-  return dx * dx + dy * dy <= r * r
-}
-
 function paintIconSample(x: number, y: number, size: number): PaintSample {
   const sample: PaintSample = { r: 0, g: 0, b: 0, a: 0 }
-  // Full-bleed rounded square, same silhouette as build/icon.png.
-  const distance = roundedRectSdf(x, y, 0, 0, size, size, 0.22 * size)
+  const left = (0.5 - 0.86 / 2) * size
+  const top = (0.5 - 0.86 / 2) * size
+  const right = (0.5 + 0.86 / 2) * size
+  const bottom = (0.5 + 0.86 / 2) * size
+  const radius = 0.235 * size
+  const distance = roundedRectSdf(x, y, left, top, right, bottom, radius)
   if (distance > 0) return sample
 
-  over(sample, BG_R / 255, BG_G / 255, BG_B / 255, 1)
+  over(sample, ACCENT_R / 255, ACCENT_G / 255, ACCENT_B / 255, 0.96)
+
+  const verticalPosition = clamp((y - top) / (bottom - top), 0, 1)
+  over(sample, 1, 1, 1, 0.08 * (1 - verticalPosition))
+
+  if (distance > -0.036 * size) {
+    over(sample, 1, 1, 1, 0.16)
+  }
 
   if (inTranGlyph(x, y, size)) {
     over(sample, 1, 1, 1, 1)
-  }
-
-  if (inDot(x, y, size)) {
-    over(sample, DOT_R / 255, DOT_G / 255, DOT_B / 255, 1)
   }
 
   return sample
@@ -231,12 +225,10 @@ function encodePng(rgba: Buffer, width: number, height: number): Buffer {
 }
 
 function buildTrayIcon(): Electron.NativeImage {
-  // Base 32px plus a 64px @2x representation so the tray icon stays sharp
-  // on high-DPI displays (Windows picks the best match per scale factor).
-  const png32 = encodePng(rasterizeIcon(32), 32, 32)
-  const png64 = encodePng(rasterizeIcon(64), 64, 64)
-  const img = nativeImage.createFromBuffer(png32, { scaleFactor: 1.0 })
-  img.addRepresentation({ scaleFactor: 2.0, buffer: png64 })
+  const size = 32
+  const rgba = rasterizeIcon(size)
+  const png = encodePng(rgba, size, size)
+  const img = nativeImage.createFromBuffer(png, { scaleFactor: 1.0 })
   img.setTemplateImage(false) // colored icon, not a macOS template
   return img
 }

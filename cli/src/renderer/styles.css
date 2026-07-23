@@ -2508,20 +2508,6 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   animation: tran-fade-in 300ms var(--easing-out) both;
 }
 
-/* 环境紫光层：全应用只挂一层，alpha ≤ 0.06。
- *  实测（本机 GPU 一般）：即便抬到内容之上，大面积渐变层逐帧位移仍会把
- *  合成帧率打到 ~44fps，故放弃位移动画，改为静态光晕——零持续合成开销。
- *  z-index 保持在内容之上，避免参与 backdrop-filter 采样。 */
-.tran-ambient {
-  position: absolute;
-  inset: -12%;
-  z-index: 30;
-  pointer-events: none;
-  background:
-    radial-gradient(38rem circle at 22% 18%, rgba(139, 92, 246, 0.06), transparent 62%),
-    radial-gradient(30rem circle at 78% 72%, rgba(139, 92, 246, 0.05), transparent 60%);
-}
-
 /* 消息/小元素入场：opacity + translateY，stagger 上限见使用处（≤300ms）。 */
 .tran-enter {
   animation: tran-fade-rise 180ms var(--easing-out) both;
@@ -2746,17 +2732,6 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
 .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable { color: #e4e4e7; }
 .hljs-addition { background: rgba(34, 197, 94, 0.12); color: #86efac; }
 .hljs-deletion { background: rgba(239, 68, 68, 0.12); color: #fca5a5; }
-
-/* 氛围 canvas：内容之上（避免 backdrop 采样）、不响应指针；reduced-motion 隐藏。 */
-.ambient-canvas {
-  position: absolute;
-  inset: 0;
-  z-index: 30;
-  pointer-events: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  .ambient-canvas { display: none; }
-}
 
 /* === 任务微动效（一次性，transform/opacity，reduced-motion 全局开关覆盖） === */
 
