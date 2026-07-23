@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.0.19 - 2026-07-23
+
+### 中文
+
+- 修复:标题栏品牌区(logo + "Tran")偶发被一团紫色光斑罩住,最大化/还原窗口后尤其明显,光斑会随时间变淡消失、每次启动位置随机。根因:氛围粒子层(AmbientCanvas)以 z-index 30 画在整个应用最上层,粒子飘到左上角时正好盖住品牌区。现每帧绘制后擦掉标题栏 42px 区域,光斑不再污染品牌区,其余位置的氛围效果不变。
+
+### English
+
+- Fixed: an intermittent purple blob tinting the titlebar brand area (logo + "Tran"), most noticeable after window maximize/restore, fading over time with a random position per launch. Root cause: the ambient particle canvas (AmbientCanvas) paints on top of the whole app at z-index 30, so particles drifting into the top-left corner covered the brand area. The titlebar's 42px strip is now cleared after each frame; the ambient effect elsewhere is unchanged.
+
+#### 验证
+
+- `npm run typecheck`
+- CDP 逐层排除实验(隐藏 `.ambient-canvas` 后角落光斑消失,恢复后复现)确认粒子层为根因
+
 ## v1.0.18 - 2026-07-23
 
 ### 中文

@@ -15,6 +15,10 @@ const DPR_SCALE = 0.35
 const IDLE_FRAME_MS = 66 // ~15fps（实测 30fps 的整窗 canvas 更新吃 10~15fps，降频保命）
 const BUSY_FRAME_MS = 150 // ~7fps
 const TYPING_BUSY_MS = 800
+/** 标题栏高度（CSS px，对应 styles.css 的 .window-titlebar）。粒子层 z-30
+ *  盖在标题栏之上，飘到左上角时会在品牌区罩一团紫色，看着像脏块——
+ *  每帧画完把这条区域擦掉。 */
+const TITLEBAR_HEIGHT_PX = 42
 
 interface Particle {
   x: number
@@ -89,6 +93,9 @@ export default function AmbientCanvas(): JSX.Element {
         ctx.drawImage(sprite, p.x * w - p.r, p.y * h - p.r, size, size)
       }
       ctx.globalAlpha = 1
+      // 擦掉标题栏区域：粒子层在内容之上，别让光斑盖住品牌 logo/文字。
+      const scale = canvas.clientHeight > 0 ? h / canvas.clientHeight : 1
+      ctx.clearRect(0, 0, w, TITLEBAR_HEIGHT_PX * scale)
     }
 
     const frame = (t: number): void => {
