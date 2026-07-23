@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.21 - 2026-07-23
+
+### 中文
+
+- 修复:输入框上方状态行"后台命令 / 子 Agent / 待办"三个 chip 间距不一致——"子 Agent"按钮带 `min-w-[120px]`,内容不足 120px 时右侧留下不可见空白,使其与"待办"的间距看起来比其他的大。移除该固定最小宽度(相邻"后台命令"chip 本就不预留宽度,计数变化时的轻微位移可接受),三个 chip 现按 `gap-3` 均匀排布。
+
+### English
+
+- Fixed: uneven spacing between the "后台命令 / 子 Agent / 待办" chips above the composer — the "子 Agent" button had `min-w-[120px]`, leaving invisible trailing space when its content was shorter, making the gap to "待办" look wider. The fixed min-width is removed (the neighboring "后台命令" chip reserves no width either; minor shift on count changes is acceptable), so all chips now space evenly via `gap-3`.
+
+#### 验证
+
+- `npm run typecheck`
+
 ## v1.0.20 - 2026-07-23
 
 ### 中文
