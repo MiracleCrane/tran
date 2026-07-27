@@ -84,7 +84,8 @@ function composerHeightBoundsForViewport(viewportHeight: number): ComposerHeight
   const compact = viewportHeight < 680
   const min = compact ? 30 : 34
   const maxByViewport = Math.floor(viewportHeight * (compact ? 0.2 : 0.24))
-  const maxCap = compact ? 128 : 184
+  // #10：上限对齐"8~10 行"（行高 ~22.75px + 上下 padding 16px），常规窗口 224px ≈ 9 行。
+  const maxCap = compact ? 128 : 224
   return { min, max: Math.max(min, Math.min(maxCap, maxByViewport)) }
 }
 
@@ -917,6 +918,7 @@ export default function Composer(): JSX.Element {
             onSelect={refreshSlashContextFromTextarea}
             onPaste={(e) => void onPaste(e)}
             rows={1}
+            spellCheck={false}
             placeholder={
               running
                 ? 'Tran 正在处理…(可继续发送,消息会排队)'

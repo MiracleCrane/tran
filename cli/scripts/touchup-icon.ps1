@@ -2,6 +2,7 @@
 # 并做尺寸自适应 ICO：
 #   - 64/96/128/256：修斑后的母版高质量缩小（保留月壤纹理）
 #   - 16/20/24/32/40/48：无纹理扁平渲染（黑底 + 白 T + 紫点），小尺寸零污渍
+# 输入：build/icon-src.png（纯净母版：黑底 + 全白 T + 紫点 + 月壤纹理）。
 # 输出：build/icon.png（修斑母版）、5 个 ICO、renderer/assets/app-icon.png。
 #
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/touchup-icon.ps1
@@ -20,9 +21,10 @@ function Smooth01([double]$t) {
     return $t * $t * (3 - 2 * $t)
 }
 
-# ---- 1. 修斑：读入 icon.png，调暗 T 下方亮颗粒（LockBits 快速通道） ----
+# ---- 1. 修斑：读入 icon-src.png（纯净母版），调暗 T 下方亮颗粒（LockBits 快速通道） ----
+# 输入是 icon-src.png 而非 icon.png：输出不回读，重复运行不会累积压暗。
 # 从 MemoryStream 构造，避免 GDI+ 文件锁导致无法覆盖保存同名文件。
-$fileBytes = [System.IO.File]::ReadAllBytes((Join-Path $buildDir 'icon.png'))
+$fileBytes = [System.IO.File]::ReadAllBytes((Join-Path $buildDir 'icon-src.png'))
 $memStream = [System.IO.MemoryStream]::new($fileBytes)
 $src = [System.Drawing.Bitmap]::FromStream($memStream)
 $S = $src.Width
@@ -77,7 +79,9 @@ function Add-RoundedRectPath([float]$x, [float]$y, [float]$w, [float]$h, [float]
 }
 
 function Render-Flat([int]$S) {
-    # 小尺寸无纹理版：黑底圆角方块 + 白 T（与母版同几何）+ 紫点
+    # 小尺寸无纹理版：黑底圆角方块 + 白 T + 紫点。
+    # 几何对齐 Kimi 桌面版 K：字形 x[0.320,0.660]、y[0.318,0.669]，
+    # 笔画宽 0.090（K 为 0.064，T 少一笔斜划，加粗补体量，白色覆盖率约 5.4% vs K 6.1%）。
     $bmp = New-Object System.Drawing.Bitmap($S, $S, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
@@ -86,13 +90,13 @@ function Render-Flat([int]$S) {
     $bgBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, $BG_R, $BG_G, $BG_B))
     $g.FillPath($bgBrush, $bgPath)
     $white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
-    $barPath = Add-RoundedRectPath ($S * 0.305) ($S * 0.280) ($S * 0.310) ($S * 0.090) ($S * 0.022)
+    $barPath = Add-RoundedRectPath ($S * 0.320) ($S * 0.318) ($S * 0.340) ($S * 0.090) ($S * 0.022)
     $g.FillPath($white, $barPath)
-    $stemPath = Add-RoundedRectPath ($S * 0.411) ($S * 0.280) ($S * 0.098) ($S * 0.380) ($S * 0.022)
+    $stemPath = Add-RoundedRectPath ($S * 0.445) ($S * 0.318) ($S * 0.090) ($S * 0.351) ($S * 0.022)
     $g.FillPath($white, $stemPath)
     $dotBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, $DOT_R, $DOT_G, $DOT_B))
-    $dotR = $S * 0.055
-    $g.FillEllipse($dotBrush, ($S * 0.723 - $dotR), ($S * 0.293 - $dotR), ($dotR * 2), ($dotR * 2))
+    $dotR = $S * 0.040
+    $g.FillEllipse($dotBrush, ($S * 0.725 - $dotR), ($S * 0.281 - $dotR), ($dotR * 2), ($dotR * 2))
     $g.Dispose()
     return ,$bmp
 }

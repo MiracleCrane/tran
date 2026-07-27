@@ -13,6 +13,13 @@ const SCROLL_HIGHLIGHT_RESUME_MS = 180
 const SCROLL_INTENT_IDLE_MS = 220
 const FOLLOW_OUTPUT_LOCK_MS = 1200
 const TOPBAR_RESERVE_NEAR_BOTTOM_THRESHOLD_PX = 120
+// #8b 滚动意图：距底部多少 px 内算"回到底部附近"，恢复跟随输出。
+const FOLLOW_RESUME_AT_BOTTOM_THRESHOLD_PX = 40
+// 鼠标在 bar（思考块/工具卡）上"停留"的判定窗口：最近这么多 ms 内有过真实
+// 指针移动，悬停才算主动停留（内容滚动从静止指针下方滑过不算）。
+const BAR_HOVER_INTENT_WINDOW_MS = 600
+// 参与悬停/聚焦意图判定的 bar 元素。
+const TRANSCRIPT_BAR_SELECTOR = '.thinking-block, .tool-call-card'
 
 interface TranscriptProps {
   layoutTransitioning?: boolean
@@ -335,7 +342,7 @@ const ThinkingBlock = memo(function ThinkingBlock({
   // 折叠态摘要：正文前 ~60 字符单行截断（流式期间随 text 实时更新）。
   const preview = text.replace(/\s+/g, ' ').trim().slice(0, 60)
   return (
-    <div className="thinking-block glass-panel-soft my-1.5 rounded-xl px-3 py-2">
+    <div className="thinking-block glass-panel-soft my-1 rounded-xl px-3 py-2">
       <button
         type="button"
         aria-expanded={open}
@@ -391,7 +398,7 @@ const AssistantMessage = memo(function AssistantMessage({
           if (block.kind === 'text') {
             const highlight = !isStreaming && !deferHighlight
             return (
-              <div key={i} className={isStreaming ? 'stream-mask-edge' : undefined}>
+              <div key={i}>
                 <MessageText highlight={highlight}>{block.text}</MessageText>
                 {isStreaming && <span className="tran-stream-cursor" aria-hidden />}
               </div>
@@ -452,6 +459,8 @@ export default function Transcript({
   const bottomReserveRestoreFrameRef = useRef<number | null>(null)
   const restoreBottomAfterReserveRef = useRef(false)
   const atBottomRef = useRef(true)
+  /** 最近一次真实指针移动的时间戳（bar 悬停意图判定用，见 onPointerOverCapture）。 */
+  const lastPointerMoveAtRef = useRef(0)
   const reserveEligibleRef = useRef(true)
   /** 已渲染过的消息 id（Virtuoso 滚动复用行时不重播入场动画；新消息才入场）。 */
   const seenItemIdsRef = useRef<Set<string>>(new Set())
@@ -661,7 +670,9 @@ export default function Transcript({
   }
 
   const shouldFollowOutput = (isAtBottom: boolean): 'auto' | false => {
-    if (!isAtBottom) return false
+    // atBottomRef 是本地 pin 状态：用户在 bar 上点击/悬停解除跟随后，Virtuoso
+    // 内部可能仍认为 atBottom——必须以本地状态为准，否则会继续强制下拽（#8b）。
+    if (!isAtBottom || !atBottomRef.current) return false
     if (layoutTransitioningRef.current) return false
     if (window.performance.now() < followOutputLockedUntilRef.current) return false
     return 'auto'
@@ -739,12 +750,16 @@ export default function Transcript({
 
   const renderRow = (row: DisplayRow): JSX.Element => {
     if (row.kind === 'toolGroup') {
+      // 与 AssistantMessage 的 depth-0 容器同宽（max-w-[92%]），保证工具
+      // 分组 bar 与思考/文本/单个工具 bar 等宽（#9）。
       return (
-        <ToolGroupCard
-          blocks={row.blocks}
-          forceOpen={row.blocks.some((b) => b.toolUseId === lastExpandableKey)}
-          expandedBlockKey={lastExpandableKey}
-        />
+        <div className="max-w-[92%]">
+          <ToolGroupCard
+            blocks={row.blocks}
+            forceOpen={row.blocks.some((b) => b.toolUseId === lastExpandableKey)}
+            expandedBlockKey={lastExpandableKey}
+          />
+        </div>
       )
     }
     if (row.kind === 'envelopeGroup') {
@@ -765,9 +780,28 @@ export default function Transcript({
   return (
     <div
       className="relative h-full"
-      onPointerDownCapture={() => {
+      onPointerDownCapture={(event) => {
         lockFollowOutput()
         markScrollIntent()
+        // #8b 聚焦意图：点击某个 bar（展开思考/工具卡、选中文本）即视为停下
+        // 阅读，解除跟随；回到底部附近（atBottomThreshold）后自动恢复。
+        if ((event.target as HTMLElement).closest?.(TRANSCRIPT_BAR_SELECTOR)) {
+          setPinnedAtBottom(false)
+        }
+      }}
+      onPointerMoveCapture={() => {
+        lastPointerMoveAtRef.current = window.performance.now()
+      }}
+      onPointerOverCapture={(event) => {
+        // #8b 停留意图：流式期间指针主动移上某个 bar 并停留（最近有真实移动），
+        // 解除跟随，避免内容从静止的阅读焦点下被拽走。内容自动滚动从静止指针
+        // 下方滑过时不触发（无 pointermove）。
+        if (!useSessionStore.getState().status.running) return
+        if (window.performance.now() - lastPointerMoveAtRef.current > BAR_HOVER_INTENT_WINDOW_MS) return
+        if (!(event.target as HTMLElement).closest?.(TRANSCRIPT_BAR_SELECTOR)) return
+        lockFollowOutput()
+        markScrollIntent()
+        setPinnedAtBottom(false)
       }}
       onWheelCapture={(event) => {
         lockFollowOutput()
@@ -790,7 +824,7 @@ export default function Transcript({
         isScrolling={handleTranscriptScrolling}
         itemContent={(index, row) => {
           // Per-row wrapper preserves the centered, padded column the old single
-          // container provided; py-2 approximates the former gap-4 between rows.
+          // container provided; py-1.5 keeps the block rhythm tight (#9, Kimi Web feel).
           // 入场动画只给"新到"的消息（seenItemIdsRef 去重，滚动复用不重播）；
           // 批量历史同帧挂载时 stagger 封顶 300ms。
           const rowKey = row.kind === 'item' ? row.node.item.id : row.id
@@ -803,7 +837,7 @@ export default function Transcript({
           const showHistoryDivider = !!prevItem?.isHistory && !!curItem && !curItem.isHistory
           return (
             <div
-              className={`mx-auto w-full max-w-5xl px-6 py-2 ${isNew ? 'tran-msg-enter' : ''}`}
+              className={`mx-auto w-full max-w-5xl px-6 py-1.5 ${isNew ? 'tran-msg-enter' : ''}`}
               style={isNew ? { animationDelay: `${Math.min(index * 24, 280)}ms` } : undefined}
             >
               {showHistoryDivider && (
@@ -818,7 +852,7 @@ export default function Transcript({
           )
         }}
         followOutput={shouldFollowOutput}
-        atBottomThreshold={2}
+        atBottomThreshold={FOLLOW_RESUME_AT_BOTTOM_THRESHOLD_PX}
         atBottomStateChange={handleAtBottomStateChange}
         className="transcript-scroll h-full"
         components={{
@@ -839,7 +873,13 @@ export default function Transcript({
       {!layoutTransitioning && !atBottom && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
           <button
-            onClick={() => virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' })}
+            onClick={() => {
+              virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' })
+              // 悬停/点击解除跟随后 Virtuoso 内部可能仍 atBottom（不会再次触发
+              // atBottomStateChange），这里显式重新钉住，恢复跟随（#8b）。
+              setReserveEligible(true, true)
+              setPinnedAtBottom(true)
+            }}
             className="glass-control rounded-full px-3 py-1.5 text-xs text-zinc-300 shadow-lg hover:bg-white/[0.075]"
           >
             ↓ 最新

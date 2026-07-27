@@ -84,7 +84,7 @@ export default function SwarmCard({ block }: { block: ToolBlock }): JSX.Element 
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
 
   return (
-    <div className="my-1.5 overflow-hidden rounded-lg border border-accent/35 bg-[#101116]">
+    <div className="my-1 overflow-hidden rounded-lg border border-accent/35 bg-[#101116]">
       <button
         type="button"
         aria-expanded={!collapsed}

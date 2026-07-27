@@ -2368,23 +2368,6 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
 
 /* ── Streaming text gradient / bloom effects ─────────────────────── */
 
-/** Mask applied to the text block wrapper while streaming — soft gradient edge
- *  on the right side so new tokens "emerge" from a haze. */
-.stream-mask-edge {
-  -webkit-mask-image:
-    linear-gradient(to right,
-      white 0%,
-      white 85%,
-      rgba(255, 255, 255, 0.6) 93%,
-      transparent 100%);
-  mask-image:
-    linear-gradient(to right,
-      white 0%,
-      white 85%,
-      rgba(255, 255, 255, 0.6) 93%,
-      transparent 100%);
-}
-
 /** Applied only to the newly appended text tail. Previously the animation lived
  *  on the whole block, which made already-rendered words flash on every delta. */
 .stream-text-reveal-new {

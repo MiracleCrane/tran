@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.0.26 - 2026-07-27
+
+### 中文
+
+- 优化:图标字形体量对齐 Kimi 桌面版。实测 T 的白色覆盖率仅为 K 的一半(2.9% vs 6.1%),且母版竖笔是紫渐变、下半截隐入深色背景(即"竖笔偏短"观感根源)。现扁平档按 K 实测几何重绘(竖笔底对齐、笔画加粗补偿 T 比 K 少两笔斜划,覆盖率 5.4%≈K 的 89%),母版 T 手术换为全白,任务栏/桌面/安装器/应用内图标全套重建;托盘图标保持现状。另修复 touchup 脚本原地回读导致纹理累积压暗的幂等性问题。
+- 修复:流式输出吐字僵硬。delta 经 IPC 不均匀成批到达,旧实现每帧全量倾倒导致节奏忽大忽小;现按字符预算匀速滴出(细流保底 6 字/帧,爆发自适应放大,约 50ms 内消化)。
+- 修复:流式期间强制下滚。点击/悬停停留在某个内容块上、或滚轮上翻时解除跟随;回到底部附近(阈值 2→40px)恢复跟随,"↓ 最新"按钮显式钉住。
+- 修复:流式文本块换行时右侧发虚——块级右缘渐变 mask 作用到了每一行,已移除(流式光标保留)。
+- 优化:思考/工具/文本块间距收紧(对齐 Kimi Web 观感);分组工具调用 bar 与其他 bar 等宽。
+- 优化:输入框自动增高的上限提到 8~10 行(原有自动扩展机制正常,手动拖拽高度会覆盖自动模式,双击手柄恢复)。
+- 修复:关闭英文拼写检查(textarea spellCheck=false + webPreferences 会话级关闭,不再满屏红色波浪线)。
+
+### English
+
+- Improved: icon glyph mass now matches the Kimi desktop icon. Measured white coverage of the T was only half of the K (2.9% vs 6.1%), and the master's gradient stem faded into the dark background (the "short stem" look). Flat renders are redrawn from measured K geometry (stroke widened to compensate for the T's missing diagonal strokes, 5.4% coverage ≈ 89% of K), the master T is now full white, and the whole ICO set is rebuilt; tray icon unchanged. Also fixed the touch-up script's non-idempotent texture darkening.
+- Fixed: jerky streaming. Deltas arrive in uneven IPC batches and were dumped whole each frame; output now drips at a steady character budget (min 6 chars/frame, bursts absorbed within ~50ms).
+- Fixed: forced scroll-down during streaming. Clicking/hovering a block or wheeling up releases follow; returning near the bottom (threshold 2→40px) resumes it, and the "↓ latest" button pins explicitly.
+- Fixed: right-edge blur on wrapped lines in streaming text — a block-level gradient mask applied to every line; removed (stream cursor kept).
+- Improved: tighter block spacing (Kimi Web parity); grouped tool-call bars now match other bars' width.
+- Improved: composer auto-grow cap raised to ~8–10 lines (auto-grow itself already worked; a manually dragged height overrides it — double-click the handle to reset).
+- Fixed: English spellcheck disabled (textarea + session-level), no more red squiggles.
+
+#### 验证
+
+- 图标:ICO 全 10 档逐帧目检,扁平档与 Kimi K 并排体量相当
+- 流式:CDP 驱动 dev 实例真实发消息采样,吐字步进均匀无大跳块
+- `npm run typecheck` 与 `npm run build` 全绿
+
 ## v1.0.25 - 2026-07-27
 
 ### 中文

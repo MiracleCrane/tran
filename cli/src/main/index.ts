@@ -148,7 +148,9 @@ function createWindow(): void {
       sandbox: true,
       // Keep timers/rAF running at full rate when the window is occluded, so the
       // stream-batching rAF flush never stalls mid-answer if the user alt-tabs.
-      backgroundThrottling: false
+      backgroundThrottling: false,
+      // #16：Electron 默认开启拼写检查，英文输入被划红色波浪线——整个会话关掉。
+      spellcheck: false
     }
   })
 
