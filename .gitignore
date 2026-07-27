@@ -9,4 +9,5 @@ release
 logs
 */logs
 *.log
+.scratch
 .DS_Store
