@@ -66,6 +66,7 @@ function diagnose(error: string): Diagnosis {
 export default function ErrorDiagnosticPanel(): JSX.Element {
   const error = useSessionStore((s) => s.status.error)
   const meta = useSessionStore((s) => s.meta)
+  const clearError = useSessionStore((s) => s.clearError)
   const [copied, setCopied] = useState(false)
 
   if (!error || !meta) return <></>
@@ -104,6 +105,14 @@ export default function ErrorDiagnosticPanel(): JSX.Element {
           className="shrink-0 rounded-lg border border-red-900/40 bg-black/20 px-2 py-1 text-[11px] text-red-100 transition hover:bg-red-950/50"
         >
           {copied ? '已复制' : '复制诊断日志'}
+        </button>
+        <button
+          type="button"
+          onClick={clearError}
+          className="shrink-0 rounded-lg border border-red-900/40 bg-black/20 px-2 py-1 text-[11px] text-red-100 transition hover:bg-red-950/50"
+          title="关闭错误提示"
+        >
+          ×
         </button>
       </div>
     </div>

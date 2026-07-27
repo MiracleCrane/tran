@@ -2687,6 +2687,18 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
     tran-glow-breathe 3.2s ease-in-out infinite;
 }
 
+/* 侧栏会话运行标识：turn 在跑（含切走后的后台会话）时显示呼吸点（纯 CSS）。 */
+.session-running-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: #a78bfa;
+  box-shadow: 0 0 6px rgb(167 139 250 / 0.55);
+  animation: tran-glow-breathe 1.6s ease-in-out infinite;
+}
+
 /* === 静态紫色渐变美化（无逐帧动画，fps 安全） === */
 
 /* 玻璃面板：极淡紫色系静态渐变底（不动 ::before/::after 玻璃镜头层，保可读性）。 */

@@ -12,7 +12,8 @@ import type {
   ClaudeExecutionBackend,
   SkillInfo,
   GoalInfo,
-  KimiTaskInfo
+  KimiTaskInfo,
+  SessionRunningChangedPayload
 } from '../../shared/ipc'
 import type {
   TranscriptItem,
@@ -30,7 +31,7 @@ import type {
   ContextUsage,
   ElicitationRequest
 } from '../types'
-import { pickedFileToUserAttachment } from '../utils/attachments'
+import { pickedFileToUserAttachment, userAttachmentToPickedFile } from '../utils/attachments'
 import { DEFAULT_KIMI_MODEL_ID } from '../../shared/models'
 import { normalizeCwdForCompare } from '../../shared/paths'
 import { emitForgeEvent } from '../events'
@@ -152,6 +153,15 @@ interface SessionStore {
   /** 排队消息：从队列删除（×）/ 取出并返回（点击卡片取回编辑）。 */
   removePendingMessage: (id: string) => void
   takePendingMessage: (id: string) => PendingMessage | null
+  /** 清空排队消息（#20：turn 出错悬置时的"丢弃"出路）。 */
+  clearPendingQueue: () => void
+  /** 依次重发全部排队消息（#20：turn 出错悬置时的"重发"出路；
+   *  首条直达并顺带清掉 error，其余按原 busy 语义重新排队）。 */
+  resendPendingQueue: () => Promise<void>
+  /** 清除当前会话的错误展示（#13：报错可手动关闭）。 */
+  clearError: () => void
+  /** forge:session-running-changed 推送：同步后台缓冲与侧栏列表的 running 标记。 */
+  applySessionRunningChanged: (p: SessionRunningChangedPayload) => void
   /** AskUserQuestion 回答：原样回传 optionId 并从队列移除。 */
   answerElicitation: (toolUseID: string, optionId: string) => Promise<void>
   loadMoreSessions: () => Promise<void>
@@ -293,7 +303,9 @@ function getCachedSessionHistory(
   backend?: ClaudeExecutionBackend
 ): TranscriptItem[] | null {
   const entry = sessionHistoryCache.get(sessionHistoryCacheKey(cwd, sdkSessionId, backend ?? 'current'))
-  if (!entry?.items) return null
+  // 空数组不当有效缓存：它只会来自加载失败/真空历史的兜底（见 loadSessionHistory），
+  // 一旦命中就再也拿不到后续真实内容。
+  if (!entry?.items?.length) return null
   entry.lastTouched = Date.now()
   return cloneTranscriptItems(entry.items)
 }
@@ -305,7 +317,7 @@ function loadSessionHistory(
 ): Promise<TranscriptItem[]> {
   const key = sessionHistoryCacheKey(cwd, sdkSessionId, backend ?? 'current')
   const cached = sessionHistoryCache.get(key)
-  if (cached?.items) {
+  if (cached?.items?.length) {
     cached.lastTouched = Date.now()
     return Promise.resolve(cloneTranscriptItems(cached.items))
   }
@@ -322,10 +334,16 @@ function loadSessionHistory(
     .then((items) => {
       const current = sessionHistoryCache.get(key)
       if (current?.promise === promise) {
-        sessionHistoryCache.set(key, {
-          items: cloneTranscriptItems(items),
-          lastTouched: Date.now()
-        })
+        if (items.length === 0) {
+          // 空结果（加载失败兜底或真空历史）不落缓存——否则会话产生内容后
+          // 仍命中空缓存，切回时历史永远空白。
+          sessionHistoryCache.delete(key)
+        } else {
+          sessionHistoryCache.set(key, {
+            items: cloneTranscriptItems(items),
+            lastTouched: Date.now()
+          })
+        }
       }
       return items
     })
@@ -704,6 +722,418 @@ export function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
   return items
 }
 
+/**
+ * #6 后台会话（切走但未销毁）的事件缓冲。closeSession 现在是后台化语义——
+ * turn 继续跑、事件继续推（带桥接 sessionId）。每个后台会话把自己的事件累积
+ * 到一份独立状态里：运行标记实时（驱动侧栏呼吸点），且切回时内容连续完整，
+ * 若后端会话还活着就直接 attach 这份状态，不走 session/load 全量重放（会重复）。
+ *
+ * 缓冲是 store 外的普通 Map：后台会话不可见，不需要响应式；attach 时一次性
+ * set 进 store。折叠逻辑与 ingestAgentEvent 的主会话分支同构（有意的重复：
+ * 主分支 deeply 耦合 zustand set()，抽出共享 view 的改动面远大于收益）。
+ */
+interface BackgroundSessionState {
+  bridgeSessionId: string
+  sdkSessionId?: string
+  cwd: string
+  agentBackend?: AgentBackendId
+  model: string
+  permissionMode: PermissionMode
+  tools: string[]
+  items: TranscriptItem[]
+  currentStreamingMsgId: string | null
+  running: boolean
+  /** 桥接进程已结束（agent:ended）：后端会话死了，attach 无意义，走原重放路径。 */
+  ended: boolean
+  error?: string
+  tasks: SubagentTask[]
+  planEntries: PlanEntry[]
+  goal: GoalInfo | null
+  slashCommands: SkillInfo[]
+  contextUsage: ContextUsage | null
+  /** AskUserQuestion 队列：后台期间到达的问题必须带着走——它阻塞 turn，
+   *  丢弃的话切回后这轮永远等不到回答。 */
+  elicitationQueue: ElicitationRequest[]
+}
+
+const backgroundSessions = new Map<string, BackgroundSessionState>()
+/** 缓冲上限：超限时淘汰最旧的空闲缓冲（连后端会话一起销毁，防内存/进程泄漏）。 */
+const BACKGROUND_SESSION_CAP = 12
+
+/** 导航离开当前会话前调用：把当前会话状态快照进后台缓冲，配合主进程的
+ *  后台化语义，事件流由 foldBackgroundAgentEvent 继续往里累积。 */
+function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
+  const s = get()
+  const meta = s.meta
+  // bridgeEnded 的后端会话已死，缓冲无意义（历史在磁盘上，走原重放路径）。
+  if (!meta || s.bridgeEnded) return
+  backgroundSessions.set(meta.sessionId, {
+    bridgeSessionId: meta.sessionId,
+    ...(meta.sdkSessionId ? { sdkSessionId: meta.sdkSessionId } : {}),
+    cwd: meta.cwd,
+    ...(meta.agentBackend ? { agentBackend: meta.agentBackend } : {}),
+    model: meta.model,
+    permissionMode: meta.permissionMode as PermissionMode,
+    tools: meta.tools,
+    items: s.items,
+    currentStreamingMsgId: s.currentStreamingMsgId,
+    running: s.status.running,
+    ended: false,
+    ...(s.status.error ? { error: s.status.error } : {}),
+    tasks: s.tasks,
+    planEntries: s.planEntries,
+    goal: s.goal,
+    slashCommands: s.slashCommands,
+    contextUsage: s.contextUsage,
+    elicitationQueue: s.elicitationQueue
+  })
+  while (backgroundSessions.size > BACKGROUND_SESSION_CAP) {
+    const oldest = [...backgroundSessions.values()].find((bg) => !bg.running)
+    if (!oldest) break
+    backgroundSessions.delete(oldest.bridgeSessionId)
+    void window.api.destroySession(oldest.bridgeSessionId).catch(() => {})
+  }
+}
+
+/** 切回目标：还活着（未 agent:ended）的后台会话，按 agent 侧会话 id 查找。 */
+function findLiveBackgroundSession(sdkSessionId: string): BackgroundSessionState | null {
+  for (const bg of backgroundSessions.values()) {
+    if (bg.sdkSessionId === sdkSessionId && !bg.ended) return bg
+  }
+  return null
+}
+
+/** 删除会话时用：取出（并移除）该 agent 会话对应的后台缓冲，无论是否已 ended。 */
+function takeBackgroundSession(sdkSessionId: string): BackgroundSessionState | null {
+  for (const bg of backgroundSessions.values()) {
+    if (bg.sdkSessionId === sdkSessionId) {
+      backgroundSessions.delete(bg.bridgeSessionId)
+      return bg
+    }
+  }
+  return null
+}
+
+/** 后台会话内容变了：失效它的历史缓存。否则 ended 后走 session/load 重放路径
+ *  时会命中切走前 prefetch 的旧缓存，丢掉后台期间产生的内容。kimi-only 下
+ *  openSession 的读取键 backend 恒为 'windows'，'current' 是防御性覆盖。 */
+function invalidateBackgroundHistoryCache(bg: BackgroundSessionState): void {
+  if (!bg.sdkSessionId) return
+  deleteSessionHistoryCache(bg.cwd, bg.sdkSessionId)
+  deleteSessionHistoryCache(bg.cwd, bg.sdkSessionId, 'windows')
+}
+
+/** 后台会话的事件折叠：与 ingestAgentEvent 主会话分支同构，直接改缓冲对象。 */
+function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void {
+  const bg = backgroundSessions.get(e.sessionId)
+  if (!bg) return // 未快照过的会话（防御）：保持原丢弃行为
+  if (e.type === 'agent:ended') {
+    bg.ended = true
+    bg.running = false
+    bg.error = isUserStopDiagnostic(e.error) ? bg.error : (e.error ?? bg.error)
+    invalidateBackgroundHistoryCache(bg)
+    scheduleSessionsRefresh(get)
+    return
+  }
+  const msg = e.message as Record<string, unknown> & { type: string }
+  switch (msg.type) {
+    case 'system': {
+      const subtype = msg.subtype as string
+      if (subtype === 'init') {
+        const m = msg as unknown as {
+          session_id: string
+          model: string
+          permissionMode: string
+          tools: string[]
+        }
+        bg.sdkSessionId = m.session_id
+        bg.model = m.model
+        bg.permissionMode = m.permissionMode as PermissionMode
+        bg.tools = m.tools
+      } else if (subtype === 'history') {
+        const msgs = (msg as unknown as { messages?: HistoryMessage[] }).messages
+        if (Array.isArray(msgs) && msgs.length) {
+          const historyItems = historyToItems(msgs).map((it) => ({ ...it, isHistory: true }))
+          const existing = new Set(bg.items.map((i) => i.id))
+          bg.items = [...historyItems.filter((i) => !existing.has(i.id)), ...bg.items]
+        }
+      } else if (subtype === 'plan') {
+        const entries = (msg as unknown as { entries?: PlanEntry[] }).entries
+        bg.planEntries = Array.isArray(entries) ? entries : []
+      } else if (subtype === 'goal') {
+        const g = (msg as unknown as { goal?: GoalInfo | null }).goal
+        bg.goal = g ?? null
+      } else if (subtype === 'context_usage') {
+        const usage = (msg as unknown as { contextUsage?: ContextUsage }).contextUsage
+        bg.contextUsage = usage ? { ...usage, at: Date.now() } : null
+      } else if (subtype === 'slash_commands') {
+        const c = (msg as unknown as { commands?: SkillInfo[] }).commands
+        bg.slashCommands = Array.isArray(c) ? c : []
+      } else if (subtype === 'compaction') {
+        const c = (msg as unknown as {
+          compaction?: { messagesCompacted?: number; tokensBefore?: number; tokensAfter?: number; at?: number }
+        }).compaction
+        if (c) {
+          bg.items = [
+            ...bg.items.filter(
+              (it) =>
+                !(
+                  it.kind === 'assistant' &&
+                  it.streaming &&
+                  it.blocks.some(
+                    (b) =>
+                      b &&
+                      b.kind === 'text' &&
+                      /Compacting conversation context|Compaction completed/.test(b.text)
+                  )
+                )
+            ),
+            {
+              id: uid(),
+              kind: 'compaction' as const,
+              parentToolUseId: null,
+              ...(c.messagesCompacted !== undefined ? { messagesCompacted: c.messagesCompacted } : {}),
+              ...(c.tokensBefore !== undefined ? { tokensBefore: c.tokensBefore } : {}),
+              ...(c.tokensAfter !== undefined ? { tokensAfter: c.tokensAfter } : {}),
+              at: c.at ?? Date.now()
+            }
+          ]
+        }
+      } else if (subtype === 'permission_denied') {
+        const d = msg as unknown as { tool_use_id: string; message: string }
+        bg.items = mapTool(bg.items, d.tool_use_id, (b) => ({
+          ...b,
+          status: 'denied',
+          errorMessage: d.message,
+          endedAt: Date.now()
+        }))
+      } else if (subtype === 'task_started') {
+        const t = msg as unknown as {
+          task_id: string
+          tool_use_id?: string
+          description: string
+          subagent_type?: string
+        }
+        const task: SubagentTask = {
+          taskId: t.task_id,
+          description: t.description,
+          subagentType: t.subagent_type,
+          toolUseId: t.tool_use_id,
+          status: 'running',
+          isBackgrounded: launchedInBackground(bg.items, t.tool_use_id)
+        }
+        bg.tasks = bg.tasks.some((x) => x.taskId === t.task_id)
+          ? bg.tasks.map((x) => (x.taskId === t.task_id ? { ...x, ...task } : x))
+          : [...bg.tasks, task]
+      } else if (subtype === 'task_progress') {
+        const t = msg as unknown as {
+          task_id: string
+          description?: string
+          subagent_type?: string
+          usage?: { total_tokens: number; tool_uses: number; duration_ms: number }
+          last_tool_name?: string
+          summary?: string
+        }
+        bg.tasks = bg.tasks.map((x) =>
+          x.taskId === t.task_id
+            ? {
+                ...x,
+                description: t.description ?? x.description,
+                subagentType: t.subagent_type ?? x.subagentType,
+                tokens: t.usage?.total_tokens ?? x.tokens,
+                toolUses: t.usage?.tool_uses ?? x.toolUses,
+                durationMs: t.usage?.duration_ms ?? x.durationMs,
+                lastToolName: t.last_tool_name ?? x.lastToolName,
+                summary: t.summary ?? x.summary
+              }
+            : x
+        )
+      } else if (subtype === 'task_updated') {
+        const t = msg as unknown as {
+          task_id: string
+          patch: { status?: string; description?: string; error?: string; is_backgrounded?: boolean }
+        }
+        const mappedStatus: SubagentStatus | undefined = t.patch.status
+          ? t.patch.status === 'completed' || t.patch.status === 'failed'
+            ? t.patch.status
+            : t.patch.status === 'killed'
+              ? 'stopped'
+              : undefined
+          : undefined
+        bg.tasks = bg.tasks.map((x) =>
+          x.taskId === t.task_id
+            ? {
+                ...x,
+                description: t.patch.description ?? x.description,
+                error: t.patch.error ?? x.error,
+                status: mappedStatus ?? x.status,
+                isBackgrounded: t.patch.is_backgrounded ?? x.isBackgrounded
+              }
+            : x
+        )
+      } else if (subtype === 'task_notification') {
+        const t = msg as unknown as {
+          task_id: string
+          status: 'completed' | 'failed' | 'stopped'
+          summary?: string
+          usage?: { total_tokens: number; tool_uses: number; duration_ms: number }
+        }
+        bg.tasks = bg.tasks.map((x) =>
+          x.taskId === t.task_id
+            ? {
+                ...x,
+                status: t.status,
+                summary: t.summary ?? x.summary,
+                tokens: t.usage?.total_tokens ?? x.tokens,
+                toolUses: t.usage?.tool_uses ?? x.toolUses,
+                durationMs: t.usage?.duration_ms ?? x.durationMs
+              }
+            : x
+        )
+      } else if (subtype === 'elicitation') {
+        // AskUserQuestion 阻塞 turn：问题随缓冲带走，attach 后照常逐条回答。
+        const req = (msg as unknown as { elicitation?: ElicitationRequest }).elicitation
+        if (req?.toolUseID && !bg.elicitationQueue.some((q) => q.toolUseID === req.toolUseID)) {
+          bg.elicitationQueue = [...bg.elicitationQueue, req]
+        }
+      }
+      // status 等只影响瞬时 UI 的子类型，后台不需要。
+      break
+    }
+    case 'user': {
+      const parent = (msg.parent_tool_use_id as string | null) ?? null
+      const content = (msg as unknown as { message: { content: unknown } }).message.content
+      if (typeof content === 'string') {
+        if (isModelSwitchControlOutput(content)) break
+        const last = bg.items[bg.items.length - 1]
+        if (!isOwnMessageEcho(last, content)) {
+          bg.items = [...bg.items, { id: uid(), kind: 'user', text: content, parentToolUseId: parent }]
+        }
+        bg.running = true
+      } else if (Array.isArray(content)) {
+        const toolResults = content.filter(
+          (c): c is { type: 'tool_result'; tool_use_id: string; content: unknown; is_error?: boolean; partial?: boolean } =>
+            !!c && typeof c === 'object' && (c as { type?: string }).type === 'tool_result'
+        )
+        if (toolResults.length) {
+          for (const tr of toolResults) {
+            bg.items = mapTool(bg.items, tr.tool_use_id, (b) => ({
+              ...b,
+              status: tr.partial ? 'running' : tr.is_error ? 'error' : 'done',
+              result: tr.content,
+              resultIsError: tr.partial ? b.resultIsError : !!tr.is_error,
+              ...(tr.partial ? {} : { endedAt: Date.now() }),
+              ...((tr as { input?: unknown }).input && typeof (tr as { input?: unknown }).input === 'object'
+                ? {
+                    input: {
+                      ...((b.input && typeof b.input === 'object' ? b.input : {}) as Record<string, unknown>),
+                      ...((tr as { input?: Record<string, unknown> }).input ?? {})
+                    }
+                  }
+                : {})
+            }))
+          }
+        } else {
+          const text = content
+            .map((c) => (c && typeof c === 'object' && 'text' in c ? String((c as { text: unknown }).text) : ''))
+            .join('')
+          if (isModelSwitchControlOutput(text)) break
+          if (text) {
+            const last = bg.items[bg.items.length - 1]
+            if (!isOwnMessageEcho(last, text)) {
+              bg.items = [...bg.items, { id: uid(), kind: 'user', text, parentToolUseId: parent }]
+            }
+          }
+        }
+      }
+      break
+    }
+    case 'stream_event': {
+      const su = msg as unknown as { uuid: string; parent_tool_use_id: string | null; event: Record<string, unknown> }
+      const res = applyStreamEvent(
+        { items: bg.items, currentStreamingMsgId: bg.currentStreamingMsgId },
+        su.uuid,
+        su.parent_tool_use_id ?? null,
+        su.event
+      )
+      bg.items = res.items
+      bg.currentStreamingMsgId = res.currentStreamingMsgId
+      break
+    }
+    case 'assistant': {
+      const parent = (msg.parent_tool_use_id as string | null) ?? null
+      const m = msg as unknown as {
+        uuid: string
+        error?: string
+        message: { id?: string; content: Array<Record<string, unknown>> }
+      }
+      const blocks: AssistantBlock[] = []
+      for (const c of m.message?.content ?? []) {
+        const t = c.type
+        if (t === 'text') blocks.push({ kind: 'text', text: String(c.text ?? '') })
+        else if (t === 'thinking') blocks.push({ kind: 'thinking', text: String(c.thinking ?? '') })
+        else if (t === 'tool_use') {
+          blocks.push({
+            kind: 'tool',
+            toolUseId: String(c.id ?? ''),
+            name: String(c.name ?? 'tool'),
+            input: c.input,
+            status: 'pending',
+            startedAt: Date.now()
+          })
+        }
+      }
+      if (blocks.length > 0 && blocks.every((b) => b.kind === 'text' && isModelSwitchControlOutput(b.text))) {
+        bg.currentStreamingMsgId = null
+        break
+      }
+      let targetId: string | null = null
+      if (bg.currentStreamingMsgId && bg.items.some((i) => i.id === bg.currentStreamingMsgId)) {
+        targetId = bg.currentStreamingMsgId
+      } else if (m.message?.id && bg.items.some((i) => i.id === m.message.id)) {
+        targetId = m.message.id
+      }
+      const finalId = targetId ?? (m.uuid ?? uid())
+      bg.items =
+        targetId !== null
+          ? bg.items.map((i) =>
+              i.id === finalId
+                ? { id: finalId, kind: 'assistant' as const, blocks, parentToolUseId: parent, error: m.error }
+                : i
+            )
+          : [...bg.items, { id: finalId, kind: 'assistant' as const, blocks, parentToolUseId: parent, error: m.error }]
+      bg.running = true
+      bg.currentStreamingMsgId = null
+      invalidateBackgroundHistoryCache(bg)
+      break
+    }
+    case 'tool_progress': {
+      const p = msg as unknown as { tool_use_id: string; elapsed_time_seconds: number }
+      bg.items = mapTool(bg.items, p.tool_use_id, (b) => ({
+        ...b,
+        status: 'running',
+        elapsed: p.elapsed_time_seconds
+      }))
+      break
+    }
+    case 'result': {
+      const r = msg as unknown as { subtype: string; errors?: string[] }
+      // turn 结束：清流式标记。后台缓冲没有 pendingQueue（切走时队列已清空，
+      // 后续消息靠后端回显进入 items），running 以后端推送/下一个事件为准。
+      bg.running = false
+      bg.items = bg.items.map((i) => (i.kind === 'assistant' && i.streaming ? { ...i, streaming: false } : i))
+      bg.currentStreamingMsgId = null
+      const resultError = r.errors?.length ? r.errors.join('; ') : r.subtype
+      if (r.subtype !== 'success' && !isUserStopDiagnostic(resultError)) bg.error = resultError
+      invalidateBackgroundHistoryCache(bg)
+      scheduleSessionsRefresh(get)
+      break
+    }
+    default:
+      break
+  }
+}
+
 /** If the SDK never sends system/init (e.g. the API backend hangs), unblock the
  *  UI after a timeout so the user can retry via New chat. */
 function scheduleInitWatchdog(
@@ -881,7 +1311,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           ...(shouldResume ? { resume: oldMeta.sdkSessionId } : {}),
           bridgeSessionId: newId
         })
-        await window.api.closeSession(oldSessionId).catch(() => {})
+        // 旧桥接已被新 resume 会话取代（同一 acpSessionId 不能双注册）：显式销毁，
+        // 不用后台化语义的 closeSession。
+        await window.api.destroySession(oldSessionId).catch(() => {})
         set({ sessionConfigDirty: false, sessionModelDirty: refreshingModel, bridgeEnded: false })
         meta = get().meta
         if (!meta) return
@@ -1075,6 +1507,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const requestSeq = nextSessionNavigationSeq()
     const startGate = createSessionStartGate(newId)
     const isLatestRequest = (): boolean => isCurrentSessionNavigation(get, requestSeq, newId)
+    // #6 切走=后台化：快照当前会话进事件缓冲（事件继续累积，切回可 attach）。
+    snapshotActiveSessionIntoBackground(get)
     // Flip the UI to the new project BEFORE any IPC: the main view clears and
     // enters its starting state immediately, so the click never stalls on the
     // setLastProject / getActiveProvider round-trips. Model & permission mode
@@ -1158,7 +1592,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       return
     }
     if (!isLatestRequest()) {
-      await window.api.closeSession(newId).catch(() => {})
+      await window.api.destroySession(newId).catch(() => {})
       return
     }
     set({ starting: false })
@@ -1174,6 +1608,49 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const msg = get().pendingQueue.find((p) => p.id === id) ?? null
     if (msg) set((s) => ({ pendingQueue: s.pendingQueue.filter((p) => p.id !== id) }))
     return msg
+  },
+
+  clearPendingQueue() {
+    set((s) => (s.pendingQueue.length ? { pendingQueue: [] } : {}))
+  },
+
+  async resendPendingQueue() {
+    const meta = get().meta
+    if (!meta || get().status.running) return
+    const queued = get().pendingQueue
+    if (queued.length === 0) return
+    set({ pendingQueue: [] })
+    // 逐条重发：首条直达（sendMessage 会顺带清掉 error，bridgeEnded 时先重建
+    // 会话），后续消息按原 busy 语义重新进入队列。
+    for (const p of queued) {
+      await get().sendMessage(
+        p.text,
+        p.attachments?.length ? p.attachments.map(userAttachmentToPickedFile) : undefined,
+        p.cutIn ? { cutIn: true } : undefined
+      )
+    }
+  },
+
+  clearError() {
+    set((s) => (s.status.error ? { status: { ...s.status, error: undefined } } : {}))
+  },
+
+  applySessionRunningChanged(p) {
+    // 后台缓冲的 running（attach 时恢复忙碌态用）。
+    const bg = backgroundSessions.get(p.sessionId)
+    if (bg) bg.running = p.running
+    // 侧栏列表项的 running 标记（按 acpSessionId 匹配）。当前会话的
+    // status.running 以事件流为准，这里不动。
+    if (!p.acpSessionId) return
+    set((s) => {
+      let changed = false
+      const sessions = s.sessions.map((it) => {
+        if (it.sessionId !== p.acpSessionId || !!it.running === p.running) return it
+        changed = true
+        return { ...it, running: p.running }
+      })
+      return changed ? { sessions } : {}
+    })
   },
 
   async answerElicitation(toolUseID, optionId) {
@@ -1285,6 +1762,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const requestSeq = nextSessionNavigationSeq()
     const startGate = createSessionStartGate(newId)
     const isLatestRequest = (): boolean => isCurrentSessionNavigation(get, requestSeq, newId)
+    // #6 切走=后台化：快照当前会话进事件缓冲（turn 继续跑，切回可 attach）。
+    snapshotActiveSessionIntoBackground(get)
     // 根因修复：此前 newChat 沿用旧会话的 permissionMode 做乐观值、且不传给
     // 后端（opts 里根本没有 permissionMode），ACP 侧停留在 CLI default，init
     // 事件随后把 chip 覆盖回 default —— 设置里的默认权限模式就此丢失。
@@ -1344,7 +1823,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       return
     }
     if (!isLatestRequest()) {
-      await window.api.closeSession(newId).catch(() => {})
+      await window.api.destroySession(newId).catch(() => {})
       return
     }
     set({ starting: false })
@@ -1362,6 +1841,50 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // 模式，其次沿用当前会话的模式，并在 startSession 时显式下发。
     const restoredMode: PermissionMode = readStoredPermissionMode(sdkSessionId) ?? (permissionMode as PermissionMode)
     const oldSessionId = meta.sessionId
+
+    // #6 后台会话 attach：目标会话切走时后端未被 cancel，事件已累积进它自己的
+    // 缓冲——直接接管其桥接 id 和缓冲内容继续渲染，不走 session/load 全量重放
+    // （重放会重复，且空壳已被磁盘删除时 load 直接失败）。
+    const bg = findLiveBackgroundSession(sdkSessionId)
+    if (bg && normalizeCwdForCompare(bg.cwd) === normalizeCwdForCompare(cwd)) {
+      backgroundSessions.delete(bg.bridgeSessionId)
+      nextSessionNavigationSeq()
+      snapshotActiveSessionIntoBackground(get)
+      void window.api.closeSession(oldSessionId).catch(() => {})
+      // 桥接早已就绪：sendMessage 的启动门闩直接放行。
+      createSessionStartGate(bg.bridgeSessionId).resolve()
+      set({
+        starting: false,
+        items: bg.items,
+        tasks: bg.tasks,
+        pendingQueue: [],
+        sessionConfigDirty: false,
+        sessionModelDirty: false,
+        bridgeEnded: false,
+        planEntries: bg.planEntries,
+        contextUsage: bg.contextUsage,
+        modePanel: defaultModePanel(),
+        goal: bg.goal,
+        elicitationQueue: bg.elicitationQueue,
+        slashCommands: bg.slashCommands,
+        status: { running: bg.running, ...(bg.error ? { error: bg.error } : {}) },
+        currentStreamingMsgId: bg.currentStreamingMsgId,
+        meta: {
+          sessionId: bg.bridgeSessionId,
+          ...(agentBackend ? { agentBackend } : {}),
+          sdkSessionId,
+          cwd,
+          model: bg.model || model,
+          permissionMode: readStoredPermissionMode(sdkSessionId) ?? bg.permissionMode ?? restoredMode,
+          tools: bg.tools
+        }
+      })
+      void get().refreshSessions()
+      return
+    }
+
+    // #6 切走=后台化：快照当前会话进事件缓冲（turn 继续跑，切回可 attach）。
+    snapshotActiveSessionIntoBackground(get)
     const newId = uid()
     const requestSeq = nextSessionNavigationSeq()
     const startGate = createSessionStartGate(newId)
@@ -1471,7 +1994,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     const startResult = await startPromise
     if (!isLatestRequest()) {
-      if (startResult.started) await window.api.closeSession(newId).catch(() => {})
+      if (startResult.started) await window.api.destroySession(newId).catch(() => {})
       return
     }
     if (startResult.error) {
@@ -1516,6 +2039,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   async deleteSession(sessionId: string, backend?: ClaudeExecutionBackend) {
     const meta = get().meta
     if (!meta) return
+    // 销毁仍活着的后端会话（后台缓冲的 / 当前活跃的）：否则 turn 继续在后台烧。
+    const bg = takeBackgroundSession(sessionId)
+    if (bg) void window.api.destroySession(bg.bridgeSessionId).catch(() => {})
+    if (meta.sdkSessionId === sessionId) {
+      void window.api.destroySession(meta.sessionId).catch(() => {})
+      // 桥接已销毁：标记 bridgeEnded，避免随后的 newChat 把死会话快照进后台缓冲。
+      set({ bridgeEnded: true })
+    }
     try {
       const result = await window.api.deleteSession(sessionId, meta.cwd, backend)
       // 主进程校验失败（路径穿越防护等）：不删列表项，提示错误。
@@ -1543,6 +2074,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const deletedIds = new Set<string>()
     // 串行逐个删：单个失败只计数、不中断整批。
     for (const target of targets) {
+      // 销毁仍活着的后端会话（后台缓冲的 / 当前活跃的），否则 turn 继续烧。
+      const bg = takeBackgroundSession(target.sessionId)
+      if (bg) void window.api.destroySession(bg.bridgeSessionId).catch(() => {})
+      if (meta.sdkSessionId === target.sessionId) {
+        void window.api.destroySession(meta.sessionId).catch(() => {})
+        // 桥接已销毁：标记 bridgeEnded，避免随后的 newChat 把死会话快照进后台缓冲。
+        set({ bridgeEnded: true })
+      }
       try {
         const result = await window.api.deleteSession(target.sessionId, meta.cwd, target.backend)
         if (result && result.ok === false) {
@@ -1627,7 +2166,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         })
         .catch(() => {})
     }
-    void window.api.closeSession(oldSessionId).catch(() => {})
+    // 旧桥接被同 sdkSessionId 的 resume 取代：显式销毁（closeSession 的后台化
+    // 语义会让两个桥接共享同一 acpSessionId，事件路由互相覆盖）。
+    void window.api.destroySession(oldSessionId).catch(() => {})
     try {
       await window.api.startSession(
         sdkSessionId
@@ -1663,7 +2204,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       return
     }
     if (!isLatestRequest()) {
-      await window.api.closeSession(newId).catch(() => {})
+      await window.api.destroySession(newId).catch(() => {})
       return
     }
     set({ starting: false })
@@ -1694,7 +2235,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   ingestAgentEvent(e) {
-    if (get().meta?.sessionId !== e.sessionId) return
+    // #6 非当前会话 = 后台会话：事件分流到各自的缓冲（运行标记实时、内容连续），
+    // 不再整条丢弃。
+    if (get().meta?.sessionId !== e.sessionId) {
+      foldBackgroundAgentEvent(get, e)
+      return
+    }
 
     if (e.type === 'agent:ended') {
       const endedError = isUserStopDiagnostic(e.error) ? undefined : e.error
@@ -2157,8 +2703,25 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   applyStreamBatch(batch) {
     if (batch.length === 0) return
     const activeSessionId = get().meta?.sessionId
-    if (!activeSessionId) return
-    const activeBatch = batch.filter((b) => b.sessionId === activeSessionId)
+    // #6 后台会话的流式 delta 同样累积进各自的缓冲（切回时内容连续完整）。
+    const activeBatch: StreamDeltaBatch[] = []
+    for (const b of batch) {
+      if (activeSessionId && b.sessionId === activeSessionId) {
+        activeBatch.push(b)
+        continue
+      }
+      const bg = backgroundSessions.get(b.sessionId)
+      if (bg) {
+        const res = applyStreamEvent(
+          { items: bg.items, currentStreamingMsgId: bg.currentStreamingMsgId },
+          b.fallbackId,
+          b.parent,
+          b.event
+        )
+        bg.items = res.items
+        bg.currentStreamingMsgId = res.currentStreamingMsgId
+      }
+    }
     if (activeBatch.length === 0) return
     // One set() per frame: fold every buffered delta through applyStreamEvent
     // in sequence. content_block_delta's branch returns unchanged items by

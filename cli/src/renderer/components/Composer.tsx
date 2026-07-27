@@ -179,6 +179,10 @@ export default function Composer(): JSX.Element {
   // 排队卡片：× 从队列删除；点击卡片取回编辑（文本回 textarea、附件回附件区）。
   const removePendingMessage = useSessionStore((s) => s.removePendingMessage)
   const takePendingMessage = useSessionStore((s) => s.takePendingMessage)
+  // #20 出错悬置时的出路：重发全部 / 清空队列。#13：错误可手动关闭。
+  const clearPendingQueue = useSessionStore((s) => s.clearPendingQueue)
+  const resendPendingQueue = useSessionStore((s) => s.resendPendingQueue)
+  const clearError = useSessionStore((s) => s.clearError)
   const restorePending = (id: string): void => {
     const msg = takePendingMessage(id)
     if (!msg) return
@@ -685,8 +689,33 @@ export default function Composer(): JSX.Element {
       <div className="mx-auto max-w-5xl">
         {pending.length > 0 && (
           <div className="mb-1.5">
-            <div className="mb-1 px-1 text-[10px] text-zinc-600">
-              队列 · {pending.length}　当前回合结束后自动逐条发送
+            <div className="mb-1 flex items-center gap-2 px-1 text-[10px] text-zinc-600">
+              {statusError && !running ? (
+                <>
+                  {/* #20：turn 出错后队列不再自动落地，给出明确出路。 */}
+                  <span className="text-red-400/90">
+                    队列 · {pending.length}　会话出错，排队消息已暂停发送
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void resendPendingQueue()}
+                    className="rounded px-1 text-accent transition hover:bg-white/[0.05]"
+                    title="依次重发全部排队消息"
+                  >
+                    重发
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearPendingQueue}
+                    className="rounded px-1 text-zinc-500 transition hover:bg-white/[0.05] hover:text-red-300"
+                    title="丢弃全部排队消息"
+                  >
+                    清空
+                  </button>
+                </>
+              ) : (
+                <span>队列 · {pending.length}　当前回合结束后自动逐条发送</span>
+              )}
             </div>
             <div className="flex max-h-32 flex-col gap-1.5 overflow-y-auto">
               {pending.map((p, i) => (
@@ -724,8 +753,27 @@ export default function Composer(): JSX.Element {
         {/* 状态行（输入框上方）：左侧瞬态错误/常驻 chips（计数=会话累计，0 置灰，
             点击展开任务面板），右侧常驻 Usage 圆环（自退役的 StatusBar 上移）。 */}
         <div ref={chipRowRef} data-chip-row className="mb-1.5 flex items-center gap-3 px-1 text-[11px] text-zinc-500">
-          {statusError && <span className="truncate text-red-400">{statusError}</span>}
+          {statusError && (
+            <span className="flex min-w-0 items-center gap-1 text-red-400">
+              <span className="truncate">{statusError}</span>
+              <button
+                type="button"
+                onClick={clearError}
+                className="shrink-0 rounded px-0.5 text-red-400/70 transition hover:bg-white/[0.06] hover:text-red-300"
+                title="关闭错误提示"
+              >
+                ×
+              </button>
+            </span>
+          )}
           {stopReason && !statusError && <span className="text-zinc-600">结束: {stopReason}</span>}
+          {/* #5 忙碌态：明确提示输出中 + 排队语义，不再静默。 */}
+          {running && (
+            <span className="flex shrink-0 items-center gap-1.5 text-accent/90">
+              <span className="session-running-dot" />
+              AI 正在输出中{pending.length > 0 ? `，已排队 ${pending.length} 条` : '，新消息将排队发送'}
+            </span>
+          )}
           <button
             type="button"
             data-chip="bash"

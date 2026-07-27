@@ -21,12 +21,25 @@ import type { SessionListItem } from '../shared/ipc'
 
 let client: AcpClient | null = null
 let clientPromise: Promise<AcpClient> | null = null
+let lastUsedAt = 0
+
+/** 历史连接空闲 TTL：kimi 进程内的 session/list 数据快照会过期（实测列表冻结），
+ *  空闲超过 TTL 的连接下次使用前关闭重建——外部新会话最多落后一个 TTL 可见。 */
+const HISTORY_CLIENT_IDLE_TTL_MS = 30_000
 
 function ensureClient(): Promise<AcpClient> {
-  if (client) return Promise.resolve(client)
+  if (client) {
+    if (Date.now() - lastUsedAt <= HISTORY_CLIENT_IDLE_TTL_MS) return Promise.resolve(client)
+    // 空闲超时：主动关闭旧连接。其 close 事件异步到达，onClose 里有代际比对，
+    // 不会抹掉下面重建的新连接。
+    client.close()
+    client = null
+    clientPromise = null
+  }
   if (!clientPromise) {
     const resolved = resolveWindowsKimiCommand()
-    clientPromise = AcpClient.start({
+    let promise!: Promise<AcpClient>
+    promise = AcpClient.start({
       command: resolved.command,
       argsPrefix: resolved.argsPrefix,
       args: ['acp'],
@@ -44,16 +57,21 @@ function ensureClient(): Promise<AcpClient> {
         if (msg.id !== undefined) client?.respondError(msg.id, 'Tran history client does not handle requests.', -32601)
       },
       onClose: () => {
-        client = null
-        clientPromise = null
+        // 只清理“当前这一代”连接的关闭：过期被换下的旧连接 close 事件晚到时，
+        // 不能误清已重建的新连接。
+        if (clientPromise === promise) {
+          client = null
+          clientPromise = null
+        }
       }
     }).then((started) => {
       client = started
       return started
     }).catch((error) => {
-      clientPromise = null
+      if (clientPromise === promise) clientPromise = null
       throw error
     })
+    clientPromise = promise
   }
   return clientPromise
 }
@@ -91,6 +109,7 @@ export async function listKimiSessions(
 ): Promise<SessionListItem[]> {
   try {
     const acp = await ensureClient()
+    lastUsedAt = Date.now()
     const response = await acp.request<Record<string, unknown>>('session/list', {}, 30000)
     const rawSessions = Array.isArray(response?.sessions)
       ? response.sessions

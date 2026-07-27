@@ -56,6 +56,7 @@ import type {
   PermissionResponsePayload,
   SessionListItem,
   SessionListOptions,
+  SessionRunningChangedPayload,
   StartSessionResult,
   HistoryMessage,
   SaveMcpServerArgs,
@@ -303,6 +304,14 @@ export function registerIpc(
     },
     onSessionsChanged: () => {
       send('forge:sessions-changed', {})
+    },
+    onSessionRunning: (sessionId, running, acpSessionId) => {
+      const payload: SessionRunningChangedPayload = {
+        sessionId,
+        running,
+        ...(acpSessionId ? { acpSessionId } : {})
+      }
+      send('forge:session-running-changed', payload)
     }
   })
 
@@ -341,7 +350,14 @@ export function registerIpc(
     await bridge.requestUsageRefresh(sessionId)
   })
 
+  // 渲染层在“切走会话”时调用本通道：后台化语义——不 cancel turn、不删会话，
+  // 后台 turn 继续跑、事件继续经 forge:agent-event 推送。
   ipcMain.handle('forge:closeSession', async (_e, sessionId: string): Promise<void> => {
+    bridge.background(sessionId)
+  })
+
+  // 显式关闭/删除会话：cancel 当前 turn 并销毁本地会话状态。
+  ipcMain.handle('forge:destroySession', async (_e, sessionId: string): Promise<void> => {
     await bridge.close(sessionId)
   })
 
@@ -657,7 +673,13 @@ export function registerIpc(
     const all = opts?.scope === 'all'
     const limit = all ? 200 : opts?.limit && opts.limit > 0 ? opts.limit : 50
     const offset = opts?.offset && opts.offset > 0 ? opts.offset : 0
-    return listKimiSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' })
+    const items = await listKimiSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' })
+    // 合并主进程内存中的运行状态（SessionListItem.sessionId 即 ACP 会话 id）。
+    const running = bridge.runningAcpSessionIds()
+    if (running.size) {
+      for (const item of items) item.running = running.has(item.sessionId)
+    }
+    return items
   })
 
   ipcMain.handle('forge:getSessionMessages', async (

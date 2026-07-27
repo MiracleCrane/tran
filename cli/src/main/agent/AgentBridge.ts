@@ -25,6 +25,9 @@ export interface AgentBackendHandlers {
   onPermissionRequest: (req: PermissionRequestPayload) => void
   /** 历史会话列表有外部变化（如空壳会话被删除）——渲染层应刷新侧栏列表。 */
   onSessionsChanged?(): void
+  /** turn 开始/结束：sessionId 是桥接 id，acpSessionId 是 agent 侧会话 id
+   *  （侧栏列表条目用的就是它）。 */
+  onSessionRunning?(sessionId: string, running: boolean, acpSessionId?: string): void
 }
 
 interface AgentBackendAdapter {
@@ -35,6 +38,10 @@ interface AgentBackendAdapter {
   setModel(sessionId: string, model: string): Promise<void>
   setPermissionMode(sessionId: string, mode: string): Promise<void>
   close(sessionId: string): Promise<void>
+  /** 可选：切走/后台化——不 cancel turn、不删会话，后台 turn 继续跑。 */
+  background?(sessionId: string): void
+  /** 可选：正在跑 turn 的 ACP 会话 id 集合（侧栏列表合并 running 标记用）。 */
+  runningAcpSessionIds?(): Set<string>
   listMcpServers(sessionId: string): Promise<McpServerEntry[]>
   refreshMcpServers(sessionId: string): Promise<McpServerEntry[]>
   toggleMcpServer(sessionId: string, name: string, enabled: boolean): Promise<void>
@@ -126,6 +133,20 @@ export class AgentBridge {
     if (!backend) return
     await backend.close(sessionId)
     this.sessionBackends.delete(sessionId)
+  }
+
+  /** 切走/后台化：会话留在后端继续跑（turn、事件推送不受影响），路由映射保留。 */
+  background(sessionId: string): void {
+    this.maybeBackendForSession(sessionId)?.background?.(sessionId)
+  }
+
+  /** 正在跑 turn 的 ACP 会话 id 集合（跨后端合并；listSessions 打 running 标记用）。 */
+  runningAcpSessionIds(): Set<string> {
+    const ids = new Set<string>()
+    for (const backend of Object.values(this.backends)) {
+      for (const id of backend.runningAcpSessionIds?.() ?? []) ids.add(id)
+    }
+    return ids
   }
 
   /** 退出前清理：逐个 close 活跃会话（触发后端的空壳删除等离场逻辑）。

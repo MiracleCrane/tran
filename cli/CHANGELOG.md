@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.0.24 - 2026-07-27
+
+### 中文
+
+- 修复:ACP 超时后的连锁故障。session/prompt 超时(长任务/阻塞型子代理)此前只丢弃请求——agent 侧 turn 继续空跑、迟到响应被静默丢弃,后续消息易撞"上一轮仍在进行中"。现超时后主动向该会话补发 session/cancel;并修复 initialize 失败时 kimi acp 进程泄漏(反复重试会堆积多个 nodejs 进程)。
+- 修复:会话列表"冻结"。侧边栏历史列表走一条长期存活的独立 ACP 进程,其内部快照过期后 Tran 没有失效机制(手动杀进程后反而能刷新一次)。现历史连接空闲 30 秒自动重建,外部(Kimi Web 等)新会话最多延迟 30 秒可见。
+- 新增:后台续跑。切换会话不再取消正在进行的 turn——切走的会话在后台继续处理,侧边栏实时显示运行中标识,切回时直接接续流式输出(同连接多会话并发已经实测验证)。
+- 新增:侧边栏会话列表显示"运行中"呼吸点;输入区在 AI 输出中显示明确忙碌提示与已排队条数。
+- 修复:turn 报错后会话卡死在"输出中"。现正确复位运行状态,排队消息可一键重发或清空。
+- 新增:报错横幅与错误诊断面板可手动关闭。
+- 修复:会话历史缓存把空数组当有效命中的隐患。
+
+### English
+
+- Fixed: cascade failures after ACP timeouts. A timed-out session/prompt (long tasks, blocking subagents) used to just drop the request — the agent-side turn kept running, late responses were silently discarded, and follow-up messages hit "another turn in progress". Tran now sends session/cancel after a timeout, and initialize failures no longer leak kimi acp processes (retries used to pile up nodejs processes).
+- Fixed: "frozen" session list. The sidebar history list used a separate long-lived ACP process whose internal snapshot went stale with no invalidation (killing it was the only refresh). The history connection now rebuilds after 30s idle, so external sessions (Kimi Web etc.) appear within 30 seconds.
+- Added: background continuation. Switching sessions no longer cancels the in-flight turn — sessions keep processing in the background, the sidebar shows a live running indicator, and switching back reattaches to the stream (concurrent multi-session turns on one connection verified empirically).
+- Added: running badge (breathing dot) on sidebar session items; the composer now shows an explicit busy hint with queued-message count while the AI is streaming.
+- Fixed: sessions stuck in "outputing" state after a turn error. Running state now resets correctly, and queued messages can be resent or cleared.
+- Added: error banner and diagnostic panel can be dismissed manually.
+- Fixed: session history cache treating an empty array as a valid hit.
+
+#### 验证
+
+- `npm run typecheck`(node + web 双 tsconfig)与 `npm run build`(main/preload/renderer)全绿
+- ACP 同连接多会话并发 turn 实测:真并行、通知带 sessionId 可路由(`.scratch/acp-concurrency-test`)
+
 ## v1.0.23 - 2026-07-23
 
 ### 中文

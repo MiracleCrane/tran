@@ -9,7 +9,8 @@ import type {
   GitStatus,
   SwarmTasksEvent,
   UpdateCheckResult,
-  UpdateDownloadProgress
+  UpdateDownloadProgress,
+  SessionRunningChangedPayload
 } from '../shared/ipc'
 
 function getPathForFile(file: File): string {
@@ -33,6 +34,7 @@ const api: ForgeApi = {
   goalGet: (sessionId) => ipcRenderer.invoke('forge:goalGet', sessionId),
   refreshSessionUsage: (sessionId) => ipcRenderer.invoke('forge:refreshSessionUsage', sessionId),
   closeSession: (sessionId) => ipcRenderer.invoke('forge:closeSession', sessionId),
+  destroySession: (sessionId) => ipcRenderer.invoke('forge:destroySession', sessionId),
   listSessions: (cwd, opts) => ipcRenderer.invoke('forge:listSessions', cwd, opts),
   getSessionMessages: (sessionId, cwd, backend) =>
     ipcRenderer.invoke('forge:getSessionMessages', sessionId, cwd, backend),
@@ -180,6 +182,12 @@ const api: ForgeApi = {
     const listener = (): void => cb()
     ipcRenderer.on('forge:sessions-changed', listener)
     return () => ipcRenderer.removeListener('forge:sessions-changed', listener)
+  },
+  onSessionRunningChanged: (cb) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: SessionRunningChangedPayload): void =>
+      cb(payload)
+    ipcRenderer.on('forge:session-running-changed', listener)
+    return () => ipcRenderer.removeListener('forge:session-running-changed', listener)
   },
   getAppVersion: () => ipcRenderer.invoke('forge:getAppVersion'),
   getAiTitles: () => ipcRenderer.invoke('forge:getAiTitles'),

@@ -67,6 +67,17 @@ export interface SessionListItem {
   cwd?: string
   gitBranch?: string
   runtimeBackend?: ClaudeExecutionBackend
+  /** 该会话当前有 turn 在跑（主进程内存状态合并；后台会话切走后仍在跑）。 */
+  running?: boolean
+}
+
+/** main -> renderer 推送：某会话 turn 开始/结束（forge:session-running-changed）。
+ *  sessionId 是桥接 id（与 forge:agent-event 一致），acpSessionId 是 agent 侧
+ *  会话 id（与 SessionListItem.sessionId 一致，侧栏列表关联用）。 */
+export interface SessionRunningChangedPayload {
+  sessionId: string
+  running: boolean
+  acpSessionId?: string
 }
 
 export interface SessionListOptions {
@@ -530,6 +541,9 @@ export interface ForgeApi {
   goalControl(sessionId: string, action: GoalControlAction): Promise<GoalInfo | null>
   goalGet(sessionId: string): Promise<GoalInfo | null>
   closeSession(sessionId: string): Promise<void>
+  /** 显式打断/销毁会话：cancel 当前 turn 并销毁后端会话状态（区别于
+   *  closeSession 的"切走=后台化"语义）。 */
+  destroySession(sessionId: string): Promise<void>
   listSessions(cwd: string, opts?: SessionListOptions): Promise<SessionListItem[]>
   getSessionMessages(
     sessionId: string,
@@ -702,6 +716,9 @@ export interface ForgeApi {
   onPermissionRequest(cb: (r: PermissionRequestPayload) => void): () => void
   /** 历史会话列表外部变化（空壳删除等）——订阅后应刷新侧栏列表。 */
   onSessionsChanged(cb: () => void): () => void
+  /** turn 开始/结束推送（侧栏运行标识）：sessionId 是桥接 id，acpSessionId
+   *  对应 SessionListItem.sessionId。 */
+  onSessionRunningChanged(cb: (p: SessionRunningChangedPayload) => void): () => void
   /** 应用版本号（app.getVersion()），设置页/侧栏展示用。 */
   getAppVersion(): Promise<string>
 

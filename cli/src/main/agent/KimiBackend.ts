@@ -305,9 +305,45 @@ export class KimiBackend {
     this.sessions.delete(sessionId)
   }
 
-  /** 空壳治理：本次运行由 Tran 新建（非 resume）且从未收到真实用户 prompt 的
-   *  会话，在离开（切对话/切项目/退出）时删除并清掉本地标题记录。
-   *  删除失败只记日志、不阻塞导航。 */
+  /**
+   * 切走/后台化（区别于显式关闭）：不 cancel turn、不删 session、保留
+   * acpToSession 映射——后台 turn 继续跑，事件继续经 onMessage/onEnded（带
+   * sessionId）推给渲染层。仅保留空壳治理：从未发过消息的新会话仍删磁盘壳。
+   */
+  background(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    this.discardEmptyShell(session)
+  }
+
+  /** session/prompt 硬超时后补发 session/cancel：终止 agent 侧空跑的 turn，
+   *  避免后续请求撞 "another turn in progress"。失败只记日志（AcpClient 保证
+   *  不掩盖原始超时错误）。 */
+  private cancelTurnOnTimeout(client: AcpClient, session: ActiveKimiSession): void {
+    if (!session.acpSessionId) return
+    try {
+      client.notify('session/cancel', { sessionId: session.acpSessionId })
+    } catch (error) {
+      log('kimi', `cancel after timeout failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /** 侧栏列表合并用：正在跑 turn 的 ACP 会话 id 集合。 */
+  runningAcpSessionIds(): Set<string> {
+    const ids = new Set<string>()
+    for (const session of this.sessions.values()) {
+      if (session.running && session.acpSessionId) ids.add(session.acpSessionId)
+    }
+    return ids
+  }
+
+  /** turn 开始/结束时推送运行状态（渲染层实时更新侧栏/标签的运行标记）。 */
+  private emitRunning(session: ActiveKimiSession, running: boolean): void {
+    this.h.onSessionRunning?.(session.id, running, session.acpSessionId)
+  }
+
+  /** 空壳治理：Tran 新建但没发过消息的会话，在离开（切对话/切项目/退出）时删除
+   *  并清掉本地标题记录。删除失败只记日志、不阻塞导航。 */
   private discardEmptyShell(session: ActiveKimiSession): void {
     if (!session.createdViaNew || session.gotRealPrompt || !session.acpSessionId) return
     const result = deleteKimiSession(session.acpSessionId)
@@ -563,6 +599,7 @@ export class KimiBackend {
     session.running = true
     session.turn += 1
     session.turnHadToolCall = false
+    this.emitRunning(session, true)
     try {
       await session.ready
       await this.runTurn(session, next)
@@ -574,6 +611,7 @@ export class KimiBackend {
       })
     } finally {
       session.running = false
+      this.emitRunning(session, false)
       session.currentMessageId = undefined
       session.streamedText = ''
       session.streamStarted = false
@@ -704,7 +742,7 @@ export class KimiBackend {
         sessionId: session.acpSessionId,
         prompt: [{ type: 'text', text: '/usage' }],
         messageId: cryptoId()
-      }, 60000)
+      }, 60000, () => this.cancelTurnOnTimeout(client, session))
       const usage = parseContextUsage(session.hiddenText)
       if (usage && !session.closed) {
         session.contextUsage = usage
@@ -752,7 +790,7 @@ export class KimiBackend {
       sessionId: session.acpSessionId,
       prompt: payload.prompt,
       messageId: cryptoId()
-    }, 900000)
+    }, 900000, () => this.cancelTurnOnTimeout(client, session))
     // goal 循环终止判定用：封停前捕获本轮最终正文。
     session.lastTurnText = session.streamedText
     // 压缩轮：解析统计数据，经 system/compaction 推渲染层（原始文本不渲染）。

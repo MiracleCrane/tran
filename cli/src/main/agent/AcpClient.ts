@@ -81,7 +81,12 @@ export class AcpClient {
     return client
   }
 
-  request<T = unknown>(method: string, params?: unknown, timeoutMs = 180000): Promise<T> {
+  /**
+   * @param onTimeout 硬超时触发时、reject 之前调用（如给该会话补发 session/cancel，
+   *   避免 agent 侧 turn 空跑、后续请求撞 "another turn in progress"）。回调内
+   *   异常被吞掉并记日志——不能掩盖原始超时错误。
+   */
+  request<T = unknown>(method: string, params?: unknown, timeoutMs = 180000, onTimeout?: () => void): Promise<T> {
     if (this.closed || !this.child) throw new Error(`ACP server (${this.options.logTag}) is not running.`)
     const id = this.nextId++
     const message: AcpRpcMessage = { jsonrpc: '2.0', id, method }
@@ -89,6 +94,13 @@ export class AcpClient {
     return new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id)
+        if (onTimeout) {
+          try {
+            onTimeout()
+          } catch (error) {
+            log(this.options.logTag, `onTimeout hook failed: ${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
         reject(new Error(`ACP request timed out: ${method}`))
       }, timeoutMs)
       this.pending.set(id, {
@@ -152,14 +164,21 @@ export class AcpClient {
       if (!this.closing) this.handlers.onClose(detail)
     })
 
-    await this.request('initialize', {
-      protocolVersion: 1,
-      clientCapabilities: {
-        fs: { readTextFile: true, writeTextFile: true, ...this.options.clientCapabilities?.fs },
-        terminal: this.options.clientCapabilities?.terminal ?? false
-      },
-      clientInfo: this.options.clientInfo
-    }, 60000)
+    try {
+      await this.request('initialize', {
+        protocolVersion: 1,
+        clientCapabilities: {
+          fs: { readTextFile: true, writeTextFile: true, ...this.options.clientCapabilities?.fs },
+          terminal: this.options.clientCapabilities?.terminal ?? false
+        },
+        clientInfo: this.options.clientInfo
+      }, 60000)
+    } catch (error) {
+      // 初始化失败：start() 抛错后实例对外不可达，close() 永远不会被调用——
+      // 这里必须自己 kill 已 spawn 的子进程，否则进程泄漏。
+      this.close()
+      throw error
+    }
   }
 
   private onStdout(chunk: string): void {

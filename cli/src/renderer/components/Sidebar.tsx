@@ -1497,6 +1497,7 @@ export default function Sidebar(): JSX.Element {
                         <span className="min-w-0 flex-1">
                           <div className="truncate text-xs">{s.summary || '(未命名)'}</div>
                           <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-zinc-600">
+                            {s.running && <span className="session-running-dot" title="运行中" />}
                             <span>{relTime(s.lastModified)}</span>
                             <span className={`session-runtime-badge ${wslSupportEnabled ? 'is-visible' : ''}`}>
                               {backendLabel(s.runtimeBackend)}

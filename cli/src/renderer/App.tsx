@@ -581,6 +581,13 @@ export default function App(): JSX.Element {
     })
   }, [])
 
+  useEffect(() => {
+    // turn 开始/结束推送：驱动侧栏运行标识与后台缓冲的 running 状态。
+    return window.api.onSessionRunningChanged((p) => {
+      useSessionStore.getState().applySessionRunningChanged(p)
+    })
+  }, [])
+
   // Swarm 可视化：订阅当前 ACP 会话（session_<uuid>）的 tasks 轮询。
   // server 不可用时主进程推 tasks=null，SwarmCard 自动降级为静态卡。
   const sdkSessionId = meta?.sdkSessionId
