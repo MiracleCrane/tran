@@ -63,6 +63,8 @@ interface PersistedSettings {
   /** Close window → hide to system tray instead of quitting (persisted after
    *  the user picks once on first close). */
   minimizeToTray?: boolean
+  /** 启动时最大化主窗口（默认关）。 */
+  startMaximized?: boolean
   /** User has already answered the first-close prompt (don't ask again). */
   closePromptDismissed?: boolean
   /** AI 自动命名（会话短标题，云端生成；默认开，关闭后任何路径不调 API）。 */
@@ -236,6 +238,7 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.wslSupportEnabled = optionalBoolean(source.wslSupportEnabled)
   settings.vulkanBackend = optionalBoolean(source.vulkanBackend)
   settings.minimizeToTray = optionalBoolean(source.minimizeToTray)
+  settings.startMaximized = optionalBoolean(source.startMaximized)
   settings.closePromptDismissed = optionalBoolean(source.closePromptDismissed)
   settings.aiNamingEnabled = optionalBoolean(source.aiNamingEnabled)
   settings.nativeNotifications = optionalBoolean(source.nativeNotifications)

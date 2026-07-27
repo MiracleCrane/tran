@@ -1,7 +1,8 @@
-import { app, ipcMain, dialog, shell, Notification, type BrowserWindow } from 'electron'
+import { app, ipcMain, dialog, shell, clipboard, nativeImage, net, Notification, type BrowserWindow } from 'electron'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { readFile, readdir, stat as statAsync } from 'node:fs/promises'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { AgentBridge } from './agent/AgentBridge'
 import { AGENT_BACKENDS } from '../shared/agentBackends'
 import { getApiKey, setApiKey, loadSettings, saveSettings } from './settings'
@@ -93,7 +94,8 @@ import type {
   QuotaOverviewResult,
   QuotaActionsResult,
   AiTitlesBatchResult,
-  SessionPreview
+  SessionPreview,
+  SaveImageResult
 } from '../shared/ipc'
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
@@ -429,6 +431,51 @@ export function registerIpc(
     return true
   })
 
+  // --- 图片右键菜单（#22）：复制到剪贴板 / 另存为。src 支持 data:/file:/http(s):
+  //  URL 与绝对路径；blob: 由渲染进程先转成 data: 再传入。 ---
+  const loadNativeImage = async (src: string): Promise<Electron.NativeImage> => {
+    const value = src.trim()
+    if (value.startsWith('data:')) return nativeImage.createFromDataURL(value)
+    if (/^https?:\/\//i.test(value)) {
+      const res = await net.fetch(value)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return nativeImage.createFromBuffer(Buffer.from(await res.arrayBuffer()))
+    }
+    const path = value.toLowerCase().startsWith('file:') ? fileURLToPath(value) : value
+    return nativeImage.createFromPath(path)
+  }
+
+  ipcMain.handle('forge:copyImage', async (_e, src: string): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const image = await loadNativeImage(src)
+      if (image.isEmpty()) return { ok: false, error: '无法解析图片内容' }
+      clipboard.writeImage(image)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle(
+    'forge:saveImageAs',
+    async (_e, src: string, suggestedName?: string): Promise<SaveImageResult> => {
+      try {
+        const image = await loadNativeImage(src)
+        if (image.isEmpty()) return { ok: false, error: '无法解析图片内容' }
+        const res = await dialog.showSaveDialog({
+          title: '另存图片',
+          defaultPath: suggestedName?.trim() || 'image.png',
+          filters: [{ name: 'PNG 图片', extensions: ['png'] }]
+        })
+        if (res.canceled || !res.filePath) return { ok: false, canceled: true }
+        writeFileSync(res.filePath, image.toPNG())
+        return { ok: true, path: res.filePath }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
   ipcMain.handle('forge:listSkills', async (_e, sessionId: string): Promise<SkillInfo[]> => {
     try {
       return await bridge.listSkills(sessionId)
@@ -577,11 +624,18 @@ export function registerIpc(
   ipcMain.handle('forge:minimizeWindow', async (): Promise<void> => {
     withWindow((win) => win.minimize())
   })
-  ipcMain.handle('forge:toggleMaximizeWindow', async (): Promise<void> => {
+  ipcMain.handle('forge:toggleMaximizeWindow', async (): Promise<boolean> => {
+    let maximized = false
     withWindow((win) => {
       if (win.isMaximized()) win.unmaximize()
       else win.maximize()
+      maximized = win.isMaximized()
     })
+    return maximized
+  })
+  ipcMain.handle('forge:isWindowMaximized', async (): Promise<boolean> => {
+    const win = getMainWindow()
+    return !!win && !win.isDestroyed() && win.isMaximized()
   })
   ipcMain.handle('forge:closeWindow', async (): Promise<void> => {
     withWindow((win) => win.close())

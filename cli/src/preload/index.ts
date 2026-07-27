@@ -55,6 +55,8 @@ const api: ForgeApi = {
   readFiles: (cwd, paths) => ipcRenderer.invoke('forge:readFiles', cwd, paths),
   getPathForFile,
   revealInExplorer: (cwd, pathStr) => ipcRenderer.invoke('forge:revealInExplorer', cwd, pathStr),
+  copyImage: (src) => ipcRenderer.invoke('forge:copyImage', src),
+  saveImageAs: (src, suggestedName) => ipcRenderer.invoke('forge:saveImageAs', src, suggestedName),
 
   listSkills: (sessionId) => ipcRenderer.invoke('forge:listSkills', sessionId),
   listMarketplacePlugins: (agentBackend, cwd) =>
@@ -84,7 +86,13 @@ const api: ForgeApi = {
 
   minimizeWindow: () => ipcRenderer.invoke('forge:minimizeWindow'),
   toggleMaximizeWindow: () => ipcRenderer.invoke('forge:toggleMaximizeWindow'),
+  isWindowMaximized: () => ipcRenderer.invoke('forge:isWindowMaximized'),
   closeWindow: () => ipcRenderer.invoke('forge:closeWindow'),
+  onWindowMaximizedChange: (cb) => {
+    const listener = (_event: Electron.IpcRendererEvent, maximized: boolean): void => cb(maximized)
+    ipcRenderer.on('forge:window-maximized-changed', listener)
+    return () => ipcRenderer.removeListener('forge:window-maximized-changed', listener)
+  },
 
   resolveClose: (decision) => ipcRenderer.invoke('forge:resolveClose', decision),
   showWindow: () => ipcRenderer.invoke('forge:showWindow'),

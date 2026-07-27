@@ -97,7 +97,7 @@ async function spawnServer(): Promise<ServerHandle | null> {
     return null
   }
   try {
-    const resolved = resolveWindowsKimiCommand()
+    const resolved = await resolveWindowsKimiCommand()
     log('kimi-server', `spawning kimi server run (${resolved.displayPath})`)
     const child = spawn(resolved.command, [...resolved.argsPrefix, 'server', 'run'], {
       detached: true,

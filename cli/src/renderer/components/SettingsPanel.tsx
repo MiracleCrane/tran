@@ -119,6 +119,7 @@ export default function SettingsPanel(): JSX.Element {
   const [claudeBackend, setClaudeBackend] = useState<ClaudeExecutionBackend>('windows')
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   const [minimizeToTray, setMinimizeToTray] = useState(false)
+  const [startMaximized, setStartMaximized] = useState(false)
   const [nativeNotifications, setNativeNotifications] = useState(true)
   const [aiNaming, setAiNaming] = useState(true)
   const [askOnClose, setAskOnClose] = useState(true)
@@ -156,6 +157,7 @@ export default function SettingsPanel(): JSX.Element {
       setClaudeBackend(p.claudeExecutionBackend ?? 'windows')
       setWslSupportEnabled(!!p.wslSupportEnabled)
       setMinimizeToTray(!!p.minimizeToTray)
+      setStartMaximized(!!p.startMaximized)
       setNativeNotifications(p.nativeNotifications !== false)
       setAiNaming(p.aiNamingEnabled !== false)
       setAskOnClose(!p.closePromptDismissed)
@@ -192,6 +194,19 @@ export default function SettingsPanel(): JSX.Element {
       setTimeout(() => setSavedAt(false), 1500)
     } catch {
       setMinimizeToTray(!next)
+    }
+  }
+
+  /** Start-maximized applies on next launch (read once when the window is
+   *  created); persist immediately like the other system toggles. */
+  const toggleStartMaximized = async (next: boolean): Promise<void> => {
+    setStartMaximized(next)
+    try {
+      await window.api.savePreferences({ startMaximized: next })
+      setSavedAt(true)
+      setTimeout(() => setSavedAt(false), 1500)
+    } catch {
+      setStartMaximized(!next)
     }
   }
 
@@ -374,6 +389,7 @@ export default function SettingsPanel(): JSX.Element {
     setClaudeBackend(p.claudeExecutionBackend ?? 'windows')
     setWslSupportEnabled(!!p.wslSupportEnabled)
     setMinimizeToTray(!!p.minimizeToTray)
+    setStartMaximized(!!p.startMaximized)
     setNativeNotifications(p.nativeNotifications !== false)
     setAskOnClose(!p.closePromptDismissed)
   }
@@ -648,6 +664,12 @@ export default function SettingsPanel(): JSX.Element {
               description="关闭窗口时最小化到托盘而非退出应用。点击托盘图标可恢复窗口。"
               checked={minimizeToTray}
               onChange={(checked) => void toggleMinimizeToTray(checked)}
+            />
+            <ToggleControl
+              label="启动时最大化"
+              description="应用启动时主窗口直接最大化显示。"
+              checked={startMaximized}
+              onChange={(checked) => void toggleStartMaximized(checked)}
             />
             <ToggleControl
               label="会话完成通知"

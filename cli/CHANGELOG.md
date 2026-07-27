@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.0.28 - 2026-07-27
+
+### 中文
+
+- 修复:最大化/还原按钮"疑似失效"。功能层本来正常,但标题栏按钮永远显示"最大化"图标、状态完全不可见(含双击标题栏原生切换也不同步)。现按钮在最大化/还原图标间切换,窗口原生事件同步转发。
+- 新增:"启动时最大化"设置项(设置 → 系统),创建窗口时直接最大化,无跳变。
+- 优化:冷启动不再被 where.exe 阻塞。kimi 命令解析原来在启动关键路径上串行 spawnSync 最多 3 次(实测单次 ~84-150ms 卡死事件循环),改为异步并发 + Promise 缓存。启动耗时构成分析:Chromium 加载 1.1s(dev)、kimi ACP 自身启动 ~1.5s(不可优化),Tran 侧主进程工作 <50ms。
+- 优化:历史查询连接的 kimi acp 进程(~300MB)原为常驻——TTL 只在下次查询时惰性判断。现空闲 30 秒主动回收,再查自动重建,内存 footprint 明显下降。
+- 新增:对话内图片右键菜单(AI 输出图、用户附件、预览大图):复制图片、另存为 PNG,覆盖 data:/http(s):/file:/blob: 各形态。
+- 分析:内存构成测量(#19)——两个 kimi acp 各 ~300MB 是大头(kimi CLI 自身足迹),Electron 侧主进程 120MB/渲染 139MB;`kimi server run` 守护进程为 kimi 系共享设计,Tran 退出后常驻(kimi desktop/CLI 复用),未改动。
+
+### English
+
+- Fixed: maximize/restore button "seemingly dead". The toggle worked, but the titlebar button always showed the maximize glyph with no state feedback (even native double-click toggles didn't sync). The button now switches between maximize/restore icons, driven by forwarded window events.
+- Added: "maximize on startup" setting (Settings → System), applied before first show.
+- Improved: cold start no longer blocked by where.exe. Kimi command resolution did up to 3 serial spawnSync calls (~84–150ms event-loop stalls) on the startup path; now async, concurrent, and Promise-cached. Startup breakdown: Chromium load 1.1s (dev), kimi ACP boot ~1.5s (not ours to optimize), Tran main-process work <50ms.
+- Improved: the history-query kimi acp process (~300MB) used to stay resident — TTL was only checked lazily on next query. It is now actively reaped after 30s idle and rebuilt on demand.
+- Added: image context menu in conversations (AI output, user attachments, preview pane): copy image, save as PNG; handles data:/http(s):/file:/blob: sources.
+- Analysis: memory profile (#19) — the two kimi acp processes (~300MB each) dominate (kimi CLI's own footprint); Electron main 120MB / renderer 139MB; the `kimi server run` daemon is a shared kimi-ecosystem design (persists after exit), left as-is.
+
+#### 验证
+
+- CDP 驱动独立实例实测:最大化切换/启动最大化/历史进程 30s 回收重建/内存构成
+- `npm run typecheck` 与 `npm run build` 全绿
+
 ## v1.0.27 - 2026-07-27
 
 ### 中文

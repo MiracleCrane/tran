@@ -14,6 +14,7 @@ import ErrorDiagnosticPanel from './components/ErrorDiagnosticPanel'
 import GitToolbar, { requestCloseGitDrawer } from './components/GitToolbar'
 import AttachmentPreviewPane from './components/AttachmentPreviewPane'
 import PermissionModal from './components/PermissionModal'
+import ImageContextMenuHost from './components/ImageContextMenu'
 import McpPanel from './components/McpPanel'
 import ProvidersPanel from './components/ProvidersPanel'
 import SkillsPanel from './components/SkillsPanel'
@@ -89,6 +90,18 @@ function readChatTopbarCollapsed(): boolean {
 }
 
 function WindowTitlebar(): JSX.Element {
+  const [maximized, setMaximized] = useState(false)
+  useEffect(() => {
+    let alive = true
+    void window.api.isWindowMaximized().then((v) => {
+      if (alive) setMaximized(v)
+    })
+    const unsubscribe = window.api.onWindowMaximizedChange(setMaximized)
+    return () => {
+      alive = false
+      unsubscribe()
+    }
+  }, [])
   return (
     <div className="window-titlebar flex shrink-0 items-center text-[13px] text-zinc-200/80">
       <div className="window-titlebar-drag flex min-w-0 flex-1 items-center gap-2 px-4">
@@ -107,10 +120,17 @@ function WindowTitlebar(): JSX.Element {
         <button
           type="button"
           className="window-control"
-          aria-label="最大化"
-          onClick={() => void window.api.toggleMaximizeWindow()}
+          aria-label={maximized ? '还原' : '最大化'}
+          onClick={() => void window.api.toggleMaximizeWindow().then(setMaximized)}
         >
-          <span className="block h-3 w-3 rounded-[2px] border border-current" />
+          {maximized ? (
+            <span className="relative block h-3 w-3">
+              <span className="absolute right-0 top-0 block h-2 w-2 rounded-[1px] border border-current border-l-transparent border-b-transparent" />
+              <span className="absolute bottom-0 left-0 block h-2 w-2 rounded-[1px] border border-current" />
+            </span>
+          ) : (
+            <span className="block h-3 w-3 rounded-[2px] border border-current" />
+          )}
         </button>
         <button
           type="button"
@@ -742,6 +762,7 @@ export default function App(): JSX.Element {
             {(previewOpen || previewMounted) && <AttachmentPreviewPane />}
           </div>
           <PermissionModal />
+          <ImageContextMenuHost />
           <ClosePromptDialog open={closePromptOpen} onClose={() => setClosePromptOpen(false)} />
           <UpdateAvailableDialog
             info={availableUpdate}

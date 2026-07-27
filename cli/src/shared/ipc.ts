@@ -227,6 +227,14 @@ export interface PickDirectoryOptions {
   backend?: ClaudeExecutionBackend
 }
 
+/** Result of saveImageAs (image context menu "另存为…"). */
+export interface SaveImageResult {
+  ok: boolean
+  canceled?: boolean
+  path?: string
+  error?: string
+}
+
 /** Misc app preferences managed by the Settings panel. */
 export interface Preferences {
   /** Which pluggable agent engine Tran should use. */
@@ -252,6 +260,8 @@ export interface Preferences {
   /** Close window → hide to system tray instead of quitting. Persisted after
    *  the user picks once on first close; editable in Settings afterwards. */
   minimizeToTray?: boolean
+  /** 启动时直接最大化主窗口（默认关）。 */
+  startMaximized?: boolean
   /** Show OS native notifications when a session ends while the window is
    *  inactive (default true). */
   nativeNotifications?: boolean
@@ -657,6 +667,12 @@ export interface ForgeApi {
   getPathForFile(file: File): string
   /** Reveal a file (path resolved against cwd) in the OS file manager. */
   revealInExplorer(cwd: string, pathStr: string): Promise<boolean>
+  /** Copy an image to the system clipboard. `src` may be a data:/file:/http(s):
+   *  URL or an absolute filesystem path (blob: URLs must be converted to data:
+   *  by the renderer first). */
+  copyImage(src: string): Promise<{ ok: boolean; error?: string }>
+  /** Save an image via a native save dialog. Same `src` forms as copyImage. */
+  saveImageAs(src: string, suggestedName?: string): Promise<SaveImageResult>
 
   /** Persist a server to a config file (user/project/local scope). Does NOT touch
    *  the live session — the caller restarts the session to apply. */
@@ -728,8 +744,12 @@ export interface ForgeApi {
   importSettings(backup: SettingsBackup): Promise<void>
 
   minimizeWindow(): Promise<void>
-  toggleMaximizeWindow(): Promise<void>
+  /** 切换最大化/还原；返回切换后的最大化状态。 */
+  toggleMaximizeWindow(): Promise<boolean>
+  isWindowMaximized(): Promise<boolean>
   closeWindow(): Promise<void>
+  /** 主进程窗口 maximize/unmaximize 事件推送（覆盖双击标题栏等原生路径）。 */
+  onWindowMaximizedChange(cb: (maximized: boolean) => void): () => void
 
   /** --- System tray & native notifications --- */
   /** User's answer to the first-close prompt. `minimize` = hide to tray,

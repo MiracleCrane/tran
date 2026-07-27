@@ -5,6 +5,7 @@ import { useUiStore } from '../store/uiStore'
 import type { UserAttachment } from '../types'
 import { pathToUserAttachment, pickedFileToUserAttachment } from '../utils/attachments'
 import MessageText from './MessageText'
+import { showImageContextMenu } from './ImageContextMenu'
 
 type TextMode = 'rendered' | 'source'
 
@@ -337,6 +338,9 @@ export default function AttachmentPreviewPane(): JSX.Element | null {
             <img
               src={renderCurrent.dataUrl}
               alt={renderCurrent.name}
+              onContextMenu={(event) =>
+                showImageContextMenu(event, renderCurrent.dataUrl ?? '', renderCurrent.name)
+              }
               className="max-h-full max-w-full rounded-xl border border-white/[0.08] object-contain"
             />
           </div>

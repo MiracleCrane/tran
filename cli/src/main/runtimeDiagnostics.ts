@@ -153,7 +153,7 @@ function parseVersionProbe(result: CommandResult): {
 }
 
 async function probeWindowsKimiAsync(): Promise<RuntimeProbe> {
-  const resolved = resolveWindowsKimiCommand()
+  const resolved = await resolveWindowsKimiCommand()
   const version = await runAsync(resolved.command, [...resolved.argsPrefix, '--version'], 15000)
   const parsed = parseVersionProbe(version)
   return {

@@ -60,6 +60,7 @@ export function getPreferences(): Preferences {
     hermesComposerModels: s.hermesComposerModels,
     vulkanBackend: s.vulkanBackend,
     minimizeToTray: s.minimizeToTray,
+    startMaximized: s.startMaximized,
     nativeNotifications: s.nativeNotifications,
     closePromptDismissed: s.closePromptDismissed,
     aiNamingEnabled: s.aiNamingEnabled
@@ -96,6 +97,7 @@ export function savePreferences(prefs: Preferences): Preferences {
     armVulkanBackendPreference(prefs.vulkanBackend)
   }
   if (prefs.minimizeToTray !== undefined) s.minimizeToTray = prefs.minimizeToTray
+  if (prefs.startMaximized !== undefined) s.startMaximized = prefs.startMaximized
   if (prefs.nativeNotifications !== undefined) s.nativeNotifications = prefs.nativeNotifications
   if (prefs.closePromptDismissed !== undefined) s.closePromptDismissed = prefs.closePromptDismissed
   if (prefs.aiNamingEnabled !== undefined) s.aiNamingEnabled = prefs.aiNamingEnabled

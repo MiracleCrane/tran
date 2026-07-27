@@ -965,23 +965,25 @@ export class KimiBackend {
   private async ensureClient(): Promise<AcpClient> {
     if (this.client) return this.client
     if (!this.clientPromise) {
-      const resolved = resolveWindowsKimiCommand()
-      this.clientPromise = AcpClient.start({
-        command: resolved.command,
-        argsPrefix: resolved.argsPrefix,
-        args: ['acp'],
-        displayPath: resolved.displayPath,
-        logTag: 'kimi',
-        clientInfo: { name: 'tran', title: 'Tran', version: '1.0.0' },
-        clientCapabilities: {
-          fs: { readTextFile: true, writeTextFile: true },
-          terminal: false
-        }
-      }, {
-        onNotification: (msg) => this.handleNotification(msg),
-        onServerRequest: (msg) => this.handleServerRequest(msg),
-        onClose: (error) => this.handleClientClose(error)
-      }).then((client) => {
+      this.clientPromise = (async () => {
+        const resolved = await resolveWindowsKimiCommand()
+        return AcpClient.start({
+          command: resolved.command,
+          argsPrefix: resolved.argsPrefix,
+          args: ['acp'],
+          displayPath: resolved.displayPath,
+          logTag: 'kimi',
+          clientInfo: { name: 'tran', title: 'Tran', version: '1.0.0' },
+          clientCapabilities: {
+            fs: { readTextFile: true, writeTextFile: true },
+            terminal: false
+          }
+        }, {
+          onNotification: (msg) => this.handleNotification(msg),
+          onServerRequest: (msg) => this.handleServerRequest(msg),
+          onClose: (error) => this.handleClientClose(error)
+        })
+      })().then((client) => {
         this.client = client
         return client
       }).catch((error) => {

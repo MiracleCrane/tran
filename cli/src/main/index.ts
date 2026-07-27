@@ -158,6 +158,18 @@ function createWindow(): void {
     mainWindow = null
   })
 
+  // 同步最大化状态给渲染层：自定义标题栏按钮要切换 最大化/还原 图标
+  // （双击标题栏原生切换也要覆盖，所以走窗口事件而不是 IPC 返回值）。
+  mainWindow.on('maximize', () => {
+    mainWindow?.webContents.send('forge:window-maximized-changed', true)
+  })
+  mainWindow.on('unmaximize', () => {
+    mainWindow?.webContents.send('forge:window-maximized-changed', false)
+  })
+
+  // 设置项「启动时最大化」：show 之前最大化，避免先出普通窗口再跳变。
+  if (loadSettings().startMaximized) mainWindow.maximize()
+
   mainWindow.on('unresponsive', () => log('window', 'main window became unresponsive'))
   mainWindow.on('responsive', () => log('window', 'main window became responsive'))
 

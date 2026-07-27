@@ -24,8 +24,27 @@ let clientPromise: Promise<AcpClient> | null = null
 let lastUsedAt = 0
 
 /** 历史连接空闲 TTL：kimi 进程内的 session/list 数据快照会过期（实测列表冻结），
- *  空闲超过 TTL 的连接下次使用前关闭重建——外部新会话最多落后一个 TTL 可见。 */
+ *  空闲超过 TTL 的连接下次使用前关闭重建——外部新会话最多落后一个 TTL 可见。
+ *  此外每次查询后由 armIdleReaper 主动回收：到点仍空闲即关闭连接，避免 kimi
+ *  进程在之后再无查询时白驻留到应用退出（单个约 300MB）。 */
 const HISTORY_CLIENT_IDLE_TTL_MS = 30_000
+
+let idleTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 主动空闲回收：TTL 原本只在下次使用时惰性判断——若之后再也没有历史查询，
+ *  空闲的 kimi 进程（实测约 300MB）会一直驻留到应用退出。每次查询后武装
+ *  定时器，到点仍空闲就主动关闭连接让进程退出；再次查询会重建。 */
+function armIdleReaper(): void {
+  if (idleTimer) clearTimeout(idleTimer)
+  idleTimer = setTimeout(() => {
+    idleTimer = null
+    if (!client || Date.now() - lastUsedAt < HISTORY_CLIENT_IDLE_TTL_MS) return
+    client.close()
+    client = null
+    clientPromise = null
+  }, HISTORY_CLIENT_IDLE_TTL_MS)
+  idleTimer.unref?.()
+}
 
 function ensureClient(): Promise<AcpClient> {
   if (client) {
@@ -37,9 +56,10 @@ function ensureClient(): Promise<AcpClient> {
     clientPromise = null
   }
   if (!clientPromise) {
-    const resolved = resolveWindowsKimiCommand()
     let promise!: Promise<AcpClient>
-    promise = AcpClient.start({
+    promise = (async () => {
+      const resolved = await resolveWindowsKimiCommand()
+      return AcpClient.start({
       command: resolved.command,
       argsPrefix: resolved.argsPrefix,
       args: ['acp'],
@@ -64,7 +84,8 @@ function ensureClient(): Promise<AcpClient> {
           clientPromise = null
         }
       }
-    }).then((started) => {
+    })
+    })().then((started) => {
       client = started
       return started
     }).catch((error) => {
@@ -110,6 +131,7 @@ export async function listKimiSessions(
   try {
     const acp = await ensureClient()
     lastUsedAt = Date.now()
+    armIdleReaper()
     const response = await acp.request<Record<string, unknown>>('session/list', {}, 30000)
     const rawSessions = Array.isArray(response?.sessions)
       ? response.sessions

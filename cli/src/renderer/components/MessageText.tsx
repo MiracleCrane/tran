@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, type AnchorHTMLAttributes, type MouseEvent } from 'react'
+import { memo, useEffect, useState, type AnchorHTMLAttributes, type ImgHTMLAttributes, type MouseEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -6,6 +6,7 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import type { UserAttachment } from '../types'
 import { pathToUserAttachment, pickedFileToUserAttachment } from '../utils/attachments'
+import { showImageContextMenu } from './ImageContextMenu'
 
 function isPathLike(s: string): boolean {
   if (!s || s.length > 260) return false
@@ -159,7 +160,23 @@ function LinkRenderer({
   )
 }
 
-const MD_COMPONENTS = { code: CodeRenderer, a: LinkRenderer }
+type ImgRendererProps = ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }
+
+/** AI 输出的 markdown 图片（#22）：右键弹"复制图片 / 另存为…"菜单。 */
+function ImgRenderer({ src, alt, node: _node, ...props }: ImgRendererProps): JSX.Element {
+  const source = typeof src === 'string' ? src : ''
+  const name = typeof alt === 'string' && alt ? alt : undefined
+  return (
+    <img
+      {...props}
+      src={src}
+      alt={alt ?? ''}
+      onContextMenu={(event) => showImageContextMenu(event, source, name)}
+    />
+  )
+}
+
+const MD_COMPONENTS = { code: CodeRenderer, a: LinkRenderer, img: ImgRenderer }
 const MD_PLAIN = { remarkPlugins: [remarkGfm], components: MD_COMPONENTS }
 const MD_HIGHLIGHTED = {
   remarkPlugins: [remarkGfm],

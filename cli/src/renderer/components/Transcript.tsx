@@ -4,6 +4,7 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import type { AssistantBlock, AssistantItem, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
 import MessageText from './MessageText'
+import { showImageContextMenu } from './ImageContextMenu'
 import ToolCallCard from './ToolCallCard'
 import ToolGroupCard from './ToolGroupCard'
 import CompactionDivider from './CompactionDivider'
@@ -287,8 +288,9 @@ const UserMessage = memo(function UserMessage({ item }: { item: UserItem }): JSX
                   key={i}
                   type="button"
                   onClick={(event) => handleAttachmentClick(event, a)}
+                  onContextMenu={(event) => showImageContextMenu(event, a.dataUrl ?? '', a.name)}
                   className="rounded-lg outline-none ring-accent/50 transition hover:brightness-110 focus-visible:ring-2"
-                  title={`预览 ${a.name}`}
+                  title={`预览 ${a.name}；右键复制/另存图片`}
                 >
                   <img
                     src={a.dataUrl}
