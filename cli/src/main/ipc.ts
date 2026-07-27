@@ -42,6 +42,7 @@ import {
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { listKimiSessions } from './kimiHistory'
 import { getPlanUsageCached } from './usageService'
+import { fetchQuotaOverview, fetchQuotaActions, runQuotaLogin } from './quotaService'
 import { deleteKimiSession } from './sessionDelete'
 import { removeSessionTitle, recordManualTitle } from './sessionTitles'
 import { allAiTitles, generateAiTitlesBatch, getSessionPreview } from './aiTitles'
@@ -89,6 +90,8 @@ import type {
   DiagnosticReportResult,
   SessionUsageInfo,
   PlanUsageResult,
+  QuotaOverviewResult,
+  QuotaActionsResult,
   AiTitlesBatchResult,
   SessionPreview
 } from '../shared/ipc'
@@ -445,6 +448,14 @@ export function registerIpc(
   })
 
   ipcMain.handle('forge:getPlanUsage', async (): Promise<PlanUsageResult> => getPlanUsageCached())
+
+  // --- 额度明细（MembershipService RPC；登录态取 kimi-desktop / 网页登录兜底） ---
+  ipcMain.handle('forge:getQuotaOverview', async (): Promise<QuotaOverviewResult> => fetchQuotaOverview())
+  ipcMain.handle(
+    'forge:listQuotaActions',
+    async (_e, pageToken?: string): Promise<QuotaActionsResult> => fetchQuotaActions(pageToken)
+  )
+  ipcMain.handle('forge:quotaLogin', async (): Promise<{ ok: boolean; error?: string }> => runQuotaLogin())
 
   ipcMain.handle(
     'forge:listMarketplacePlugins',

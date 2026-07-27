@@ -144,6 +144,9 @@ const api: ForgeApi = {
 
   getSessionUsage: (sessionId) => ipcRenderer.invoke('forge:getSessionUsage', sessionId),
   getPlanUsage: () => ipcRenderer.invoke('forge:getPlanUsage'),
+  getQuotaOverview: () => ipcRenderer.invoke('forge:getQuotaOverview'),
+  listQuotaActions: (pageToken) => ipcRenderer.invoke('forge:listQuotaActions', pageToken),
+  quotaLogin: () => ipcRenderer.invoke('forge:quotaLogin'),
 
   // --- Git integration ---
   isGitRepo: (cwd) => ipcRenderer.invoke('forge:gitIsRepo', cwd),

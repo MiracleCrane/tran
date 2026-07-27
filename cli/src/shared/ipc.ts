@@ -469,6 +469,73 @@ export type PlanUsageResult =
   | { ok: true; data: PlanUsageInfo }
   | { ok: false; error: string }
 
+/** --- 额度明细面板（Kimi 网页版"我的额度/使用明细"对齐） ---
+ *  数据源：kimi.gateway.membership.v2.MembershipService（Connect RPC，JSON over POST），
+ *  登录态取 kimi-desktop bridge-store（主）或 Tran 自建网页登录（兜底）。
+ *  ratio 字段均为 0–1 float，渲染层 ×100 保留两位小数。 */
+export interface QuotaRatelimitWindow {
+  /** 用量占比（0–1）。 */
+  ratio?: number
+  enabled?: boolean
+  /** 重置时间（epoch ms）。 */
+  resetAt?: number
+}
+
+export interface QuotaBoosterWallet {
+  /** 加油包开关状态（STATUS_ENABLED → true）。 */
+  enabled: boolean
+  /** 余额 / 充值总额（元）。 */
+  balanceCny?: number
+  totalCny?: number
+  /** 本月消费 / 本月上限（元；上限仅在开启月度限额时返回）。 */
+  monthlyUsedCny?: number
+  monthlyLimitCny?: number
+}
+
+export interface QuotaOverview {
+  /** 总用量占比（Kimi+Code 合并，subscription_balance.amount_used_ratio）。 */
+  totalUsedRatio?: number
+  /** 其中 Kimi Code 占比（kimi_code_used_ratio）。 */
+  codeUsedRatio?: number
+  /** 总额度重置/到期时间（epoch ms）。 */
+  expireAt?: number
+  ratelimit5h?: QuotaRatelimitWindow
+  ratelimit7d?: QuotaRatelimitWindow
+  ratelimitCode5h?: QuotaRatelimitWindow
+  ratelimitCode7d?: QuotaRatelimitWindow
+  boosterWallet?: QuotaBoosterWallet
+  overdrawn?: boolean
+}
+
+export type QuotaOverviewResult =
+  | { ok: true; data: QuotaOverview }
+  | { ok: false; error: string; needsLogin?: boolean }
+
+export interface QuotaActionItem {
+  amount?: number
+  /** 占总额度比例（0–1）。 */
+  amountRatio?: number
+  unit?: string
+  /** 折算金额（元）。 */
+  amountMoneyCny?: number
+}
+
+/** 一条使用明细（ListBalanceActions.actions[]）。 */
+export interface QuotaAction {
+  id: string
+  feature?: string
+  title?: string
+  /** ONGOING / DONE / UNDO。 */
+  status?: string
+  /** 发生时间（epoch ms）。 */
+  timestamp?: number
+  items: QuotaActionItem[]
+}
+
+export type QuotaActionsResult =
+  | { ok: true; actions: QuotaAction[]; nextPageToken?: string }
+  | { ok: false; error: string; needsLogin?: boolean }
+
 /** kimi 本地 server 的任务条目（tasks API，子代理/后台 Bash）。 */
 export interface KimiTaskInfo {
   id: string
@@ -687,6 +754,14 @@ export interface ForgeApi {
   refreshSessionUsage(sessionId: string): Promise<void>
   /** 套餐额度 / 会员 / 加油包（Kimi 云端 API，主进程直连）。 */
   getPlanUsage(): Promise<PlanUsageResult>
+
+  /** --- 额度明细面板（MembershipService RPC） --- */
+  /** 额度总览：总用量 / 5h / 7d（含 Code 分项）/ 加油包。 */
+  getQuotaOverview(): Promise<QuotaOverviewResult>
+  /** 使用明细分页（pageToken 缺省=首页；服务端固定每页约 20 条）。 */
+  listQuotaActions(pageToken?: string): Promise<QuotaActionsResult>
+  /** 兜底登录：打开 Kimi 网页登录窗，成功后本地保存 token 供额度 RPC 复用。 */
+  quotaLogin(): Promise<{ ok: boolean; error?: string }>
 
   /** --- Git integration --- */
   isGitRepo(cwd: string): Promise<boolean>

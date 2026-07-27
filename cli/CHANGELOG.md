@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.25 - 2026-07-27
+
+### 中文
+
+- 新增:额度明细面板(对齐 Kimi 网页版"我的额度/使用明细")。用量圆环悬停卡底部新增"额度明细 →"入口,面板内含:总用量(两位小数百分比 + 重置时间,附 Kimi Code 分项)、5 小时/7 天/Code 5 小时/Code 7 天各行用量(百分比 + 重置时间)、额度加油包卡片(开关状态、余额/总额、本月消费/上限)、使用明细逐条消耗记录(标题、时间、消耗百分比,分页加载更多)。
+- 数据通路:复用 kimi-desktop 的 MembershipService RPC(JSON over HTTP,原生两位小数精度),登录态优先读取本机 kimi-desktop 的 token 缓存并自动刷新;读不到时兜底弹出 Kimi 网页登录窗(登录一次后本地复用)。token 值不进任何日志。
+
+### English
+
+- Added: quota detail panel (mirrors the Kimi web "My Quota / Usage Details" page). A new "额度明细 →" entry at the bottom of the usage-ring hover card opens a panel with: total usage (two-decimal percentage + reset time, with the Kimi Code sub-figure), 5-hour / 7-day / Code 5-hour / Code 7-day windows, booster wallet card (status, balance/total, monthly spend/limit), and a paged per-action consumption list.
+- Data path: reuses kimi-desktop's MembershipService RPC (JSON over HTTP, native two-decimal precision). Auth prefers the local kimi-desktop token cache with automatic refresh; falls back to an embedded kimi.com login window (one-time, reused locally). Token values never touch logs.
+
+#### 验证
+
+- 三个 RPC 端点(GetSubscriptionStats / ListBalanceActions / token refresh)均用真实 token 实测通过;明细分页 pageToken 翻页正常
+- `npm run typecheck` 与 `npm run build` 全绿
+
 ## v1.0.24 - 2026-07-27
 
 ### 中文

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useUiStore } from '../store/uiStore'
 import { useSessionStore } from '../store/sessionStore'
 import { fmtK } from '../utils/format'
+import QuotaPanel from './QuotaPanel'
 import type { PlanUsageInfo, UsageLimitWindow } from '../../shared/ipc'
 
 /** 状态栏迷你用量圆环（kimi web 式）：5h 滚动窗口 + 每周额度两个小 SVG 环，
@@ -126,6 +127,7 @@ export default function UsageRings(): JSX.Element {
   const pinned = useUiStore((s) => s.usageOpen)
   const setPinned = useUiStore((s) => s.setUsageOpen)
   const [hover, setHover] = useState(false)
+  const [quotaOpen, setQuotaOpen] = useState(false)
   const [plan, setPlan] = useState<PlanUsageInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -289,12 +291,24 @@ export default function UsageRings(): JSX.Element {
               <p className="text-xs text-zinc-600">云端未返回额度数据。</p>
             )}
           </div>
-          <div className="mt-3 border-t border-white/[0.06] pt-2 text-center text-[10px] text-zinc-600">
-            悬停预览 · 点击钉住
+          <div className="mt-3 flex items-center justify-between border-t border-white/[0.06] pt-2 text-[10px] text-zinc-600">
+            <span>悬停预览 · 点击钉住</span>
+            <button
+              type="button"
+              onClick={() => {
+                setQuotaOpen(true)
+                setPinned(false)
+                setHover(false)
+              }}
+              className="rounded px-1.5 py-0.5 text-[11px] text-accent transition hover:bg-accent/15"
+            >
+              额度明细 →
+            </button>
           </div>
         </div>,
         document.body
       )}
+      <QuotaPanel open={quotaOpen} onClose={() => setQuotaOpen(false)} />
     </div>
   )
 }
