@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.0.27 - 2026-07-27
+
+### 中文
+
+- 新增:紫黄旋转月亮思考动画(纯 CSS,无依赖)。思考块、"输出中…"、"Tran 正在处理…"、输入区忙碌提示四处呼吸点统一替换为 Kimi Web 同款旋转新月;遵循 prefers-reduced-motion。
+- 优化:后台命令/子 Agent 浮层改造。最新条目在前、运行中置顶并高亮;默认只显示活跃项 + 最近 8 条,历史归档为"查看全部"折叠;子 agent 与 Bash 条目优先显示可读意图(description/prompt),裸命令收进展开详情。
+- 修复:新建会话落错目录。根因是启动项目匹配用裸 === 比较路径——session/list 写回的正斜杠路径与项目列表的反斜杠永不匹配,回退到列表第一项(恰好是用户目录)。现统一归一化比较(含 ProjectSwitcher 高亮/去重/删除判定)。
+- 新增:MCP 状态条。会话上方显示各 MCP server 名称、连接状态、transport、工具数(如"yuque · connected · 19 tools (stdio)"),带刷新按钮;经隐藏 /mcp 轮获取(本地直返不耗 token),打开会话自动查询、pending 自动补查。
+- 新增:查询类斜杠命令(/usage、/status、/mcp)输出不再混入对话流,改渲染为可折叠的状态卡片。
+- 优化:会话 AI 自动命名升级。首轮结束仍用首条消息快速命名;攒够前 3 次真实发言后精修一次标题(只覆盖 AI 标题,手动命名不动),命名更准。
+
+### English
+
+- Added: purple-yellow rotating moon thinking animation (pure CSS, no deps), replacing the breathing dot in thinking blocks, "outputing…", "Tran is processing…", and the composer busy hint; honors prefers-reduced-motion.
+- Improved: background-command/sub-agent popovers. Newest first, running items pinned and highlighted; collapsed by default to active + 8 recent with a "show all" archive toggle; sub-agent and Bash rows now show readable intent (description/prompt) instead of raw commands.
+- Fixed: new sessions landing in the wrong directory. Root cause: startup-project matching compared paths with bare `===` — the forward-slash path written back from session/list never matched the back-slash project list, falling back to the first entry (the user home). Comparisons are now normalized (including ProjectSwitcher highlight/dedupe/remove).
+- Added: MCP status bar above the transcript — per-server name, status, transport, tool count (e.g. "yuque · connected · 19 tools (stdio)") with a refresh button, fetched via a hidden /mcp turn (local, no token cost), auto-queried on session open with pending retry.
+- Added: query-type slash commands (/usage, /status, /mcp) render as collapsible status cards instead of chat messages.
+- Improved: AI session naming. First turn still names from the first message; after 3 real user messages the title is refined once (AI titles only, manual names untouched).
+
+#### 验证
+
+- kimi acp 0.29 实测:cwd 下发、/mcp 输出解析、多会话并发均通过
+- `npm run typecheck` 与 `npm run build` 全绿
+
 ## v1.0.26 - 2026-07-27
 
 ### 中文

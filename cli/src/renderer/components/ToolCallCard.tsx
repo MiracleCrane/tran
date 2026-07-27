@@ -71,7 +71,8 @@ export function summaryForTool(name: string, input: unknown): string {
   switch (name) {
     case 'Bash':
     case 'terminal':
-      return s(inp.command)
+      // #12 优先可读 description（Kimi 风格：意图在前，裸命令收进展开区）。
+      return s(inp.description) || s(inp.command)
     case 'Read':
     case 'read_file':
       return s(inp.file_path) || s(inp.path)

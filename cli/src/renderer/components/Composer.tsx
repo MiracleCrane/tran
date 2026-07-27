@@ -768,10 +768,10 @@ export default function Composer(): JSX.Element {
             </span>
           )}
           {stopReason && !statusError && <span className="text-zinc-600">结束: {stopReason}</span>}
-          {/* #5 忙碌态：明确提示输出中 + 排队语义，不再静默。 */}
+          {/* #5 忙碌态：明确提示输出中 + 排队语义，不再静默。#11 换 Kimi Web 同款旋转月亮。 */}
           {running && (
             <span className="flex shrink-0 items-center gap-1.5 text-accent/90">
-              <span className="session-running-dot" />
+              <span className="thinking-moon" aria-hidden />
               AI 正在输出中{pending.length > 0 ? `，已排队 ${pending.length} 条` : '，新消息将排队发送'}
             </span>
           )}

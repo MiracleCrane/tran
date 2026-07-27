@@ -1,6 +1,7 @@
 import { basename } from 'node:path'
 import { loadSettings, saveSettings } from './settings'
 import { log } from './logger'
+import { normalizeCwdForCompare } from '../shared/paths'
 import type { Project } from '../shared/ipc'
 
 /**
@@ -62,7 +63,11 @@ export function getStartupProject(): Project | null {
   if (!list.length) return null
   const last = loadSettings().lastProjectPath
   if (last) {
-    const found = list.find((p) => p.path === last)
+    // #14 路径形式归一化后再比：session/list 返回正斜杠形式的 cwd，经
+    // openSessionCrossProject → setLastProject 写回后与项目列表里的反斜杠
+    // 形式做 === 永远不匹配，启动回退到列表第一项（可能根本不是上次项目）。
+    const target = normalizeCwdForCompare(last)
+    const found = list.find((p) => normalizeCwdForCompare(p.path) === target)
     if (found) return found
   }
   return list[0]

@@ -7,6 +7,7 @@ import MessageText from './MessageText'
 import ToolCallCard from './ToolCallCard'
 import ToolGroupCard from './ToolGroupCard'
 import CompactionDivider from './CompactionDivider'
+import QueryResultCard from './QueryResultCard'
 
 const INITIAL_HIGHLIGHT_DELAY_MS = 420
 const SCROLL_HIGHLIGHT_RESUME_MS = 180
@@ -354,7 +355,7 @@ const ThinkingBlock = memo(function ThinkingBlock({
         {!open && (
           <span className="min-w-0 truncate font-normal text-zinc-600">{preview}</span>
         )}
-        {streaming && <span className="stream-cursor-glow" />}
+        {streaming && <span className="thinking-moon" aria-hidden />}
       </button>
       {open && (
         <div
@@ -424,7 +425,7 @@ const AssistantMessage = memo(function AssistantMessage({
         })}
       {isStreaming && (
         <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
-          <span className="stream-cursor-glow" />
+          <span className="thinking-moon" aria-hidden />
           输出中…
         </div>
       )}
@@ -767,6 +768,7 @@ export default function Transcript({
     }
     if (row.node.item.kind === 'user') return <UserMessage item={row.node.item as UserItem} />
     if (row.node.item.kind === 'compaction') return <CompactionDivider item={row.node.item} />
+    if (row.node.item.kind === 'query') return <QueryResultCard item={row.node.item} />
     return (
       <AssistantMessage
         item={row.node.item as AssistantItem}
@@ -861,7 +863,7 @@ export default function Transcript({
               {compacting && <div className="text-center text-xs text-zinc-500">正在压缩上下文…</div>}
               {running && (
                 <div className="flex items-center gap-2 text-xs text-zinc-500">
-                  <span className="stream-cursor-glow" />
+                  <span className="thinking-moon" aria-hidden />
                   Tran 正在处理…
                 </div>
               )}

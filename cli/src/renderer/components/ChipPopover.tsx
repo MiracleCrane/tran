@@ -1,11 +1,14 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useSessionStore } from '../store/sessionStore'
 import { AGENT_TOOL_NAMES, BASH_TOOL_NAMES, collectToolBlocks, countRunningTools } from '../utils/toolStats'
-import { PlanRow, ToolRow } from './taskRows'
+import { isToolRowActive, PlanRow, ToolRow } from './taskRows'
 
 /** chips 独立浮层（kimi web 同款）：点哪个 chip 弹哪个自己的面板，portal 挂
  *  body、fixed 定位向上浮出、点外部关闭。合并面板（TaskPanel）已被此取代。 */
+
+/** #12 归档阈值：默认只显示活跃项 + 最近 N 条历史，其余收进"查看全部"。 */
+const RECENT_HISTORY_LIMIT = 8
 
 export type ChipKind = 'bash' | 'agent' | 'plan'
 
@@ -26,6 +29,7 @@ export default function ChipPopover({
   const items = useSessionStore((s) => s.items)
   const planEntries = useSessionStore((s) => s.planEntries)
   const cardRef = useRef<HTMLDivElement | null>(null)
+  const [showAllHistory, setShowAllHistory] = useState(false)
 
   // 点卡片外任意处关闭（无 backdrop，非模态）。
   useEffect(() => {
@@ -57,6 +61,13 @@ export default function ChipPopover({
         ? agentBlocks.length === 0
         : planEntries.length === 0
 
+  // #12 排序：最新在前（collectToolBlocks 返回时间正序，倒转）；活跃项再置顶突出。
+  const newestFirst = (kind === 'bash' ? bashBlocks : agentBlocks).slice().reverse()
+  const activeBlocks = newestFirst.filter(isToolRowActive)
+  const historyBlocks = newestFirst.filter((b) => !isToolRowActive(b))
+  const visibleHistory = showAllHistory ? historyBlocks : historyBlocks.slice(0, RECENT_HISTORY_LIMIT)
+  const hiddenHistoryCount = historyBlocks.length - visibleHistory.length
+
   return createPortal(
     <div
       ref={cardRef}
@@ -73,9 +84,28 @@ export default function ChipPopover({
         ) : kind === 'plan' ? (
           planEntries.map((entry, i) => <PlanRow key={i} entry={entry} index={i} />)
         ) : (
-          (kind === 'bash' ? bashBlocks : agentBlocks).map((b) => (
-            <ToolRow key={b.toolUseId} block={b} />
-          ))
+          <>
+            {[...activeBlocks, ...visibleHistory].map((b) => (
+              <ToolRow key={b.toolUseId} block={b} />
+            ))}
+            {hiddenHistoryCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowAllHistory(true)}
+                className="mt-0.5 w-full rounded-lg px-2 py-1.5 text-left text-[11px] text-zinc-500 transition hover:bg-white/[0.03] hover:text-zinc-300"
+              >
+                查看全部（还有 {hiddenHistoryCount} 条历史）
+              </button>
+            ) : showAllHistory && historyBlocks.length > RECENT_HISTORY_LIMIT ? (
+              <button
+                type="button"
+                onClick={() => setShowAllHistory(false)}
+                className="mt-0.5 w-full rounded-lg px-2 py-1.5 text-left text-[11px] text-zinc-500 transition hover:bg-white/[0.03] hover:text-zinc-300"
+              >
+                收起历史
+              </button>
+            ) : null}
+          </>
         )}
       </div>
     </div>,

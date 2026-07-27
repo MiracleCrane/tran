@@ -5,6 +5,7 @@ import type {
   ComposerModel,
   MarketplacePlugin,
   McpServerEntry,
+  McpServerStatusKind,
   PermissionRequestPayload,
   PermissionResponsePayload,
   SDKMessage,
@@ -95,8 +96,19 @@ interface ActiveKimiSession {
   /** 空壳治理：是否收到过真实用户 prompt（sendMessage 的用户消息；
    *  隐藏 /usage 轮不算）。 */
   gotRealPrompt: boolean
-  /** AI 命名：本运行内是否已触发过自动生成（每会话至多一次，控制 token 成本）。 */
+  /** AI 命名：本运行内是否已触发过自动生成（首轮快命名，控制 token 成本）。 */
   aiTitleRequested: boolean
+  /** AI 命名：是否已用前几次发言精修过一次（至多一次，AI 标题可覆盖）。 */
+  aiTitleRefined: boolean
+  /** AI 命名语料：前 3 次真实用户发言原文（斜杠命令轮不收）。 */
+  titleTexts: string[]
+  /** 查询轮（/usage、/status、/mcp 这类"查询结果非对话"的斜杠命令）：该轮
+   *  文本累积不转发对话流，turn 结束经 system/query_result 状态卡推送。 */
+  queryTurn: boolean
+  queryText: string
+  queryCommand?: string
+  /** 隐藏 /mcp 轮解析出的 server 状态缓存（listMcpServers / 面板刷新用）。 */
+  mcpServers?: McpServerEntry[]
 }
 
 interface PendingPermission {
@@ -148,6 +160,11 @@ interface PromptPayload {
 }
 
 const KIMI_AUTH_HINT = 'Kimi CLI 未登录或登录已过期：请在终端运行 kimi login 完成登录，然后重启 Tran。'
+
+/** 会话打开后查 MCP 状态前的等待（server 异步连接，实测秒级）。 */
+const MCP_CONNECT_GRACE_MS = 3500
+/** /mcp 结果仍有 pending server 时的补查间隔（只补一次）。 */
+const MCP_PENDING_RETRY_MS = 6000
 
 /** Map ACP/JSON-RPC failures to user-facing text. authRequired (-32000) means
  *  the Kimi CLI has no usable token — the fix is a terminal `kimi login`. */
@@ -225,7 +242,11 @@ export class KimiBackend {
       usageRefreshPending: false,
       createdViaNew: !opts.resume,
       gotRealPrompt: false,
-      aiTitleRequested: false
+      aiTitleRequested: false,
+      aiTitleRefined: false,
+      titleTexts: [],
+      queryTurn: false,
+      queryText: ''
     }
     session.ready = this.prepareSession(session, opts)
     this.sessions.set(sessionId, session)
@@ -365,16 +386,22 @@ export class KimiBackend {
     }
   }
 
-  // TODO(kimi-mcp): 接入 Kimi 的 MCP 配置（session/new 的 mcpServers 转发已获
-  // ACP 支持）；目前 UI 的 MCP 面板入口已隐藏，这里先返回空列表。
+  // MCP server 状态来自隐藏 /mcp 轮（ACP initialize/session-new 均不下发
+  // server 明细，实测 0.29）；会话打开时自动查一次并经 system/mcp_servers
+  // 推送，这里返回缓存。toggle 尚未接入（ACP 无对应方法）。
   async listMcpServers(sessionId: string): Promise<McpServerEntry[]> {
     const session = this.requireSession(sessionId)
     await session.ready
-    return []
+    return [...(session.mcpServers ?? [])]
   }
 
   async refreshMcpServers(sessionId: string): Promise<McpServerEntry[]> {
-    return this.listMcpServers(sessionId)
+    const session = this.requireSession(sessionId)
+    await session.ready.catch(() => {})
+    // 触发一次隐藏 /mcp 轮重查（内部有空闲/串行守卫），结果经
+    // system/mcp_servers 推送；这里先返回现有缓存。
+    void this.runHiddenMcpTurn(session)
+    return [...(session.mcpServers ?? [])]
   }
 
   async toggleMcpServer(_sessionId: string, _name: string, _enabled: boolean): Promise<void> {
@@ -532,11 +559,22 @@ export class KimiBackend {
     }
     this.emitInit(session, session.acpSessionId ?? opts.resume ?? session.id, session.model ?? model)
     void this.drain(session)
-    // 会话打开即刷新上下文用量（session/new、session/load 各一次；有轮在跑
-    // 则 turn 末的 afterTurn 会补，这里只在空转时触发，保持串行）。
+    // 会话打开即刷新上下文用量 + MCP server 状态（串行隐藏轮；有轮在跑则
+    // turn 末的 afterTurn 会补 /usage，这里只在空转时触发，保持串行）。
     if (!session.closed && !session.running && session.queue.length === 0) {
-      void this.runHiddenUsageTurn(session)
+      void this.runSessionOpenHiddenTurns(session)
     }
+  }
+
+  /** 会话打开时的串行隐藏轮：先 /usage（上下文环），稍等 MCP 异步连接后
+   *  再 /mcp（server 状态条）。任一环节失败只记日志，不影响会话。 */
+  private async runSessionOpenHiddenTurns(session: ActiveKimiSession): Promise<void> {
+    await this.runHiddenUsageTurn(session)
+    // MCP server 在 session/new / session/load 后异步连接（实测秒级），立即查
+    // 只能拿到 pending——先等一拍；仍有 pending 时 runHiddenMcpTurn 自补一次。
+    await new Promise((resolve) => setTimeout(resolve, MCP_CONNECT_GRACE_MS))
+    if (session.closed || session.running || session.queue.length) return
+    await this.runHiddenMcpTurn(session)
   }
 
   private rememberConfigOptions(value: unknown): void {
@@ -623,6 +661,10 @@ export class KimiBackend {
       // 压缩轮标志随轮重置（runTurn 正常结束已清；这里是出错兜底）。
       session.compactTurn = false
       session.compactText = ''
+      // 查询轮标志同理（出错兜底：吞掉的文本直接丢弃，不补状态卡）。
+      session.queryTurn = false
+      session.queryText = ''
+      session.queryCommand = undefined
       if (!session.closed && session.queue.length) void this.drain(session)
       // turn 完成且队列空了：隐藏 /usage 轮 + goal 续跑（串行，见 afterTurn）。
       else if (!session.closed) void this.afterTurn(session, next)
@@ -634,6 +676,11 @@ export class KimiBackend {
   private async afterTurn(session: ActiveKimiSession, finished: QueuedMessage): Promise<void> {
     if (!finished.goal) await this.runHiddenUsageTurn(session)
     if (session.closed) return
+    // MCP 状态首查在会话打开时没机会跑（用户立即开聊）：turn 末空闲补一次。
+    if (session.mcpServers === undefined && !session.running && session.queue.length === 0) {
+      await this.runHiddenMcpTurn(session)
+      if (session.closed) return
+    }
     if (session.queue.length) {
       void this.drain(session)
       return
@@ -776,12 +823,70 @@ export class KimiBackend {
     void this.runHiddenUsageTurn(session)
   }
 
+  /** 隐藏轮：向 ACP 会话发 '/mcp'，解析 server 连接状态（名称/connected 等
+   *  状态/传输方式/工具数），经 system/mcp_servers 推渲染层状态区。与
+   *  /usage 隐藏轮共用 hiddenTurn 吞事件机制；只在会话空闲时跑（用户轮在
+   *  途时直接放弃，状态区等下次机会，不与对话流抢 FIFO）。 */
+  private async runHiddenMcpTurn(session: ActiveKimiSession, allowRetry = true): Promise<void> {
+    if (session.closed || !session.acpSessionId || session.hiddenTurn) return
+    if (session.running || session.queue.length) return
+    session.hiddenTurn = true
+    session.hiddenText = ''
+    try {
+      const client = await this.ensureClient()
+      await client.request('session/prompt', {
+        sessionId: session.acpSessionId,
+        prompt: [{ type: 'text', text: '/mcp' }],
+        messageId: cryptoId()
+      }, 60000, () => this.cancelTurnOnTimeout(client, session))
+      const servers = parseMcpServers(session.hiddenText)
+      if (servers && !session.closed) {
+        session.mcpServers = servers
+        this.h.onMessage(session.id, {
+          type: 'system',
+          subtype: 'mcp_servers',
+          servers
+        } as unknown as SDKMessage)
+        // server 异步连接：还有 pending 就晚些补查一次（仅一次，防轮询烧 turn）。
+        if (allowRetry && servers.some((s) => s.status === 'pending')) {
+          setTimeout(() => {
+            if (!session.closed) void this.runHiddenMcpTurn(session, false)
+          }, MCP_PENDING_RETRY_MS).unref()
+        }
+      }
+    } catch (error) {
+      log('kimi', `hidden /mcp turn failed: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      session.hiddenTurn = false
+      session.hiddenText = ''
+      // 轮进行中收到的 /usage 刷新请求：轮末补跑（与 runHiddenUsageTurn 同款）。
+      if (session.usageRefreshPending && !session.closed) {
+        session.usageRefreshPending = false
+        void this.runHiddenUsageTurn(session)
+      }
+    }
+  }
+
   private async runTurn(session: ActiveKimiSession, message: QueuedMessage): Promise<void> {
     if (!session.acpSessionId) throw new Error('Kimi session is not ready.')
-    // 侧栏标题兜底：kimi 对未命名会话只回 "New Session"，用首条用户消息补。
-    recordSessionTitle(session.acpSessionId, firstUserText(message.content))
+    const userText = firstUserText(message.content).trimStart()
+    // 查询轮标记（/usage、/status、/mcp：输出是状态信息不是对话）：该轮文本
+    // 累积不转发对话流，turn 结束经 system/query_result 状态卡推送。
+    const queryCommand = queryCommandOf(userText)
+    if (queryCommand) {
+      session.queryTurn = true
+      session.queryCommand = queryCommand
+    } else {
+      // 侧栏标题兜底：kimi 对未命名会话只回 "New Session"，用首条用户消息补
+      // （斜杠命令轮不当标题）。
+      recordSessionTitle(session.acpSessionId, firstUserText(message.content))
+    }
+    // AI 命名语料：前 3 次真实发言（斜杠命令轮不收）。
+    if (session.createdViaNew && userText && !userText.startsWith('/') && session.titleTexts.length < 3) {
+      session.titleTexts.push(firstUserText(message.content))
+    }
     // 压缩轮标记：/compact（含参数形式）——该轮压缩文本不渲染，结束统一解析。
-    if (firstUserText(message.content).trimStart().startsWith('/compact')) {
+    if (userText.startsWith('/compact')) {
       session.compactTurn = true
     }
     const client = await this.ensureClient()
@@ -793,6 +898,31 @@ export class KimiBackend {
     }, 900000, () => this.cancelTurnOnTimeout(client, session))
     // goal 循环终止判定用：封停前捕获本轮最终正文。
     session.lastTurnText = session.streamedText
+    // 查询轮：输出经 system/query_result 状态卡推渲染层（原文不进对话流）。
+    if (session.queryTurn) {
+      const command = session.queryCommand ?? '/status'
+      const text = session.queryText.trim()
+      session.queryTurn = false
+      session.queryText = ''
+      session.queryCommand = undefined
+      this.h.onMessage(session.id, {
+        type: 'system',
+        subtype: 'query_result',
+        query: { command, text, at: Date.now() }
+      } as unknown as SDKMessage)
+      // 用户手输 /usage：顺带刷新上下文环（与隐藏轮同一解析）。
+      if (command === '/usage') {
+        const usage = parseContextUsage(text)
+        if (usage) {
+          session.contextUsage = usage
+          this.h.onMessage(session.id, {
+            type: 'system',
+            subtype: 'context_usage',
+            contextUsage: usage
+          } as unknown as SDKMessage)
+        }
+      }
+    }
     // 压缩轮：解析统计数据，经 system/compaction 推渲染层（原始文本不渲染）。
     if (session.compactTurn) {
       this.h.onMessage(session.id, {
@@ -812,14 +942,23 @@ export class KimiBackend {
       outputTokens: asNumber(usage?.outputTokens),
       totalTokens: asNumber(usage?.totalTokens)
     })
-    // AI 会话命名：Tran 新建会话的首个真实用户 turn 结束后触发一次（resume 的
-    // 老会话不自动生成）。输入只给首条消息（截断 ~500 字符），单次调用
-    // ≈100-200 token，失败静默回退原标题，不重试。
-    if (session.createdViaNew && !session.aiTitleRequested && session.acpSessionId) {
-      session.aiTitleRequested = true
-      void generateAiTitle(session.acpSessionId, firstUserText(message.content)).then((title) => {
-        if (title) this.h.onSessionsChanged?.()
-      })
+    // AI 会话命名：Tran 新建会话限定（resume 的老会话不自动生成）。首轮结束
+    // 用首条发言快速命名一次；攒够前 3 次发言后再精修一次（#17：命名输入不
+    // 只给第一句话；AI 标题可覆盖，手动命名永远不动）。单次 ≈100-200 token，
+    // 每会话至多 2 次，失败静默回退原标题，不重试。
+    if (session.createdViaNew && session.acpSessionId) {
+      const texts = session.titleTexts
+      if (!session.aiTitleRequested && texts.length > 0) {
+        session.aiTitleRequested = true
+        void generateAiTitle(session.acpSessionId, texts[0]).then((title) => {
+          if (title) this.h.onSessionsChanged?.()
+        })
+      } else if (texts.length >= 3 && !session.aiTitleRefined) {
+        session.aiTitleRefined = true
+        void generateAiTitle(session.acpSessionId, texts.join('\n'), { overwriteAiTitle: true }).then((title) => {
+          if (title) this.h.onSessionsChanged?.()
+        })
+      }
     }
   }
 
@@ -1012,6 +1151,12 @@ export class KimiBackend {
     if (type === 'agent_message_chunk') {
       const text = textFromContentBlock(update.content)
       if (!text) return
+      // 查询轮（/usage、/status、/mcp 标记）：累积不转发，turn 结束经
+      // system/query_result 状态卡推送。
+      if (session.queryTurn) {
+        session.queryText += text
+        return
+      }
       // 压缩轮（/compact 标记；或自动压缩：chunk 文本出现压缩标记即检出并置位，
       // 后续 chunk 一并吞掉）：累积不转发，turn 结束经 system/compaction 推送。
       if (session.compactTurn || isCompactionText(session.compactText + text)) {
@@ -1473,6 +1618,46 @@ function pushReplayToolResult(
 /** 压缩文本检出：kimi 宿主直返的压缩提示（/compact 或自动压缩）。 */
 function isCompactionText(text: string): boolean {
   return text.includes('Compacting conversation context') || text.includes('Compaction completed')
+}
+
+/** "查询类"斜杠命令（输出是状态信息、不该以普通对话形式出现）：命中返回
+ *  规范化命令名，否则 null。/compact 走压缩轮通道，不在此列。 */
+function queryCommandOf(text: string): string | null {
+  const match = text.match(/^\/(usage|status|mcp)\b/)
+  return match ? `/${match[1]}` : null
+}
+
+/** /mcp 状态词 → 面板状态枚举（未知词按 pending，连接中会由补查修正）。 */
+function mcpStatusKind(raw: string): McpServerStatusKind {
+  const s = raw.toLowerCase()
+  if (s === 'connected') return 'connected'
+  if (s === 'failed' || s === 'error') return 'failed'
+  if (s === 'disabled') return 'disabled'
+  if (s === 'needs-auth' || s === 'needsauth') return 'needs-auth'
+  return 'pending'
+}
+
+/** 解析 /mcp 隐藏轮文本（kimi 宿主直返，实测 0.29）：
+ *  `MCP servers (1):` + `- yuque: connected (stdio, 19 tools)`。
+ *  配置了 0 个 server 时返回 []；文本完全不像 /mcp 输出（出错/格式变化）
+ *  返回 null——不推渲染层，状态区保持无数据而非误显示空。 */
+function parseMcpServers(text: string): McpServerEntry[] | null {
+  if (!/MCP servers?/i.test(text)) return null
+  const servers: McpServerEntry[] = []
+  for (const line of text.split('\n')) {
+    const match = line.trim().match(/^[-•]\s*(.+?):\s*([A-Za-z][\w-]*)(?:\s*\(([^)]*)\))?\s*$/)
+    if (!match) continue
+    const detail = match[3] ?? ''
+    const transport = detail.match(/stdio|http|sse/i)?.[0]?.toLowerCase()
+    const toolCount = Number(detail.match(/(\d+)\s*tools?/i)?.[1])
+    servers.push({
+      name: match[1].trim(),
+      status: mcpStatusKind(match[2]),
+      ...(transport ? { config: { type: transport } } : {}),
+      ...(Number.isFinite(toolCount) ? { toolCount } : {})
+    })
+  }
+  return servers
 }
 
 /** 解析压缩统计：`Messages compacted: 16` / `Tokens before: 1,906` / `Tokens after: 782`。 */

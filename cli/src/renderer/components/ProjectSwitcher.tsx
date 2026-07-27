@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { ClaudeExecutionBackend, Project } from '../../shared/ipc'
 import Collapse from './Collapse'
-import { isWslProjectPath } from '../../shared/paths'
+import { isWslProjectPath, normalizeCwdForCompare } from '../../shared/paths'
 import { emitForgeEvent, onForgeEvent } from '../events'
 
 const FolderIcon = (): JSX.Element => (
@@ -127,7 +127,12 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
     }
   }, [open])
 
-  const current = projects.find((p) => p.path === meta?.cwd) ?? null
+  // #14 归一化比较：meta.cwd 可能来自 session/list（正斜杠形式），与项目
+  // 列表里的反斜杠路径 === 永不匹配，选中高亮/当前项目判定会失效。
+  const currentCwd = meta?.cwd ? normalizeCwdForCompare(meta.cwd) : null
+  const current = currentCwd
+    ? projects.find((p) => normalizeCwdForCompare(p.path) === currentCwd) ?? null
+    : null
   const currentLabel =
     current?.name ?? (meta?.cwd ? meta.cwd.split(/[\\/]/).pop() : '项目')
 
@@ -169,7 +174,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   const onSwitch = (path: string): void => {
     ++projectActionSeqRef.current
     setOpen(false)
-    if (path === meta?.cwd) return
+    if (currentCwd && normalizeCwdForCompare(path) === currentCwd) return
     void switchProject(path)
   }
 
@@ -187,7 +192,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
     const list = await window.api.removeProject(path)
     if (projectActionSeqRef.current !== actionSeq) return
     setProjects(list)
-    if (path === meta?.cwd) {
+    if (currentCwd && normalizeCwdForCompare(path) === currentCwd) {
       if (list[0]) void switchProject(list[0].path)
       else reset() // removed the last project → back to Onboarding
     }
@@ -234,7 +239,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
           <div className="px-3 py-2 text-xs text-zinc-600">还没有项目</div>
         )}
         {projects.map((p, i) => {
-          const isCurrent = p.path === meta?.cwd
+          const isCurrent = currentCwd !== null && normalizeCwdForCompare(p.path) === currentCwd
           const editing = editingPath === p.path
           const confirming = confirmPath === p.path
           return (

@@ -102,6 +102,8 @@ export interface McpServerEntry {
   serverInfo?: { name: string; version: string }
   error?: string
   tools?: { name: string; description?: string }[]
+  /** 工具数（kimi /mcp 只给计数、不给明细；与 tools 数组二选一）。 */
+  toolCount?: number
   config?: {
     type: string
     command?: string

@@ -83,7 +83,20 @@ export interface AssistantItem {
   /** 来自 session/load 重放的历史消息（分界线上方内容）。 */
   isHistory?: boolean
 }
-export type TranscriptItem = UserItem | AssistantItem | CompactionItem
+export type TranscriptItem = UserItem | AssistantItem | CompactionItem | QueryItem
+
+/** 查询类斜杠命令（/usage、/status、/mcp）的结果状态卡（system/query_result →
+ *  TranscriptItem）。查询输出是状态信息，不以普通对话流形式出现（#15）。 */
+export interface QueryItem {
+  id: string
+  kind: 'query'
+  parentToolUseId: string | null
+  command: string
+  text: string
+  at: number
+  /** 见 UserItem.isHistory（历史重放里不会出现，占位兼容）。 */
+  isHistory?: boolean
+}
 
 /** 上下文压缩分界线（/compact 或自动压缩；system/compaction → TranscriptItem）。 */
 export interface CompactionItem {

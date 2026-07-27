@@ -24,6 +24,14 @@ const STATUS_ICON: Record<ToolStatus, { glyph: string; cls: string }> = {
   stopped: { glyph: '⏸', cls: 'text-zinc-500' }
 }
 
+/** 行是否活跃（运行中/排队；后台 agent 以 launch 结果的 running 为准）：
+ *  ChipPopover 的置顶排序与行高亮共用同一判定。 */
+export function isToolRowActive(block: ToolBlock): boolean {
+  const bg = AGENT_TOOL_NAMES.has(block.name) ? backgroundTaskInfo(block) : null
+  if (bg?.isBackground) return bg.running
+  return block.status === 'running' || block.status === 'pending'
+}
+
 export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
   const interrupt = useSessionStore((s) => s.interrupt)
   const sendMessage = useSessionStore((s) => s.sendMessage)
@@ -41,7 +49,9 @@ export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
   return (
     <div>
       <div
-        className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs transition hover:bg-white/[0.03]"
+        className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs transition hover:bg-white/[0.03] ${
+          isToolRowActive(block) ? 'tool-row-running' : ''
+        }`}
         onClick={() => setOpen((o) => !o)}
       >
         {/* 状态图标：颜色/态过渡 150ms（运行中→完成/失败）。 */}
@@ -68,9 +78,20 @@ export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
         ) : (
           <span className="shrink-0 font-mono text-[11px] text-zinc-300">{block.name}</span>
         )}
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500">
-          {summary || sub?.prompt || ''}
-        </span>
+        {/* #12 子 agent 显示可读意图（description→prompt），不再是裸参数；
+         *  完整输入/命令收进下方展开区（ToolCallCard）。 */}
+        {isAgent ? (
+          <span
+            className="min-w-0 flex-1 truncate text-[11px] text-zinc-300"
+            title={sub?.prompt || summary}
+          >
+            {sub?.description || sub?.prompt || summary || ''}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500">
+            {summary}
+          </span>
+        )}
         {bgRunning && bg?.taskId && (
           <button
             type="button"

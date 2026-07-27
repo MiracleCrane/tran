@@ -8,11 +8,13 @@ import { loadSettings } from './settings'
 import { manualSessionTitle } from './sessionTitles'
 
 /**
- * AI 会话命名：用 kimi 云端 chat/completions 把首条用户消息概括成短标题。
+ * AI 会话命名：用 kimi 云端 chat/completions 把用户发言概括成短标题。
  *
  * 成本硬约束（用户已确认"目的是好区分，不追求完美"）：
- * - 每会话只生成一次，本地 ai-titles.json 缓存，有缓存绝不再调 API；
- * - 输入只给首条消息（截断 ~500 字符），thinking 关闭 + max_tokens=50，
+ * - 每会话至多 2 次调用：首轮结束用首条发言快速命名；攒够前 3 次发言后
+ *   精修一次（#17，只覆盖 AI 生成的标题，手动命名永远不动）；本地
+ *   ai-titles.json 缓存，除此之外绝不调 API；
+ * - 单次输入截断 ~500 字符，thinking 关闭 + max_tokens=50，
  *   实测单次调用 ≈100-200 token；
  * - 失败静默回退原标题，单次尝试不重试。
  *
@@ -77,13 +79,18 @@ function cleanTitle(raw: string): string | null {
   return title || null
 }
 
-/** 为单个会话生成 AI 标题（有缓存/手动命名/开关关闭时直接跳过）。
+/** 为单个会话生成 AI 标题（有缓存/手动命名/开关关闭时直接跳过；
+ *  opts.overwriteAiTitle 允许覆盖已有 AI 标题——#17 前几次发言精修用）。
  *  手动重命名永远最高优先，AI 不覆盖。 */
-export async function generateAiTitle(sessionId: string, firstUserText: string): Promise<string | null> {
+export async function generateAiTitle(
+  sessionId: string,
+  firstUserText: string,
+  opts?: { overwriteAiTitle?: boolean }
+): Promise<string | null> {
   if (!aiNamingEnabled()) return null
   if (!sessionId || !firstUserText.trim()) return null
   const existing = load()[sessionId]
-  if (existing) return existing
+  if (existing && !opts?.overwriteAiTitle) return existing
   if (manualSessionTitle(sessionId)) return null
 
   const token = await getValidAccessToken()

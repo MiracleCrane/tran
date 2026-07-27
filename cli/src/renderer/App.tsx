@@ -8,6 +8,7 @@ import Composer from './components/Composer'
 import ElicitationCard from './components/ElicitationCard'
 import PlanCard from './components/PlanCard'
 import GoalCard from './components/GoalCard'
+import McpStatusBar from './components/McpStatusBar'
 import RuntimeStatusStrip from './components/RuntimeStatusStrip'
 import ErrorDiagnosticPanel from './components/ErrorDiagnosticPanel'
 import GitToolbar, { requestCloseGitDrawer } from './components/GitToolbar'
@@ -305,6 +306,7 @@ function MainViewContent({
       <ChatTopbar collapsed={chatTopbarCollapsed} onToggle={onToggleChatTopbar} />
       <GoalCard />
       <PlanCard />
+      <McpStatusBar />
       <div className="min-h-0 flex-1 overflow-hidden" onPointerDownCapture={requestCloseGitDrawer}>
         <Transcript
           layoutTransitioning={chatTopbarLayoutMotion}

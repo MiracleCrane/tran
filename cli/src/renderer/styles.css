@@ -2403,30 +2403,7 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   }
 }
 
-/** Streaming cursor — a breathing glow dot that replaces the hard "outputting"
- *  indicator with something softer. */
-.stream-cursor-glow {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: rgba(139, 92, 246, 0.85);
-  box-shadow: 0 0 8px rgba(139, 92, 246, 0.4), 0 0 16px rgba(139, 92, 246, 0.15);
-  animation: stream-cursor-pulse 1.8s ease-in-out infinite;
-}
-
-@keyframes stream-cursor-pulse {
-  0%, 100% {
-    opacity: 0.4;
-    transform: scale(0.82);
-    box-shadow: 0 0 6px rgba(139, 92, 246, 0.2), 0 0 10px rgba(139, 92, 246, 0.08);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.15);
-    box-shadow: 0 0 12px rgba(139, 92, 246, 0.5), 0 0 24px rgba(139, 92, 246, 0.18);
-  }
-}
+/** Streaming cursor — #11 起由 .thinking-moon（紫黄旋转月亮）取代原呼吸点。 */
 
 /** Vertical bar cursor variant for code blocks — subtle typing indicator. */
 .stream-cursor-bar {
@@ -2551,6 +2528,35 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   position: relative;
   background: rgba(139, 92, 246, 0.045);
   border-left: 2px solid rgba(139, 92, 246, 0.55);
+}
+
+/* #11 Kimi Web 同款思考月亮：纯 CSS 新月（圆形 + 径向 mask 抠掉一瓣成月牙），
+ *  紫→黄渐变，绕中心匀速旋转。只动 transform，合成器友好；
+ *  reduced-motion 全局开关会把它降为近静止。 */
+.thinking-moon {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #8b5cf6 10%, #c084fc 45%, #facc15 90%);
+  -webkit-mask: radial-gradient(circle at 68% 32%, transparent 56%, #000 59%);
+  mask: radial-gradient(circle at 68% 32%, transparent 56%, #000 59%);
+  animation: thinking-moon-spin 1.5s linear infinite;
+}
+
+@keyframes thinking-moon-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* #12 任务行运行中：紫色微底 + 内描边高亮（状态图标自身的脉冲承担动效）。 */
+.tool-row-running {
+  background: rgba(139, 92, 246, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.28);
+}
+
+.tool-row-running:hover {
+  background: rgba(139, 92, 246, 0.12) !important;
 }
 
 /* Composer 聚焦：独立 ring 元素承载光晕，只过渡 opacity。

@@ -5,6 +5,7 @@ import type {
   PermissionResponsePayload,
   SessionListItem,
   HistoryMessage,
+  McpServerEntry,
   PickedFile,
   EffortLevel,
   PermissionMode,
@@ -105,6 +106,8 @@ interface SessionStore {
   swarmTasks: KimiTaskInfo[] | null
   /** 隐藏 /usage 轮解析出的上下文用量（system/context_usage；null 表示无数据）。 */
   contextUsage: ContextUsage | null
+  /** 隐藏 /mcp 轮解析出的 MCP server 状态（system/mcp_servers；null = 未查询到）。 */
+  mcpServers: McpServerEntry[] | null
   /** 模式面板状态（计划/权限互斥恢复 + Swarm/目标开关），per session。 */
   modePanel: ModePanelState
   /** goal 循环状态（system/goal 推送；null 表示无目标），per session。 */
@@ -751,6 +754,7 @@ interface BackgroundSessionState {
   goal: GoalInfo | null
   slashCommands: SkillInfo[]
   contextUsage: ContextUsage | null
+  mcpServers: McpServerEntry[] | null
   /** AskUserQuestion 队列：后台期间到达的问题必须带着走——它阻塞 turn，
    *  丢弃的话切回后这轮永远等不到回答。 */
   elicitationQueue: ElicitationRequest[]
@@ -785,6 +789,7 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
     goal: s.goal,
     slashCommands: s.slashCommands,
     contextUsage: s.contextUsage,
+    mcpServers: s.mcpServers,
     elicitationQueue: s.elicitationQueue
   })
   while (backgroundSessions.size > BACKGROUND_SESSION_CAP) {
@@ -866,6 +871,24 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
       } else if (subtype === 'context_usage') {
         const usage = (msg as unknown as { contextUsage?: ContextUsage }).contextUsage
         bg.contextUsage = usage ? { ...usage, at: Date.now() } : null
+      } else if (subtype === 'mcp_servers') {
+        const servers = (msg as unknown as { servers?: McpServerEntry[] }).servers
+        bg.mcpServers = Array.isArray(servers) ? servers : []
+      } else if (subtype === 'query_result') {
+        const q = (msg as unknown as { query?: { command?: string; text?: string; at?: number } }).query
+        if (q) {
+          bg.items = [
+            ...bg.items,
+            {
+              id: uid(),
+              kind: 'query' as const,
+              parentToolUseId: null,
+              command: q.command ?? '/status',
+              text: q.text ?? '',
+              at: q.at ?? Date.now()
+            }
+          ]
+        }
       } else if (subtype === 'slash_commands') {
         const c = (msg as unknown as { commands?: SkillInfo[] }).commands
         bg.slashCommands = Array.isArray(c) ? c : []
@@ -1214,6 +1237,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   planEntries: [],
   swarmTasks: null,
   contextUsage: null,
+  mcpServers: null,
   modePanel: defaultModePanel(),
   goal: null,
   elicitationQueue: [],
@@ -1259,6 +1283,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         bridgeEnded: false,
         planEntries: [],
         contextUsage: null,
+        mcpServers: null,
         modePanel: defaultModePanel(),
         goal: null,
         elicitationQueue: [],
@@ -1477,7 +1502,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   reset() {
     cancelActiveHistoryHydration(0)
-    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], contextUsage: null, modePanel: defaultModePanel(), goal: null, elicitationQueue: [] })
+    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], contextUsage: null, mcpServers: null, modePanel: defaultModePanel(), goal: null, elicitationQueue: [] })
   },
 
   async bootstrap() {
@@ -1525,6 +1550,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessionsHasMore: false,
       planEntries: [],
       contextUsage: null,
+      mcpServers: null,
       modePanel: defaultModePanel(),
       goal: null,
       elicitationQueue: [],
@@ -1785,6 +1811,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       bridgeEnded: false,
       planEntries: [],
       contextUsage: null,
+      mcpServers: null,
       modePanel: defaultModePanel(),
       goal: null,
       elicitationQueue: [],
@@ -1863,6 +1890,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         bridgeEnded: false,
         planEntries: bg.planEntries,
         contextUsage: bg.contextUsage,
+        mcpServers: bg.mcpServers,
         modePanel: defaultModePanel(),
         goal: bg.goal,
         elicitationQueue: bg.elicitationQueue,
@@ -1903,6 +1931,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       bridgeEnded: false,
       planEntries: [],
       contextUsage: null,
+      mcpServers: null,
       modePanel: defaultModePanel(),
       goal: null,
       elicitationQueue: [],
@@ -2282,6 +2311,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             // 新会话/恢复会话时清空上一会话残留的待办清单（新 plan 事件会重建）。
             planEntries: [],
             contextUsage: null,
+            mcpServers: null,
             modePanel: defaultModePanel(),
             goal: null,
             elicitationQueue: [],
@@ -2301,6 +2331,29 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           // 隐藏 /usage 轮解析出的上下文用量（UsageRings 第三环）。
           const usage = (msg as unknown as { contextUsage?: ContextUsage }).contextUsage
           set({ contextUsage: usage ? { ...usage, at: Date.now() } : null })
+        } else if (subtype === 'mcp_servers') {
+          // 隐藏 /mcp 轮解析出的 server 状态（McpStatusBar 状态区）。
+          const servers = (msg as unknown as { servers?: McpServerEntry[] }).servers
+          set({ mcpServers: Array.isArray(servers) ? servers : [] })
+        } else if (subtype === 'query_result') {
+          // 查询类斜杠命令（/usage、/status、/mcp）：结果落成状态卡 item，
+          // 不以普通对话流形式出现（#15）。
+          const q = (msg as unknown as { query?: { command?: string; text?: string; at?: number } }).query
+          if (q) {
+            set((s) => ({
+              items: [
+                ...s.items,
+                {
+                  id: uid(),
+                  kind: 'query' as const,
+                  parentToolUseId: null,
+                  command: q.command ?? '/status',
+                  text: q.text ?? '',
+                  at: q.at ?? Date.now()
+                }
+              ]
+            }))
+          }
         } else if (subtype === 'goal') {
           // goal 循环状态推送（GoalCard 进度 / ModePanel 开关激活态）。
           const g = (msg as unknown as { goal?: GoalInfo | null }).goal
