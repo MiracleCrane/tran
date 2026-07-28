@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.0.34 - 2026-07-28
+
+### 中文
+
+- 修复:流式吐字"快一阵卡一下"根因落定(#8 第三轮,埋点实测)。kimi 后端到达本身就是阵发的(实测平均仅 69 字/秒,瞬时 200~480 后静默 0.2~0.7s,17 秒内 40 次停顿),280 字/秒限速器从不启动、显示=跟随到达;渲染侧证伪(commit <3ms,掉帧 0.2%)。基础速率 280→**110 字/秒**(贴近平均到达),到达快时蓄水、静默时恒速放水,实测输出节奏标准差 11.3→4.6、停顿次数 40→25、停顿总时长 11.4s→9.3s;残余停顿是到达完全中断的物理极限(缓冲放无可放)。另:埋点模块常驻(`window.__streamProbe.dump()`),后续流式体感问题可直接取数。
+- 优化:思考动画改彗星环绕(用户选定)——紫黄渐变彗星头绕轨公转(1.2s),conic 拖尾沿切线渐隐、中心区域干净,深浅底各相位离屏目检通过。
+- 调查:Kimi Web 的 bash 可读摘要确认为工具调用自带 description(无二次 AI 总结),Tran 已是同优先级;本仓库会话内模型调用将全程携带 description。
+
+### English
+
+- Fixed: "burst then stall" streaming root-caused with instrumentation (#8, round 3). Kimi's arrival is inherently bursty (measured avg 69 chars/s: 200–480 bursts followed by 0.2–0.7s silences, 40 pauses in 17s), so the 280 chars/s limiter never engaged and display simply followed arrival; the render side was exonerated (commits <3ms, 0.2% dropped frames). Base rate lowered 280→**110 chars/s** to track the average arrival — buffering fills during bursts and drains at a constant rate through silences. Measured: cadence SD 11.3→4.6, pauses 40→25, dead time 11.4s→9.3s; residual stalls are the physical limit of arrival fully stopping. A lightweight probe ships in builds (`window.__streamProbe.dump()`) for future diagnostics.
+- Improved: thinking animation is now a comet (user-selected) — a purple-yellow comet head orbiting with a fading conic tail, clean center, verified across phases on dark/light backgrounds.
+- Investigation: Kimi Web's readable bash labels are the tool call's own description (no secondary AI summarization) — Tran already shares that priority; model calls in this repo's sessions will now always carry descriptions.
+
+#### 验证
+
+- 流式埋点复测:节奏 SD 11.3→4.6,掉帧 14→1;彗星 4 相位 × 深浅底目检
+- `npm run typecheck` 与 `npm run build` 全绿
+
 ## v1.0.33 - 2026-07-28
 
 ### 中文

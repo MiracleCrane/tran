@@ -1,5 +1,6 @@
 import type { AgentEvent } from '../../shared/ipc'
 import { useSessionStore, type StreamDeltaBatch } from './sessionStore'
+import { probeArrival, probeFlush } from '../utils/streamProbe'
 
 /**
  * Coalesces streaming `content_block_delta` events into ≤1 store update per
@@ -24,6 +25,13 @@ import { useSessionStore, type StreamDeltaBatch } from './sessionStore'
  * frames; folding deltas is pure string append per block (see
  * applyStreamEvent), so splitting is order-safe.
  *
+ * Base-rate choice (#8 第三轮，埋点实测): kimi 后端的到达本身就是阵发的——
+ * 实测瞬时 200~480 字/秒的一阵（20~48 字/100ms），随后 0.2~0.7s 完全静默，
+ * 全程平均只有 ~88 字/秒。基础速率若高于平均到达（此前的 280），积压恒为 0、
+ * 限速器从不启动，显示=忠实跟随到达："快一阵、卡一下"。基础速率降到贴近
+ * 平均到达（110）后，阵发期蓄水、静默期放水，日常亚秒级间隙被熨平成
+ * 匀速打字机；秒级以上的思考/工具停顿缓冲终会耗尽，那是到达侧的物理极限。
+ *
  * Ordering is preserved: any NON-delta event (block start/stop, message_start,
  * the final `assistant`/`result`, tool progress, system, agent:ended) flushes
  * the pending deltas FIRST (in full), then applies immediately — structural
@@ -32,9 +40,13 @@ import { useSessionStore, type StreamDeltaBatch } from './sessionStore'
 let pending: StreamDeltaBatch[] = []
 let rafId: number | null = null
 
-/** Constant base rate (~4.7 chars/frame at 60fps). Time-based, so the cadence
- *  is identical on 120Hz+ displays — a per-frame budget would double there. */
-const BASE_CHARS_PER_SEC = 280
+/** Constant base rate (~1.8 chars/frame at 60fps). Time-based, so the cadence
+ *  is identical on 120Hz+ displays — a per-frame budget would double there.
+ *  Deliberately close to (just above) the backend's measured long-run average
+ *  arrival (~88 chars/s): low enough that burst water covers the sub-second
+ *  silences between bursts, high enough that the display never falls
+ *  progressively behind on long outputs — see the header comment. */
+const BASE_CHARS_PER_SEC = 110
 /** Below this backlog the rate stays at the base rate — the backlog only
  *  buffers, it never changes the cadence. */
 const HIGH_WATER_CHARS = 800
@@ -131,8 +143,16 @@ function flushFrame(): void {
   carry += rate * dt
   const budget = Math.floor(carry)
   carry -= budget
-  useSessionStore.getState().applyStreamBatch(drainBudget(budget))
+  const batch = drainBudget(budget)
+  probeFlush(batchChars(batch), pendingChars())
+  useSessionStore.getState().applyStreamBatch(batch)
   if (pending.length > 0) rafId = requestAnimationFrame(flushFrame)
+}
+
+function batchChars(batch: StreamDeltaBatch[]): number {
+  let total = 0
+  for (const b of batch) total += deltaTextOf(b.event)?.value.length ?? 0
+  return total
 }
 
 /** Full drain used before structural events and on teardown: ordering and
@@ -164,6 +184,7 @@ export function pushAgentEvent(e: AgentEvent): void {
       parent: msg.parent_tool_use_id ?? null,
       event: msg.event
     })
+    probeArrival(deltaTextOf(msg.event)?.value.length ?? 0)
     if (rafId === null) {
       rafId = requestAnimationFrame(flushFrame)
     }

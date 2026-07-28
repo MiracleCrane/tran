@@ -1,7 +1,8 @@
-import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { memo, Profiler, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
+import { probeCommit, probeRender } from '../utils/streamProbe'
 import type { AssistantBlock, AssistantItem, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
 import MessageText from './MessageText'
 import { showImageContextMenu } from './ImageContextMenu'
@@ -400,9 +401,18 @@ const AssistantMessage = memo(function AssistantMessage({
         .map((block, i) => {
           if (block.kind === 'text') {
             const highlight = !isStreaming && !deferHighlight
+            const md = <MessageText highlight={highlight}>{block.text}</MessageText>
             return (
               <div key={i}>
-                <MessageText highlight={highlight}>{block.text}</MessageText>
+                {/* #8 埋点：流式期间用 Profiler 记录该块每帧 React 渲染耗时
+                    （mdMs），结束后回到普通渲染，零包裹开销。 */}
+                {isStreaming ? (
+                  <Profiler id={`stream-text-${item.id}:${i}`} onRender={probeRender}>
+                    {md}
+                  </Profiler>
+                ) : (
+                  md
+                )}
                 {isStreaming && <span className="tran-stream-cursor" aria-hidden />}
               </div>
             )
@@ -511,6 +521,11 @@ export default function Transcript({
   useEffect(() => {
     deferHighlightRef.current = deferHighlight
   }, [deferHighlight])
+
+  // #8 埋点：items 每次因流式 flush 变化后，记录 store→commit 耗时（见 streamProbe）。
+  useLayoutEffect(() => {
+    probeCommit()
+  }, [items])
 
   const setReserveEligible = (eligible: boolean, force = false): void => {
     if (!force && reserveEligibleRef.current === eligible) return

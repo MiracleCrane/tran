@@ -2529,10 +2529,12 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   border-left: 2px solid rgba(139, 92, 246, 0.55);
 }
 
-/* #11/#37 思考月亮：纯渐变球（无斑纹）—— ::before 是紫→黄→紫绕心的
- *  conic-gradient 色盘，整周期 rotate 形成自转；::after 承载静态 inset
- *  受光/背光阴影（不随转动），外发光留在球体本身；只动 transform，合成器友好；
- *  reduced-motion 全局开关会把它降为近静止。 */
+/* #11 思考动画（第四迭代：彗星环绕）—— 14px 见方内一颗紫黄渐变彗星头
+ *  沿圆形轨道绕中心旋转，身后拖一条沿轨道切线渐隐的紫→黄拖尾。
+ *  ::before 是整周期旋转的 conic-gradient 环形拖尾（radial mask 只留外圈，
+ *  中心区域保持干净透明）；::after 是彗星头（小圆点 + 柔光），用
+ *  rotate+translate 做同周期同向公转，与拖尾亮端始终对齐。
+ *  只动 transform，合成器友好；reduced-motion 全局开关会把它降为近静止。 */
 .thinking-moon {
   position: relative;
   display: inline-block;
@@ -2540,11 +2542,6 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   height: 14px;
   flex-shrink: 0;
   overflow: hidden;
-  border-radius: 50%;
-  background: #a78bfa;
-  box-shadow:
-    0 0 6px rgba(192, 132, 252, 0.5),
-    0 0 2px rgba(250, 204, 21, 0.3);
 }
 
 .thinking-moon::before {
@@ -2554,28 +2551,49 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   border-radius: 50%;
   background: conic-gradient(
     from 0deg,
-    #8b5cf6 0deg,
-    #a78bfa 80deg,
-    #c084fc 160deg,
-    #facc15 240deg,
-    #c084fc 300deg,
-    #8b5cf6 360deg
+    rgba(250, 204, 21, 0.95) 0deg,
+    rgba(192, 132, 252, 0.55) 55deg,
+    rgba(139, 92, 246, 0.22) 120deg,
+    transparent 190deg,
+    transparent 360deg
   );
-  animation: thinking-moon-spin 1.8s linear infinite;
+  -webkit-mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 3.5px),
+    #000 calc(100% - 2px)
+  );
+  mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 3.5px),
+    #000 calc(100% - 2px)
+  );
+  animation: thinking-moon-spin 1.2s linear infinite;
 }
 
 .thinking-moon::after {
   content: '';
   position: absolute;
-  inset: 0;
+  left: 50%;
+  top: 50%;
+  width: 3.5px;
+  height: 3.5px;
+  margin: -1.75px 0 0 -1.75px;
   border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fef9c3, #facc15 55%, #c084fc 100%);
   box-shadow:
-    inset -2px -2.5px 3.5px rgba(24, 10, 52, 0.42),
-    inset 2px 2.5px 3px rgba(255, 255, 255, 0.38);
+    0 0 2px rgba(250, 204, 21, 0.9),
+    0 0 3.5px rgba(192, 132, 252, 0.55);
+  animation: thinking-moon-orbit 1.2s linear infinite;
 }
 
 @keyframes thinking-moon-spin {
   to { transform: rotate(360deg); }
+}
+
+/* 彗星头公转：与拖尾同周期同向，rotate 前置使圆点始终位于轨道 12 点相位。 */
+@keyframes thinking-moon-orbit {
+  from { transform: rotate(0deg) translateY(-4.75px); }
+  to { transform: rotate(360deg) translateY(-4.75px); }
 }
 
 /* #12 任务行运行中：紫色微底 + 内描边高亮（状态图标自身的脉冲承担动效）。 */
