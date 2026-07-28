@@ -213,7 +213,7 @@ const emptyStatus: SessionStatus = { running: false }
 export const SWARM_PROMPT_PREFIX =
   '[Swarm 模式] 请优先使用 AgentSwarm 并行子代理拆分独立子任务。原始消息：'
 
-/** 模式面板状态（per session，随会话切换重置）。 */
+/** 模式面板状态（per session；新会话落默认，#23 后台会话 attach 时从缓冲恢复）。 */
 export interface ModePanelState {
   swarmEnabled: boolean
   /** 目标模式：占位开关（下一版本提供），状态先留口。 */
@@ -758,6 +758,13 @@ interface BackgroundSessionState {
   /** AskUserQuestion 队列：后台期间到达的问题必须带着走——它阻塞 turn，
    *  丢弃的话切回后这轮永远等不到回答。 */
   elicitationQueue: ElicitationRequest[]
+  /** #23 kimi server 轮询的 Swarm tasks（Swarm 面板数据源）：切走时的最后一帧
+   *  随缓冲带走，后台期间的推送继续折叠进来；否则切回后面板降级成静态卡，
+   *  运行中的子代理误显示完成态。 */
+  swarmTasks: KimiTaskInfo[] | null
+  /** #23 模式面板状态（Swarm/目标开关、计划前权限档）：低成本，随快照带走，
+   *  切回不落回默认。 */
+  modePanel: ModePanelState
 }
 
 const backgroundSessions = new Map<string, BackgroundSessionState>()
@@ -771,6 +778,8 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
   const meta = s.meta
   // bridgeEnded 的后端会话已死，缓冲无意义（历史在磁盘上，走原重放路径）。
   if (!meta || s.bridgeEnded) return
+  // #23 任何后续导航都使未消费的 swarmTasks 交接失效（防陈旧交接误配同 id 会话）。
+  attachedSwarmTasks = null
   backgroundSessions.set(meta.sessionId, {
     bridgeSessionId: meta.sessionId,
     ...(meta.sdkSessionId ? { sdkSessionId: meta.sdkSessionId } : {}),
@@ -790,7 +799,9 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
     slashCommands: s.slashCommands,
     contextUsage: s.contextUsage,
     mcpServers: s.mcpServers,
-    elicitationQueue: s.elicitationQueue
+    elicitationQueue: s.elicitationQueue,
+    swarmTasks: s.swarmTasks,
+    modePanel: s.modePanel
   })
   while (backgroundSessions.size > BACKGROUND_SESSION_CAP) {
     const oldest = [...backgroundSessions.values()].find((bg) => !bg.running)
@@ -826,6 +837,29 @@ function invalidateBackgroundHistoryCache(bg: BackgroundSessionState): void {
   if (!bg.sdkSessionId) return
   deleteSessionHistoryCache(bg.cwd, bg.sdkSessionId)
   deleteSessionHistoryCache(bg.cwd, bg.sdkSessionId, 'windows')
+}
+
+/** #23 Swarm tasks 轮询推给非当前会话（后台）：折叠进它的缓冲，attach 时随
+ *  bg.swarmTasks 一起恢复（与 foldBackgroundAgentEvent 同机制，只是数据源是
+ *  window.api.onSwarmTasks 而非 agent 事件流）。 */
+export function foldBackgroundSwarmTasks(sdkSessionId: string, tasks: KimiTaskInfo[] | null): void {
+  for (const bg of backgroundSessions.values()) {
+    if (bg.sdkSessionId === sdkSessionId) {
+      bg.swarmTasks = tasks
+      return
+    }
+  }
+}
+
+/** #23 attach 恢复的 swarmTasks 一次性交接：openSession 的 attach 分支写入，
+ *  App 的 Swarm 订阅 effect 按 sdkSessionId 取走——否则 effect 的"切会话清空"
+ *  会把刚恢复的状态抹回 null。undefined = 无交接；null = 有交接但当时就无数据。 */
+let attachedSwarmTasks: { sdkSessionId: string; tasks: KimiTaskInfo[] | null } | null = null
+
+export function takeAttachedSwarmTasks(sdkSessionId: string): KimiTaskInfo[] | null | undefined {
+  const handoff = attachedSwarmTasks
+  attachedSwarmTasks = null
+  return handoff && handoff.sdkSessionId === sdkSessionId ? handoff.tasks : undefined
 }
 
 /** 后台会话的事件折叠：与 ingestAgentEvent 主会话分支同构，直接改缓冲对象。 */
@@ -1880,6 +1914,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       void window.api.closeSession(oldSessionId).catch(() => {})
       // 桥接早已就绪：sendMessage 的启动门闩直接放行。
       createSessionStartGate(bg.bridgeSessionId).resolve()
+      // #23 swarmTasks 交接给 App 的订阅 effect（防它的切会话清空抹掉恢复值）。
+      attachedSwarmTasks = { sdkSessionId, tasks: bg.swarmTasks }
       set({
         starting: false,
         items: bg.items,
@@ -1891,10 +1927,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         planEntries: bg.planEntries,
         contextUsage: bg.contextUsage,
         mcpServers: bg.mcpServers,
-        modePanel: defaultModePanel(),
+        modePanel: bg.modePanel,
         goal: bg.goal,
         elicitationQueue: bg.elicitationQueue,
         slashCommands: bg.slashCommands,
+        swarmTasks: bg.swarmTasks,
         status: { running: bg.running, ...(bg.error ? { error: bg.error } : {}) },
         currentStreamingMsgId: bg.currentStreamingMsgId,
         meta: {

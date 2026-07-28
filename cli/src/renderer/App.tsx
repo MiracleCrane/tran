@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useSessionStore } from './store/sessionStore'
+import { useSessionStore, foldBackgroundSwarmTasks, takeAttachedSwarmTasks } from './store/sessionStore'
 import { useUiStore, type View } from './store/uiStore'
 import Onboarding from './components/Onboarding'
 import Sidebar from './components/Sidebar'
@@ -614,11 +614,17 @@ export default function App(): JSX.Element {
   // server 不可用时主进程推 tasks=null，SwarmCard 自动降级为静态卡。
   const sdkSessionId = meta?.sdkSessionId
   useEffect(() => {
-    useSessionStore.setState({ swarmTasks: null })
+    // #23 attach 切回：openSession 已从后台缓冲恢复该会话的 swarmTasks，
+    // 不能清空；其余路径（新会话/历史重放）清空上一会话残留。
+    if (sdkSessionId === undefined || takeAttachedSwarmTasks(sdkSessionId) === undefined) {
+      useSessionStore.setState({ swarmTasks: null })
+    }
     if (!sdkSessionId) return
     void window.api.subscribeSwarmTasks(sdkSessionId).catch(() => {})
     const off = window.api.onSwarmTasks((e) => {
+      // #23 非当前会话的推送折叠进对应后台缓冲（attach 时随快照恢复）。
       if (e.sessionId === sdkSessionId) useSessionStore.setState({ swarmTasks: e.tasks })
+      else foldBackgroundSwarmTasks(e.sessionId, e.tasks)
     })
     return () => {
       off()

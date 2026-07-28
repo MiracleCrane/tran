@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.0.30 - 2026-07-28
+
+### 中文
+
+- 修复:"another turn is active"僵尸 turn 自动恢复。所有 session/prompt(用户轮与 /usage、/mcp 隐藏轮)统一走恢复入口:撞 another turn → 自动 cancel → 等 2 秒 → 原样重发,用户无感;重试仍失败才显示错误。同时修复僵尸 turn 的一个产生源(隐藏轮与用户轮并发互撞,现互斥 + busy 跳过)。实测确认 turn 互斥为连接级、cancel 仅对自身连接有效,恢复路径与协议行为对齐。
+- 修复:子 Agent 面板状态在切换会话后丢失(运行计数归 0、耗时变"—"、运行中显示完成态)。swarmTasks 与 modePanel 纳入后台缓冲的快照/折叠/attach 恢复链路。
+- 优化:后台命令/子 Agent/待办浮层加宽(子 Agent 30rem、其余 24rem),子 Agent 描述改两行截断,可预览完整大意。
+- 修复:待办已完成打勾偏移的真根因——动画类 `.tran-check-pop` 的 `display: inline-block` 覆盖了圆圈的 flex 居中(只有已完成项带动画类,所以只有打勾偏);另修 PlanCard 同款问题并统一 SVG 勾选。
+- 优化:无 description 的 Bash 调用显示规则化摘要(去 env 前缀/管道重定向截断/git 剥配置噪声/curl 聚焦目标 URL),不再是整段裸命令。
+
+### English
+
+- Fixed: automatic recovery from "another turn is active" zombie turns. All session/prompt calls (user turns and hidden /usage, /mcp turns) go through a recovery path: on the error, Tran cancels, waits 2s, and retries the original payload — invisible to the user; only a second failure surfaces an error. Also fixed a zombie-turn source (hidden turns racing user turns; now mutually exclusive with busy guards). Verified empirically that turn exclusivity is per-connection and cancel only affects the owning connection.
+- Fixed: sub-agent panel state lost across session switches (running count reset, durations gone, running shown as done). swarmTasks and modePanel are now folded into the background-session snapshot/fold/attach pipeline.
+- Improved: wider popovers for background commands / sub-agents / todos (30rem for sub-agents, 24rem others) with two-line description clamping.
+- Fixed: real root cause of the off-center todo check — the `.tran-check-pop` animation class's `display: inline-block` overrode the circle's flex centering (only completed items have the class, hence only they were off); PlanCard had the same bug and now shares the SVG check.
+- Improved: Bash calls without a description now show a rule-based summary (env prefixes stripped, pipes/redirects truncated, git config noise removed, curl focused on the target URL) instead of the raw command.
+
+#### 验证
+
+- ACP 跨连接实验:turn 互斥为连接级、跨连接 cancel 无效、load 不转发实时流(`.scratch/acp-turn-ownership/`)
+- `npm run typecheck` 与 `npm run build` 全绿
+
 ## v1.0.29 - 2026-07-28
 
 ### 中文

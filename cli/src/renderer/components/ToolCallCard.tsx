@@ -54,6 +54,60 @@ export function parseSubagentInput(input: unknown): {
   }
 }
 
+/** #28 Bash 无 description 时的规则化摘要：剥掉前导 env 赋值、管道/串联/
+ *  重定向只留第一段主干，`cd X &&` 保留目录语境，超长按词边界截断加 …。
+ *  纯字符串规则（不耗 token），目标是折叠态"一眼看懂在干嘛"。 */
+const BASH_SUMMARY_MAX = 72
+
+/** 前导环境变量赋值（FOO=bar BAZ=1 npm test → npm test）。 */
+const ENV_ASSIGN_RE = /^([A-Za-z_][A-Za-z0-9_]*=\S+\s+)+/
+
+function bashCommandSummary(command: string): string {
+  const flat = command.replace(/\s+/g, ' ').trim()
+  if (!flat) return ''
+  let cmd = flat.replace(ENV_ASSIGN_RE, '')
+  // `cd X && …`：目录是重要语境，保留前缀，摘要后半段。
+  let prefix = ''
+  const cd = /^cd\s+(\S+)\s*&&\s*(.+)$/.exec(cmd)
+  if (cd) {
+    prefix = `cd ${cd[1]} && `
+    cmd = (cd[2] ?? '').replace(ENV_ASSIGN_RE, '')
+  }
+  // 只留第一段主干：管道 / && / || / ; / 重定向（含 2>&1 的 fd 前缀）之后不进摘要。
+  let truncated = false
+  const cut = /\|\|?|&&|;|\d*>>?/.exec(cmd)
+  if (cut && cut.index > 0) {
+    cmd = cmd.slice(0, cut.index).trim()
+    truncated = true
+  }
+  // 常见命令的友好化。
+  const head = (cmd.split(' ')[0] ?? '').toLowerCase()
+  if (head === 'git') {
+    // -c http.proxy=… 这类临时配置是噪声。
+    const stripped = cmd.replace(/\s+-c\s+\S+=\S+/g, '')
+    if (stripped !== cmd) {
+      cmd = stripped
+      truncated = true
+    }
+  } else if (head === 'curl') {
+    // 聚焦目标 URL（取最后一个 http(s) token：-x 代理 URL 在前面）。
+    const tokens = cmd.split(' ')
+    const url = [...tokens].reverse().find((t) => /^https?:\/\//.test(t))
+    if (url && cmd !== `curl ${url}`) {
+      cmd = `curl ${url}`
+      truncated = true
+    }
+  }
+  let summary = prefix + cmd
+  if (summary.length > BASH_SUMMARY_MAX) {
+    const headPart = summary.slice(0, BASH_SUMMARY_MAX)
+    const wordBoundary = headPart.lastIndexOf(' ')
+    summary = wordBoundary > 24 ? headPart.slice(0, wordBoundary) : headPart
+    truncated = true
+  }
+  return truncated ? `${summary} …` : summary
+}
+
 /** 折叠态摘要：按工具类型从 rawInput 提取关键信息（命令行/路径/pattern/
  *  description）。rawInput 可能是对象或 JSON 字符串，防御式解析；失败回落通用摘要。 */
 export function summaryForTool(name: string, input: unknown): string {
@@ -71,8 +125,9 @@ export function summaryForTool(name: string, input: unknown): string {
   switch (name) {
     case 'Bash':
     case 'terminal':
-      // #12 优先可读 description（Kimi 风格：意图在前，裸命令收进展开区）。
-      return s(inp.description) || s(inp.command)
+      // #12 优先可读 description（Kimi 风格：意图在前，裸命令收进展开区）；
+      // #28 无 description 时给规则化摘要，不再是整行裸命令。
+      return s(inp.description) || bashCommandSummary(s(inp.command))
     case 'Read':
     case 'read_file':
       return s(inp.file_path) || s(inp.path)
@@ -172,7 +227,7 @@ const ToolCallCard = memo(function ToolCallCard({
         )}
         <span key={block.status} className={`ml-auto shrink-0 text-[11px] ${meta.text}`}>
           {/* 完成瞬间：状态勾弹入（key 随状态重挂载，动画只播一次） */}
-          {block.status === 'done' && !bg?.running && <span className="tran-check-pop mr-1">✓</span>}
+          {block.status === 'done' && !bg?.running && <span className="tran-check-pop mr-1 inline-block">✓</span>}
           {statusLabel}
           {block.elapsed ? ` · ${block.elapsed.toFixed(1)}s` : ''}
         </span>

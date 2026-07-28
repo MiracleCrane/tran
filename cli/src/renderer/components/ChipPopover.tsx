@@ -68,10 +68,14 @@ export default function ChipPopover({
   const visibleHistory = showAllHistory ? historyBlocks : historyBlocks.slice(0, RECENT_HISTORY_LIMIT)
   const hiddenHistoryCount = historyBlocks.length - visibleHistory.length
 
+  // #28 浮层加宽：子 Agent 行要预览完整任务描述（原 w-80 截断成"额度悬浮卡…"），
+  // 给到 30rem；bash/待办适度加宽到 24rem。max-w 兜底小窗口不溢出屏幕。
+  const widthCls = kind === 'agent' ? 'w-[30rem]' : 'w-96'
+
   return createPortal(
     <div
       ref={cardRef}
-      className="glass-panel tran-enter fixed z-[90] w-80 rounded-2xl p-2 shadow-2xl"
+      className={`glass-panel tran-enter fixed z-[90] ${widthCls} max-w-[92vw] rounded-2xl p-2 shadow-2xl`}
       style={{ left: anchor.left, bottom: anchor.bottom }}
     >
       <div className="flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-zinc-200">

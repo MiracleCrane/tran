@@ -2762,7 +2762,9 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   to { opacity: 1; transform: scale(1); }
 }
 .tran-check-pop {
-  display: inline-block;
+  /* 不带 display：该类会叠在 flex 容器上（待办圆圈），inline-block 会盖掉
+   *  Tailwind 的 flex（同优先级、本文件顺序在后）导致居中失效、勾选偏移（#28）。
+   *  需要 inline 元素可变换的调用方自行加 Tailwind inline-block。 */
   animation: tran-check-pop 200ms ease-out both;
 }
 

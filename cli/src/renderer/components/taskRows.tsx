@@ -79,10 +79,11 @@ export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
           <span className="shrink-0 font-mono text-[11px] text-zinc-300">{block.name}</span>
         )}
         {/* #12 子 agent 显示可读意图（description→prompt），不再是裸参数；
-         *  完整输入/命令收进下方展开区（ToolCallCard）。 */}
+         *  完整输入/命令收进下方展开区（ToolCallCard）。
+         *  #28 两行 clamp（配合浮层加宽）：描述能预览到大意，不再一刀切省略。 */}
         {isAgent ? (
           <span
-            className="min-w-0 flex-1 truncate text-[11px] text-zinc-300"
+            className="line-clamp-2 min-w-0 flex-1 text-[11px] leading-snug text-zinc-300"
             title={sub?.prompt || summary}
           >
             {sub?.description || sub?.prompt || summary || ''}

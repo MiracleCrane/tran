@@ -166,6 +166,10 @@ const MCP_CONNECT_GRACE_MS = 3500
 /** /mcp 结果仍有 pending server 时的补查间隔（只补一次）。 */
 const MCP_PENDING_RETRY_MS = 6000
 
+/** 僵尸 turn 恢复：命中 "another turn" 后补发 session/cancel 的生效等待
+ *  （kimi 侧取消是异步的，立即重试会再撞一次）。 */
+const ZOMBIE_CANCEL_GRACE_MS = 2000
+
 /** Map ACP/JSON-RPC failures to user-facing text. authRequired (-32000) means
  *  the Kimi CLI has no usable token — the fix is a terminal `kimi login`. */
 function userFacingError(error: unknown): string {
@@ -173,6 +177,17 @@ function userFacingError(error: unknown): string {
   if (error instanceof AcpRequestError && error.code === -32000) return KIMI_AUTH_HINT
   const message = error instanceof Error ? error.message : String(error)
   return /auth(entication)? (is )?required/i.test(message) ? KIMI_AUTH_HINT : message
+}
+
+/** "another turn" 错误识别（turn ID 数字可变，与渲染层 ErrorDiagnosticPanel 的
+ *  识别文案同源）：agent 侧还挂着上一轮（result 丢失/超时取消失败留下的僵尸
+ *  turn）时，session/prompt 会以此报错。message 与 error.data 一并匹配。 */
+function isAnotherTurnError(error: unknown): boolean {
+  const haystack =
+    (error instanceof Error ? error.message : String(error)) +
+    ' ' +
+    JSON.stringify((error as { data?: unknown }).data ?? '')
+  return haystack.includes('another turn') || haystack.includes('turn.agent_busy')
 }
 
 /** 从 session/load 的错误文本中解析缺失的 plan 文件绝对路径。严格白名单校验
@@ -346,6 +361,42 @@ export class KimiBackend {
       client.notify('session/cancel', { sessionId: session.acpSessionId })
     } catch (error) {
       log('kimi', `cancel after timeout failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /** session/prompt 统一入口（用户轮 + 隐藏轮共用）：撞 "another turn"（僵尸
+   *  turn——上轮 result 丢失或超时取消未生效，Tran 侧 running 已复位但 agent 侧
+   *  turn 还活着）时自动补 session/cancel、短等生效后原样重试一次；重试仍失败
+   *  才把原始错误抛给 UI。与 drain/hiddenTurn 互斥守卫配合：本进程内不可能另有
+   *  本地轮在跑，命中即僵尸，cancel 不会误杀正常轮。全过程只记日志，对用户无感。 */
+  private async promptWithRecovery(
+    client: AcpClient,
+    session: ActiveKimiSession,
+    payload: PromptPayload,
+    timeoutMs: number
+  ): Promise<Record<string, unknown>> {
+    const acpSessionId = session.acpSessionId
+    if (!acpSessionId) throw new Error('Kimi session is not ready.')
+    const send = (): Promise<Record<string, unknown>> =>
+      client.request<Record<string, unknown>>('session/prompt', {
+        sessionId: acpSessionId,
+        prompt: payload.prompt,
+        messageId: cryptoId()
+      }, timeoutMs, () => this.cancelTurnOnTimeout(client, session))
+    try {
+      return await send()
+    } catch (error) {
+      if (!isAnotherTurnError(error) || session.closed) throw error
+      log('kimi', `zombie turn detected session=${session.id}: ${userFacingError(error)} — cancel + retry once`)
+      this.cancelTurnOnTimeout(client, session)
+      await new Promise((resolve) => setTimeout(resolve, ZOMBIE_CANCEL_GRACE_MS))
+      if (session.closed) throw error
+      try {
+        return await send()
+      } catch (retryError) {
+        log('kimi', `zombie turn retry failed session=${session.id}: ${userFacingError(retryError)}`)
+        throw error
+      }
     }
   }
 
@@ -631,7 +682,10 @@ export class KimiBackend {
   }
 
   private async drain(session: ActiveKimiSession): Promise<void> {
-    if (session.running || session.closed) return
+    // hiddenTurn 互斥：隐藏轮（/usage、/mcp）在 agent 侧也是真实 turn，不设
+    // running——这里挡住，避免用户轮与隐藏轮并发撞 "another turn"。隐藏轮
+    // 结束时会在 finally 里补 drain 排队的消息。
+    if (session.running || session.hiddenTurn || session.closed) return
     const next = session.queue.shift()
     if (!next) return
     session.running = true
@@ -778,18 +832,17 @@ export class KimiBackend {
 
   /** 隐藏轮：向 ACP 会话发 '/usage'，该轮的流式事件全部吞掉（hiddenTurn 标志），
    *  只累积文本，结束后解析 Context 行推给渲染层。标志在 prompt 响应到达后才
-   *  清除——kimi 侧 FIFO，用户轮排在隐藏轮之后，其事件到达时标志已清。 */
+   *  清除——kimi 侧 FIFO，用户轮排在隐藏轮之后，其事件到达时标志已清。
+   *  只在会话空闲时跑（busy 直接跳过：turn 末的 afterTurn 会补刷新），不与
+   *  对话流抢 FIFO。 */
   private async runHiddenUsageTurn(session: ActiveKimiSession): Promise<void> {
     if (session.closed || !session.acpSessionId || session.hiddenTurn) return
+    if (session.running || session.queue.length) return
     session.hiddenTurn = true
     session.hiddenText = ''
     try {
       const client = await this.ensureClient()
-      await client.request('session/prompt', {
-        sessionId: session.acpSessionId,
-        prompt: [{ type: 'text', text: '/usage' }],
-        messageId: cryptoId()
-      }, 60000, () => this.cancelTurnOnTimeout(client, session))
+      await this.promptWithRecovery(client, session, { prompt: [{ type: 'text', text: '/usage' }] }, 60000)
       const usage = parseContextUsage(session.hiddenText)
       if (usage && !session.closed) {
         session.contextUsage = usage
@@ -809,10 +862,13 @@ export class KimiBackend {
         session.usageRefreshPending = false
         void this.runHiddenUsageTurn(session)
       }
+      // 隐藏轮期间排队的消息（drain 被 hiddenTurn 互斥挡住）：轮末补 drain。
+      if (!session.closed && !session.hiddenTurn && session.queue.length) void this.drain(session)
     }
   }
 
-  /** 渲染层悬停上下文环触发的即时刷新：无轮直接跑，有轮标记 pending 轮末补。 */
+  /** 渲染层悬停上下文环触发的即时刷新：无轮直接跑，隐藏轮在途标记 pending 轮末
+   *  补；用户轮在途/队列非空则跳过（turn 末 afterTurn 会补刷新）。 */
   async requestUsageRefresh(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session || session.closed) return
@@ -834,11 +890,7 @@ export class KimiBackend {
     session.hiddenText = ''
     try {
       const client = await this.ensureClient()
-      await client.request('session/prompt', {
-        sessionId: session.acpSessionId,
-        prompt: [{ type: 'text', text: '/mcp' }],
-        messageId: cryptoId()
-      }, 60000, () => this.cancelTurnOnTimeout(client, session))
+      await this.promptWithRecovery(client, session, { prompt: [{ type: 'text', text: '/mcp' }] }, 60000)
       const servers = parseMcpServers(session.hiddenText)
       if (servers && !session.closed) {
         session.mcpServers = servers
@@ -864,6 +916,8 @@ export class KimiBackend {
         session.usageRefreshPending = false
         void this.runHiddenUsageTurn(session)
       }
+      // 隐藏轮期间排队的消息（drain 被 hiddenTurn 互斥挡住）：轮末补 drain。
+      if (!session.closed && !session.hiddenTurn && session.queue.length) void this.drain(session)
     }
   }
 
@@ -891,11 +945,7 @@ export class KimiBackend {
     }
     const client = await this.ensureClient()
     const payload = contentToPrompt(message.content)
-    const response = await client.request<Record<string, unknown>>('session/prompt', {
-      sessionId: session.acpSessionId,
-      prompt: payload.prompt,
-      messageId: cryptoId()
-    }, 900000, () => this.cancelTurnOnTimeout(client, session))
+    const response = await this.promptWithRecovery(client, session, payload, 900000)
     // goal 循环终止判定用：封停前捕获本轮最终正文。
     session.lastTurnText = session.streamedText
     // 查询轮：输出经 system/query_result 状态卡推渲染层（原文不进对话流）。
