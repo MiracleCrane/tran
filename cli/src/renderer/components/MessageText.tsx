@@ -1,5 +1,5 @@
 import { memo, useEffect, useState, type AnchorHTMLAttributes, type ImgHTMLAttributes, type MouseEvent } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import { useSessionStore } from '../store/sessionStore'
@@ -177,10 +177,16 @@ function ImgRenderer({ src, alt, node: _node, ...props }: ImgRendererProps): JSX
 }
 
 const MD_COMPONENTS = { code: CodeRenderer, a: LinkRenderer, img: ImgRenderer }
-const MD_PLAIN = { remarkPlugins: [remarkGfm], components: MD_COMPONENTS }
+/** #26：react-markdown 默认 urlTransform 白名单只有 https?/ircs?/mailto/xmpp，
+ *  data: URI 被清空成 src=""。只放行 data:image/（图片 data URL），其余仍走默认过滤。 */
+function urlTransformAllowDataImage(url: string): string {
+  return /^data:image\//i.test(url) ? url : defaultUrlTransform(url)
+}
+const MD_PLAIN = { remarkPlugins: [remarkGfm], urlTransform: urlTransformAllowDataImage, components: MD_COMPONENTS }
 const MD_HIGHLIGHTED = {
   remarkPlugins: [remarkGfm],
   rehypePlugins: [rehypeHighlight],
+  urlTransform: urlTransformAllowDataImage,
   components: MD_COMPONENTS
 }
 

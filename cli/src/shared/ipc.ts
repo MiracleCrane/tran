@@ -78,6 +78,8 @@ export interface SessionRunningChangedPayload {
   sessionId: string
   running: boolean
   acpSessionId?: string
+  /** 本轮 turn 开始时间戳（running=true 时带上；#41 忙碌态 mm:ss 计时用）。 */
+  startedAt?: number
 }
 
 export interface SessionListOptions {

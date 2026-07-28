@@ -109,6 +109,18 @@ interface ActiveKimiSession {
   queryCommand?: string
   /** 隐藏 /mcp 轮解析出的 server 状态缓存（listMcpServers / 面板刷新用）。 */
   mcpServers?: McpServerEntry[]
+  /** #41 本轮用户 turn 开始时间（0=空闲；忙碌态计时/静默监督用）。 */
+  turnStartedAt: number
+  /** #41 最近一次该会话事件时间（静默监督的活动计时）。 */
+  lastEventAt: number
+  /** #41 上次"疑似无响应"推送时间（0=未推送；活动恢复后归零）。 */
+  stallWarnedAt: number
+  /** #41 静默监督定时器（仅用户轮在跑时存在）。 */
+  stallTimer?: NodeJS.Timeout
+  /** #41 兜底中止：纯静默到上限时 reject 进行中的 prompt（runTurn race）。 */
+  stallAbort?: (error: Error) => void
+  /** #41 权限/elicitation 等待中：是在等用户不是 agent 卡死，静默监督暂停。 */
+  waitingOnUser: boolean
 }
 
 interface PendingPermission {
@@ -117,6 +129,8 @@ interface PendingPermission {
   options: Array<Record<string, unknown>>
   /** AskUserQuestion（elicitation）：回传用户点选的原样 optionId，不走模糊匹配。 */
   elicitation?: boolean
+  /** #41 发起等待的桥接会话 id：用户作答后复位其 waitingOnUser。 */
+  sessionId?: string
 }
 
 interface TokenUsage {
@@ -169,6 +183,15 @@ const MCP_PENDING_RETRY_MS = 6000
 /** 僵尸 turn 恢复：命中 "another turn" 后补发 session/cancel 的生效等待
  *  （kimi 侧取消是异步的，立即重试会再撞一次）。 */
 const ZOMBIE_CANCEL_GRACE_MS = 2000
+
+/** #41 长 turn 分级介入（用户轮不再 900s 硬掐——一次多任务、阻塞型子代理可
+ *  十几分钟无流式事件，硬超时会把正常工作掐死）。该会话任何事件都重置静默
+ *  计时；纯静默到 WARN 不掐断，推"疑似无响应"给渲染层（用户决定继续等/打断，
+ *  打断走现有 cancel 路径）；纯静默到 ABORT 才自动 cancel 防真僵尸（后续
+ *  请求撞 "another turn" 时由 #27 的 cancel+retry 恢复）。 */
+const TURN_STALL_WARN_MS = 15 * 60_000
+const TURN_STALL_ABORT_MS = 2 * 60 * 60_000
+const TURN_STALL_CHECK_MS = 60_000
 
 /** Map ACP/JSON-RPC failures to user-facing text. authRequired (-32000) means
  *  the Kimi CLI has no usable token — the fix is a terminal `kimi login`. */
@@ -261,7 +284,11 @@ export class KimiBackend {
       aiTitleRefined: false,
       titleTexts: [],
       queryTurn: false,
-      queryText: ''
+      queryText: '',
+      turnStartedAt: 0,
+      lastEventAt: 0,
+      stallWarnedAt: 0,
+      waitingOnUser: false
     }
     session.ready = this.prepareSession(session, opts)
     this.sessions.set(sessionId, session)
@@ -330,6 +357,7 @@ export class KimiBackend {
     const session = this.sessions.get(sessionId)
     if (!session) return
     session.closed = true
+    this.disarmStallWatch(session)
     if (session.acpSessionId) {
       // 空壳治理：Tran 新建但没发过消息的会话，离开时直接从磁盘删掉。
       this.discardEmptyShell(session)
@@ -409,9 +437,89 @@ export class KimiBackend {
     return ids
   }
 
-  /** turn 开始/结束时推送运行状态（渲染层实时更新侧栏/标签的运行标记）。 */
+  /** turn 开始/结束时推送运行状态（渲染层实时更新侧栏/标签的运行标记）。
+   *  开始时附带本轮开始时间戳（#41 渲染层忙碌态 mm:ss 计时用）。 */
   private emitRunning(session: ActiveKimiSession, running: boolean): void {
-    this.h.onSessionRunning?.(session.id, running, session.acpSessionId)
+    this.h.onSessionRunning?.(
+      session.id,
+      running,
+      session.acpSessionId,
+      running && session.turnStartedAt ? session.turnStartedAt : undefined
+    )
+  }
+
+  /** #41 静默监督（仅用户轮；隐藏轮保持 60s 硬超时不变）：每分钟检查一次该
+   *  会话活动。纯静默到 WARN 推"疑似无响应"（之后每个 WARN 周期复读一次，
+   *  含最新时长）；到 ABORT 自动 cancel 并中止本轮（真僵尸兜底）。 */
+  private armStallWatch(session: ActiveKimiSession): void {
+    this.disarmStallWatch(session)
+    session.lastEventAt = Date.now()
+    session.stallWarnedAt = 0
+    session.stallTimer = setInterval(() => this.checkTurnStall(session), TURN_STALL_CHECK_MS)
+    session.stallTimer.unref()
+  }
+
+  private disarmStallWatch(session: ActiveKimiSession): void {
+    if (session.stallTimer) {
+      clearInterval(session.stallTimer)
+      session.stallTimer = undefined
+    }
+    session.stallWarnedAt = 0
+  }
+
+  private checkTurnStall(session: ActiveKimiSession): void {
+    if (!session.running || !session.turnStartedAt || session.closed) return
+    // 权限/elicitation 等待期间不算无响应——是在等用户，不是 agent 卡死。
+    if (session.waitingOnUser) return
+    // 会话已被取代/清空（close/handleClientClose 后旧定时器的残火）：直接自拆。
+    if (this.sessions.get(session.id) !== session) {
+      this.disarmStallWatch(session)
+      return
+    }
+    const now = Date.now()
+    const silentMs = now - session.lastEventAt
+    if (silentMs >= TURN_STALL_ABORT_MS) {
+      const silentMin = Math.round(silentMs / 60000)
+      log('kimi', `turn stalled ${silentMin}min session=${session.id} — auto cancel (zombie fallback)`)
+      this.emitTurnStall(session, silentMs)
+      if (this.client) this.cancelTurnOnTimeout(this.client, session)
+      // 中止 runTurn 的等待（race）。prompt 的 pending 条目留给 ACP 响应/进程
+      // 关闭时清理——cancel 生效（#27 实测）时响应会到达并正常清掉。
+      session.stallAbort?.(new Error(`本轮已 ${silentMin} 分钟完全无响应，Tran 已自动中断（agent 疑似卡死）。`))
+      return
+    }
+    if (silentMs >= TURN_STALL_WARN_MS && now - session.stallWarnedAt >= TURN_STALL_WARN_MS) {
+      session.stallWarnedAt = now
+      this.emitTurnStall(session, silentMs)
+    }
+  }
+
+  /** #41 活动触点：该会话任何事件（流式/工具/权限/fs）都重置静默计时；
+   *  曾推过"疑似无响应"的，补一条 recovered 让渲染层撤掉提示。 */
+  private touchTurnActivity(session: ActiveKimiSession): void {
+    if (!session.running || !session.turnStartedAt) return
+    session.lastEventAt = Date.now()
+    if (session.stallWarnedAt) {
+      session.stallWarnedAt = 0
+      this.h.onMessage(session.id, {
+        type: 'system',
+        subtype: 'turn_stall',
+        stall: { recovered: true, at: Date.now() }
+      } as unknown as SDKMessage)
+    }
+  }
+
+  /** #41 "疑似无响应"推送：含本轮已运行时长与当前静默时长（渲染层提示卡用）。 */
+  private emitTurnStall(session: ActiveKimiSession, silentMs: number): void {
+    this.h.onMessage(session.id, {
+      type: 'system',
+      subtype: 'turn_stall',
+      stall: {
+        elapsedMs: Date.now() - session.turnStartedAt,
+        silentMs,
+        at: Date.now()
+      }
+    } as unknown as SDKMessage)
   }
 
   /** 空壳治理：Tran 新建但没发过消息的会话，在离开（切对话/切项目/退出）时删除
@@ -495,6 +603,11 @@ export class KimiBackend {
     const pending = this.pendingPermissions.get(resp.toolUseID)
     if (!pending) return false
     this.pendingPermissions.delete(resp.toolUseID)
+    // #41 用户已作答：复位"等用户"状态，静默监督恢复。
+    if (pending.sessionId) {
+      const session = this.sessions.get(pending.sessionId)
+      if (session) session.waitingOnUser = false
+    }
     if (pending.elicitation) {
       // elicitation：原样返回用户点选的 optionId（不做 allow/deny 模糊匹配）。
       const chosen = asString(resp.answers?.optionId)
@@ -691,6 +804,7 @@ export class KimiBackend {
     session.running = true
     session.turn += 1
     session.turnHadToolCall = false
+    session.turnStartedAt = Date.now()
     this.emitRunning(session, true)
     try {
       await session.ready
@@ -703,6 +817,9 @@ export class KimiBackend {
       })
     } finally {
       session.running = false
+      session.turnStartedAt = 0
+      session.waitingOnUser = false
+      this.disarmStallWatch(session)
       this.emitRunning(session, false)
       session.currentMessageId = undefined
       session.streamedText = ''
@@ -945,7 +1062,21 @@ export class KimiBackend {
     }
     const client = await this.ensureClient()
     const payload = contentToPrompt(message.content)
-    const response = await this.promptWithRecovery(client, session, payload, 900000)
+    // #41 用户轮无硬超时（timeoutMs=0）：长任务（一次多任务、阻塞型子代理可
+    // 十几分钟无流式事件）不该被 900s 掐死。改由静默监督分级介入：纯静默
+    // 15 分钟推"疑似无响应"（用户决定继续等/打断），纯静默 2 小时自动 cancel
+    // 兜底（stallAbort race 在此 reject，错误走 drain 的统一出错路径）。
+    this.armStallWatch(session)
+    const stallAbort = new Promise<never>((_, reject) => {
+      session.stallAbort = reject
+    })
+    let response: Record<string, unknown>
+    try {
+      response = await Promise.race([this.promptWithRecovery(client, session, payload, 0), stallAbort])
+    } finally {
+      session.stallAbort = undefined
+      this.disarmStallWatch(session)
+    }
     // goal 循环终止判定用：封停前捕获本轮最终正文。
     session.lastTurnText = session.streamedText
     // 查询轮：输出经 system/query_result 状态卡推渲染层（原文不进对话流）。
@@ -1195,6 +1326,7 @@ export class KimiBackend {
 
   private handleSessionUpdate(session: ActiveKimiSession, update: Record<string, unknown>): void {
     const type = asString(update.sessionUpdate)
+    this.touchTurnActivity(session)
     // 隐藏轮：吞掉该轮所有事件，只累积 agent_message_chunk 文本供解析。
     if (session.hiddenTurn) {
       if (type === 'agent_message_chunk') session.hiddenText += textFromContentBlock(update.content)
@@ -1307,6 +1439,9 @@ export class KimiBackend {
     if (msg.id === undefined) return
     const client = this.client
     if (!client) return
+    // #41 权限/fs 请求也是该会话的活动（权限等待不算无响应）：重置静默计时。
+    const session = this.sessionForAcp(asString(params.sessionId))
+    if (session) this.touchTurnActivity(session)
     if (method === 'session/request_permission') {
       this.handlePermissionRequest(client, msg.id, params)
       return
@@ -1351,11 +1486,19 @@ export class KimiBackend {
     const options = Array.isArray(params.options)
       ? params.options.filter((option): option is Record<string, unknown> => !!asRecord(option))
       : []
+    // #41 转入"等用户"状态：权限/elicitation 等待期间静默监督暂停（作答后复位）。
+    const session = this.sessionForAcp(asString(params.sessionId))
+    if (session) session.waitingOnUser = true
     // AskUserQuestion：走 elicitation 通道（区别于工具审批）——问题+选项原样
     // 经 system/elicitation 推渲染层，回答时原样返回 optionId。
     if (asString(toolCall.title) === 'AskUserQuestion') {
-      this.pendingPermissions.set(toolUseID, { client, requestId, options, elicitation: true })
-      const session = this.sessionForAcp(asString(params.sessionId))
+      this.pendingPermissions.set(toolUseID, {
+        client,
+        requestId,
+        options,
+        elicitation: true,
+        ...(session ? { sessionId: session.id } : {})
+      })
       const choices = options
         .map((option) => {
           const optionId = asString(option.optionId)
@@ -1383,7 +1526,7 @@ export class KimiBackend {
       }
       return
     }
-    this.pendingPermissions.set(toolUseID, { client, requestId, options })
+    this.pendingPermissions.set(toolUseID, { client, requestId, options, ...(session ? { sessionId: session.id } : {}) })
     this.h.onPermissionRequest({
       toolUseID,
       toolName: toolName(toolCall),

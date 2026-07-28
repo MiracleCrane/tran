@@ -134,8 +134,66 @@ function mergeModels(agentBackend: AgentBackendId | undefined, ...groups: Compos
   return merged
 }
 
+/** 1s 心跳：让忙碌态计时/无响应时长随时间递增。 */
+function useSecondTick(): void {
+  const [, forceTick] = useState(0)
+  useEffect(() => {
+    const t = window.setInterval(() => forceTick((n) => n + 1), 1000)
+    return () => window.clearInterval(t)
+  }, [])
+}
+
+/** #41 忙碌态已运行时长（mm:ss 递增；startedAt 由主进程随 turn 开始推送）。 */
+function TurnElapsed({ startedAt }: { startedAt: number }): JSX.Element {
+  useSecondTick()
+  const total = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+  const mm = String(Math.floor(total / 60)).padStart(2, '0')
+  const ss = String(total % 60).padStart(2, '0')
+  return <span className="font-mono">（{mm}:{ss}）</span>
+}
+
+/** #41 疑似无响应提示：静默超阈值后由主进程推送（system/turn_stall），显示
+ *  已静默分钟数（随心跳递增）+ 继续等待/打断两个操作（打断走现有 cancel 路径）。 */
+function TurnStallNotice({
+  stall,
+  onDismiss,
+  onInterrupt
+}: {
+  stall: { elapsedMs: number; silentMs: number; at: number }
+  onDismiss: () => void
+  onInterrupt: () => void
+}): JSX.Element {
+  useSecondTick()
+  const silentMin = Math.max(1, Math.floor((stall.silentMs + Date.now() - stall.at) / 60000))
+  return (
+    <span className="flex shrink-0 items-center gap-2 text-amber-300/90">
+      <span>已 {silentMin} 分钟无响应</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="rounded border border-white/15 px-1.5 py-0.5 text-[10px] text-zinc-300 transition hover:bg-white/[0.08]"
+        title="继续等待本轮完成（若持续无响应会再次提醒）"
+      >
+        继续等待
+      </button>
+      <button
+        type="button"
+        onClick={onInterrupt}
+        className="rounded border border-red-900/60 bg-red-950/40 px-1.5 py-0.5 text-[10px] text-red-300 transition hover:bg-red-950/60"
+        title="打断本轮（与停止按钮同一条 cancel 路径）"
+      >
+        打断
+      </button>
+    </span>
+  )
+}
+
 export default function Composer(): JSX.Element {
   const running = useSessionStore((s) => s.status.running)
+  // #41 忙碌态计时（turn 开始时间戳）与疑似无响应提示。
+  const turnStartedAt = useSessionStore((s) => s.status.startedAt)
+  const turnStall = useSessionStore((s) => s.status.stall)
+  const dismissTurnStall = useSessionStore((s) => s.dismissTurnStall)
   const starting = useSessionStore((s) => s.starting)
   const meta = useSessionStore((s) => s.meta)
   const sendMessage = useSessionStore((s) => s.sendMessage)
@@ -837,8 +895,16 @@ export default function Composer(): JSX.Element {
           {running && (
             <span className="flex shrink-0 items-center gap-1.5 text-accent/90">
               <span className="thinking-moon" aria-hidden />
-              AI 正在输出中{pending.length > 0 ? `，已排队 ${pending.length} 条` : '，新消息将排队发送'}
+              AI 正在输出中{turnStartedAt ? <TurnElapsed startedAt={turnStartedAt} /> : null}
+              {pending.length > 0 ? `，已排队 ${pending.length} 条` : '，新消息将排队发送'}
             </span>
+          )}
+          {running && turnStall && (
+            <TurnStallNotice
+              stall={turnStall}
+              onDismiss={dismissTurnStall}
+              onInterrupt={() => void interrupt()}
+            />
           )}
           <UsageRings />
         </div>

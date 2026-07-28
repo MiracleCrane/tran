@@ -190,6 +190,10 @@ export interface SessionMeta {
 
 export interface SessionStatus {
   running: boolean
+  /** 本轮 turn 开始时间戳（forge:session-running-changed 带来；#41 忙碌态 mm:ss 计时）。 */
+  startedAt?: number
+  /** #41 疑似无响应：该会话静默超阈值（system/turn_stall 推送；含已运行/静默时长）。 */
+  stall?: { elapsedMs: number; silentMs: number; at: number }
   costUsd?: number
   turns?: number
   inputTokens?: number

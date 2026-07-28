@@ -13,12 +13,16 @@ import { useSessionStore, type StreamDeltaBatch } from './sessionStore'
  *
  * Pacing (#8): deltas arrive in irregular bursts (IPC chunking, tool
  * round-trips), so draining the whole buffer every frame makes the text jump
- * in uneven slabs — 吐字僵硬. Instead each frame releases a bounded budget of
- * characters: a small floor keeps a steady trickle smooth, and the budget
- * scales with the backlog so a big burst still clears within ~3 frames
- * (never falling behind, never dumping it all at once). A delta larger than
- * the remaining budget is split across frames; folding deltas is pure string
- * append per block (see applyStreamEvent), so splitting is order-safe.
+ * in uneven slabs — 吐字僵硬. Instead the release is paced by TIME at a fixed
+ * base rate (chars/second, independent of the display refresh rate), giving a
+ * constant-speed typewriter feel: within the normal backlog range
+ * (< HIGH_WATER_CHARS) the release rate never varies — the backlog only acts
+ * as a buffer, it does not change the cadence. Only when the backlog crosses
+ * the high watermark does the rate speed up, and the speed-up is GRADUAL
+ * (linear in the excess, capped), so bursts are absorbed smoothly instead of
+ * dumped in slabs. A delta larger than the remaining budget is split across
+ * frames; folding deltas is pure string append per block (see
+ * applyStreamEvent), so splitting is order-safe.
  *
  * Ordering is preserved: any NON-delta event (block start/stop, message_start,
  * the final `assistant`/`result`, tool progress, system, agent:ended) flushes
@@ -28,10 +32,18 @@ import { useSessionStore, type StreamDeltaBatch } from './sessionStore'
 let pending: StreamDeltaBatch[] = []
 let rafId: number | null = null
 
-/** Steady-state floor: chars released per frame (~360 chars/s at 60fps). */
-const MIN_CHARS_PER_FRAME = 6
-/** Burst catch-up: the whole backlog drains within this many frames. */
-const CATCHUP_FRAMES = 3
+/** Constant base rate (~4.7 chars/frame at 60fps). Time-based, so the cadence
+ *  is identical on 120Hz+ displays — a per-frame budget would double there. */
+const BASE_CHARS_PER_SEC = 280
+/** Below this backlog the rate stays at the base rate — the backlog only
+ *  buffers, it never changes the cadence. */
+const HIGH_WATER_CHARS = 800
+/** Smooth ramp: every char of backlog above the high watermark adds this many
+ *  chars/sec, so catch-up accelerates gradually (linear), not in slabs. */
+const RAMP_CHARS_PER_SEC = 2
+/** Hard ceiling on the catch-up rate: even a huge backlog (e.g. a long paste)
+ *  drains fast but never dumps in one slab. */
+const MAX_CHARS_PER_SEC = 1800
 
 /** Text-bearing fields of a content_block_delta, in priority order. */
 const DELTA_TEXT_KEYS = ['text', 'thinking', 'partial_json'] as const
@@ -95,11 +107,30 @@ function pendingChars(): number {
 }
 
 /** rAF flush: paced release (see header comment). Re-arms itself while a
- *  backlog remains. */
+ *  backlog remains. The budget accrues by elapsed time (`carry` holds the
+ *  sub-char remainder), so the cadence is a constant chars/second on any
+ *  display refresh rate. */
+let lastFlushAt = 0
+let carry = 0
+
 function flushFrame(): void {
   rafId = null
-  if (pending.length === 0) return
-  const budget = Math.max(MIN_CHARS_PER_FRAME, Math.ceil(pendingChars() / CATCHUP_FRAMES))
+  if (pending.length === 0) {
+    lastFlushAt = 0
+    carry = 0
+    return
+  }
+  const now = performance.now()
+  // Clamp dt so a stalled rAF (occluded/throttled tab) doesn't dump a huge
+  // accumulated budget on resume.
+  const dt = lastFlushAt > 0 ? Math.min((now - lastFlushAt) / 1000, 0.1) : 1 / 60
+  lastFlushAt = now
+  const backlog = pendingChars()
+  const excess = Math.max(0, backlog - HIGH_WATER_CHARS)
+  const rate = Math.min(MAX_CHARS_PER_SEC, BASE_CHARS_PER_SEC + excess * RAMP_CHARS_PER_SEC)
+  carry += rate * dt
+  const budget = Math.floor(carry)
+  carry -= budget
   useSessionStore.getState().applyStreamBatch(drainBudget(budget))
   if (pending.length > 0) rafId = requestAnimationFrame(flushFrame)
 }
@@ -112,6 +143,8 @@ function flushAll(): void {
     rafId = null
   }
   if (pending.length === 0) return
+  lastFlushAt = 0
+  carry = 0
   useSessionStore.getState().applyStreamBatch(drainAll())
 }
 

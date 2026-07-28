@@ -194,6 +194,8 @@ interface SessionStore {
   clearError: () => void
   /** forge:session-running-changed 推送：同步后台缓冲与侧栏列表的 running 标记。 */
   applySessionRunningChanged: (p: SessionRunningChangedPayload) => void
+  /** #41 "继续等待"：撤掉疑似无响应提示（后端会在下一个静默周期再推）。 */
+  dismissTurnStall: () => void
   /** AskUserQuestion 回答：原样回传 optionId 并从队列移除。 */
   answerElicitation: (toolUseID: string, optionId: string) => Promise<void>
   loadMoreSessions: () => Promise<void>
@@ -803,6 +805,10 @@ interface BackgroundSessionState {
   items: TranscriptItem[]
   currentStreamingMsgId: string | null
   running: boolean
+  /** #41 本轮 turn 开始时间戳与"疑似无响应"提示：随缓冲走，attach 切回后
+   *  忙碌态计时连续、提示不丢。 */
+  startedAt?: number
+  stall?: { elapsedMs: number; silentMs: number; at: number }
   /** 桥接进程已结束（agent:ended）：后端会话死了，attach 无意义，走原重放路径。 */
   ended: boolean
   error?: string
@@ -848,6 +854,8 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
     items: s.items,
     currentStreamingMsgId: s.currentStreamingMsgId,
     running: s.status.running,
+    ...(s.status.startedAt ? { startedAt: s.status.startedAt } : {}),
+    ...(s.status.stall ? { stall: s.status.stall } : {}),
     ended: false,
     ...(s.status.error ? { error: s.status.error } : {}),
     tasks: s.tasks,
@@ -926,6 +934,8 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
   if (e.type === 'agent:ended') {
     bg.ended = true
     bg.running = false
+    delete bg.startedAt
+    delete bg.stall
     bg.error = isUserStopDiagnostic(e.error) ? bg.error : (e.error ?? bg.error)
     invalidateBackgroundHistoryCache(bg)
     scheduleSessionsRefresh(get)
@@ -1110,6 +1120,20 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
         if (req?.toolUseID && !bg.elicitationQueue.some((q) => q.toolUseID === req.toolUseID)) {
           bg.elicitationQueue = [...bg.elicitationQueue, req]
         }
+      } else if (subtype === 'turn_stall') {
+        // #41 疑似无响应：提示随缓冲走，attach 切回后照常显示；recovered 撤掉。
+        const stall = (msg as unknown as {
+          stall?: { recovered?: boolean; elapsedMs?: number; silentMs?: number; at?: number }
+        }).stall
+        if (stall && !stall.recovered) {
+          bg.stall = {
+            elapsedMs: stall.elapsedMs ?? 0,
+            silentMs: stall.silentMs ?? 0,
+            at: stall.at ?? Date.now()
+          }
+        } else {
+          delete bg.stall
+        }
       }
       // status 等只影响瞬时 UI 的子类型，后台不需要。
       break
@@ -1235,6 +1259,8 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
       // turn 结束：清流式标记。后台缓冲没有 pendingQueue（切走时队列已清空，
       // 后续消息靠后端回显进入 items），running 以后端推送/下一个事件为准。
       bg.running = false
+      delete bg.startedAt
+      delete bg.stall
       bg.items = sealHungToolBlocks(
         bg.items.map((i) => (i.kind === 'assistant' && i.streaming ? { ...i, streaming: false } : i)),
         true
@@ -1567,7 +1593,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               )
             }
       ),
-      status: { ...s.status, running: false }
+      status: { ...s.status, running: false, stall: undefined }
     }))
     await window.api.interrupt(meta.sessionId)
   },
@@ -1784,11 +1810,28 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   applySessionRunningChanged(p) {
-    // 后台缓冲的 running（attach 时恢复忙碌态用）。
+    // 后台缓冲的 running（attach 时恢复忙碌态用）+ #41 计时/提示随 turn 结束清掉。
     const bg = backgroundSessions.get(p.sessionId)
-    if (bg) bg.running = p.running
-    // 侧栏列表项的 running 标记（按 acpSessionId 匹配）。当前会话的
-    // status.running 以事件流为准，这里不动。
+    if (bg) {
+      bg.running = p.running
+      if (p.running && p.startedAt) bg.startedAt = p.startedAt
+      if (!p.running) {
+        delete bg.startedAt
+        delete bg.stall
+      }
+    }
+    // 当前会话：turn 开始时间戳（忙碌态 mm:ss 计时）从主进程带来的为准；
+    // turn 结束时清掉计时与无响应提示。running 本身以事件流为准，这里不动。
+    if (get().meta?.sessionId === p.sessionId) {
+      set((s) => ({
+        status: {
+          ...s.status,
+          ...(p.running && p.startedAt ? { startedAt: p.startedAt } : {}),
+          ...(!p.running ? { startedAt: undefined, stall: undefined } : {})
+        }
+      }))
+    }
+    // 侧栏列表项的 running 标记（按 acpSessionId 匹配）。
     if (!p.acpSessionId) return
     set((s) => {
       let changed = false
@@ -1799,6 +1842,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       })
       return changed ? { sessions } : {}
     })
+  },
+
+  dismissTurnStall() {
+    set((s) => (s.status.stall ? { status: { ...s.status, stall: undefined } } : {}))
   },
 
   async answerElicitation(toolUseID, optionId) {
@@ -2020,7 +2067,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         elicitationQueue: bg.elicitationQueue,
         slashCommands: bg.slashCommands,
         swarmTasks: bg.swarmTasks,
-        status: { running: bg.running, ...(bg.error ? { error: bg.error } : {}) },
+        status: {
+          running: bg.running,
+          ...(bg.startedAt ? { startedAt: bg.startedAt } : {}),
+          ...(bg.stall ? { stall: bg.stall } : {}),
+          ...(bg.error ? { error: bg.error } : {})
+        },
         currentStreamingMsgId: bg.currentStreamingMsgId,
         meta: {
           sessionId: bg.bridgeSessionId,
@@ -2400,7 +2452,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const endedError = isUserStopDiagnostic(e.error) ? undefined : e.error
       set((s) => ({
         bridgeEnded: true,
-        status: { ...s.status, running: false, error: endedError ?? s.status.error }
+        status: { ...s.status, running: false, startedAt: undefined, stall: undefined, error: endedError ?? s.status.error }
       }))
       scheduleSessionsRefresh(get)
       return
@@ -2483,6 +2535,24 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           // goal 循环状态推送（GoalCard 进度 / ModePanel 开关激活态）。
           const g = (msg as unknown as { goal?: GoalInfo | null }).goal
           set({ goal: g ?? null })
+        } else if (subtype === 'turn_stall') {
+          // #41 疑似无响应：静默超阈值（含已运行/静默时长）；recovered 撤掉提示。
+          const stall = (msg as unknown as {
+            stall?: { recovered?: boolean; elapsedMs?: number; silentMs?: number; at?: number }
+          }).stall
+          set((s) => ({
+            status: {
+              ...s.status,
+              stall:
+                stall && !stall.recovered
+                  ? {
+                      elapsedMs: stall.elapsedMs ?? 0,
+                      silentMs: stall.silentMs ?? 0,
+                      at: stall.at ?? Date.now()
+                    }
+                  : undefined
+            }
+          }))
         } else if (subtype === 'elicitation') {
           // AskUserQuestion：问题卡片入队（多问题 q0/q1… 顺序逐条处理）。
           const req = (msg as unknown as { elicitation?: ElicitationRequest }).elicitation
@@ -2854,6 +2924,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             ...s.status,
             // Stay "running" if a queued message is about to be processed.
             running: s.pendingQueue.length > 0,
+            // turn 收尾：无响应提示随之撤掉（下一轮若再静默会重新推送）。
+            stall: undefined,
             costUsd: r.total_cost_usd,
             turns: r.num_turns,
             inputTokens: r.usage?.input_tokens,

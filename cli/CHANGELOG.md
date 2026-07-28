@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.0.33 - 2026-07-28
+
+### 中文
+
+- 修复:长 turn 被 15 分钟硬超时掐断(#41)。用户轮 session/prompt 不再设硬超时,改为静默监督:turn 期间任何事件(含权限/fs 请求)重置活跃计时;纯静默 15 分钟提示"已 X 分钟无响应 [继续等待][打断]"(决定权给用户,每 15 分钟复读);纯静默 2 小时才自动 cancel 兜底(僵尸恢复由 cancel+retry 兜着)。忙碌态显示 mm:ss 运行计时;后台会话同样收得到告警。隐藏轮(/usage、/mcp)与握手超时保持原样。
+- 优化:流式吐字改严格匀速(#8 二次反馈)。按时间计费(非帧计费,120Hz 高刷屏不再速率翻倍)恒定 280 字/秒;积压 <800 字只起缓冲不变速,超限线性渐进加速(上限 1800 字/秒防猛倒)。实测稳态 264~303 字/秒(±6%),无"一坨+停顿"。
+- 修复:markdown 中 data: URL 图片渲染为破图(#26-1)——react-markdown v10 默认协议白名单不含 data:,现放行 `data:image/*`(其余协议仍按默认过滤)。
+- 修复:kimi web 实例发现的时间戳解析恒 NaN(started_at/heartbeat_at 是 epoch ms 数字被按字符串解析),兼容数字/字符串两种形态。
+- 排查:丢壳后疑似静默退出(#26-2)无实锤排除——丢壳日志是正常退出路径的最后动作(果非因),代码链路无 app.quit/close 误触发路径。
+
+### English
+
+- Fixed: long turns killed by the 15-minute hard timeout (#41). User-turn session/prompt no longer has a hard timeout; a stall watchdog now resets on any session event (including permission/fs requests). After 15 minutes of pure silence Tran shows "no response for X min [keep waiting] [interrupt]" (repeating every 15 min); only 2 hours of silence triggers an automatic cancel (zombie recovery still backed by cancel+retry). The busy indicator shows an mm:ss elapsed timer, and background sessions receive stall notices too. Hidden-turn and handshake timeouts unchanged.
+- Improved: streaming output is now strictly constant-rate (#8 follow-up). Time-based metering (not per-frame — no more double speed on 120Hz displays) at a steady 280 chars/sec; backlog under 800 chars only buffers, beyond that a linear ramp accelerates (capped at 1800 chars/sec). Measured 264–303 chars/sec (±6%) with no dump-and-pause.
+- Fixed: data: URL images rendering as broken (#26-1) — react-markdown v10's default protocol whitelist lacks data:; `data:image/*` is now allowed (other protocols still filtered).
+- Fixed: kimi web instance discovery timestamp parsing always NaN (epoch-ms numbers parsed as strings).
+- Investigated: the "silent exit after discarding an empty shell" (#26-2) is exonerated — the shell-discard log is the last action of the normal quit path (effect, not cause).
+
+#### 验证
+
+- 匀速:合成高压测试稳态 280 字/秒 ±6%;真实消息链路无猛倒模式
+- `npm run typecheck` 与 `npm run build` 全绿
+
 ## v1.0.32 - 2026-07-28
 
 ### 中文

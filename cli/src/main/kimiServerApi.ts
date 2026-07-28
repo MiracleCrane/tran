@@ -78,6 +78,14 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+/** instances/*.json 的 started_at/heartbeat_at 实际是 epoch ms 数字（#26），
+ *  兼容数字与 ISO 字符串两种形态；解析不出返回 NaN。 */
+function parseInstanceTime(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') return Date.parse(value)
+  return NaN
+}
+
 /** 从 server/instances/ 发现一个活着的实例（pid 存活或 heartbeat 新鲜），取最新；
  *  拿不到返回 null（调用方回退默认端口）。instances 文件可能残留，必须校验。 */
 function discoverInstance(): { host: string; port: number } | null {
@@ -99,15 +107,13 @@ function discoverInstance(): { host: string; port: number } | null {
       }
       if (typeof inst.port !== 'number' || inst.port <= 0) continue
       const alive = typeof inst.pid === 'number' && pidAlive(inst.pid)
-      const heartbeat =
-        typeof inst.heartbeat_at === 'string' ? Date.parse(inst.heartbeat_at) : NaN
+      const heartbeat = parseInstanceTime(inst.heartbeat_at)
       const fresh = Number.isFinite(heartbeat) && Date.now() - heartbeat < HEARTBEAT_FRESH_MS
       if (!alive && !fresh) continue
       // 监听 0.0.0.0/:: 时连接走回环。
       const rawHost = typeof inst.host === 'string' ? inst.host : ''
       const host = rawHost && rawHost !== '0.0.0.0' && rawHost !== '::' ? rawHost : '127.0.0.1'
-      const startedAt =
-        typeof inst.started_at === 'string' ? Date.parse(inst.started_at) || 0 : 0
+      const startedAt = parseInstanceTime(inst.started_at) || 0
       if (!best || startedAt > best.startedAt) best = { host, port: inst.port, startedAt }
     } catch {
       /* 单个文件损坏 → 跳过 */

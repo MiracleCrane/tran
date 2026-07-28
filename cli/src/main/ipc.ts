@@ -310,11 +310,12 @@ export function registerIpc(
     onSessionsChanged: () => {
       send('forge:sessions-changed', {})
     },
-    onSessionRunning: (sessionId, running, acpSessionId) => {
+    onSessionRunning: (sessionId, running, acpSessionId, startedAt) => {
       const payload: SessionRunningChangedPayload = {
         sessionId,
         running,
-        ...(acpSessionId ? { acpSessionId } : {})
+        ...(acpSessionId ? { acpSessionId } : {}),
+        ...(startedAt ? { startedAt } : {})
       }
       send('forge:session-running-changed', payload)
     }

@@ -26,8 +26,8 @@ export interface AgentBackendHandlers {
   /** 历史会话列表有外部变化（如空壳会话被删除）——渲染层应刷新侧栏列表。 */
   onSessionsChanged?(): void
   /** turn 开始/结束：sessionId 是桥接 id，acpSessionId 是 agent 侧会话 id
-   *  （侧栏列表条目用的就是它）。 */
-  onSessionRunning?(sessionId: string, running: boolean, acpSessionId?: string): void
+   *  （侧栏列表条目用的就是它）。startedAt 是本轮开始时间戳（#41 忙碌态计时）。 */
+  onSessionRunning?(sessionId: string, running: boolean, acpSessionId?: string, startedAt?: number): void
 }
 
 interface AgentBackendAdapter {

@@ -17,7 +17,8 @@ interface PendingRequest {
   method: string
   resolve: (value: unknown) => void
   reject: (error: Error) => void
-  timeout: NodeJS.Timeout
+  /** timeoutMs <= 0 的请求无硬超时（#41 用户轮长任务），此字段缺省。 */
+  timeout?: NodeJS.Timeout
 }
 
 interface ClientHandlers {
@@ -82,6 +83,8 @@ export class AcpClient {
   }
 
   /**
+   * @param timeoutMs 硬超时毫秒数；传 <= 0 表示不设硬超时（#41：用户轮长任务
+   *   由调用方的活动监督/静默分级介入负责兜底，握手与隐藏轮仍传正值）。
    * @param onTimeout 硬超时触发时、reject 之前调用（如给该会话补发 session/cancel，
    *   避免 agent 侧 turn 空跑、后续请求撞 "another turn in progress"）。回调内
    *   异常被吞掉并记日志——不能掩盖原始超时错误。
@@ -92,22 +95,24 @@ export class AcpClient {
     const message: AcpRpcMessage = { jsonrpc: '2.0', id, method }
     if (params !== undefined) message.params = params
     return new Promise<T>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(id)
-        if (onTimeout) {
-          try {
-            onTimeout()
-          } catch (error) {
-            log(this.options.logTag, `onTimeout hook failed: ${error instanceof Error ? error.message : String(error)}`)
-          }
-        }
-        reject(new Error(`ACP request timed out: ${method}`))
-      }, timeoutMs)
+      const timeout = timeoutMs > 0
+        ? setTimeout(() => {
+            this.pending.delete(id)
+            if (onTimeout) {
+              try {
+                onTimeout()
+              } catch (error) {
+                log(this.options.logTag, `onTimeout hook failed: ${error instanceof Error ? error.message : String(error)}`)
+              }
+            }
+            reject(new Error(`ACP request timed out: ${method}`))
+          }, timeoutMs)
+        : undefined
       this.pending.set(id, {
         method,
         resolve: (value) => resolve(value as T),
         reject,
-        timeout
+        ...(timeout ? { timeout } : {})
       })
       this.write(message)
     })
@@ -205,7 +210,7 @@ export class AcpClient {
       const pending = this.pending.get(msg.id)
       if (!pending) return
       this.pending.delete(msg.id)
-      clearTimeout(pending.timeout)
+      if (pending.timeout) clearTimeout(pending.timeout)
       if (msg.error) {
         pending.reject(new AcpRequestError(
           msg.error.message || `${pending.method} failed`,
@@ -232,7 +237,7 @@ export class AcpClient {
 
   private rejectAll(error: Error): void {
     for (const [id, pending] of this.pending) {
-      clearTimeout(pending.timeout)
+      if (pending.timeout) clearTimeout(pending.timeout)
       pending.reject(error)
       this.pending.delete(id)
     }
