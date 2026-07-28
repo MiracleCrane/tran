@@ -3,14 +3,14 @@ import { createPortal } from 'react-dom'
 import type {
   QuotaAction,
   QuotaActionItem,
-  QuotaOverview,
-  QuotaRatelimitWindow
+  QuotaOverview
 } from '../../shared/ipc'
 
 /** 额度明细面板（对齐 Kimi 网页版"我的额度/使用明细"）：从状态栏圆环悬停卡
- *  打开，模态弹层。数据走 forge:getQuotaOverview / forge:listQuotaActions
- *  （MembershipService RPC，ratio ×100 保留两位小数）；登录态缺失时给
- *  "登录 Kimi"兜底按钮（forge:quotaLogin 网页登录）。 */
+ *  打开，模态弹层。只保留使用明细列表 + 加油包卡片——额度进度条（月度/5h/7天）
+ *  已上移到 UsageRings 悬停卡。数据走 forge:getQuotaOverview /
+ *  forge:listQuotaActions（MembershipService RPC，ratio ×100 保留两位小数）；
+ *  登录态缺失时给"登录 Kimi"兜底按钮（forge:quotaLogin 网页登录）。 */
 
 function pad(n: number): string {
   return String(n).padStart(2, '0')
@@ -22,20 +22,6 @@ function absTime(ms?: number): string | null {
   if (Number.isNaN(d.getTime())) return null
   const body = `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
   return d.getFullYear() !== new Date().getFullYear() ? `${d.getFullYear()}-${body}` : body
-}
-
-function resetLabel(resetAt?: number): string | null {
-  if (!resetAt) return null
-  const ms = resetAt - Date.now()
-  if (ms <= 0) return '即将重置'
-  const hours = Math.floor(ms / 3_600_000)
-  const minutes = Math.floor((ms % 3_600_000) / 60_000)
-  if (hours >= 24) return `${Math.floor(hours / 24)}天${hours % 24}小时后重置`
-  return `${hours}h ${minutes}m后重置`
-}
-
-function pct2(ratio: number | undefined): string | null {
-  return ratio === undefined ? null : `${(ratio * 100).toFixed(2)}%`
 }
 
 const FEATURE_LABELS: Record<string, string> = {
@@ -70,43 +56,6 @@ function itemAmountLabel(item: QuotaActionItem): string {
   if (item.amount !== undefined) return `${item.amount} ${UNIT_LABELS[item.unit ?? ''] ?? item.unit ?? ''}`.trim()
   if (item.amountMoneyCny !== undefined) return `¥${item.amountMoneyCny.toFixed(2)}`
   return '—'
-}
-
-function UsageBar({ ratio }: { ratio: number | undefined }): JSX.Element {
-  const pct = Math.min(100, (ratio ?? 0) * 100)
-  const danger = ratio !== undefined && ratio >= 0.8
-  return (
-    <div className="h-1.5 overflow-hidden rounded-full bg-black/30">
-      <div
-        className="h-full rounded-full"
-        style={{
-          width: `${pct}%`,
-          background: danger
-            ? 'linear-gradient(90deg, #f59e0b, #ef4444)'
-            : 'linear-gradient(90deg, #8b5cf6, #a78bfa)'
-        }}
-      />
-    </div>
-  )
-}
-
-function RatelimitRow({ title, window }: { title: string; window: QuotaRatelimitWindow }): JSX.Element {
-  const pct = pct2(window.ratio)
-  const reset = resetLabel(window.resetAt)
-  const abs = absTime(window.resetAt)
-  return (
-    <div>
-      <div className="mb-1 flex items-baseline justify-between text-xs">
-        <span className="text-zinc-400">{title}</span>
-        <span className="whitespace-nowrap text-zinc-500">
-          {pct ?? '—'}
-          {reset ? ` · ${reset}` : ''}
-          {abs && <span className="text-zinc-600">{` (${abs})`}</span>}
-        </span>
-      </div>
-      <UsageBar ratio={window.ratio} />
-    </div>
-  )
 }
 
 interface OverviewState {
@@ -243,35 +192,6 @@ export default function QuotaPanel({ open, onClose }: { open: boolean; onClose: 
 
           {data && (
             <>
-              {/* 总用量（Kimi+Code 合并，两位小数） */}
-              {data.totalUsedRatio !== undefined && (
-                <div>
-                  <div className="mb-1 flex items-baseline justify-between text-xs">
-                    <span className="text-zinc-400">总用量</span>
-                    <span className="whitespace-nowrap text-zinc-500">
-                      {pct2(data.totalUsedRatio)}
-                      {data.expireAt ? ` · ${resetLabel(data.expireAt) ?? ''}` : ''}
-                      {data.expireAt && <span className="text-zinc-600">{` (${absTime(data.expireAt)})`}</span>}
-                    </span>
-                  </div>
-                  <UsageBar ratio={data.totalUsedRatio} />
-                  {data.codeUsedRatio !== undefined && (
-                    <div className="mt-1 text-[11px] text-zinc-600">
-                      其中 Kimi Code {pct2(data.codeUsedRatio)}
-                      {data.overdrawn ? ' · 已超支' : ''}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* 5h / 7 天滚动窗口（Code 单独一组） */}
-              <div className="space-y-3">
-                {data.ratelimit5h && <RatelimitRow title="5 小时用量" window={data.ratelimit5h} />}
-                {data.ratelimit7d && <RatelimitRow title="7 天用量" window={data.ratelimit7d} />}
-                {data.ratelimitCode5h && <RatelimitRow title="Code 5 小时用量" window={data.ratelimitCode5h} />}
-                {data.ratelimitCode7d && <RatelimitRow title="Code 7 天用量" window={data.ratelimitCode7d} />}
-              </div>
-
               {/* 额度加油包 */}
               {wallet && (
                 <div className="rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2">

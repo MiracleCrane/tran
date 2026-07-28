@@ -307,6 +307,44 @@ export async function fetchQuotaOverview(): Promise<QuotaOverviewResult> {
   return { ok: true, data: parseOverview(res.json) }
 }
 
+/** --- 60s 缓存轮询（与 usageService 同款）：状态栏圆环/悬停预览/明细面板共用，
+ *  避免每次悬停都打 RPC。<30s 直接回缓存；30–60s 先回缓存、后台刷新；>60s 等刷新。 */
+const OVERVIEW_CACHE_FRESH_MS = 30_000
+const OVERVIEW_CACHE_MAX_MS = 60_000
+
+let overviewCache: { at: number; result: QuotaOverviewResult } | null = null
+let overviewInflight: Promise<QuotaOverviewResult> | null = null
+
+function refreshQuotaOverview(): Promise<QuotaOverviewResult> {
+  if (!overviewInflight) {
+    overviewInflight = fetchQuotaOverview()
+      .then((result) => {
+        // 失败时保留旧缓存兜底（有缓存回缓存，没缓存回错误）。
+        if (result.ok) overviewCache = { at: Date.now(), result }
+        overviewInflight = null
+        return overviewCache?.result ?? result
+      })
+      .catch((error) => {
+        overviewInflight = null
+        log('quota', `overview refresh failed: ${error instanceof Error ? error.message : String(error)}`)
+        return overviewCache?.result ?? { ok: false as const, error: NETWORK_ERROR_MESSAGE }
+      })
+  }
+  return overviewInflight
+}
+
+export function getQuotaOverviewCached(): Promise<QuotaOverviewResult> {
+  const cached = overviewCache
+  if (!cached) return refreshQuotaOverview()
+  const age = Date.now() - cached.at
+  if (age < OVERVIEW_CACHE_FRESH_MS) return Promise.resolve(cached.result)
+  if (age < OVERVIEW_CACHE_MAX_MS) {
+    void refreshQuotaOverview()
+    return Promise.resolve(cached.result)
+  }
+  return refreshQuotaOverview()
+}
+
 function parseActions(payload: unknown): { actions: QuotaAction[]; nextPageToken?: string } {
   const root = asRecord(payload) ?? {}
   const actions: QuotaAction[] = []

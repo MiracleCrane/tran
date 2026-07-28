@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.0.29 - 2026-07-28
+
+### 中文
+
+- 修复:图标底部月壤纹理偏弱。v1.0.26 的修斑压暗区延伸过深误伤底部纹理带(亮度 71.5→46.0),现压暗区收敛回 T 竖笔正下方、新增底部提亮通道,量化指标对齐 Kimi 桌面版(meanLum 76.1 vs 72.4,高亮覆盖率 8.9% vs 8.0%),底部纹理饱满贴底。
+- 优化:额度悬浮卡数据源切换为 RPC 精确值(两位小数):月度额度(原"总额度",含 Kimi Code 分项与重置时间)、5 小时额度、每周额度;沿用 60s 缓存,悬停卡秒开。token 用量与上下文窗口展示不变。额度明细弹层精简为只含加油包卡片与使用明细列表。
+- 优化:思考月亮动画改实心月盘——紫黄渐变圆盘 + 外发光 + conic 高光扫带旋转,14px 下清晰可辨,读作"月光扫过月面"(旧抠瓣新月方案在小尺寸下像两轮新月对转)。
+
+### English
+
+- Fixed: weak bottom regolith texture in the icon. v1.0.26's de-smudge dimming reached too deep into the texture band (luminance 71.5→46.0); the dim zone is now confined to under the T stem and a bottom brighten pass was added, matching the Kimi desktop icon's measured profile (meanLum 76.1 vs 72.4).
+- Improved: usage hover card now reads precise two-decimal RPC data — monthly quota (formerly "total", with Kimi Code sub-figure and reset time), 5-hour and weekly quotas; same 60s cache so the card still opens instantly. Token/context displays unchanged. The quota detail panel now only shows the booster wallet card and the usage-action list.
+- Improved: thinking moon is now a solid disc — purple-yellow gradient with outer glow and a rotating conic highlight sweep, crisp at 14px (the old crescent-cut design read as two thin crescents).
+
+#### 验证
+
+- v1.0.28 打包版 12 项冒烟自检全部通过(独立 profile + CDP 驱动)
+- 图标 256 档与 Kimi 母版并排目检;月亮动画离屏渲染多相位目检
+- `npm run typecheck` 与 `npm run build` 全绿
+
 ## v1.0.28 - 2026-07-27
 
 ### 中文

@@ -1,4 +1,5 @@
-﻿# 图标修斑：调暗 T 竖笔下方的亮颗粒（任务栏小尺寸下像一坨白渍），
+﻿# 图标修斑：调暗 T 竖笔正下方紧邻区的亮颗粒（64+ 尺寸下避免与 T 糊成一坨），
+# 同时提亮底部纹理带（y>0.78 的中亮颗粒向白推），对齐 Kimi 桌面版的饱满月壤观感；
 # 并做尺寸自适应 ICO：
 #   - 64/96/128/256：修斑后的母版高质量缩小（保留月壤纹理）
 #   - 16/20/24/32/40/48：无纹理扁平渲染（黑底 + 白 T + 紫点），小尺寸零污渍
@@ -37,25 +38,35 @@ for ($y = 0; $y -lt $S; $y++) {
     $fy = $y / [double]$S
     for ($x = 0; $x -lt $S; $x++) {
         $fx = $x / [double]$S
-        # 核心区：T 竖笔正下方（x 0.30-0.72, y 0.63-0.85），羽化 0.05
+        # 核心区：仅 T 竖笔正下方紧邻区（x 0.30-0.72, y 0.63-0.72），羽化 0.05/0.04。
+        # v1.0.27 起不再延伸到 0.85：底部纹理带保留给提亮通道。
         $mx = (Smooth01(($fx - 0.25) / 0.05)) * (1 - (Smooth01(($fx - 0.72) / 0.05)))
-        $my = (Smooth01(($fy - 0.58) / 0.05)) * (1 - (Smooth01(($fy - 0.85) / 0.05)))
-        $core = $mx * $my * 0.80
-        # 全局：y 0.60-0.82 以上区域轻度压暗（0.35 封顶），让纹理整体上移出 T 的周围
-        $global = (1 - (Smooth01(($fy - 0.60) / 0.22))) * 0.35
-        if ($fy -gt 0.82) { $global = 0 }
+        $my = (Smooth01(($fy - 0.58) / 0.05)) * (1 - (Smooth01(($fy - 0.72) / 0.04)))
+        $core = $mx * $my * 0.70
+        # 全局：y 0.60-0.75 轻度压暗（0.25 封顶）让纹理退出 T 的周围；0.75 以下不压
+        $global = (1 - (Smooth01(($fy - 0.60) / 0.15))) * 0.25
+        if ($fy -gt 0.75) { $global = 0 }
         $dim = [Math]::Max($core, $global)
-        if ($dim -le 0) { continue }
+        # 底部提亮：y 0.78 以下（羽化 0.04）把中亮颗粒向白推，纹理带饱满贴底边
+        $boost = (Smooth01(($fy - 0.74) / 0.04)) * 0.35
+        if ($dim -le 0 -and $boost -le 0) { continue }
         $idx = $y * $data.Stride + $x * 4
         $a = $bytes[$idx + 3]
         if ($a -eq 0) { continue }
-        # 只压有色亮斑（颗粒），不碰纯白 T：亮度阈值
         $lum = ($bytes[$idx] + $bytes[$idx + 1] + $bytes[$idx + 2]) / 3.0
-        if ($lum -gt 200) { continue }
-        $keep = 1.0 - $dim
-        $bytes[$idx]     = [byte]($bytes[$idx] * $keep)
-        $bytes[$idx + 1] = [byte]($bytes[$idx + 1] * $keep)
-        $bytes[$idx + 2] = [byte]($bytes[$idx + 2] * $keep)
+        if ($dim -gt 0 -and $lum -le 200) {
+            # 只压有色亮斑（颗粒），不碰纯白 T：亮度阈值
+            $keep = 1.0 - $dim
+            $bytes[$idx]     = [byte]($bytes[$idx] * $keep)
+            $bytes[$idx + 1] = [byte]($bytes[$idx + 1] * $keep)
+            $bytes[$idx + 2] = [byte]($bytes[$idx + 2] * $keep)
+        } elseif ($boost -gt 0 -and $lum -gt 140 -and $lum -lt 235) {
+            # 只提中亮颗粒，不碰已近白的像素（避免整片糊白）
+            $push = 1.0 - $boost
+            $bytes[$idx]     = [byte](255 - (255 - $bytes[$idx]) * $push)
+            $bytes[$idx + 1] = [byte](255 - (255 - $bytes[$idx + 1]) * $push)
+            $bytes[$idx + 2] = [byte](255 - (255 - $bytes[$idx + 2]) * $push)
+        }
     }
 }
 [System.Runtime.InteropServices.Marshal]::Copy($bytes, 0, $data.Scan0, $bytes.Length)

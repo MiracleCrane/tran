@@ -43,7 +43,7 @@ import {
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { listKimiSessions } from './kimiHistory'
 import { getPlanUsageCached } from './usageService'
-import { fetchQuotaOverview, fetchQuotaActions, runQuotaLogin } from './quotaService'
+import { getQuotaOverviewCached, fetchQuotaActions, runQuotaLogin } from './quotaService'
 import { deleteKimiSession } from './sessionDelete'
 import { removeSessionTitle, recordManualTitle } from './sessionTitles'
 import { allAiTitles, generateAiTitlesBatch, getSessionPreview } from './aiTitles'
@@ -496,8 +496,9 @@ export function registerIpc(
 
   ipcMain.handle('forge:getPlanUsage', async (): Promise<PlanUsageResult> => getPlanUsageCached())
 
-  // --- 额度明细（MembershipService RPC；登录态取 kimi-desktop / 网页登录兜底） ---
-  ipcMain.handle('forge:getQuotaOverview', async (): Promise<QuotaOverviewResult> => fetchQuotaOverview())
+  // --- 额度总览/明细（MembershipService RPC；登录态取 kimi-desktop / 网页登录兜底）。
+  // 总览走 60s 缓存（悬停卡/明细面板共用，悬停秒开）；明细翻页每次实时。 ---
+  ipcMain.handle('forge:getQuotaOverview', async (): Promise<QuotaOverviewResult> => getQuotaOverviewCached())
   ipcMain.handle(
     'forge:listQuotaActions',
     async (_e, pageToken?: string): Promise<QuotaActionsResult> => fetchQuotaActions(pageToken)

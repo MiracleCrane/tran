@@ -2530,18 +2530,38 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   border-left: 2px solid rgba(139, 92, 246, 0.55);
 }
 
-/* #11 Kimi Web 同款思考月亮：纯 CSS 新月（圆形 + 径向 mask 抠掉一瓣成月牙），
- *  紫→黄渐变，绕中心匀速旋转。只动 transform，合成器友好；
+/* #11 思考月亮：实心饱满月盘（紫→黄对角渐变）+ 一层旋绕的高光/阴影
+ *  （conic-gradient 随 ::before 旋转）制造"转"的动感，柔和外发光。
+ *  动画只动 ::before 的 transform，合成器友好；
  *  reduced-motion 全局开关会把它降为近静止。 */
 .thinking-moon {
+  position: relative;
   display: inline-block;
   width: 14px;
   height: 14px;
   flex-shrink: 0;
+  overflow: hidden;
   border-radius: 50%;
   background: linear-gradient(135deg, #8b5cf6 10%, #c084fc 45%, #facc15 90%);
-  -webkit-mask: radial-gradient(circle at 68% 32%, transparent 56%, #000 59%);
-  mask: radial-gradient(circle at 68% 32%, transparent 56%, #000 59%);
+  box-shadow:
+    0 0 6px rgba(192, 132, 252, 0.55),
+    0 0 2px rgba(250, 204, 21, 0.35);
+}
+
+.thinking-moon::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    rgba(255, 255, 255, 0.6) 0deg,
+    rgba(255, 255, 255, 0) 80deg,
+    rgba(30, 16, 60, 0) 170deg,
+    rgba(30, 16, 60, 0.5) 265deg,
+    rgba(30, 16, 60, 0) 340deg,
+    rgba(255, 255, 255, 0.6) 360deg
+  );
   animation: thinking-moon-spin 1.5s linear infinite;
 }
 

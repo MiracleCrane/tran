@@ -4,11 +4,12 @@ import { useUiStore } from '../store/uiStore'
 import { useSessionStore } from '../store/sessionStore'
 import { fmtK } from '../utils/format'
 import QuotaPanel from './QuotaPanel'
-import type { PlanUsageInfo, UsageLimitWindow } from '../../shared/ipc'
+import type { QuotaOverview } from '../../shared/ipc'
 
 /** 状态栏迷你用量圆环（kimi web 式）：5h 滚动窗口 + 每周额度两个小 SVG 环，
  *  悬停浮出非模态预览卡（无 backdrop、不阻断对话、移走即关），点击钉住。
- *  数据走 forge:getPlanUsage（主进程 60s 缓存，悬停刷新门槛低）。 */
+ *  额度数据走 forge:getQuotaOverview（MembershipService RPC，两位小数精度，
+ *  主进程 60s 缓存，悬停秒开）；token/上下文窗口仍走隐藏 /usage 轮推送。 */
 
 function resetLabel(resetAt?: number): string | null {
   if (!resetAt) return null
@@ -31,23 +32,9 @@ function resetAbsLabel(resetAt?: number): string | null {
   return date.getFullYear() !== new Date().getFullYear() ? `${date.getFullYear()}-${body}` : body
 }
 
-const MEMBERSHIP_LABELS: Record<string, string> = {
-  LEVEL_FREE: '免费版',
-  LEVEL_BASIC: '基础会员',
-  LEVEL_INTERMEDIATE: '中级会员',
-  LEVEL_ADVANCED: '高级会员'
-}
-
-function membershipLabel(level: string | undefined): string | null {
-  if (!level) return null
-  return MEMBERSHIP_LABELS[level] ?? level
-}
-
-function windowPct(window: UsageLimitWindow | undefined): number | null {
-  if (!window || window.used === undefined || !window.limit) return null
-  // 整数百分点：云端 used/limit 就是整数百分点（used: 42/100），诚实显示整数；
-  // 控制台的两位小数来自 cookie 鉴权的另一数据源，token 拿不到。
-  return Math.min(100, Math.round((window.used / window.limit) * 100))
+/** ratio（0–1 float）→ 两位小数百分比文本；无数据返回 null。 */
+function pct2(ratio: number | undefined): string | null {
+  return ratio === undefined ? null : `${(ratio * 100).toFixed(2)}%`
 }
 
 function UsageBar({ pct }: { pct: number | null }): JSX.Element {
@@ -67,25 +54,33 @@ function UsageBar({ pct }: { pct: number | null }): JSX.Element {
   )
 }
 
-function LimitRow({ title, window }: { title: string; window: UsageLimitWindow }): JSX.Element {
-  const pct = windowPct(window)
-  const reset = resetLabel(window.resetAt)
-  const resetAbs = resetAbsLabel(window.resetAt)
+/** 一行额度：标题 + 两位小数百分比 + 重置时间 + 进度条（+ 可选弱化补充行）。 */
+function QuotaRow({
+  title,
+  ratio,
+  resetAt,
+  hint
+}: {
+  title: string
+  ratio?: number
+  resetAt?: number
+  hint?: string
+}): JSX.Element {
+  const pctText = pct2(ratio)
+  const reset = resetLabel(resetAt)
+  const resetAbs = resetAbsLabel(resetAt)
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between text-xs">
         <span className="text-zinc-400">{title}</span>
         <span className="whitespace-nowrap text-zinc-500">
-          {pct !== null ? `${pct}%` : '—'}
+          {pctText ?? '—'}
           {reset ? ` · ${reset}` : ''}
           {resetAbs && <span className="text-zinc-600">{` (${resetAbs})`}</span>}
         </span>
       </div>
-      <UsageBar pct={pct} />
-      <div className="mt-1 text-[11px] text-zinc-600">
-        {window.used !== undefined ? fmtK(window.used) : '—'} / {window.limit ? fmtK(window.limit) : '—'}
-        {window.remaining !== undefined ? ` · 剩余 ${fmtK(window.remaining)}` : ''}
-      </div>
+      <UsageBar pct={ratio !== undefined ? ratio * 100 : null} />
+      {hint && <div className="mt-1 text-[11px] text-zinc-600">{hint}</div>}
     </div>
   )
 }
@@ -128,8 +123,10 @@ export default function UsageRings(): JSX.Element {
   const setPinned = useUiStore((s) => s.setUsageOpen)
   const [hover, setHover] = useState(false)
   const [quotaOpen, setQuotaOpen] = useState(false)
-  const [plan, setPlan] = useState<PlanUsageInfo | null>(null)
+  const [quota, setQuota] = useState<QuotaOverview | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [needsLogin, setNeedsLogin] = useState(false)
+  const [loggingIn, setLoggingIn] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const cardRef = useRef<HTMLDivElement | null>(null)
   // 预览卡通过 portal 挂到 body 并用 fixed 定位——状态栏容器是 overflow:hidden
@@ -138,17 +135,32 @@ export default function UsageRings(): JSX.Element {
 
   const refresh = useCallback((): void => {
     void window.api
-      .getPlanUsage()
+      .getQuotaOverview()
       .then((result) => {
         if (result.ok) {
-          setPlan(result.data)
+          setQuota(result.data)
           setError(null)
+          setNeedsLogin(false)
         } else {
           setError(result.error)
+          setNeedsLogin(result.needsLogin === true)
         }
       })
-      .catch(() => setError('网络错误，无法连接 Kimi 云端接口'))
+      .catch(() => {
+        setError('网络错误，无法连接 Kimi 云端接口')
+        setNeedsLogin(false)
+      })
   }, [])
+
+  const login = useCallback((): void => {
+    setLoggingIn(true)
+    void window.api
+      .quotaLogin()
+      .then((result) => {
+        if (result.ok) refresh()
+      })
+      .finally(() => setLoggingIn(false))
+  }, [refresh])
 
   // 挂载拉一次（主进程有缓存，便宜）；预览打开时再拉（>30s 会触发后台刷新）。
   useEffect(() => refresh(), [refresh])
@@ -185,9 +197,15 @@ export default function UsageRings(): JSX.Element {
     return () => document.removeEventListener('pointerdown', onPointerDown, true)
   }, [pinned, setPinned])
 
-  const rollingPct = windowPct(plan?.rolling)
-  const weeklyPct = windowPct(plan?.weekly)
-  const membership = membershipLabel(plan?.membershipLevel)
+  // 5h/周额度环：Code 专属窗口优先（本应用走 Kimi Code 额度），缺省回落全量窗口。
+  const rl5h = quota?.ratelimitCode5h ?? quota?.ratelimit5h
+  const rl7d = quota?.ratelimitCode7d ?? quota?.ratelimit7d
+  const rollingPct = rl5h?.ratio !== undefined ? rl5h.ratio * 100 : null
+  const weeklyPct = rl7d?.ratio !== undefined ? rl7d.ratio * 100 : null
+  const monthlyHint =
+    quota?.codeUsedRatio !== undefined
+      ? `其中 Kimi Code ${(quota.codeUsedRatio * 100).toFixed(2)}%${quota.overdrawn ? ' · 已超支' : ''}`
+      : undefined
   // 上下文用量：隐藏 /usage 轮推送（system/context_usage），无数据置灰。
   const contextUsage = useSessionStore((s) => s.contextUsage)
   const contextPct = contextUsage ? Math.min(100, Math.round(contextUsage.pct)) : null
@@ -231,20 +249,25 @@ export default function UsageRings(): JSX.Element {
           <div className="mb-3 flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-accent" />
             <span className="flex-1 text-xs font-semibold text-zinc-100">套餐用量</span>
-            {membership && (
-              <span className="rounded bg-accent/15 px-2 py-0.5 text-[11px] font-medium text-accent">
-                {membership}
-              </span>
-            )}
           </div>
           {error && (
-            <div className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-200/90">
-              {error}
+            <div className="flex items-center gap-2 rounded-lg border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-200/90">
+              <span className="flex-1">{error}</span>
+              {needsLogin && (
+                <button
+                  type="button"
+                  disabled={loggingIn}
+                  onClick={login}
+                  className="shrink-0 rounded bg-accent/20 px-2 py-1 text-[11px] font-medium text-accent transition hover:bg-accent/30 disabled:opacity-50"
+                >
+                  {loggingIn ? '登录中…' : '登录 Kimi'}
+                </button>
+              )}
             </div>
           )}
           <div className="space-y-3">
             {/* 数据加载中：骨架条（opacity 脉动） */}
-            {!error && !plan && (
+            {!error && !quota && (
               <div className="animate-pulse space-y-2.5">
                 <div className="h-2.5 w-full rounded bg-white/[0.06]" />
                 <div className="h-2.5 w-2/3 rounded bg-white/[0.06]" />
@@ -282,12 +305,17 @@ export default function UsageRings(): JSX.Element {
                 {contextUsage ? `${contextUsage.usedText} / ${contextUsage.total.toLocaleString()}` : '暂无数据（下个 turn 结束后更新）'}
               </div>
             </div>
-            {plan?.rolling && <LimitRow title={`${plan.rolling.label}滚动窗口`} window={plan.rolling} />}
-            {plan?.weekly && <LimitRow title="每周额度" window={plan.weekly} />}
-            {plan?.parallelLimit !== undefined && (
-              <div className="text-xs text-zinc-500">并行任务上限：{plan.parallelLimit}</div>
+            {quota?.totalUsedRatio !== undefined && (
+              <QuotaRow
+                title="月度额度"
+                ratio={quota.totalUsedRatio}
+                resetAt={quota.expireAt}
+                hint={monthlyHint}
+              />
             )}
-            {!error && plan && !plan.rolling && !plan.weekly && (
+            {rl5h && <QuotaRow title="5 小时额度" ratio={rl5h.ratio} resetAt={rl5h.resetAt} />}
+            {rl7d && <QuotaRow title="每周额度" ratio={rl7d.ratio} resetAt={rl7d.resetAt} />}
+            {!error && quota && quota.totalUsedRatio === undefined && !rl5h && !rl7d && (
               <p className="text-xs text-zinc-600">云端未返回额度数据。</p>
             )}
           </div>
