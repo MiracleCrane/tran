@@ -1,8 +1,8 @@
-import { app, shell } from 'electron'
+import { app, net, shell } from 'electron'
 import { createWriteStream, mkdirSync, unlinkSync } from 'node:fs'
-import { get } from 'node:https'
 import { join } from 'node:path'
-import type { IncomingMessage } from 'node:http'
+import { Readable } from 'node:stream'
+import type { ReadableStream as WebReadableStream } from 'node:stream/web'
 import type {
   UpdateAssetInfo,
   UpdateCheckResult,
@@ -54,73 +54,40 @@ function compareVersions(a: string | undefined, b: string | undefined): number {
   return 0
 }
 
-function releaseTagFromUrl(url: string): string | undefined {
+async function requestLatestRelease(): Promise<LatestReleaseInfo> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(new Error('Update check timed out.')), 15000)
   try {
-    const parsed = new URL(url)
-    const parts = parsed.pathname.split('/').filter(Boolean)
-    const tagIndex = parts.findIndex((part, index) => part === 'tag' && parts[index - 1] === 'releases')
-    return tagIndex >= 0 ? parts[tagIndex + 1] : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function absoluteLocation(location: string, currentUrl: string): string {
-  return new URL(location, currentUrl).toString()
-}
-
-function requestLatestRelease(url = RELEASES_LATEST_URL, redirects = 5): Promise<LatestReleaseInfo> {
-  return new Promise((resolve, reject) => {
-    const req = get(
-      url,
-      {
-        headers: {
-          Accept: 'text/html,*/*',
-          'User-Agent': UPDATE_USER_AGENT
-        }
-      },
-      (res) => {
-        const location = res.headers.location
-        if (
-          location &&
-          redirects > 0 &&
-          res.statusCode &&
-          res.statusCode >= 300 &&
-          res.statusCode < 400
-        ) {
-          const nextUrl = absoluteLocation(location, url)
-          const tag = releaseTagFromUrl(nextUrl)
-          res.resume()
-          if (tag) resolve({ tag, releaseUrl: nextUrl })
-          else requestLatestRelease(nextUrl, redirects - 1).then(resolve, reject)
-          return
-        }
-
-        let body = ''
-        res.setEncoding('utf8')
-        res.on('data', (chunk: string) => {
-          body += chunk
-        })
-        res.on('end', () => {
-          if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
-            reject(new Error(`GitHub returned ${res.statusCode ?? 'unknown'}: ${body.slice(0, 240)}`))
-            return
-          }
-          const match = body.match(/\/releases\/tag\/([^"'?#/]+)/)
-          const tag = match?.[1]
-          if (!tag) {
-            reject(new Error('Could not resolve latest release tag from GitHub.'))
-            return
-          }
-          resolve({ tag, releaseUrl: `${RELEASES_TAG_BASE_URL}/${tag}` })
-        })
+    // net.fetch 走 Chromium 网络栈，自动遵循系统代理（Node 原生 https 不走代理）。
+    // 重定向由 net.fetch 自动跟随（redirect:'manual' 在 Electron 中有 bug，见
+    // electron/electron#43715），tag 从最终的 release 页面 HTML 提取。
+    const res = await net.fetch(RELEASES_LATEST_URL, {
+      signal: controller.signal,
+      headers: {
+        Accept: 'text/html,*/*',
+        'User-Agent': UPDATE_USER_AGENT
       }
-    )
-    req.on('error', reject)
-    req.setTimeout(15000, () => {
-      req.destroy(new Error('Update check timed out.'))
     })
-  })
+
+    const body = await res.text()
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`GitHub returned ${res.status}: ${body.slice(0, 240)}`)
+    }
+    // 字符类排除 `*`：GitHub 页面里嵌有路由模式占位符 /releases/tag/*name，
+    // 位置在真实 tag 之前，且 git tag 本身不允许含 `*`。
+    const match = body.match(/\/releases\/tag\/([^"'?#/*]+)/)
+    const tag = match?.[1]
+    if (!tag) {
+      throw new Error('Could not resolve latest release tag from GitHub.')
+    }
+    return { tag, releaseUrl: `${RELEASES_TAG_BASE_URL}/${tag}` }
+  } catch (error) {
+    // body 读取途中被 abort 时 Chromium 抛的是通用 AbortError，还原为超时错误消息
+    if (controller.signal.aborted) throw controller.signal.reason
+    throw error
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 function installerAssetForVersion(version: string, tag = `v${version}`): UpdateAssetInfo {
@@ -158,12 +125,7 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
   }
 }
 
-function pipeDownload(
-  url: string,
-  destination: string,
-  options: PipeDownloadOptions,
-  redirects = 5
-): Promise<void> {
+function pipeDownload(url: string, destination: string, options: PipeDownloadOptions): Promise<void> {
   return new Promise((resolve, reject) => {
     const fail = (error: unknown): void => {
       try {
@@ -171,49 +133,44 @@ function pipeDownload(
       } catch {
         /* ignore incomplete downloads */
       }
-      reject(error)
+      // 流读取途中被 abort 时 Chromium 抛的是通用 AbortError，还原为超时错误消息
+      reject(controller.signal.aborted ? controller.signal.reason : error)
     }
 
-    const req = get(
-      url,
-      {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(new Error('Update download timed out.')), 300000)
+    const done = (): void => {
+      clearTimeout(timeout)
+    }
+
+    // net.fetch 走 Chromium 网络栈，自动遵循系统代理，并自动跟随重定向
+    // （redirect:'manual' 在 Electron 中有 bug，见 electron/electron#43715）。
+    net
+      .fetch(url, {
+        signal: controller.signal,
         headers: {
           'User-Agent': UPDATE_USER_AGENT
         }
-      },
-      (res: IncomingMessage) => {
-        const location = res.headers.location
-        if (
-          location &&
-          redirects > 0 &&
-          res.statusCode &&
-          res.statusCode >= 300 &&
-          res.statusCode < 400
-        ) {
-          const nextUrl = absoluteLocation(location, url)
-          res.resume()
-          pipeDownload(nextUrl, destination, options, redirects - 1).then(resolve, reject)
+      })
+      .then((res) => {
+        if (res.status < 200 || res.status >= 300 || !res.body) {
+          res.body?.cancel().catch(() => {
+            /* ignore body teardown errors */
+          })
+          done()
+          fail(new Error(`Download returned ${res.status}.`))
           return
         }
 
-        if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
-          res.resume()
-          fail(new Error(`Download returned ${res.statusCode ?? 'unknown'}.`))
-          return
-        }
-
-        const rawTotal = Array.isArray(res.headers['content-length'])
-          ? res.headers['content-length'][0]
-          : res.headers['content-length']
-        const parsedTotal = Number.parseInt(rawTotal ?? '', 10)
+        const parsedTotal = Number.parseInt(res.headers.get('content-length') ?? '', 10)
         const totalBytes = Number.isFinite(parsedTotal) && parsedTotal > 0 ? parsedTotal : undefined
         const startedAt = Date.now()
         let receivedBytes = 0
         let lastEmitAt = 0
 
-        const emitProgress = (done = false): void => {
+        const emitProgress = (finished = false): void => {
           const now = Date.now()
-          if (!done && now - lastEmitAt < 250) return
+          if (!finished && now - lastEmitAt < 250) return
           lastEmitAt = now
           const elapsedMs = Math.max(now - startedAt, 1)
           const progress: UpdateDownloadProgress = {
@@ -225,15 +182,20 @@ function pipeDownload(
             ...(totalBytes ? { percent: Math.min(100, (receivedBytes / totalBytes) * 100) } : {}),
             bytesPerSecond: receivedBytes / (elapsedMs / 1000),
             elapsedMs,
-            ...(done ? { done: true } : {})
+            ...(finished ? { done: true } : {})
           }
           options.onProgress?.(progress)
         }
 
+        const body = Readable.fromWeb(res.body as WebReadableStream<Uint8Array>)
         const file = createWriteStream(destination)
-        file.on('error', fail)
+        file.on('error', (error) => {
+          done()
+          fail(error)
+        })
         file.on('finish', () => {
           file.close((error) => {
+            done()
             if (error) fail(error)
             else {
               emitProgress(true)
@@ -241,19 +203,21 @@ function pipeDownload(
             }
           })
         })
-        res.on('error', fail)
-        res.on('data', (chunk: Buffer) => {
+        body.on('error', (error) => {
+          done()
+          fail(error)
+        })
+        body.on('data', (chunk: Buffer) => {
           receivedBytes += chunk.length
           emitProgress()
         })
         emitProgress()
-        res.pipe(file)
-      }
-    )
-    req.on('error', fail)
-    req.setTimeout(300000, () => {
-      req.destroy(new Error('Update download timed out.'))
-    })
+        body.pipe(file)
+      })
+      .catch((error) => {
+        done()
+        fail(error)
+      })
   })
 }
 

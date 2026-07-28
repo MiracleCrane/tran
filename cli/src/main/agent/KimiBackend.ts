@@ -1253,6 +1253,11 @@ export class KimiBackend {
       //  run_in_background 在这里才到）一并下传，渲染层合并进 block.input。
       const partialText = stringifyToolResult(update.rawOutput ?? update.content)
       const rawInput = asRecord(update.rawInput)
+      // #30：输入未闭合时 kimi 把"工具输入 JSON 的累积快照"当 in_progress
+      // content 逐字推流（{"command":"… 不断增长）——这是输入不是输出，跳过；
+      // 否则渲染层会把原始 JSON 残片当卡片正文。真正的输出从不在输入闭合前
+      // 到达，闭合后的 update 带 rawInput 走正常合并，completed 再带全量输出。
+      if (!rawInput && partialText.trimStart().startsWith('{')) return
       if (partialText || rawInput) this.emitToolPartial(session, toolUseId, partialText, rawInput ?? undefined)
       return
     }

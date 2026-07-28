@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.0.31 - 2026-07-28
+
+### 中文
+
+- 优化:GPU 进程内存大幅下降(起步 898→437MB,-51%;空闲 4 分钟稳定 -39%,零波动)。玻璃拟态的 filter/screen-blend 离屏表面剥除(Vulkan 简化样式推广为默认,玻璃质感变素),并重新启用窗口遮挡停帧。
+- 修复:kimi-server 起不来——kimi 0.29 移除了 `kimi server run`,迁移到 `kimi web --no-open`(新实例发现机制 + pid 存活校验),stdout 捕获 deprecated 直接判死,轮询改指数退避(15s→5min 封顶),退出时清理进程树。swarm/子代理状态轮询恢复。
+- 修复:Ctrl+S(打断并发送)吞消息。直达发送的消息从未入队,撞僵尸 turn 失败后彻底悬空;现加未确认台账,失败自动回收到待重发队列,Ctrl+S 在输入框为空但有待发消息时直接重发。
+- 修复:子 Agent 面板状态不可信。后台 agent 的运行中状态/耗时改由 kimi server 轮询按 taskId 校正(此前是启动时的静态猜测);悬挂工具块在 turn 结束/历史重放时统一封口为已停止。
+- 修复:Bash 工具卡片显示流式输入 JSON 残片(kimi 在输入未闭合时把输入快照当输出推流),现拦截该快照并加"准备执行…"兜底。
+- 新增:输入框草稿按会话持久化(localStorage),切视图/切会话/重启不丢,发送即清(附件不持久化)。
+- 修复:检查更新/下载更新不走代理(Node 裸连 GitHub),改用 Electron net 模块走 Chromium 网络栈(自动遵循系统代理),代理环境下实测下载安装器通过。
+- 优化:思考月亮再改版——紫黄渐变球体(左上受光/右下背光的侧视体积感),球面月海斑纹无缝平移表现自转(1.8s/圈),14px 下各相位目检均为一颗完整小球。
+
+### English
+
+- Improved: big GPU memory reduction (898→437MB at startup, -51%; stable -39% over 4 idle minutes with zero drift). The glass filter/screen-blend offscreen surfaces are removed (Vulkan simplified styles promoted to default — flatter frosted look), and native window-occlusion throttling is re-enabled.
+- Fixed: kimi-server never coming up — kimi 0.29 removed `kimi server run`; migrated to `kimi web --no-open` (new instance discovery + pid liveness checks), deprecated output now fails fast, polling uses exponential backoff (15s→5min cap), and the process tree is cleaned up on quit. Swarm/sub-agent status polling works again.
+- Fixed: Ctrl+S (interrupt & send) swallowing messages. Direct-sent messages were never queued and vanished on failure; an ack-ledger now recycles them into the resend queue, and Ctrl+S resends when the input is empty but messages are pending.
+- Fixed: sub-agent panel trustworthiness. Background agents' running state and duration are now corrected against kimi server polling by taskId (previously a static guess from launch text); hung tool blocks are sealed as stopped on turn end / history replay.
+- Fixed: Bash tool cards showing raw input-JSON fragments (kimi streams input snapshots as output before the input closes); now filtered with a "preparing…" fallback.
+- Added: per-session composer drafts persisted to localStorage — survives view switches, session switches, and restarts (attachments excluded).
+- Fixed: update check/download ignored proxies (raw Node https); now uses Electron net (Chromium stack, honors system proxy) — verified by downloading an installer through a local proxy.
+- Improved: thinking moon reworked again — a purple-yellow gradient sphere (lit/shadowed sides for a 3D globe look) with seamless surface-feature drift for rotation (1.8s/turn), verified across phases at 14px.
+
+#### 验证
+
+- GPU A/B(打包版真实配置):起步 -51%,空闲零波动;kimi web spawn/discover/probe/kill 四段实测;更新走代理实测下载 94MB 安装器
+- `npm run typecheck` 与 `npm run build` 全绿
+
 ## v1.0.30 - 2026-07-28
 
 ### 中文

@@ -112,7 +112,6 @@ export function configureWindowsGpuBackend(): void {
   app.commandLine.appendSwitch('ignore-gpu-blocklist')
 
   if (!settings.vulkanBackend) {
-    app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
     app.commandLine.appendSwitch('enable-zero-copy')
     return
   }
@@ -122,7 +121,7 @@ export function configureWindowsGpuBackend(): void {
   if (forcedSafe) {
     disableVulkanPreference('safe GPU mode requested')
     app.commandLine.appendSwitch('use-angle', 'd3d11')
-    app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion,Vulkan')
+    app.commandLine.appendSwitch('disable-features', 'Vulkan')
     return
   }
 
@@ -130,7 +129,7 @@ export function configureWindowsGpuBackend(): void {
   if (state.pendingVulkanLaunch) {
     disableVulkanPreference('previous Vulkan launch did not reach ready-to-show', state)
     app.commandLine.appendSwitch('use-angle', 'd3d11')
-    app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion,Vulkan')
+    app.commandLine.appendSwitch('disable-features', 'Vulkan')
     return
   }
 
@@ -138,7 +137,7 @@ export function configureWindowsGpuBackend(): void {
   if (!mayAttemptVulkan) {
     disableVulkanPreference('Vulkan preference predates the startup guard', state)
     app.commandLine.appendSwitch('use-angle', 'd3d11')
-    app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion,Vulkan')
+    app.commandLine.appendSwitch('disable-features', 'Vulkan')
     return
   }
 
@@ -154,7 +153,6 @@ export function configureWindowsGpuBackend(): void {
   app.commandLine.appendSwitch('use-angle', 'vulkan')
   app.commandLine.appendSwitch('use-gl', 'angle')
   app.commandLine.appendSwitch('disable-direct-composition')
-  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
   app.commandLine.appendSwitch('enable-features', 'DefaultANGLEVulkan,VulkanFromANGLE')
   log('gpu', 'Vulkan backend enabled for this launch')
 }

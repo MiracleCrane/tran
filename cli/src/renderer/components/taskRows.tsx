@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { PlanEntry, ToolBlock, ToolStatus } from '../types'
-import { AGENT_TOOL_NAMES, backgroundTaskInfo } from '../utils/toolStats'
+import type { KimiTaskInfo } from '../../shared/ipc'
+import { AGENT_TOOL_NAMES, backgroundTaskInfo, withServerTaskStatus } from '../utils/toolStats'
 import ToolCallCard, { parseSubagentInput, summaryForTool } from './ToolCallCard'
 
 /** 任务行组件（chips 独立浮层共用；原 TaskPanel 合并面板拆出）。 */
@@ -24,33 +25,43 @@ const STATUS_ICON: Record<ToolStatus, { glyph: string; cls: string }> = {
   stopped: { glyph: '⏸', cls: 'text-zinc-500' }
 }
 
-/** 行是否活跃（运行中/排队；后台 agent 以 launch 结果的 running 为准）：
+/** 行是否活跃（运行中/排队；后台 agent 以 server 校正后的 running 为准，
+ *  server 不可用退回 launch 结果文本猜测）：
  *  ChipPopover 的置顶排序与行高亮共用同一判定。 */
-export function isToolRowActive(block: ToolBlock): boolean {
+export function isToolRowActive(block: ToolBlock, swarmTasks?: KimiTaskInfo[] | null): boolean {
   const bg = AGENT_TOOL_NAMES.has(block.name) ? backgroundTaskInfo(block) : null
-  if (bg?.isBackground) return bg.running
+  if (bg?.isBackground) return withServerTaskStatus(bg, swarmTasks).running
   return block.status === 'running' || block.status === 'pending'
 }
 
 export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
   const interrupt = useSessionStore((s) => s.interrupt)
   const sendMessage = useSessionStore((s) => s.sendMessage)
+  const swarmTasks = useSessionStore((s) => s.swarmTasks)
   const [open, setOpen] = useState(false)
-  const icon = STATUS_ICON[block.status]
   const isAgent = AGENT_TOOL_NAMES.has(block.name)
   // 后台任务（实证形态见 toolStats.backgroundTaskInfo）：完成=已挂后台。
-  const bg = isAgent ? backgroundTaskInfo(block) : null
+  // #32 有 server tasks 时以其状态为准（完成/被杀后不再误报运行中）。
+  const bgInfo = isAgent ? backgroundTaskInfo(block) : null
+  const bg = bgInfo?.isBackground ? withServerTaskStatus(bgInfo, swarmTasks) : bgInfo
   const bgRunning = !!bg?.isBackground && bg.running
   // 前台阻塞语义只给非后台任务。
   const running = (block.status === 'running' || block.status === 'pending') && !bg?.isBackground
+  // #32 后台仍在跑时块 status 已是 done（launch ack），图标按运行中显示。
+  const icon = STATUS_ICON[bgRunning ? 'running' : block.status]
   const sub = isAgent ? parseSubagentInput(block.input) : null
   const summary = summaryForTool(block.name, block.input)
+  // #32 后台任务时长以 server task 的 started_at/completed_at 为准（block 的
+  //  endedAt 只是 launch ack 时间）；仍在跑则计到当前。
+  const duration = bg?.isBackground
+    ? fmtDuration(bg.startedAt ?? block.startedAt, bgRunning ? undefined : bg.endedAt ?? block.endedAt)
+    : fmtDuration(block.startedAt, block.endedAt)
 
   return (
     <div>
       <div
         className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs transition hover:bg-white/[0.03] ${
-          isToolRowActive(block) ? 'tool-row-running' : ''
+          isToolRowActive(block, swarmTasks) ? 'tool-row-running' : ''
         }`}
         onClick={() => setOpen((o) => !o)}
       >
@@ -124,7 +135,7 @@ export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
           </button>
         )}
         <span className="shrink-0 text-[10px] tabular-nums text-zinc-600">
-          {fmtDuration(block.startedAt, block.endedAt)}
+          {duration}
         </span>
       </div>
       {/* 详情：现有 ToolCallCard 的展开态渲染（输入/输出/子代理流式结果） */}

@@ -28,6 +28,8 @@ export default function ChipPopover({
 }): JSX.Element {
   const items = useSessionStore((s) => s.items)
   const planEntries = useSessionStore((s) => s.planEntries)
+  // #32 后台 agent 的运行中计数/置顶以 server 校正后的状态为准。
+  const swarmTasks = useSessionStore((s) => s.swarmTasks)
   const cardRef = useRef<HTMLDivElement | null>(null)
   const [showAllHistory, setShowAllHistory] = useState(false)
 
@@ -45,7 +47,7 @@ export default function ChipPopover({
 
   const bashBlocks = kind === 'bash' ? collectToolBlocks(items, BASH_TOOL_NAMES) : []
   const agentBlocks = kind === 'agent' ? collectToolBlocks(items, AGENT_TOOL_NAMES) : []
-  const runningAgents = kind === 'agent' ? countRunningTools(items, AGENT_TOOL_NAMES) : 0
+  const runningAgents = kind === 'agent' ? countRunningTools(items, AGENT_TOOL_NAMES, swarmTasks) : 0
   const planDone = planEntries.filter((e) => e.status === 'completed').length
 
   const title =
@@ -63,8 +65,8 @@ export default function ChipPopover({
 
   // #12 排序：最新在前（collectToolBlocks 返回时间正序，倒转）；活跃项再置顶突出。
   const newestFirst = (kind === 'bash' ? bashBlocks : agentBlocks).slice().reverse()
-  const activeBlocks = newestFirst.filter(isToolRowActive)
-  const historyBlocks = newestFirst.filter((b) => !isToolRowActive(b))
+  const activeBlocks = newestFirst.filter((b) => isToolRowActive(b, swarmTasks))
+  const historyBlocks = newestFirst.filter((b) => !isToolRowActive(b, swarmTasks))
   const visibleHistory = showAllHistory ? historyBlocks : historyBlocks.slice(0, RECENT_HISTORY_LIMIT)
   const hiddenHistoryCount = historyBlocks.length - visibleHistory.length
 

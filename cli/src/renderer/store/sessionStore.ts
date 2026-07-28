@@ -61,6 +61,31 @@ function storePermissionMode(sdkSessionId: string | undefined, mode: string): vo
   }
 }
 
+/** #31 Composer 草稿按会话持久化（对齐 Kimi Web：草稿跟会话走）。键优先
+ *  sdkSessionId（重启 resume 后稳定）；新会话 init 前暂无 sdk id，先挂 bridge
+ *  sessionId，init 到达后由 Composer 迁移。空文本即删除条目。 */
+const COMPOSER_DRAFTS_STORAGE_KEY = 'forge.composerDrafts.v1'
+
+function readStoredComposerDrafts(): Record<string, string> {
+  try {
+    const raw = window.localStorage.getItem(COMPOSER_DRAFTS_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return parsed as Record<string, string>
+  } catch {
+    return {}
+  }
+}
+
+function storeComposerDrafts(drafts: Record<string, string>): void {
+  try {
+    window.localStorage.setItem(COMPOSER_DRAFTS_STORAGE_KEY, JSON.stringify(drafts))
+  } catch {
+    /* ignore */
+  }
+}
+
 /** A buffered `content_block_delta` waiting to be folded into the store in a
  *  single batched update (one per animation frame). See streamBatcher.ts. */
 export interface StreamDeltaBatch {
@@ -114,6 +139,10 @@ interface SessionStore {
   goal: GoalInfo | null
   /** AskUserQuestion 队列（system/elicitation；逐条处理，多问题顺序到达）。 */
   elicitationQueue: ElicitationRequest[]
+  /** #31 Composer 未发送草稿（按会话；键见 COMPOSER_DRAFTS_STORAGE_KEY 注释），
+   *  切视图/切会话/重启不丢，发送成功后清空。 */
+  composerDrafts: Record<string, string>
+  setComposerDraft: (sessionKey: string, text: string) => void
 
   startSession: (args: StartArgs) => Promise<void>
   sendMessage: (text: string, attachments?: PickedFile[], opts?: { cutIn?: boolean }) => Promise<void>
@@ -251,6 +280,13 @@ interface SessionHistoryCacheEntry {
 
 const sessionHistoryCache = new Map<string, SessionHistoryCacheEntry>()
 const sessionStartPromises = new Map<string, Promise<void>>()
+
+/** #29 直达发送（非排队）后尚未被 agent 确认收到的用户消息：turn 以错误收尾
+ *  （典型：僵尸 turn "another turn is active"）时回收到 pendingQueue，走 #20 的
+ *  重发/清空出路，避免消息只剩一个气泡却被吞。agent 回显（user echo）或成功
+ *  result 时清除；用户主动停止的 suppressed result 不清（该 turn 的消息可能
+ *  根本没被处理，留着等后续 result 定论）。 */
+let unackedDirectMessage: (Omit<PendingMessage, 'id'> & { sessionId: string }) | null = null
 
 interface SessionHistoryHydrationTask {
   bridgeSessionId: string
@@ -560,6 +596,25 @@ function mapTool(
   })
 }
 
+/** #32 悬挂工具块封口：终态 tool_result 丢失（子代理被杀/Session closed/中断）
+ *  的块不能永远挂 running/pending——翻成 stopped。withTimestamp 打终态时间戳
+ *  （live turn 结束兜底）；历史重放无时间戳，诚实缺省。后台 agent 的块
+ *  status 已是 done（launch ack），不受影响。 */
+function sealHungToolBlocks(items: TranscriptItem[], withTimestamp: boolean): TranscriptItem[] {
+  return items.map((item) => {
+    if (!item || item.kind !== 'assistant') return item
+    let changed = false
+    const blocks = item.blocks.map((b) => {
+      if (b && b.kind === 'tool' && (b.status === 'running' || b.status === 'pending')) {
+        changed = true
+        return { ...b, status: 'stopped' as const, ...(withTimestamp ? { endedAt: Date.now() } : {}) }
+      }
+      return b
+    })
+    return changed ? { ...item, blocks } : item
+  })
+}
+
 /**
  * Fold a streaming delta into the assistant item for the message currently
  * streaming. The key is the Anthropic message id (from `message_start`), which
@@ -722,7 +777,9 @@ export function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
       }
     }
   }
-  return items
+  // #32 历史里无终态 result 的 tool_use（被杀/中断的子代理）不能重放成
+  //  永久"运行中"：封口 stopped（无时间戳，计时诚实显示 —）。
+  return sealHungToolBlocks(items, false)
 }
 
 /**
@@ -1178,7 +1235,10 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
       // turn 结束：清流式标记。后台缓冲没有 pendingQueue（切走时队列已清空，
       // 后续消息靠后端回显进入 items），running 以后端推送/下一个事件为准。
       bg.running = false
-      bg.items = bg.items.map((i) => (i.kind === 'assistant' && i.streaming ? { ...i, streaming: false } : i))
+      bg.items = sealHungToolBlocks(
+        bg.items.map((i) => (i.kind === 'assistant' && i.streaming ? { ...i, streaming: false } : i)),
+        true
+      )
       bg.currentStreamingMsgId = null
       const resultError = r.errors?.length ? r.errors.join('; ') : r.subtype
       if (r.subtype !== 'success' && !isUserStopDiagnostic(resultError)) bg.error = resultError
@@ -1275,6 +1335,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   modePanel: defaultModePanel(),
   goal: null,
   elicitationQueue: [],
+  composerDrafts: readStoredComposerDrafts(),
+
+  setComposerDraft(sessionKey, text) {
+    const drafts = { ...get().composerDrafts }
+    if (text) drafts[sessionKey] = text
+    else delete drafts[sessionKey]
+    storeComposerDrafts(drafts)
+    set({ composerDrafts: drafts })
+  },
 
   async startSession(args) {
     if (get().starting) return
@@ -1440,6 +1509,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (busy) {
       set((s) => ({ pendingQueue: [...s.pendingQueue, { id: uid(), text: value, ...attProps, ...swarmProps, ...cutInProps }] }))
     } else {
+      // #29：直达消息先入未确认台账——turn 错误收尾时靠它回收（见 result 分支）。
+      unackedDirectMessage = { sessionId: meta.sessionId, text: value, ...attProps, ...swarmProps, ...cutInProps }
       set((s) => ({
         items: [...s.items, { id: uid(), kind: 'user', text: value, parentToolUseId: null, ...attProps, ...swarmProps, ...cutInProps }],
         status: { ...s.status, running: true, error: undefined }
@@ -1451,7 +1522,23 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       await window.api.sendMessage(meta.sessionId, content)
     } catch (error: unknown) {
       if (get().meta?.sessionId !== meta.sessionId) return
+      // #29：直达发送在 IPC 层就失败（消息没到后端）：立即回收到 pendingQueue
+      // 队首，与 turn 错误收尾的回收同一条出路。busy 路径本就在队列里，不重收。
+      const unacked = !busy && unackedDirectMessage?.sessionId === meta.sessionId ? unackedDirectMessage : null
+      if (unacked) unackedDirectMessage = null
       set((s) => ({
+        pendingQueue: unacked
+          ? [
+              {
+                id: uid(),
+                text: unacked.text,
+                ...(unacked.attachments ? { attachments: unacked.attachments } : {}),
+                ...(unacked.swarm ? { swarm: true } : {}),
+                ...(unacked.cutIn ? { cutIn: true } : {})
+              },
+              ...s.pendingQueue
+            ]
+          : s.pendingQueue,
         status: {
           ...s.status,
           running: false,
@@ -1536,6 +1623,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   reset() {
     cancelActiveHistoryHydration(0)
+    unackedDirectMessage = null
     set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], contextUsage: null, mcpServers: null, modePanel: defaultModePanel(), goal: null, elicitationQueue: [] })
   },
 
@@ -2573,6 +2661,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           set((s) => {
             const last = s.items[s.items.length - 1]
             if (isOwnMessageEcho(last, content)) {
+              // #29：agent 回显 = 已收到本条，直达消息出台账。
+              unackedDirectMessage = null
               return { status: { ...s.status, running: true } }
             }
             return {
@@ -2628,6 +2718,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                 // (incl. attachments), so don't add the text-only echo again.
                 const last = s.items[s.items.length - 1]
                 if (isOwnMessageEcho(last, text)) {
+                  // #29：agent 回显 = 已收到本条，直达消息出台账。
+                  unackedDirectMessage = null
                   return { status: { ...s.status, running: true } }
                 }
                 return {
@@ -2742,6 +2834,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         }
         const resultError = r.errors?.length ? r.errors.join('; ') : r.subtype
         const shouldSuppressError = r.subtype === 'success' || isUserStopDiagnostic(resultError)
+        // #29：错误收尾的 turn 若吞掉了一条直达消息（agent 从未收到/处理，典型：
+        // 僵尸 turn "another turn is active"），回收到 pendingQueue 队首，交给
+        // #20 的重发/清空出路，而不是只剩一个气泡悄悄丢失。仅在队列已空时回收：
+        // 队列未空说明后端仍在按自身队列续跑，塞回去会打乱 renderer↔backend 的
+        // 队列镜像。成功 result = 已处理，出台账；用户主动停止（suppressed）不
+        // 动台账（该 turn 的消息可能没被处理，留给后续 result 定论）。
+        let swallowed: typeof unackedDirectMessage = null
+        if (!shouldSuppressError) {
+          if (unackedDirectMessage && unackedDirectMessage.sessionId === get().meta?.sessionId) {
+            swallowed = unackedDirectMessage
+          }
+          unackedDirectMessage = null
+        } else if (r.subtype === 'success') {
+          unackedDirectMessage = null
+        }
         set((s) => ({
           status: {
             ...s.status,
@@ -2762,10 +2869,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             const cleared = s.items.map((i) =>
               i.kind === 'assistant' && i.streaming ? { ...i, streaming: false } : i
             )
+            // #32 turn 结束兜底：无终态 tool_result 的悬挂块封口 stopped。
+            const sealed = sealHungToolBlocks(cleared, true)
             const due = s.pendingQueue[0]
-            if (!due) return cleared
+            if (!due) return sealed
             return [
-              ...cleared,
+              ...sealed,
               {
                 id: due.id,
                 kind: 'user' as const,
@@ -2777,7 +2886,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               }
             ]
           })(),
-          pendingQueue: s.pendingQueue.slice(1),
+          pendingQueue:
+            swallowed && s.pendingQueue.length === 0
+              ? [
+                  {
+                    id: uid(),
+                    text: swallowed.text,
+                    ...(swallowed.attachments ? { attachments: swallowed.attachments } : {}),
+                    ...(swallowed.swarm ? { swarm: true } : {}),
+                    ...(swallowed.cutIn ? { cutIn: true } : {})
+                  }
+                ]
+              : s.pendingQueue.slice(1),
           currentStreamingMsgId: null
         }))
         // turn 完成：kimi 此时已持久化会话，刷新侧栏"最近会话"（防抖）。

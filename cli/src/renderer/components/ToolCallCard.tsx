@@ -117,7 +117,11 @@ export function summaryForTool(name: string, input: unknown): string {
     try {
       value = JSON.parse(raw)
     } catch {
-      return raw.slice(0, 80) // 非 JSON 字符串：直接截断当摘要
+      // #30 疑似未闭合的 JSON 残片（流式输入缓冲）：不当摘要渲染，按无输入
+      // 走各工具的兜底；普通非 JSON 字符串维持原样截断。
+      const trimmed = raw.trimStart()
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) value = null
+      else return raw.slice(0, 80) // 非 JSON 字符串：直接截断当摘要
     }
   }
   const inp = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>
@@ -127,7 +131,8 @@ export function summaryForTool(name: string, input: unknown): string {
     case 'terminal':
       // #12 优先可读 description（Kimi 风格：意图在前，裸命令收进展开区）；
       // #28 无 description 时给规则化摘要，不再是整行裸命令。
-      return s(inp.description) || bashCommandSummary(s(inp.command))
+      // #30 输入仍在流式拼接（command 未到达）时给兜底，摘要行不留白。
+      return s(inp.description) || bashCommandSummary(s(inp.command)) || '准备执行…'
     case 'Read':
     case 'read_file':
       return s(inp.file_path) || s(inp.path)

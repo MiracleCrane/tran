@@ -812,6 +812,10 @@ export function registerIpc(
     swarmTimer = setTimeout(() => void pollSwarmTasks(), delayMs)
   }
 
+  // 失败重试退避：15s→60s→5min 封顶（成功后 swarmFailures 清零自动重置）。
+  const swarmRetryDelay = (failures: number): number =>
+    Math.min(15000 * 4 ** (failures - 1), 300000)
+
   const pollSwarmTasks = async (): Promise<void> => {
     const sessionId = swarmSessionId
     if (!sessionId) return
@@ -819,13 +823,12 @@ export function registerIpc(
     if (swarmSessionId !== sessionId) return
     if (tasks === null) {
       swarmFailures += 1
-      // server 持续不可用：推一次降级态后停轮（下次订阅再重试）。
-      if (swarmFailures >= 3) {
+      // server 持续不可用：推一次降级态，之后按指数退避继续重试（15s→60s→5min
+      // 封顶），server 恢复后自动回到正常轮询。
+      if (swarmFailures === 3) {
         send('forge:swarm-tasks', { sessionId, tasks: null })
-        stopSwarmPolling()
-        return
       }
-      scheduleSwarmPoll(15000)
+      scheduleSwarmPoll(swarmRetryDelay(swarmFailures))
       return
     }
     swarmFailures = 0

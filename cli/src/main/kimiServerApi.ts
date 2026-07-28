@@ -1,18 +1,22 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { app } from 'electron'
 import { log } from './logger'
 import { resolveWindowsKimiCommand } from './windowsKimi'
 
 /**
  * kimi 本地 server（REST + WebSocket + web UI 后端）连接管理。
  *
- * 实证事实：
- * - 启动方式：`kimi server run`（后台 daemon；--foreground 前台）。默认端口
- *   固定 58627；token 启动时打印并持久化到 ~/.kimi-code/server.token。
- * - 发现机制：~/.kimi-code/server/lock 是 JSON {pid, host, port, started_at}，
- *   直接读它拿端口；再读 server.token 做 Bearer 认证。
+ * 实证事实（kimi CLI 0.29.0）：
+ * - 启动方式：`kimi web --no-open`（前台进程，约 2s 就绪；旧的 `kimi server
+ *   run` 已移除，执行后打印 deprecated 提示立即退出）。Tran 持有 child 句柄，
+ *   app quit 时终止整棵进程树。默认端口 58627。
+ * - token 机制不变：~/.kimi-code/server.token，Bearer 认证。
+ * - 发现机制：~/.kimi-code/server/instances/<server_id>.json 是 JSON {pid,
+ *   host, port, started_at, heartbeat_at, host_version}（不再有 server/lock）。
+ *   文件可能残留（pid 死了文件还在），发现时校验 pid 存活或 heartbeat 新鲜。
  * - tasks API：GET /api/v1/sessions/<sessionId>/tasks → {data:{items:[{id,
  *   session_id, kind: "bash"|"subagent", description, status, created_at,
  *   started_at, completed_at, command?}]}}。无分页（limit 参数被忽略，全量返回）。
@@ -25,6 +29,9 @@ import { resolveWindowsKimiCommand } from './windowsKimi'
 const PROBE_TIMEOUT_MS = 4000
 const SERVER_BOOT_TIMEOUT_MS = 10000
 const TASKS_TIMEOUT_MS = 8000
+const DEFAULT_PORT = 58627
+// instance 心跳新鲜度阈值：pid 校验不到（如跨权限/容器）时的兜底。
+const HEARTBEAT_FRESH_MS = 60000
 
 export interface KimiTaskInfo {
   id: string
@@ -42,10 +49,6 @@ interface ServerHandle {
   token: string
 }
 
-function lockPath(): string {
-  return join(homedir(), '.kimi-code', 'server', 'lock')
-}
-
 function tokenPath(): string {
   return join(homedir(), '.kimi-code', 'server.token')
 }
@@ -59,15 +62,55 @@ function readToken(): string | null {
   }
 }
 
-/** 从 server/lock 读端口（拿不到就用默认 58627——kimi server run 的固定默认）。 */
-function readLockPort(): number {
+function instancesDir(): string {
+  return join(homedir(), '.kimi-code', 'server', 'instances')
+}
+
+function pidAlive(pid: number): boolean {
   try {
-    const lock = JSON.parse(readFileSync(lockPath(), 'utf8')) as { port?: unknown }
-    if (typeof lock.port === 'number' && lock.port > 0) return lock.port
+    process.kill(pid, 0)
+    return true
   } catch {
-    /* lock 不存在或损坏 → 默认端口 */
+    return false
   }
-  return 58627
+}
+
+/** 从 server/instances/ 发现一个活着的实例（pid 存活或 heartbeat 新鲜），取最新；
+ *  拿不到返回 null（调用方回退默认端口）。instances 文件可能残留，必须校验。 */
+function discoverInstance(): { host: string; port: number } | null {
+  let files: string[]
+  try {
+    files = readdirSync(instancesDir()).filter((f) => f.endsWith('.json'))
+  } catch {
+    return null
+  }
+  let best: { host: string; port: number; startedAt: number } | null = null
+  for (const file of files) {
+    try {
+      const inst = JSON.parse(readFileSync(join(instancesDir(), file), 'utf8')) as {
+        pid?: unknown
+        host?: unknown
+        port?: unknown
+        started_at?: unknown
+        heartbeat_at?: unknown
+      }
+      if (typeof inst.port !== 'number' || inst.port <= 0) continue
+      const alive = typeof inst.pid === 'number' && pidAlive(inst.pid)
+      const heartbeat =
+        typeof inst.heartbeat_at === 'string' ? Date.parse(inst.heartbeat_at) : NaN
+      const fresh = Number.isFinite(heartbeat) && Date.now() - heartbeat < HEARTBEAT_FRESH_MS
+      if (!alive && !fresh) continue
+      // 监听 0.0.0.0/:: 时连接走回环。
+      const rawHost = typeof inst.host === 'string' ? inst.host : ''
+      const host = rawHost && rawHost !== '0.0.0.0' && rawHost !== '::' ? rawHost : '127.0.0.1'
+      const startedAt =
+        typeof inst.started_at === 'string' ? Date.parse(inst.started_at) || 0 : 0
+      if (!best || startedAt > best.startedAt) best = { host, port: inst.port, startedAt }
+    } catch {
+      /* 单个文件损坏 → 跳过 */
+    }
+  }
+  return best
 }
 
 async function probe(baseUrl: string, token: string): Promise<boolean> {
@@ -88,43 +131,93 @@ async function probe(baseUrl: string, token: string): Promise<boolean> {
 
 let cachedHandle: ServerHandle | null = null
 let spawnPromise: Promise<ServerHandle | null> | null = null
+let serverChild: ChildProcess | null = null
 
-/** 拉起 kimi server daemon（detached，不等标准输出；靠轮询 probe 判活）。 */
+/** 终止 Tran 拉起的 kimi web（整棵进程树；Windows 上 cmd.exe 包裹 kill 不到子进程）。 */
+function killServerChild(): void {
+  const child = serverChild
+  serverChild = null
+  if (!child || child.exitCode !== null) return
+  try {
+    if (process.platform === 'win32' && child.pid) {
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }).unref()
+    } else {
+      child.kill('SIGTERM')
+    }
+  } catch {
+    /* 退出路径尽力而为 */
+  }
+}
+
+app.once('before-quit', killServerChild)
+
+/** 拉起 kimi web（前台进程，持有句柄；捕获早期输出识别 deprecated/错误直接判死，
+ *  靠 instances 发现 + 轮询 probe 判活）。 */
 async function spawnServer(): Promise<ServerHandle | null> {
   const token = readToken()
   if (!token) {
     log('kimi-server', 'no server.token, cannot start/probe server')
     return null
   }
+  let child: ChildProcess
+  let earlyOutput = ''
+  let exited = false
   try {
     const resolved = await resolveWindowsKimiCommand()
-    log('kimi-server', `spawning kimi server run (${resolved.displayPath})`)
-    const child = spawn(resolved.command, [...resolved.argsPrefix, 'server', 'run'], {
-      detached: true,
-      stdio: 'ignore',
+    log('kimi-server', `spawning kimi web --no-open (${resolved.displayPath})`)
+    child = spawn(resolved.command, [...resolved.argsPrefix, 'web', '--no-open'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true
     })
-    child.unref()
+    serverChild = child
+    const onData = (chunk: Buffer): void => {
+      earlyOutput = (earlyOutput + chunk.toString('utf8')).slice(-4096)
+    }
+    child.stdout?.on('data', onData)
+    child.stderr?.on('data', onData)
+    child.on('exit', () => {
+      exited = true
+      if (serverChild === child) serverChild = null
+    })
+    child.on('error', () => {
+      exited = true
+      if (serverChild === child) serverChild = null
+    })
   } catch (error) {
     log('kimi-server', `spawn failed: ${error instanceof Error ? error.message : String(error)}`)
     return null
   }
-  // daemon 起来需要一两秒：轮询 probe 直到可用或超时。
+  // server 起来需要一两秒：轮询 instances 发现 + probe 直到可用或超时。
   const deadline = Date.now() + SERVER_BOOT_TIMEOUT_MS
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 800))
-    const handle = { baseUrl: `http://127.0.0.1:${readLockPort()}`, token }
+    // 进程已退出（如旧版 CLI 打 deprecated 提示即退）或明确报错：直接判死。
+    if (exited || /deprecat|unknown command|error/i.test(earlyOutput)) {
+      log(
+        'kimi-server',
+        `kimi web died at boot: ${earlyOutput.trim().split(/\r?\n/).slice(-3).join(' | ') || '(no output)'}`
+      )
+      killServerChild()
+      return null
+    }
+    const inst = discoverInstance()
+    const handle = {
+      baseUrl: `http://${inst?.host ?? '127.0.0.1'}:${inst?.port ?? DEFAULT_PORT}`,
+      token
+    }
     if (await probe(handle.baseUrl, handle.token)) return handle
   }
   log('kimi-server', 'server did not come up in time')
+  killServerChild()
   return null
 }
 
-/** 拿可用的 server 句柄：先探测现有实例（lock 端口），不行就自己拉起一次。 */
+/** 拿可用的 server 句柄：先探测现有实例（instances 发现，回退默认端口），不行就自己拉起一次。 */
 export async function ensureKimiServer(): Promise<ServerHandle | null> {
   const token = readToken()
   if (!token) return null
-  const baseUrl = `http://127.0.0.1:${readLockPort()}`
+  const inst = discoverInstance()
+  const baseUrl = `http://${inst?.host ?? '127.0.0.1'}:${inst?.port ?? DEFAULT_PORT}`
   if (await probe(baseUrl, token)) {
     cachedHandle = { baseUrl, token }
     return cachedHandle
@@ -192,8 +285,4 @@ export async function getSessionTasks(sessionId: string): Promise<KimiTaskInfo[]
   } finally {
     clearTimeout(timer)
   }
-}
-
-export function kimiServerLockExists(): boolean {
-  return existsSync(lockPath())
 }

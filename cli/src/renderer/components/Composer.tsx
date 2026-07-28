@@ -195,7 +195,32 @@ export default function Composer(): JSX.Element {
   }
   const statusError = useSessionStore((s) => s.status.error)
   const stopReason = useSessionStore((s) => s.status.stopReason)
-  const [text, setText] = useState('')
+  // #31 草稿提升到 store 并按会话持久化（localStorage）：切视图/切会话/重启不丢，
+  // 发送成功后清空。键优先 sdkSessionId（resume 后稳定）；新会话 init 前暂无
+  // sdk id，暂挂 bridge sessionId，init 到达后迁移（见下方 effect）。
+  const draftKey = meta?.sdkSessionId ?? meta?.sessionId ?? null
+  const text = useSessionStore((s) => (draftKey ? (s.composerDrafts[draftKey] ?? '') : ''))
+  const setComposerDraft = useSessionStore((s) => s.setComposerDraft)
+  const setText = (value: string | ((current: string) => string)): void => {
+    if (!draftKey) return
+    const next =
+      typeof value === 'function'
+        ? value(useSessionStore.getState().composerDrafts[draftKey] ?? '')
+        : value
+    setComposerDraft(draftKey, next)
+  }
+  // 新会话 init 到达后，把暂挂 bridge id 键下的草稿迁到稳定的 sdk id 键。
+  useEffect(() => {
+    if (!meta?.sdkSessionId || !draftKey) return
+    const staleKey = meta.sessionId
+    if (staleKey === meta.sdkSessionId) return
+    const drafts = useSessionStore.getState().composerDrafts
+    const stale = drafts[staleKey]
+    if (stale && !drafts[meta.sdkSessionId]) {
+      setComposerDraft(meta.sdkSessionId, stale)
+      setComposerDraft(staleKey, '')
+    }
+  }, [meta?.sdkSessionId, meta?.sessionId, draftKey, setComposerDraft])
   const [models, setModels] = useState(defaultModelsForAgent(undefined))
   const [attachments, setAttachments] = useState<PickedFile[]>([])
   const [showTemplates, setShowTemplates] = useState(false)
@@ -635,9 +660,15 @@ export default function Composer(): JSX.Element {
   }
 
   /** Ctrl+S 打断并发送（插队）：运行中先中断（interrupt 乐观清 running），
-   *  再立即发送（不走 pendingQueue）；无文本则只中断。 */
+   *  再立即发送（不走 pendingQueue）；无文本则只中断。
+   *  #29：输入框为空但队列里有已提交待发的消息（含 turn 出错后回收回来的）
+   *  时，打断后直接重发队列——否则这些消息会一直晾在队列里，等同被吞。 */
   const cutInSubmit = async (): Promise<void> => {
     if (running) await interrupt()
+    if (!text.trim() && attachments.length === 0 && pending.length > 0) {
+      await resendPendingQueue()
+      return
+    }
     await submit(true)
   }
 
