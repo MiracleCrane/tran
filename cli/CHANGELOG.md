@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.0.32 - 2026-07-28
+
+### 中文
+
+- 修复:子 Agent 面板仍全部"运行中"(#34)。根因:kimi 0.29 的 REST tasks API 只覆盖 web server 托管的会话,ACP 启动的后台任务恒返回空,校正永不命中。现改读磁盘真实记录(~/.kimi-code/sessions/.../agents/main/tasks/,ACP 主代理实时写)与 REST 合并,运行状态与耗时真实可信;server 不可用时也能用磁盘数据降级。
+- 修复:Bash 摘要"迟迟不来"(#40)。#30 的 JSON 快照守卫把摘要需要的 command 一并丢弃,权限等待窗口只剩"准备执行…"。现守卫拦截时从流式残片抢救 command/description 实时喂给摘要(权限未批准即显示命令主干);并修复闭合帧把整段输入 JSON 当正文的问题。
+- 修复:输入框不自动增高的真相(#38)——顶边有一条贯穿整宽的隐形拖拽手柄带,误拖一次手动高度即永久锁死自动模式,且恢复途径(双击隐形手柄)无任何可见提示。现锁定态显示"恢复自动高度"按钮。
+- 优化:思考月亮去斑纹(#37)——纯紫黄渐变球,conic 色盘绕心自转,静态受光/背光保留球体侧视感,无任何斑点。
+- 优化:"AI 正在思考中"指示挪到待办 chip 右侧(#39),后台命令/子 Agent/待办三个 chip 位置实测三态纹丝不动。
+- 修复:设置/技能/说明/翻译/运营商五个子页面"返回对话"吸顶(#35),滚动任意位置可返回。
+- 修复:发送消息自动滚动到底部(#36)——直发/排队落回/自动消息三条路径覆盖,历史重放与子代理转发不误触。
+
+### English
+
+- Fixed: sub-agent panel stuck at "all running" (#34). Root cause: kimi 0.29's REST tasks API only covers web-server-hosted sessions — ACP-launched background tasks always return empty, so the correction never matched. Now reads the on-disk task records (written in real time by the ACP parent) merged with REST; states and durations are real, with disk fallback when the server is down.
+- Fixed: Bash summaries "never arriving" (#40). The #30 input-snapshot guard also discarded the command text, leaving "preparing…" for the whole permission-wait window. The guard now salvages command/description from the streaming fragments (summary appears before approval), and the closing frame no longer dumps raw input JSON as the card body.
+- Fixed: real cause of the composer not auto-growing (#38) — an invisible full-width drag strip above the input locks a manual height forever with no visible way back. A "restore auto height" button now appears when locked.
+- Improved: thinking moon is now a clean gradient sphere (#37) — conic purple-yellow sweep rotating around the center, static lit/shadow sides, no speckles.
+- Improved: the "thinking" indicator moved right of the todo chip (#39); the three chips' positions are pixel-stable across states.
+- Fixed: back-to-chat headers are sticky in settings/skills/help/translate/providers panels (#35).
+- Fixed: sending a message scrolls to bottom (#36) across direct/queued/auto paths, without misfiring on history replay or sub-agent forwards.
+
+#### 验证
+
+- 磁盘任务记录实测:43 个后台任务 ack task_id 零 miss;摘要抢救 9 用例全过;chip 三态坐标实测;月亮 8 相位目检
+- `npm run typecheck` 与 `npm run build` 全绿
+
 ## v1.0.31 - 2026-07-28
 
 ### 中文

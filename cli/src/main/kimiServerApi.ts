@@ -20,6 +20,9 @@ import { resolveWindowsKimiCommand } from './windowsKimi'
  * - tasks API：GET /api/v1/sessions/<sessionId>/tasks → {data:{items:[{id,
  *   session_id, kind: "bash"|"subagent", description, status, created_at,
  *   started_at, completed_at, command?}]}}。无分页（limit 参数被忽略，全量返回）。
+ *   ⚠ #34 实证（0.29.0）：REST tasks 只覆盖 web server 自己托管会话的任务；
+ *   Tran 走 `kimi acp` 启动的后台任务（子代理/后台 Bash）REST 永远返回空
+ *   items。真相在磁盘，见 readDiskTasks。
  * - tasks/<id> 详情与列表项同形；没有子代理"最近动态"接口（web 卡片那行走
  *   WebSocket，REST 拿不到）——Tran 只渲染 description + status。
  *
@@ -243,10 +246,69 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value ? value : undefined
 }
 
-/** 拉取某会话的全部 tasks（无分页，全量）。server 不可用返回 null（降级）。 */
+/** #34 磁盘数据源：ACP 主代理把后台任务记录实时写在
+ *  ~/.kimi-code/sessions/<workspace>/<sessionId>/agents/main/tasks/<taskId>.json
+ *  形态 {taskId, kind: "agent"|"process", status: running|completed|failed|
+ *  killed|lost, description, command?, startedAt, endedAt(epoch ms, 未完为 null)}。
+ *  taskId 与 launch ack 文本里的 task_id 同空间（实证一致）。REST 查不到这些
+ *  任务，所以磁盘是主数据源；server 挂了也照读。找不到会话目录返回 []。 */
+function readDiskTasks(sessionId: string): KimiTaskInfo[] {
+  // sessionId 拼路径，先挡目录穿越。
+  if (!/^[\w-]+$/.test(sessionId)) return []
+  const base = join(homedir(), '.kimi-code', 'sessions')
+  let workspaces: string[]
+  try {
+    workspaces = readdirSync(base)
+  } catch {
+    return []
+  }
+  for (const ws of workspaces) {
+    const tasksDir = join(base, ws, sessionId, 'agents', 'main', 'tasks')
+    let files: string[]
+    try {
+      files = readdirSync(tasksDir).filter((f) => f.endsWith('.json'))
+    } catch {
+      continue
+    }
+    const tasks: KimiTaskInfo[] = []
+    for (const file of files) {
+      try {
+        const raw = JSON.parse(readFileSync(join(tasksDir, file), 'utf8')) as Record<string, unknown>
+        const id = asString(raw.taskId)
+        if (!id) continue
+        // 磁盘词表 → REST 词表（渲染层按 subagent/bash 分类、stopped/failed 展示）。
+        const rawKind = asString(raw.kind)
+        const kind = rawKind === 'agent' ? 'subagent' : rawKind === 'process' ? 'bash' : rawKind
+        if (!kind) continue
+        const rawStatus = asString(raw.status)
+        const status =
+          rawStatus === 'killed' ? 'stopped' : rawStatus === 'lost' ? 'failed' : rawStatus
+        const startedMs = typeof raw.startedAt === 'number' ? raw.startedAt : NaN
+        const endedMs = typeof raw.endedAt === 'number' ? raw.endedAt : NaN
+        tasks.push({
+          id,
+          kind,
+          ...(asString(raw.description) ? { description: asString(raw.description) } : {}),
+          ...(status ? { status } : {}),
+          ...(asString(raw.command) ? { command: asString(raw.command) } : {}),
+          ...(Number.isFinite(startedMs) ? { startedAt: new Date(startedMs).toISOString() } : {}),
+          ...(Number.isFinite(endedMs) ? { completedAt: new Date(endedMs).toISOString() } : {})
+        })
+      } catch {
+        /* 单个文件损坏/写入中 → 跳过 */
+      }
+    }
+    return tasks
+  }
+  return []
+}
+
+/** 拉取某会话的全部 tasks：REST（web server 托管任务）+ 磁盘（ACP 后台任务，
+ *  #34）按 id 合并，REST 优先。server 不可用且无磁盘记录时返回 null（降级）。 */
 export async function getSessionTasks(sessionId: string): Promise<KimiTaskInfo[] | null> {
   const handle = await ensureKimiServer()
-  if (!handle) return null
+  const disk = readDiskTasks(sessionId)
+  if (!handle) return disk.length > 0 ? disk : null
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TASKS_TIMEOUT_MS)
   try {
@@ -257,11 +319,11 @@ export async function getSessionTasks(sessionId: string): Promise<KimiTaskInfo[]
     if (!response.ok) {
       // token 失效（可能被 rotate）：清缓存下次重探测。
       if (response.status === 401 || response.status === 403) cachedHandle = null
-      return null
+      return disk.length > 0 ? disk : null
     }
     const payload = (await response.json()) as unknown
     const items = asRecord(asRecord(payload)?.data)?.items
-    if (!Array.isArray(items)) return []
+    if (!Array.isArray(items)) return disk
     const tasks: KimiTaskInfo[] = []
     for (const raw of items) {
       const entry = asRecord(raw)
@@ -279,9 +341,10 @@ export async function getSessionTasks(sessionId: string): Promise<KimiTaskInfo[]
         ...(asString(entry?.completed_at) ? { completedAt: asString(entry?.completed_at) } : {})
       })
     }
-    return tasks
+    const restIds = new Set(tasks.map((t) => t.id))
+    return [...tasks, ...disk.filter((t) => !restIds.has(t.id))]
   } catch {
-    return null
+    return disk.length > 0 ? disk : null
   } finally {
     clearTimeout(timer)
   }

@@ -150,7 +150,8 @@ export default function SkillsPanel(): JSX.Element {
   return (
     <div ref={rootRef} className="h-full overflow-y-auto bg-bg-base">
       <div className="mx-auto max-w-3xl px-6 py-6">
-        <div className="mb-4 flex items-center gap-2">
+        {/* #35 吸顶标题栏：下滚后"返回对话"仍可点。 */}
+        <div className="sticky top-0 z-10 -mx-6 mb-4 flex items-center gap-2 bg-bg-base/95 px-6 py-3">
           <button
             type="button"
             onClick={() => useUiStore.getState().setView('chat')}

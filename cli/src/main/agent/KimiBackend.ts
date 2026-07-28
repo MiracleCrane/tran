@@ -1251,13 +1251,22 @@ export class KimiBackend {
       // in_progress 等中间态：转发流式内容（子代理输出等），partial 标记让
       // 渲染层保持 running 状态、只更新卡片内容。rawInput（后台任务标记
       //  run_in_background 在这里才到）一并下传，渲染层合并进 block.input。
-      const partialText = stringifyToolResult(update.rawOutput ?? update.content)
+      let partialText = stringifyToolResult(update.rawOutput ?? update.content)
       const rawInput = asRecord(update.rawInput)
       // #30：输入未闭合时 kimi 把"工具输入 JSON 的累积快照"当 in_progress
-      // content 逐字推流（{"command":"… 不断增长）——这是输入不是输出，跳过；
-      // 否则渲染层会把原始 JSON 残片当卡片正文。真正的输出从不在输入闭合前
-      // 到达，闭合后的 update 带 rawInput 走正常合并，completed 再带全量输出。
-      if (!rawInput && partialText.trimStart().startsWith('{')) return
+      // content 逐字推流（{"command":"… 不断增长）——这是输入不是输出，不当
+      // 卡片正文渲染。但快照里已拼出的 command/description 正是摘要要等的
+      // 信息（#40：权限等待/输入流式期间摘要不能一直停"准备执行…"），抢救
+      // 出来按 rawInput 同款合并下传。真正的输出从不在输入闭合前到达，闭合
+      // 后的 update 带 rawInput 走正常合并，completed 再带全量输出。
+      if (!rawInput && partialText.trimStart().startsWith('{')) {
+        const salvaged = salvageStreamingInput(partialText)
+        if (salvaged) this.emitToolPartial(session, toolUseId, '', salvaged)
+        return
+      }
+      // #30 残留：闭合瞬间的 update 把完整输入快照当 content 带来（与 rawInput
+      // 同文），不是输出——不下传，否则 running 卡片正文显示整段输入 JSON。
+      if (rawInput && partialText === JSON.stringify(rawInput)) partialText = ''
       if (partialText || rawInput) this.emitToolPartial(session, toolUseId, partialText, rawInput ?? undefined)
       return
     }
@@ -1985,6 +1994,28 @@ function stringifyToolContentItem(value: unknown): string {
   if (item.type === 'terminal') return asString(item.command) ?? asString(item.output) ?? ''
   if (item.type === 'diff') return asString(item.diff) ?? ''
   return asString(item.text) ?? asString(item.title) ?? ''
+}
+
+/** #40 从流式输入 JSON 快照残片里抢救已拼出的 command/description（卡片摘要用）。
+ *  快照是 truncated JSON（字符串值可能未闭合），不做整体 parse，逐字段正则提取；
+ *  残片恰好在转义符中间断开时剥掉孤立反斜杠再试，仍失败则放弃该字段。 */
+function salvageStreamingInput(snapshot: string): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {}
+  for (const key of ['command', 'description']) {
+    const m = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`).exec(snapshot)
+    if (!m || !m[1]) continue
+    const raw = m[1]
+    try {
+      out[key] = JSON.parse(`"${raw}"`) as string
+    } catch {
+      try {
+        out[key] = JSON.parse(`"${raw.replace(/\\+$/, '')}"`) as string
+      } catch {
+        /* 残片无法修复：跳过该字段，等下一条更长的快照 */
+      }
+    }
+  }
+  return Object.keys(out).length ? out : null
 }
 
 function mergeComposerModels(...groups: ComposerModel[][]): ComposerModel[] {

@@ -799,13 +799,6 @@ export default function Composer(): JSX.Element {
             </span>
           )}
           {stopReason && !statusError && <span className="text-zinc-600">结束: {stopReason}</span>}
-          {/* #5 忙碌态：明确提示输出中 + 排队语义，不再静默。#11 换 Kimi Web 同款旋转月亮。 */}
-          {running && (
-            <span className="flex shrink-0 items-center gap-1.5 text-accent/90">
-              <span className="thinking-moon" aria-hidden />
-              AI 正在输出中{pending.length > 0 ? `，已排队 ${pending.length} 条` : '，新消息将排队发送'}
-            </span>
-          )}
           <button
             type="button"
             data-chip="bash"
@@ -839,6 +832,14 @@ export default function Composer(): JSX.Element {
           >
             <span>☰</span>待办 ({planDone}/{planTotal})
           </button>
+          {/* #5 忙碌态：明确提示输出中 + 排队语义，不再静默。#11 换 Kimi Web 同款旋转月亮。
+              #39：指示固定在待办 chip 之后，三个 chip 位置不再被挤动。 */}
+          {running && (
+            <span className="flex shrink-0 items-center gap-1.5 text-accent/90">
+              <span className="thinking-moon" aria-hidden />
+              AI 正在输出中{pending.length > 0 ? `，已排队 ${pending.length} 条` : '，新消息将排队发送'}
+            </span>
+          )}
           <UsageRings />
         </div>
         {openChip && chipAnchor && (
@@ -864,6 +865,18 @@ export default function Composer(): JSX.Element {
             onPointerDown={beginTextareaResize}
             onDoubleClick={resetTextareaHeight}
           />
+          {/* #38：手动拖拽的高度会持久化覆盖自动增高，双击手柄的旧恢复途径太隐蔽，
+              手动模式激活期间给出一个可见的恢复入口。 */}
+          {manualTextareaHeight !== null && (
+            <button
+              type="button"
+              className="composer-height-reset"
+              title="输入框高度已手动锁定，点击恢复自动增高"
+              onClick={resetTextareaHeight}
+            >
+              恢复自动高度
+            </button>
+          )}
           <div
             className={`slash-command-reveal ${slashMenuOpen ? 'is-open' : ''}`}
             style={{ height: slashPanelHeight }}

@@ -1643,6 +1643,31 @@ textarea:focus-visible {
   box-shadow: 0 0 16px rgba(244, 244, 245, 0.08);
 }
 
+/* #38 手动高度锁定期间的可见恢复入口（双击手柄太隐蔽，手动高度又持久化）。
+ *  浮在顶边手柄带上，z-index 高于 resize-zone 以免被拖拽命中。 */
+.composer-height-reset {
+  position: absolute;
+  top: -0.4rem;
+  right: 0.75rem;
+  z-index: 4;
+  padding: 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(24, 24, 27, 0.9);
+  color: rgba(161, 161, 170, 0.75);
+  font-size: 10px;
+  line-height: 16px;
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease;
+}
+
+.composer-height-reset:hover {
+  color: #e4e4e7;
+  border-color: rgba(139, 92, 246, 0.4);
+}
+
 .composer-toolbar {
   position: relative;
   z-index: 12;
@@ -2504,9 +2529,9 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   border-left: 2px solid rgba(139, 92, 246, 0.55);
 }
 
-/* #11 思考月亮：紫黄渐变小球（侧视球体感）—— inset 双侧阴影塑造球体体积，
- *  ::before 是"表面特征层"（暗斑 + 亮点，14px 周期平铺），整周期 translateX
- *  平移形成无缝自转；只动 transform，合成器友好；
+/* #11/#37 思考月亮：纯渐变球（无斑纹）—— ::before 是紫→黄→紫绕心的
+ *  conic-gradient 色盘，整周期 rotate 形成自转；::after 承载静态 inset
+ *  受光/背光阴影（不随转动），外发光留在球体本身；只动 transform，合成器友好；
  *  reduced-motion 全局开关会把它降为近静止。 */
 .thinking-moon {
   position: relative;
@@ -2516,10 +2541,8 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   flex-shrink: 0;
   overflow: hidden;
   border-radius: 50%;
-  background: linear-gradient(105deg, #8b5cf6 0%, #a78bfa 30%, #c084fc 58%, #facc15 92%);
+  background: #a78bfa;
   box-shadow:
-    inset -2px -2.5px 3.5px rgba(24, 10, 52, 0.42),
-    inset 2px 2.5px 3px rgba(255, 255, 255, 0.38),
     0 0 6px rgba(192, 132, 252, 0.5),
     0 0 2px rgba(250, 204, 21, 0.3);
 }
@@ -2527,20 +2550,32 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
 .thinking-moon::before {
   content: '';
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -14px;
-  width: 42px;
-  background:
-    radial-gradient(circle 1.6px at 4px 4.5px, rgba(20, 8, 46, 0.5) 60%, transparent 100%),
-    radial-gradient(circle 1.1px at 10.5px 9px, rgba(255, 255, 255, 0.55) 60%, transparent 100%),
-    radial-gradient(circle 2.2px at 9.5px 3px, rgba(20, 8, 46, 0.26) 55%, transparent 100%);
-  background-size: 14px 14px;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    #8b5cf6 0deg,
+    #a78bfa 80deg,
+    #c084fc 160deg,
+    #facc15 240deg,
+    #c084fc 300deg,
+    #8b5cf6 360deg
+  );
   animation: thinking-moon-spin 1.8s linear infinite;
 }
 
+.thinking-moon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow:
+    inset -2px -2.5px 3.5px rgba(24, 10, 52, 0.42),
+    inset 2px 2.5px 3px rgba(255, 255, 255, 0.38);
+}
+
 @keyframes thinking-moon-spin {
-  to { transform: translateX(-14px); }
+  to { transform: rotate(360deg); }
 }
 
 /* #12 任务行运行中：紫色微底 + 内描边高亮（状态图标自身的脉冲承担动效）。 */

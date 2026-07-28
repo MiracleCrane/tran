@@ -467,6 +467,8 @@ export default function Transcript({
   const reserveEligibleRef = useRef(true)
   /** 已渲染过的消息 id（Virtuoso 滚动复用行时不重播入场动画；新消息才入场）。 */
   const seenItemIdsRef = useRef<Set<string>>(new Set())
+  /** #36 已处理过"发送滚到底"的用户消息 id（items 每次流式更新都变，去重）。 */
+  const lastSendScrollItemIdRef = useRef<string | null>(null)
   // "stick to bottom": Virtuoso reports this via atBottomStateChange. While at
   // the bottom, followOutput pins to the newest content; scroll up to read and
   // it stops following until the ↓ button returns you.
@@ -519,6 +521,15 @@ export default function Transcript({
   const setPinnedAtBottom = (nextAtBottom: boolean): void => {
     atBottomRef.current = nextAtBottom
     setAtBottom(nextAtBottom)
+  }
+
+  // "↓ 最新"按钮的钉住路径：滚到底并显式重新钉住跟随。悬停/点击解除跟随后
+  // Virtuoso 内部可能仍 atBottom（不会再次触发 atBottomStateChange），所以必须
+  // 本地显式钉住才能恢复跟随（#8b）。#36 发送消息也走这条路径。
+  const pinToBottom = (behavior: 'auto' | 'smooth'): void => {
+    virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior })
+    setReserveEligible(true, true)
+    setPinnedAtBottom(true)
   }
 
   const refreshReserveEligibleFromScroller = (element: HTMLElement | null = scrollElement): void => {
@@ -712,6 +723,19 @@ export default function Transcript({
     }
   }, [sessionKey, setTranscriptScrolling])
 
+  // #36 发送消息 = 明确"去底部"意图：即使用户之前上翻/点击/悬停解除了跟随，
+  // 自己发出消息时也重新钉住并滚到底（与"↓ 最新"按钮同一条路径）。判定：
+  // 末尾出现一条新的顶层用户消息（非历史重放、非子代理转发、非系统信封）。
+  useEffect(() => {
+    const last = items[items.length - 1]
+    if (!last || last.kind !== 'user') return
+    if (last.isHistory || last.parentToolUseId) return
+    if (ENVELOPE_RE.test(last.text.trimStart())) return
+    if (lastSendScrollItemIdRef.current === last.id) return
+    lastSendScrollItemIdRef.current = last.id
+    pinToBottom('auto')
+  }, [items])
+
   if (items.length === 0) {
     return (
       <div className="transcript-scroll h-full overflow-y-auto">
@@ -877,13 +901,7 @@ export default function Transcript({
       {!layoutTransitioning && !atBottom && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
           <button
-            onClick={() => {
-              virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' })
-              // 悬停/点击解除跟随后 Virtuoso 内部可能仍 atBottom（不会再次触发
-              // atBottomStateChange），这里显式重新钉住，恢复跟随（#8b）。
-              setReserveEligible(true, true)
-              setPinnedAtBottom(true)
-            }}
+            onClick={() => pinToBottom('smooth')}
             className="glass-control rounded-full px-3 py-1.5 text-xs text-zinc-300 shadow-lg hover:bg-white/[0.075]"
           >
             ↓ 最新
