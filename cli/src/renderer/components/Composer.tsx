@@ -343,18 +343,8 @@ export default function Composer(): JSX.Element {
     )
   }, [heightBounds])
 
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(COMPOSER_HEIGHT_STORAGE_KEY)
-      const parsed = saved ? Number(saved) : NaN
-      if (Number.isFinite(parsed)) {
-        setManualTextareaHeight(clampComposerHeight(parsed, heightBoundsRef.current))
-      }
-    } catch {
-      /* ignore */
-    }
-  }, [])
-
+  // 手动拖拽高度只在本次运行内生效，不写 localStorage（#38 后续：
+  // 顶边手柄带很隐蔽，误拖即永久锁死自动增高，用户无从恢复）。
   useEffect(() => {
     const onResize = (): void => setViewportHeight(window.innerHeight)
     window.addEventListener('resize', onResize)
@@ -584,11 +574,6 @@ export default function Composer(): JSX.Element {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', finish)
       window.removeEventListener('pointercancel', finish)
-      try {
-        window.localStorage.setItem(COMPOSER_HEIGHT_STORAGE_KEY, String(nextHeight))
-      } catch {
-        /* ignore */
-      }
     }
 
     const move = (moveEvent: PointerEvent): void => {

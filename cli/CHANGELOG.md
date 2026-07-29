@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.36 - 2026-07-28
+
+### 中文
+
+- 优化:输入框手动拖拽高度不再持久化(#38 后续)。顶边手柄带隐蔽易误拖,此前误拖一次手动高度即写入 localStorage 永久锁死自动增高(需手动点"恢复自动高度")。现手动高度只在本次运行内生效,重启自动恢复;"恢复自动高度"按钮保留用于当次立即还原。
+
+### English
+
+- Improved: manually dragged composer height is no longer persisted (#38 follow-up). The invisible drag strip made accidental locks permanent via localStorage (requiring a manual "restore auto height" click). Manual height now only lasts for the current run — restart heals it; the restore button remains for immediate recovery.
+
 ## v1.0.35 - 2026-07-28
 
 ### 中文
