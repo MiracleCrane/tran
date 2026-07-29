@@ -1,7 +1,19 @@
-import { memo, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { PlanEntry } from '../types'
 import Collapse from './Collapse'
+
+/** 超过这个时长没更新就显示陈旧提示（待办是纯推送，没有补拉，旧快照看起来
+ *  和当前状态一模一样——见 kimi 的设计：后台任务完成只在「下一轮」才注入）。 */
+const PLAN_STALE_AFTER_MS = 90_000
+
+function staleLabel(sinceMs: number): string {
+  const min = Math.floor(sinceMs / 60000)
+  if (min < 60) return `${min} 分钟前更新`
+  const hour = Math.floor(min / 60)
+  if (hour < 24) return `${hour} 小时前更新`
+  return `${Math.floor(hour / 24)} 天前更新`
+}
 
 const ListGlyph = (): JSX.Element => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -18,11 +30,40 @@ const ListGlyph = (): JSX.Element => (
  *  completed 打勾、in_progress 紫色高亮（优先显示 activeForm）。 */
 const PlanCard = memo(function PlanCard(): JSX.Element | null {
   const entries = useSessionStore((s) => s.planEntries)
+  const planUpdatedAt = useSessionStore((s) => s.planUpdatedAt)
+  const running = useSessionStore((s) => s.status.running)
+  const swarmTasks = useSessionStore((s) => s.swarmTasks)
   const [collapsed, setCollapsed] = useState(false)
+  // 陈旧文案要随时间走，但待办本身不会再变——用一个低频 tick 驱动重算。
+  const [, setTick] = useState(0)
+
+  const hasUnfinished = entries.some((e) => e.status !== 'completed')
+  useEffect(() => {
+    if (!hasUnfinished || running) return
+    const timer = window.setInterval(() => setTick((v) => v + 1), 30_000)
+    return () => window.clearInterval(timer)
+  }, [hasUnfinished, running])
+
   if (entries.length === 0) return null
 
   const done = entries.filter((e) => e.status === 'completed').length
   const allDone = done === entries.length
+
+  // 后台任务已收尾但待办还停在未完成 + 会话空闲 = agent 还不知道。
+  // kimi 的后台任务完成通知只在「下一轮」注入（源码原文：
+  // "The completion arrives automatically in a later turn."），所以在用户
+  // 发下一条消息之前，待办物理上不可能自己更新。Tran 靠磁盘任务记录能比
+  // agent 先知道，这里就是把这个时间差告诉用户。
+  const settledBackgroundTask =
+    !running &&
+    hasUnfinished &&
+    (swarmTasks ?? []).some((t) => {
+      const status = (t.status ?? '').toLowerCase()
+      return status === 'completed' || status === 'failed' || status === 'stopped'
+    })
+
+  const staleSince = planUpdatedAt === null ? 0 : Date.now() - planUpdatedAt
+  const showStale = !running && hasUnfinished && planUpdatedAt !== null && staleSince >= PLAN_STALE_AFTER_MS
 
   const rowOf = (entry: PlanEntry, index: number): JSX.Element => {
     const active = entry.status === 'in_progress'
@@ -78,8 +119,21 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
           <span className="text-[11px] text-zinc-500">
             {allDone ? '已完成' : `已完成 ${done}/${entries.length}`}
           </span>
+          {showStale && (
+            <span className="shrink-0 text-[11px] text-zinc-600" title="待办由 AI 主动推送，会话空闲时不会自行刷新">
+              · {staleLabel(staleSince)}
+            </span>
+          )}
           <span className="ml-auto shrink-0 text-xs text-zinc-600">{collapsed ? '▸' : '▾'}</span>
         </button>
+        {settledBackgroundTask && (
+          <div className="flex items-start gap-2 border-t border-amber-500/25 bg-amber-500/[0.07] px-3 py-2 text-[11px] leading-relaxed text-amber-200/90">
+            <span aria-hidden className="mt-px shrink-0">⏱</span>
+            <span>
+              后台任务已结束，但待办还停在未完成 —— AI 要等你发下一条消息才会收到完成通知并更新。
+            </span>
+          </div>
+        )}
         <Collapse open={!collapsed}>
           <div className="border-t border-border-subtle bg-[#0f1015] px-3 py-1.5">
             {entries.map(rowOf)}

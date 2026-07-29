@@ -127,6 +127,9 @@ interface SessionStore {
   slashCommands: SkillInfo[]
   /** ACP plan 事件推送的待办清单（system/plan，全量替换；空数组表示无）。 */
   planEntries: PlanEntry[]
+  /** 待办最后一次被 agent 更新的时刻（ms）。plan 是纯推送、无补拉，
+   *  卡片需要据此显示陈旧度，否则旧快照看起来永远像当前状态。 */
+  planUpdatedAt: number | null
   /** kimi 本地 server 轮询到的会话 tasks（Swarm 可视化；null = server 不可用降级）。 */
   swarmTasks: KimiTaskInfo[] | null
   /** 隐藏 /usage 轮解析出的上下文用量（system/context_usage；null 表示无数据）。 */
@@ -1397,6 +1400,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   bridgeEnded: false,
   slashCommands: [],
   planEntries: [],
+  planUpdatedAt: null,
   swarmTasks: null,
   contextUsage: null,
   mcpServers: null,
@@ -1454,6 +1458,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         bridgeEnded: false,
         slashCommands: [],
         planEntries: [],
+        planUpdatedAt: null,
         contextUsage: null,
         mcpServers: null,
         modePanel: defaultModePanel(),
@@ -1693,7 +1698,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   reset() {
     cancelActiveHistoryHydration(0)
     unackedDirectMessage = null
-    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], contextUsage: null, mcpServers: null, modePanel: defaultModePanel(), goal: null, elicitationQueue: [] })
+    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], planUpdatedAt: null, contextUsage: null, mcpServers: null, modePanel: defaultModePanel(), goal: null, elicitationQueue: [] })
   },
 
   async bootstrap() {
@@ -1741,6 +1746,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessionsHasMore: false,
       slashCommands: [],
       planEntries: [],
+      planUpdatedAt: null,
       contextUsage: null,
       mcpServers: null,
       modePanel: defaultModePanel(),
@@ -2048,6 +2054,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       bridgeEnded: false,
       slashCommands: [],
       planEntries: [],
+      planUpdatedAt: null,
       contextUsage: null,
       mcpServers: null,
       modePanel: defaultModePanel(),
@@ -2180,6 +2187,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       bridgeEnded: false,
       slashCommands: [],
       planEntries: [],
+      planUpdatedAt: null,
       contextUsage: null,
       mcpServers: null,
       modePanel: defaultModePanel(),
@@ -2560,6 +2568,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             bridgeEnded: false,
             // 新会话/恢复会话时清空上一会话残留的待办清单（新 plan 事件会重建）。
             planEntries: [],
+            planUpdatedAt: null,
             contextUsage: null,
             mcpServers: null,
             modePanel: defaultModePanel(),
@@ -2576,7 +2585,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         } else if (subtype === 'plan') {
           // ACP plan：kimi 全量推送待办清单，直接整体替换（实时更新）。
           const entries = (msg as unknown as { entries?: PlanEntry[] }).entries
-          set({ planEntries: Array.isArray(entries) ? entries : [] })
+          set({ planEntries: Array.isArray(entries) ? entries : [], planUpdatedAt: Date.now() })
         } else if (subtype === 'context_usage') {
           // 隐藏 /usage 轮解析出的上下文用量（UsageRings 第三环）。
           const usage = (msg as unknown as { contextUsage?: ContextUsage }).contextUsage
