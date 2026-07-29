@@ -15,6 +15,7 @@ import {
 import { getPreferences } from '../preferences'
 import { log } from '../logger'
 import { KimiBackend } from './KimiBackend'
+import { ClaudeBackend } from './ClaudeBackend'
 import type { GoalControlAction, GoalInfo, GoalStartOptions } from '../goalStore'
 import type { PermissionRequestPayload, SDKMessage } from '../../shared/ipc'
 
@@ -83,8 +84,8 @@ export class AgentBridge {
       }
     }
     this.backends = {
-      // 目前只实例化 Kimi 一个后端；新增后端时在此挂接新的 adapter。
-      kimi: new KimiBackend(wrappedHandlers)
+      kimi: new KimiBackend(wrappedHandlers),
+      claude: new ClaudeBackend(wrappedHandlers)
     }
   }
 
