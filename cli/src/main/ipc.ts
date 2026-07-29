@@ -43,6 +43,7 @@ import {
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { checkKimiVersion } from './kimiVersion'
 import { listKimiSessions } from './kimiHistory'
+import { listClaudeSessions } from './claudeHistory'
 import { getPlanUsageCached } from './usageService'
 import { getQuotaOverviewCached, fetchQuotaActions, runQuotaLogin } from './quotaService'
 import { deleteKimiSession } from './sessionDelete'
@@ -761,7 +762,16 @@ export function registerIpc(
     const all = opts?.scope === 'all'
     const limit = all ? 200 : opts?.limit && opts.limit > 0 ? opts.limit : 50
     const offset = opts?.offset && opts.offset > 0 ? opts.offset : 0
-    const items = await listKimiSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' })
+    // 两个后端的历史各自落盘、互不相通：kimi 在 ~/.kimi-code/sessions，
+    // Claude Code 在 ~/.claude/projects。合并后按时间统一排序，条目自带
+    // agentBackend 供打开时路由到正确的后端。
+    const [kimiItems, claudeItems] = await Promise.all([
+      listKimiSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' }),
+      Promise.resolve(listClaudeSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' }))
+    ])
+    const items = [...kimiItems, ...claudeItems]
+      .sort((a, b) => b.lastModified - a.lastModified)
+      .slice(0, limit)
     // 合并主进程内存中的运行状态（SessionListItem.sessionId 即 ACP 会话 id）。
     const running = bridge.runningAcpSessionIds()
     if (running.size) {

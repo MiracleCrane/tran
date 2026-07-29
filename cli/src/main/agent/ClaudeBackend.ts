@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { log } from '../logger'
 import { ClaudeStreamClient } from './ClaudeStreamClient'
+import { listClaudeSessions } from '../claudeHistory'
 import type {
   ComposerModel,
   PermissionMode,
@@ -8,6 +9,7 @@ import type {
   McpServerEntry,
   PermissionResponsePayload,
   SDKMessage,
+  SessionListItem,
   SessionUsageInfo,
   SkillInfo,
   StartSessionOptions
@@ -48,6 +50,8 @@ interface ActiveClaudeSession {
   /** system/init 的 mcp_servers / slash_commands 快照。 */
   mcpServers: McpServerEntry[]
   skills: SkillInfo[]
+  /** 最近一帧 rate_limit_event 的原始信息（额度面板用）。 */
+  rateLimit?: Record<string, unknown>
 }
 
 /** Tran 的权限档 → Claude Code 的 --permission-mode（`claude --help` 实证值）。 */
@@ -215,6 +219,13 @@ export class ClaudeBackend {
     // 实测：斜杠命令是单独一帧推的（system/commands_changed），不只在 init 里。
     if (type === 'system' && message.subtype === 'commands_changed') {
       session.skills = parseInitSkills(message.commands)
+    }
+
+    // 实测：每轮开始时推一帧配额信息（five_hour 窗口 + 重置时间戳）。
+    // 这是 Claude 后端唯一的额度来源（没有 kimi 那套 /usage 隐藏轮）。
+    if (type === 'rate_limit_event') {
+      const info = asRecord(message.rate_limit_info)
+      if (info) session.rateLimit = info
     }
 
     if (type === 'result') {
@@ -406,6 +417,16 @@ export class ClaudeBackend {
 
   async listMarketplacePlugins(_cwd?: string): Promise<MarketplacePlugin[]> {
     return []
+  }
+
+  /** 会话历史：直读 ~/.claude/projects/<cwd 编码>/*.jsonl（实测布局）。 */
+  listSessions(cwd: string, opts?: { limit?: number; offset?: number; scope?: 'project' | 'all' }): SessionListItem[] {
+    return listClaudeSessions(cwd, opts ?? {})
+  }
+
+  /** 最近一帧配额信息（rate_limit_event）。 */
+  getRateLimit(sessionId: string): Record<string, unknown> | null {
+    return this.sessions.get(sessionId)?.rateLimit ?? null
   }
 
   /** TODO(阶段 2)：接 `--permission-prompt-tool` 或 canUseTool 回调。

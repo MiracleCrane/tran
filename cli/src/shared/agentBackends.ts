@@ -50,10 +50,13 @@ export const AGENT_BACKENDS: AgentBackendInfo[] = [
       // 权限弹窗仍待接（当前由 --permission-mode 在 CLI 侧决策，Tran 不弹窗）；
       // 会话历史列表待接。MCP 与技能已从 system/init 拿到（实测该帧带
       // mcp_servers 与 slash_commands）。
+      // 权限弹窗：实测当前 CLI 版本的 stream-json 通道**不提供**交互式
+      // 授权信道（无 --permission-prompt-tool，工具直接按 --permission-mode
+      // 与 settings 策略执行）。要做弹窗得改走 Agent SDK 的 canUseTool。
       permissions: false,
       mcp: true,
       skills: true,
-      sessionHistory: false,
+      sessionHistory: true,
       subagents: true
     }
   }
