@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
+import { useUiStore } from '../store/uiStore'
 import type { HealthCheckItem, WslHealthReport } from '../../shared/ipc'
 
 const STATE_STYLE: Record<HealthCheckItem['state'], { dot: string; text: string; label: string }> = {
@@ -62,6 +63,16 @@ export default function WslHealthPanel(): JSX.Element {
   return (
     <div className="h-full overflow-y-auto bg-bg-base">
       <div className="mx-auto max-w-3xl space-y-5 px-6 py-6">
+        {/* #35 吸顶返回栏：本面板此前完全没有返回入口，只能从侧栏离开。 */}
+        <div className="sticky top-0 z-10 -mx-6 flex items-center gap-2 bg-bg-base/95 px-6 py-3">
+          <button
+            type="button"
+            onClick={() => useUiStore.getState().setView('chat')}
+            className="glass-control flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100"
+          >
+            ← 返回对话
+          </button>
+        </div>
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-lg font-semibold text-zinc-100">WSL 健康检查</h1>

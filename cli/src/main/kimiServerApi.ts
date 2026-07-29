@@ -224,6 +224,21 @@ async function spawnServer(): Promise<ServerHandle | null> {
   return null
 }
 
+/**
+ * 拉起失败后的冷却期（#25）。
+ *
+ * 此前这里没有任何失败记忆：每次调用都是 probe → 失败 → spawnServer()，
+ * 而 spawnServer 要等满 SERVER_BOOT_TIMEOUT_MS 才判死。调用方
+ * getSessionTasks 每 2~15s 轮询一次，于是 server 起不来时就变成
+ * 「每十几秒拉起一次 kimi web」的死循环。
+ *
+ * ipc.ts 里那套 15s→60s→5min 的退避对此无效：#34 加入磁盘任务回退后，
+ * getSessionTasks 即使 server 挂着也会返回非 null（磁盘有记录），
+ * swarmFailures 永远清零，退避阶梯根本不会启动。
+ */
+const SPAWN_COOLDOWN_MS = 5 * 60 * 1000
+let spawnFailedAt = 0
+
 /** 拿可用的 server 句柄：先探测现有实例（instances 发现，回退默认端口），不行就自己拉起一次。 */
 export async function ensureKimiServer(): Promise<ServerHandle | null> {
   const token = readToken()
@@ -232,10 +247,17 @@ export async function ensureKimiServer(): Promise<ServerHandle | null> {
   const baseUrl = `http://${inst?.host ?? '127.0.0.1'}:${inst?.port ?? DEFAULT_PORT}`
   if (await probe(baseUrl, token)) {
     cachedHandle = { baseUrl, token }
+    spawnFailedAt = 0
     return cachedHandle
   }
   if (cachedHandle && (await probe(cachedHandle.baseUrl, cachedHandle.token))) {
+    spawnFailedAt = 0
     return cachedHandle
+  }
+  // 冷却期内不再尝试拉起：探测已经做过了（上面两步），server 真起来了会
+  // 被探测命中，这里只挡住反复 spawn。
+  if (spawnFailedAt > 0 && Date.now() - spawnFailedAt < SPAWN_COOLDOWN_MS) {
+    return null
   }
   if (!spawnPromise) {
     spawnPromise = spawnServer().finally(() => {
@@ -243,7 +265,13 @@ export async function ensureKimiServer(): Promise<ServerHandle | null> {
     })
   }
   const handle = await spawnPromise
-  if (handle) cachedHandle = handle
+  if (handle) {
+    cachedHandle = handle
+    spawnFailedAt = 0
+  } else {
+    spawnFailedAt = Date.now()
+    log('kimi-server', `拉起失败，${SPAWN_COOLDOWN_MS / 60000} 分钟内不再重试`)
+  }
   return handle
 }
 

@@ -331,8 +331,6 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(() => {
     seedDefaultIfNeeded()
-    // 空壳治理收尾：清理上次运行留下的孤儿会话目录（被强杀、kimi 重建的壳）。
-    sweepOrphanSessionDirs()
     // Tray is created after the window; pass a getter so registerIpc's closures
     // pick up the live tray (used for tooltip updates on session end).
     agentBridge = registerIpc(
@@ -348,6 +346,18 @@ if (!hasSingleInstanceLock) {
       }
     )
     createWindow()
+    // 空壳治理收尾：清理上次运行留下的孤儿会话目录（被强杀、kimi 重建的壳）。
+    // #18：这是一次同步的全树遍历（readFileSync 整个索引 + 逐项目目录
+    // readdirSync/statSync/rmSync）。放在 createWindow() 之前会直接把冷启动
+    // 卡住；挪到窗口创建之后、用 setImmediate 让出一轮，用户先看到界面。
+    // 孤儿目录是上次运行的残留，晚几百毫秒清理没有任何影响。
+    setImmediate(() => {
+      try {
+        sweepOrphanSessionDirs()
+      } catch (error) {
+        log('startup', `孤儿会话目录清理失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+    })
     forgeTray = createTray(
       () => mainWindow,
       () => {

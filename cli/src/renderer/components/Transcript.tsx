@@ -509,6 +509,9 @@ export default function Transcript({
   const starting = useSessionStore((s) => s.starting)
   const compacting = useSessionStore((s) => s.status.compacting)
   const setTranscriptScrolling = useSessionStore((s) => s.setTranscriptScrolling)
+  // #36：turn 运行中发送会进 pendingQueue 而不是 items，只看 items 的话
+  // 这一路不会回底（而排队恰恰是运行中发送的默认路径）。
+  const pendingQueueLength = useSessionStore((s) => s.pendingQueue.length)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const highlightTimeoutRef = useRef<number | null>(null)
   const scrollIntentTimeoutRef = useRef<number | null>(null)
@@ -530,6 +533,7 @@ export default function Transcript({
   const seenItemIdsRef = useRef<Set<string>>(new Set())
   /** #36 已处理过"发送滚到底"的用户消息 id（items 每次流式更新都变，去重）。 */
   const lastSendScrollItemIdRef = useRef<string | null>(null)
+  const lastPendingQueueLengthRef = useRef(0)
   // "stick to bottom": Virtuoso reports this via atBottomStateChange. While at
   // the bottom, followOutput pins to the newest content; scroll up to read and
   // it stops following until the ↓ button returns you.
@@ -949,6 +953,15 @@ export default function Transcript({
     lastSendScrollItemIdRef.current = last.id
     pinToBottom('auto')
   }, [items])
+
+  // #36 补齐排队路径：turn 忙时 sendMessage 推的是 pendingQueue，items 不变，
+  // 上面那条 effect 不触发。队列变长同样是用户刚发了消息，一样要回底。
+  // 只在"变长"时触发——出队（队列消费）不该抢用户的滚动位置。
+  useEffect(() => {
+    const previous = lastPendingQueueLengthRef.current
+    lastPendingQueueLengthRef.current = pendingQueueLength
+    if (pendingQueueLength > previous) pinToBottom('auto')
+  }, [pendingQueueLength])
 
   if (items.length === 0) {
     return (
