@@ -38,6 +38,9 @@ interface AgentBackendAdapter {
   setModel(sessionId: string, model: string): Promise<void>
   setPermissionMode(sessionId: string, mode: string): Promise<void>
   close(sessionId: string): Promise<void>
+  /** 可选：退出前彻底释放后端自身持有的资源（ACP 子进程等）。
+   *  close(sessionId) 只处理单个会话，子进程是后端级的，必须单独收。 */
+  dispose?(): void
   /** 可选：切走/后台化——不 cancel turn、不删会话，后台 turn 继续跑。 */
   background?(sessionId: string): void
   /** 可选：正在跑 turn 的 ACP 会话 id 集合（侧栏列表合并 running 标记用）。 */
@@ -154,6 +157,15 @@ export class AgentBridge {
   async shutdown(): Promise<void> {
     for (const sessionId of [...this.sessionBackends.keys()]) {
       await this.close(sessionId).catch(() => {})
+    }
+    // 会话收完后释放后端级资源：ACP 子进程不属于任何单个会话，
+    // 不显式 kill 的话在 Windows 上不会随父进程退出而回收。
+    for (const backend of Object.values(this.backends)) {
+      try {
+        backend.dispose?.()
+      } catch {
+        /* 退出路径尽力而为 */
+      }
     }
   }
 

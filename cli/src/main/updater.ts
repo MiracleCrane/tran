@@ -32,6 +32,7 @@ interface PipeDownloadOptions {
   onProgress?: (progress: UpdateDownloadProgress) => void
 }
 
+/** 取 major.minor.patch 三段数字，忽略预发布/构建元数据。 */
 function normalizeVersion(version: string | undefined): number[] {
   return String(version ?? '')
     .trim()
@@ -44,6 +45,13 @@ function normalizeVersion(version: string | undefined): number[] {
     })
 }
 
+/** 预发布标识（1.2.0-beta.1 的 "beta.1"）；正式版返回空串。
+ *  按 semver：有预发布标识的版本低于同号正式版。 */
+function prereleaseTag(version: string | undefined): string {
+  const match = /^[vV]?\d+(?:\.\d+){0,2}-([0-9A-Za-z.-]+)/.exec(String(version ?? '').trim())
+  return match?.[1] ?? ''
+}
+
 function compareVersions(a: string | undefined, b: string | undefined): number {
   const left = normalizeVersion(a)
   const right = normalizeVersion(b)
@@ -51,7 +59,14 @@ function compareVersions(a: string | undefined, b: string | undefined): number {
     const diff = (left[i] ?? 0) - (right[i] ?? 0)
     if (diff !== 0) return diff
   }
-  return 0
+  // 三段数字相同时按 semver 比预发布标识：1.2.0-beta < 1.2.0。
+  // 此前一律返回 0，从预发布升到同号正式版会被判定为「无更新」。
+  const leftTag = prereleaseTag(a)
+  const rightTag = prereleaseTag(b)
+  if (leftTag === rightTag) return 0
+  if (!leftTag) return 1
+  if (!rightTag) return -1
+  return leftTag < rightTag ? -1 : 1
 }
 
 async function requestLatestRelease(): Promise<LatestReleaseInfo> {
@@ -205,6 +220,10 @@ function pipeDownload(url: string, destination: string, options: PipeDownloadOpt
         })
         body.on('error', (error) => {
           done()
+          // 源流出错时 pipe 不会拆掉可写端：不显式 destroy 会泄漏 fd，
+          // 且 Windows 上文件句柄没关会让 fail() 里的 unlinkSync 失败，
+          // 半个 .exe 留在磁盘上。
+          file.destroy()
           fail(error)
         })
         body.on('data', (chunk: Buffer) => {

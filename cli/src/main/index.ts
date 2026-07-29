@@ -53,11 +53,35 @@ function isSameDocumentNavigation(currentUrl: string, nextUrl: string): boolean 
   }
 }
 
+/** 允许交给系统浏览器/邮件客户端的协议。其余（file:、smb:、以及各种
+ *  自定义协议处理器）一律不外发——openExternal 等于把 URI 交给操作系统。 */
+const EXTERNAL_PROTOCOLS = ['http:', 'https:', 'mailto:']
+
+function isSafeExternalUrl(url: string): boolean {
+  try {
+    return EXTERNAL_PROTOCOLS.includes(new URL(url).protocol)
+  } catch {
+    return false
+  }
+}
+
+/** 带协议校验的 openExternal：拒绝时记日志，并吞掉 promise 拒绝
+ *  （没有注册处理器的协议会让 openExternal reject）。 */
+function openExternalSafely(url: string, context: string): void {
+  if (!isSafeExternalUrl(url)) {
+    log('renderer', `blocked external open (${context}): ${url.slice(0, 200)}`)
+    return
+  }
+  void shell.openExternal(url).catch((error: unknown) => {
+    log('renderer', `openExternal failed: ${error instanceof Error ? error.message : String(error)}`)
+  })
+}
+
 function shouldOpenExternalNavigation(currentUrl: string, nextUrl: string): boolean {
   try {
     const current = new URL(currentUrl)
     const next = new URL(nextUrl)
-    if (!['http:', 'https:', 'mailto:'].includes(next.protocol)) return false
+    if (!EXTERNAL_PROTOCOLS.includes(next.protocol)) return false
     if (next.protocol !== 'mailto:' && next.origin === current.origin) return false
     return true
   } catch {
@@ -77,7 +101,7 @@ function notifyRendererUpdateAvailable(info: UpdateCheckResult): void {
     silent: false
   })
   notification.on('click', () => {
-    if (info.releaseUrl) void shell.openExternal(info.releaseUrl)
+    if (info.releaseUrl) openExternalSafely(info.releaseUrl, 'update-notification')
     const current = mainWindow
     if (!current || current.isDestroyed()) return
     if (!current.isVisible()) current.show()
@@ -96,6 +120,10 @@ function scheduleAutoUpdateCheck(): void {
       }
       log('updater', `current=${info.currentVersion} latest=${info.latestVersion ?? '(unknown)'}`)
       if (info.updateAvailable) notifyRendererUpdateAvailable(info)
+    }).catch((error: unknown) => {
+      // checkForUpdates 约定以 { error } 返回，但抛出（DNS/网络栈异常）时
+      // 没有 catch 会变成启动期的未处理拒绝。
+      log('updater', `check threw: ${error instanceof Error ? error.message : String(error)}`)
     })
   }, AUTO_UPDATE_CHECK_DELAY_MS)
   timer.unref?.()
@@ -227,7 +255,9 @@ function createWindow(): void {
 
   // Open external links in the system browser, not inside the app.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    // 与 will-navigate 走同一套协议白名单：此前这里不校验，window.open
+    // 任意 URI（file:、smb:、自定义协议）都会被直接交给操作系统。
+    openExternalSafely(url, 'window-open')
     return { action: 'deny' }
   })
 
@@ -237,7 +267,7 @@ function createWindow(): void {
 
     event.preventDefault()
     if (shouldOpenExternalNavigation(currentUrl, url)) {
-      void shell.openExternal(url)
+      openExternalSafely(url, 'will-navigate')
     } else {
       log('renderer', `blocked in-app navigation: ${url}`)
     }

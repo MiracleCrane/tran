@@ -1,6 +1,7 @@
 import { app } from 'electron'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { writeFileAtomic } from './atomicWrite'
+import { join } from 'node:path'
 import { log } from './logger'
 
 import type { GoalControlAction, GoalInfo, GoalStartOptions, GoalStatus } from '../shared/ipc'
@@ -46,8 +47,7 @@ function load(): Record<string, GoalInfo> {
 function save(): void {
   if (!cache) return
   try {
-    mkdirSync(dirname(storePath()), { recursive: true })
-    writeFileSync(storePath(), JSON.stringify(cache, null, 1), 'utf8')
+    writeFileAtomic(storePath(), JSON.stringify(cache, null, 1))
   } catch (error) {
     log('goal', `save failed: ${error instanceof Error ? error.message : String(error)}`)
   }

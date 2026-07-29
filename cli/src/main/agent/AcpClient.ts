@@ -4,6 +4,9 @@ import { log } from '../logger'
 
 export type AcpRpcId = number | string
 
+/** stderr 只用于 close 时拼错误信息，保留尾部即可（见 spawn 里的截断）。 */
+const STDERR_KEEP_CHARS = 64 * 1024
+
 export interface AcpRpcMessage {
   jsonrpc?: '2.0'
   id?: AcpRpcId
@@ -90,7 +93,12 @@ export class AcpClient {
    *   异常被吞掉并记日志——不能掩盖原始超时错误。
    */
   request<T = unknown>(method: string, params?: unknown, timeoutMs = 180000, onTimeout?: () => void): Promise<T> {
-    if (this.closed || !this.child) throw new Error(`ACP server (${this.options.logTag}) is not running.`)
+    // 返回 rejected promise 而不是同步 throw：调用方普遍用 .catch() 兜错
+    // （如 setModel / setPermissionMode），同步 throw 会绕过这些 .catch，
+    // 把本可吞掉的错误一路抛到 prepareSession，拆掉整个会话。
+    if (this.closed || !this.child) {
+      return Promise.reject(new Error(`ACP server (${this.options.logTag}) is not running.`))
+    }
     const id = this.nextId++
     const message: AcpRpcMessage = { jsonrpc: '2.0', id, method }
     if (params !== undefined) message.params = params
@@ -118,23 +126,41 @@ export class AcpClient {
     })
   }
 
+  /** 即发即忘的写入：进程已退出属于正常竞态（如关闭时补发 session/cancel），
+   *  记录即可，不能把异常抛给没有 try/catch 的调用方。 */
+  private writeQuiet(message: AcpRpcMessage): void {
+    try {
+      this.write(message)
+    } catch (error) {
+      log(this.options.logTag, `write skipped: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   notify(method: string, params?: unknown): void {
     const message: AcpRpcMessage = { jsonrpc: '2.0', method }
     if (params !== undefined) message.params = params
-    this.write(message)
+    this.writeQuiet(message)
   }
 
   respond(id: AcpRpcId, result: unknown): void {
-    this.write({ jsonrpc: '2.0', id, result })
+    this.writeQuiet({ jsonrpc: '2.0', id, result })
   }
 
   respondError(id: AcpRpcId, message: string, code = -32000): void {
-    this.write({ jsonrpc: '2.0', id, error: { code, message } })
+    this.writeQuiet({ jsonrpc: '2.0', id, error: { code, message } })
   }
 
+  /**
+   * 同步置位 closed 并断开 child 引用：'close' 事件是异步到达的，在它到达
+   * 之前 request()/notify()/respond() 的守卫（this.closed || !this.child）
+   * 会放行，把数据写进刚被 kill 的进程 stdin，触发 EPIPE。
+   */
   close(): void {
     this.closing = true
-    this.child?.kill()
+    this.closed = true
+    const child = this.child
+    this.child = null
+    child?.kill()
     this.rejectAll(new Error(`ACP server (${this.options.logTag}) closed.`))
   }
 
@@ -154,8 +180,18 @@ export class AcpClient {
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk: string) => {
       this.stderr += chunk
+      // 只保留尾部：stderr 仅在 close 时用于拼错误信息，长会话里
+      // 无限累积会让主进程堆随日志量线性增长。
+      if (this.stderr.length > STDERR_KEEP_CHARS) {
+        this.stderr = this.stderr.slice(-STDERR_KEEP_CHARS)
+      }
       const trimmed = chunk.trim()
       if (trimmed) log(`${logTag}-stderr`, trimmed)
+    })
+    // stdin 的 'error'（进程已死时写入触发 EPIPE）没有监听器会成为
+    // 未处理的流错误，直接掀掉 Electron 主进程。
+    child.stdin.on('error', (error) => {
+      log(logTag, `stdin error: ${error.message}`)
     })
     child.on('error', (error) => {
       this.closed = true
@@ -186,6 +222,18 @@ export class AcpClient {
     }
   }
 
+  /** 按原值找 pending，找不到再按数字/字符串互转找一次。 */
+  private resolvePendingKey(id: AcpRpcId): AcpRpcId | undefined {
+    if (this.pending.has(id)) return id
+    if (typeof id === 'string') {
+      const numeric = Number(id)
+      if (Number.isFinite(numeric) && this.pending.has(numeric)) return numeric
+    } else if (typeof id === 'number' && this.pending.has(String(id))) {
+      return String(id)
+    }
+    return undefined
+  }
+
   private onStdout(chunk: string): void {
     this.stdoutBuffer += chunk
     let index = this.stdoutBuffer.indexOf('\n')
@@ -207,9 +255,13 @@ export class AcpClient {
     }
 
     if (msg.id !== undefined && (Object.prototype.hasOwnProperty.call(msg, 'result') || msg.error)) {
-      const pending = this.pending.get(msg.id)
+      // 请求 id 一律是数字，但对端可能回成字符串（"1" vs 1）。Map 键类型不匹配
+      // 会查不到 pending，响应被丢掉、请求一直挂到超时——这里做一次归一。
+      const key = this.resolvePendingKey(msg.id)
+      if (key === undefined) return
+      const pending = this.pending.get(key)
       if (!pending) return
-      this.pending.delete(msg.id)
+      this.pending.delete(key)
       if (pending.timeout) clearTimeout(pending.timeout)
       if (msg.error) {
         pending.reject(new AcpRequestError(

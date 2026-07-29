@@ -358,6 +358,8 @@ export interface DiagnosticReportOptions {
 export interface DiagnosticReportResult {
   canceled?: boolean
   path?: string
+  /** 写盘失败（只读目录/权限不足）时的错误信息。 */
+  error?: string
 }
 
 export type HealthCheckState = 'pass' | 'warn' | 'fail'

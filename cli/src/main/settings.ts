@@ -1,6 +1,8 @@
 import { app, safeStorage } from 'electron'
-import { readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { statSync } from 'node:fs'
+import { join } from 'node:path'
+import { readJsonSafe, writeJsonAtomic } from './atomicWrite'
+import { log } from './logger'
 import type {
   Provider,
   Project,
@@ -264,31 +266,64 @@ function settingsChanged(a: unknown, b: unknown): boolean {
 }
 
 function writeSettingsFile(path: string, settings: PersistedSettings): void {
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, JSON.stringify(settings, null, 2), 'utf8')
+  writeJsonAtomic(path, settings)
 }
+
+/**
+ * 读取失败时禁止落盘：底下压着的可能是完好的设置（providers / projects /
+ * apiKey / 百度密钥）。读失败在 Windows 上很常见——杀软、备份、索引程序会
+ * 临时占用文件（EBUSY/EPERM）。此前这里不区分「读不到」和「文件损坏」，
+ * 一律退回空默认值并写进 cache，用户随后改任意一项设置就会把空 cache
+ * 覆写回真实文件，导致永久丢失。
+ */
+let loadFailed = false
 
 function load(): PersistedSettings {
   const path = settingsPath()
   const mtimeMs = readMtimeMs(path)
-  if (cache && cacheMtimeMs === mtimeMs) return cache
-  try {
-    const raw = JSON.parse(readFileSync(path, 'utf8')) as unknown
-    cache = normalizeSettings(raw)
-    if (settingsChanged(raw, cache)) {
-      writeSettingsFile(path, cache)
-    }
-    cacheMtimeMs = readMtimeMs(path)
-  } catch {
+  if (cache && cacheMtimeMs === mtimeMs && !loadFailed) return cache
+
+  const result = readJsonSafe(path)
+  if (result.status === 'failed') {
+    // 内存里给出可用的默认值，但打上标记：save() 不会落盘，避免覆写。
+    log('settings', `读取失败，本次不落盘以免覆写：${result.error.message}`)
+    loadFailed = true
     cache = normalizeSettings({})
     cacheMtimeMs = mtimeMs
+    return cache
   }
+
+  loadFailed = false
+  const raw: unknown = result.status === 'ok' ? result.value : {}
+  cache = normalizeSettings(raw)
+  if (result.status === 'ok' && settingsChanged(raw, cache)) {
+    try {
+      writeSettingsFile(path, cache)
+    } catch {
+      /* 规范化回写是尽力而为 */
+    }
+  }
+  cacheMtimeMs = readMtimeMs(path)
   return cache
 }
 
 function save(s: PersistedSettings): void {
-  cache = normalizeSettings(s)
   const path = settingsPath()
+  if (loadFailed) {
+    // 上次读取失败，当前 cache 是空默认值而非真实设置——落盘会抹掉磁盘上的
+    // 真数据。先重试读取，恢复成功再写，否则放弃本次持久化。
+    const retry = readJsonSafe(path)
+    if (retry.status === 'failed') {
+      log('settings', '设置读取仍失败，跳过本次保存以保护磁盘上的数据')
+      cache = normalizeSettings(s)
+      return
+    }
+    loadFailed = false
+    // 把本次改动合并到磁盘上的真实设置之上，而不是空默认值之上。
+    const disk = normalizeSettings(retry.status === 'ok' ? retry.value : {})
+    s = { ...disk, ...s }
+  }
+  cache = normalizeSettings(s)
   try {
     writeSettingsFile(path, cache)
     cacheMtimeMs = readMtimeMs(path)

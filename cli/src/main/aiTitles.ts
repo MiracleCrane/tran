@@ -1,7 +1,8 @@
 import { app } from 'electron'
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { writeFileAtomic } from './atomicWrite'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { log } from './logger'
 import { getValidAccessToken } from './usageService'
 import { loadSettings } from './settings'
@@ -49,8 +50,7 @@ function load(): Record<string, string> {
 
 function save(): void {
   try {
-    mkdirSync(dirname(storePath()), { recursive: true })
-    writeFileSync(storePath(), JSON.stringify(load(), null, 1), 'utf8')
+    writeFileAtomic(storePath(), JSON.stringify(load(), null, 1))
   } catch (error) {
     log('ai-titles', `save failed: ${error instanceof Error ? error.message : String(error)}`)
   }

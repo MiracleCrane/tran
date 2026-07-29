@@ -202,14 +202,27 @@ function userFacingError(error: unknown): string {
   return /auth(entication)? (is )?required/i.test(message) ? KIMI_AUTH_HINT : message
 }
 
+/** 拼接错误的 message 与 error.data 供文本匹配。
+ *  error 可能是 null/undefined（promise 以空值 reject），直接取 .data 会
+ *  抛 TypeError，把原始错误换成一个更难查的崩溃。 */
+function errorHaystack(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  let data = ''
+  if (error !== null && typeof error === 'object') {
+    try {
+      data = JSON.stringify((error as { data?: unknown }).data ?? '')
+    } catch {
+      data = ''
+    }
+  }
+  return `${message} ${data}`
+}
+
 /** "another turn" 错误识别（turn ID 数字可变，与渲染层 ErrorDiagnosticPanel 的
  *  识别文案同源）：agent 侧还挂着上一轮（result 丢失/超时取消失败留下的僵尸
  *  turn）时，session/prompt 会以此报错。message 与 error.data 一并匹配。 */
 function isAnotherTurnError(error: unknown): boolean {
-  const haystack =
-    (error instanceof Error ? error.message : String(error)) +
-    ' ' +
-    JSON.stringify((error as { data?: unknown }).data ?? '')
+  const haystack = errorHaystack(error)
   return haystack.includes('another turn') || haystack.includes('turn.agent_busy')
 }
 
@@ -217,10 +230,7 @@ function isAnotherTurnError(error: unknown): boolean {
  *  （必须位于 ~/.kimi-code/sessions 下、属于该会话、在 plans 目录、.md 结尾），
  *  防止异常文本诱导写出任意路径。 */
 function missingPlanFileFromError(error: unknown, acpSessionId: string): string | null {
-  const haystack =
-    (error instanceof Error ? error.message : String(error)) +
-    ' ' +
-    JSON.stringify((error as { data?: unknown }).data ?? '')
+  const haystack = errorHaystack(error)
   if (!haystack.includes('ENOENT') || !haystack.includes('readTextFile')) return null
   const match = /readTextFile failed for (.+?\.md)\b/i.exec(haystack)
   if (!match) return null
@@ -679,6 +689,9 @@ export class KimiBackend {
       // onSessionsChanged 通知，与 close 路径一致），不注册映射、不做后续初始化。
       if (session.closed) {
         this.discardEmptyShell(session)
+        // 缓冲区里可能已经堆了这个 acpSessionId 的通知（kimi 在 session/new
+        // 响应后立刻推）。这里不注册映射也不 flush，不清就永久留在 Map 里。
+        this.pendingNotifications.delete(acpSessionId)
         return
       }
       this.acpToSession.set(acpSessionId, session.id)
@@ -1538,10 +1551,32 @@ export class KimiBackend {
     } satisfies PermissionRequestPayload)
   }
 
+  /** 退出前释放后端级资源：kill ACP 子进程并停掉所有定时器。 */
+  dispose(): void {
+    for (const session of this.sessions.values()) {
+      this.disarmStallWatch(session)
+    }
+    const client = this.client
+    this.client = null
+    this.clientPromise = null
+    try {
+      client?.close()
+    } catch {
+      /* 退出路径尽力而为 */
+    }
+    this.sessions.clear()
+    this.acpToSession.clear()
+    this.pendingPermissions.clear()
+    this.pendingNotifications.clear()
+  }
+
   private handleClientClose(error?: string): void {
     this.client = null
     this.clientPromise = null
     for (const session of this.sessions.values()) {
+      // 先停掉本会话的 stall 定时器：只清 sessions 的话，定时器要等下一次
+      // 60s tick 自检才会自拆，这段时间里是空转的残火。
+      this.disarmStallWatch(session)
       this.h.onEnded(session.id, error)
     }
     this.sessions.clear()

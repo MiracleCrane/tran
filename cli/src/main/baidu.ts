@@ -15,6 +15,8 @@ import { log } from './logger'
  */
 
 const BAIDU_ENDPOINT = 'https://fanyi-api.baidu.com/api/trans/vip/translate'
+/** 请求超时：此前无超时，连接挂起时翻译调用永不落地。 */
+const BAIDU_TIMEOUT_MS = 30000
 
 function md5Hex(s: string): string {
   return createHash('md5').update(s, 'utf8').digest('hex')
@@ -61,17 +63,35 @@ export async function translateViaBaidu(
   }).toString()
 
   log('baidu', `translating ${deduped.length} text(s)`)
-  const res = await fetch(BAIDU_ENDPOINT, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body
-  })
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), BAIDU_TIMEOUT_MS)
+  let res: Response
+  try {
+    res = await fetch(BAIDU_ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+      signal: controller.signal
+    })
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`百度翻译请求超时（${BAIDU_TIMEOUT_MS / 1000}s）`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
     throw new Error(`百度翻译请求失败 (HTTP ${res.status}): ${detail.slice(0, 200)}`)
   }
 
-  const data = (await res.json()) as BaiduSuccess & BaiduError
+  let data: BaiduSuccess & BaiduError
+  try {
+    data = (await res.json()) as BaiduSuccess & BaiduError
+  } catch {
+    throw new Error('百度翻译响应不是合法 JSON')
+  }
   if (data.error_code) {
     throw new Error(`百度翻译错误 ${data.error_code}: ${data.error_msg ?? '未知错误'}`)
   }

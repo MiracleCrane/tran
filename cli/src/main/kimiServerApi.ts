@@ -201,7 +201,10 @@ async function spawnServer(): Promise<ServerHandle | null> {
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 800))
     // 进程已退出（如旧版 CLI 打 deprecated 提示即退）或明确报错：直接判死。
-    if (exited || /deprecat|unknown command|error/i.test(earlyOutput)) {
+    // 收紧匹配：原来的 /error/i 会命中任何含 "error" 的输出（"0 errors"、
+    // 带 error 字样的警告、URL 里的 error 路径），把已经起来的 server 误杀。
+    // 只认真正表示启动失败的形态。
+    if (exited || /deprecat|unknown command|command not found|fatal error|panic:|EADDRINUSE|error:/i.test(earlyOutput)) {
       log(
         'kimi-server',
         `kimi web died at boot: ${earlyOutput.trim().split(/\r?\n/).slice(-3).join(' | ') || '(no output)'}`

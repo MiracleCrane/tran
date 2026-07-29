@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { readJsonSafe, writeJsonAtomic } from './atomicWrite'
 import { log } from './logger'
 import type {
   QuotaAction,
@@ -76,11 +77,17 @@ function writeTokens(source: TokenSource, tokens: QuotaTokens): void {
   try {
     if (source === 'desktop') {
       // 读改写，保留 origin 等其它字段；文件被桌面版更新过时以盘上最新为准。
-      const raw = JSON.parse(readFileSync(tokenPath(source), 'utf8')) as Record<string, unknown>
+      // 读不出来就放弃写：拿 { tokens } 覆盖会抹掉 origin 等字段。
+      const existing = readJsonSafe<Record<string, unknown>>(tokenPath(source))
+      if (existing.status === 'failed') {
+        log('quota', `token write-back skipped (${source}): 读取失败，避免覆盖既有内容`)
+        return
+      }
+      const raw = existing.status === 'ok' ? existing.value : {}
       raw.tokens = tokens
-      writeFileSync(tokenPath(source), JSON.stringify(raw, null, 2), 'utf8')
+      writeJsonAtomic(tokenPath(source), raw)
     } else {
-      writeFileSync(tokenPath(source), JSON.stringify(tokens, null, 2), 'utf8')
+      writeJsonAtomic(tokenPath(source), tokens)
     }
   } catch (error) {
     log('quota', `token write-back failed (${source}): ${error instanceof Error ? error.message : String(error)}`)
@@ -129,9 +136,25 @@ interface TokenContext {
   trafficId?: string
 }
 
+/**
+ * refresh_token 轮换，并发刷新会让后到的请求拿着已作废的 token 去换，
+ * 服务端拒绝 → 误报「需要重新登录」。fetchQuotaOverview 与 fetchQuotaActions
+ * 是各自独立的入口，并发是常态，所以这里做在飞请求合并。
+ */
+let inflightToken: Promise<TokenContext | null> | null = null
+
 /** 取有效 access_token：依次试 desktop → local；过期用 refresh_token 换新写回。
  *  forceRefresh 用于 RPC 401/403 后的重试。 */
 async function getValidToken(forceRefresh = false): Promise<TokenContext | null> {
+  if (inflightToken) return inflightToken
+  const run = getValidTokenUncached(forceRefresh).finally(() => {
+    if (inflightToken === run) inflightToken = null
+  })
+  inflightToken = run
+  return run
+}
+
+async function getValidTokenUncached(forceRefresh: boolean): Promise<TokenContext | null> {
   for (const source of ['desktop', 'local'] as const) {
     const tokens = readTokens(source)
     if (!tokens?.access_token) continue

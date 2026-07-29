@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { writeJsonAtomic } from './atomicWrite'
 import { log } from './logger'
 import type { PlanUsageInfo, PlanUsageResult, UsageLimitWindow } from '../shared/ipc'
 
@@ -47,9 +48,24 @@ function readCredentials(): OAuthCredentials | null {
   }
 }
 
+/**
+ * expires_at 允许是 ISO 字符串或 epoch 数字（不同 CLI 版本写法不同）。
+ * 此前一律 Date.parse(String(...))，数字形式会得到 NaN → 记为 0 → 每次调用
+ * 都判定为已过期，导致每个请求都强制刷新，把轮换的 refresh_token 转个不停。
+ */
 function expiryMs(creds: OAuthCredentials): number {
-  const parsed = Date.parse(String(creds.expires_at ?? ''))
-  return Number.isFinite(parsed) ? parsed : 0
+  const raw = creds.expires_at
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    // 秒级时间戳（10 位量级）按秒处理，其余按毫秒。
+    return raw < 1e12 ? raw * 1000 : raw
+  }
+  if (typeof raw === 'string' && raw.trim() !== '') {
+    const numeric = Number(raw)
+    if (Number.isFinite(numeric)) return numeric < 1e12 ? numeric * 1000 : numeric
+    const parsed = Date.parse(raw)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
 }
 
 async function refreshAccessToken(refreshToken: string): Promise<OAuthCredentials | null> {
@@ -79,13 +95,14 @@ async function refreshAccessToken(refreshToken: string): Promise<OAuthCredential
   }
 }
 
-/** 取有效 access_token：未过期直接用；过期则 refresh 并写回（refresh_token 轮换）。
- *  forceRefresh 用于 /usages 401 后的重试。aiTitles 模块复用同一凭证链。 */
-export async function getValidAccessToken(forceRefresh = false): Promise<string | null> {
-  const creds = readCredentials()
-  if (!creds?.access_token) return null
-  const expired = expiryMs(creds) - EXPIRY_SKEW_MS < Date.now()
-  if (!expired && !forceRefresh) return creds.access_token
+/**
+ * 同一时刻只允许一次刷新。refresh_token 是轮换的（用一次就作废），并发刷新
+ * 会让第二个请求拿着已被消费的 token 去换，服务端拒绝 → 该调用方误判为
+ * 「需要重新登录」。usageService 与 aiTitles 共用这条凭证链，并发是常态。
+ */
+let inflightRefresh: Promise<string | null> | null = null
+
+async function refreshAndPersist(creds: OAuthCredentials): Promise<string | null> {
   if (!creds.refresh_token) return null
   const refreshed = await refreshAccessToken(creds.refresh_token)
   if (!refreshed?.access_token) return null
@@ -95,11 +112,29 @@ export async function getValidAccessToken(forceRefresh = false): Promise<string 
     expires_at: new Date(Date.now() + (refreshed.expires_in ?? 900) * 1000).toISOString()
   }
   try {
-    writeFileSync(credentialsPath(), JSON.stringify(next, null, 2), 'utf8')
+    writeJsonAtomic(credentialsPath(), next)
   } catch (error) {
     log('usage', `credentials write-back failed: ${error instanceof Error ? error.message : String(error)}`)
   }
   return next.access_token ?? null
+}
+
+/** 取有效 access_token：未过期直接用；过期则 refresh 并写回（refresh_token 轮换）。
+ *  forceRefresh 用于 /usages 401 后的重试。aiTitles 模块复用同一凭证链。 */
+export async function getValidAccessToken(forceRefresh = false): Promise<string | null> {
+  const creds = readCredentials()
+  if (!creds?.access_token) return null
+  const expired = expiryMs(creds) - EXPIRY_SKEW_MS < Date.now()
+  if (!expired && !forceRefresh) return creds.access_token
+  if (!creds.refresh_token) return null
+
+  // 已有刷新在飞行中就复用它，避免重复消费 refresh_token。
+  if (inflightRefresh) return inflightRefresh
+  const run = refreshAndPersist(creds).finally(() => {
+    if (inflightRefresh === run) inflightRefresh = null
+  })
+  inflightRefresh = run
+  return run
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

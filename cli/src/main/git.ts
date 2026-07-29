@@ -65,19 +65,37 @@ export async function listBranches(cwd: string): Promise<GitBranchInfo[]> {
   }
 }
 
+/**
+ * 拒绝以 `-` 开头的 ref：git 会把它当成选项而不是分支名/提交号
+ * （如 `-D`、`--upload-pack=...`）。spawn 不经 shell，所以这不是 shell 注入，
+ * 但仍是实打实的参数注入。
+ *
+ * 不用 `--` 分隔是因为各子命令语义不一致——`git checkout -- <name>` 表示
+ * 「从索引恢复该路径的文件」，而不是切分支，加上去会直接改坏功能
+ * （已用 git 2.43 实测）。校验入参是唯一对所有子命令都安全的做法。
+ */
+function assertRef(value: string, label: string): string {
+  const ref = value.trim()
+  if (!ref) throw new Error(`${label}不能为空`)
+  if (ref.startsWith('-')) throw new Error(`${label}不能以 - 开头：${ref}`)
+  return ref
+}
+
 /** Switch to a branch (checkout). */
 export async function checkoutBranch(cwd: string, branch: string): Promise<void> {
-  await runGit(cwd, ['checkout', branch])
+  // `--` 分隔选项与 ref：不加的话名为 `-D`、`--upload-pack=...` 之类的
+  // 分支名会被 git 当成选项解析（spawn 无 shell，不涉及 shell 注入）。
+  await runGit(cwd, ['checkout', assertRef(branch, '分支名')])
 }
 
 /** Create a new branch. */
 export async function createBranch(cwd: string, name: string): Promise<void> {
-  await runGit(cwd, ['branch', name])
+  await runGit(cwd, ['branch', assertRef(name, '分支名')])
 }
 
 /** Delete a local branch (force if requested). */
 export async function deleteBranch(cwd: string, name: string, force = false): Promise<void> {
-  await runGit(cwd, ['branch', force ? '-D' : '-d', name])
+  await runGit(cwd, ['branch', force ? '-D' : '-d', assertRef(name, '分支名')])
 }
 
 /** git pull. */
@@ -215,7 +233,7 @@ export async function stash(cwd: string, action = 'push', message?: string): Pro
 
 /** git revert a commit. */
 export async function revert(cwd: string, commitHash: string): Promise<void> {
-  await runGit(cwd, ['revert', '--no-edit', commitHash])
+  await runGit(cwd, ['revert', '--no-edit', assertRef(commitHash, '提交号')])
 }
 
 /** Unified diff of unstaged changes; pass staged=true for already-staged

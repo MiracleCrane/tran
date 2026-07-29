@@ -58,12 +58,17 @@ async function translateTextsLlm(texts: string[]): Promise<string[]> {
   }
 
   log('translate', `translating ${deduped.length} text(s) via ${url}`)
-  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
+  const res = await fetchWithTimeout(url, { method: 'POST', headers, body: JSON.stringify(body) })
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
     throw new Error(`翻译请求失败 (${res.status}): ${detail.slice(0, 200)}`)
   }
-  const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> }
+  let data: { content?: Array<{ type: string; text?: string }> }
+  try {
+    data = (await res.json()) as { content?: Array<{ type: string; text?: string }> }
+  } catch {
+    throw new Error('翻译响应不是合法 JSON')
+  }
   const out = (data.content ?? []).find((c) => c.type === 'text')?.text ?? ''
   const translated = parseArray(out)
 
@@ -81,6 +86,23 @@ async function translateTextsLlm(texts: string[]): Promise<string[]> {
  * Signature is unchanged from the original LLM-only impl, so SkillsPanel keeps
  * working and degrades gracefully on error.
  */
+/** 翻译接口的请求超时。此前无超时，连接被挂住时 promise 永不落地，
+ *  调用方（技能面板等）会一直转圈。 */
+const TRANSLATE_TIMEOUT_MS = 30000
+
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), TRANSLATE_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(`翻译请求超时（${TRANSLATE_TIMEOUT_MS / 1000}s）`)
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export async function translateTexts(texts: string[]): Promise<string[]> {
   if (getTranslateEngine() === 'baidu') {
     const creds = getBaiduCreds()

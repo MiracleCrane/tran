@@ -1,6 +1,7 @@
 import { app } from 'electron'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { writeFileAtomic } from './atomicWrite'
+import { join } from 'node:path'
 import { log } from './logger'
 
 /** 本地会话标题兜底：kimi 的 session/list 对未命名会话只回 "New Session"，
@@ -33,8 +34,7 @@ export function recordSessionTitle(sessionId: string, text: string): void {
   if (map[sessionId]) return
   map[sessionId] = title
   try {
-    mkdirSync(dirname(storePath()), { recursive: true })
-    writeFileSync(storePath(), JSON.stringify(map, null, 1), 'utf8')
+    writeFileAtomic(storePath(), JSON.stringify(map, null, 1))
   } catch (error) {
     log('titles', `save failed: ${error instanceof Error ? error.message : String(error)}`)
   }
@@ -50,8 +50,7 @@ export function removeSessionTitle(sessionId: string): void {
   if (!(sessionId in map)) return
   delete map[sessionId]
   try {
-    mkdirSync(dirname(storePath()), { recursive: true })
-    writeFileSync(storePath(), JSON.stringify(map, null, 1), 'utf8')
+    writeFileAtomic(storePath(), JSON.stringify(map, null, 1))
   } catch (error) {
     log('titles', `save failed: ${error instanceof Error ? error.message : String(error)}`)
   }
@@ -79,8 +78,7 @@ function loadManual(): Record<string, string> {
 
 function saveManual(): void {
   try {
-    mkdirSync(dirname(manualStorePath()), { recursive: true })
-    writeFileSync(manualStorePath(), JSON.stringify(loadManual(), null, 1), 'utf8')
+    writeFileAtomic(manualStorePath(), JSON.stringify(loadManual(), null, 1))
   } catch (error) {
     log('titles', `save manual failed: ${error instanceof Error ? error.message : String(error)}`)
   }

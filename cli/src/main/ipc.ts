@@ -133,6 +133,15 @@ function withPathReadTimeout<T>(
   })
 }
 
+/** 校验来自渲染层的字符串入参。IPC 载荷不可全信（渲染层出 bug 或被注入时
+ *  可能传 undefined/数字），直接 .trim() 会抛 TypeError。 */
+function requireString(value: unknown, field: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`invalid ${field}: expected string, got ${typeof value}`)
+  }
+  return value
+}
+
 function isNativeAbsolutePath(path: string): boolean {
   return isAbsolute(path) || /^[/\\]{2}/.test(path)
 }
@@ -609,7 +618,13 @@ export function registerIpc(
       })
       if (res.canceled || !res.filePath) return { canceled: true }
       const report = await buildDiagnosticReport(options)
-      writeFileSync(res.filePath, report, 'utf8')
+      try {
+        writeFileSync(res.filePath, report, 'utf8')
+      } catch (error) {
+        // 与同级 handler（saveImageAs）一致：把失败作为结构化结果返回，
+        // 而不是抛成 promise 拒绝丢给渲染层。
+        return { error: error instanceof Error ? error.message : String(error) }
+      }
       return { path: res.filePath }
     }
   )
@@ -722,7 +737,7 @@ export function registerIpc(
 
   ipcMain.handle('forge:listProjects', async (): Promise<Project[]> => listProjects())
   ipcMain.handle('forge:addProject', async (_e, path: string, name?: string): Promise<Project[]> =>
-    addProject(path.trim(), name)
+    addProject(requireString(path, 'path').trim(), name)
   )
   ipcMain.handle('forge:removeProject', async (_e, path: string): Promise<Project[]> =>
     removeProject(path)
@@ -731,7 +746,7 @@ export function registerIpc(
     renameProject(path, name)
   )
   ipcMain.handle('forge:setLastProject', async (_e, path: string): Promise<void> => {
-    setLastProject(path.trim())
+    setLastProject(requireString(path, 'path').trim())
   })
   ipcMain.handle('forge:getStartupProject', async (): Promise<Project | null> => getStartupProject())
 
@@ -811,6 +826,8 @@ export function registerIpc(
 
   const scheduleSwarmPoll = (delayMs: number): void => {
     swarmTimer = setTimeout(() => void pollSwarmTasks(), delayMs)
+    // 轮询不该拖住事件循环、阻止进程退出。
+    swarmTimer.unref?.()
   }
 
   // 失败重试退避：15s→60s→5min 封顶（成功后 swarmFailures 清零自动重置）。
@@ -820,6 +837,12 @@ export function registerIpc(
   const pollSwarmTasks = async (): Promise<void> => {
     const sessionId = swarmSessionId
     if (!sessionId) return
+    // 窗口没了就彻底停：渲染层重载/关窗时不会发退订，继续轮询是纯空转。
+    const win = getMainWindow()
+    if (!win || win.isDestroyed()) {
+      stopSwarmPolling()
+      return
+    }
     const tasks = await getSessionTasks(sessionId).catch(() => null)
     if (swarmSessionId !== sessionId) return
     if (tasks === null) {
@@ -850,6 +873,10 @@ export function registerIpc(
   ipcMain.handle('forge:unsubscribeSwarmTasks', async (): Promise<void> => {
     stopSwarmPolling()
   })
+
+  // 渲染层不一定会退订（重载、隐藏到托盘、直接关窗），不挂这两个钩子的话
+  // pollSwarmTasks 会一直自我续期地轮询下去。
+  app.once('before-quit', stopSwarmPolling)
 
   ipcMain.handle(
     'forge:deleteSession',
