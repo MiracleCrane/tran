@@ -21,8 +21,8 @@
 | 项 | 状态 | 原因 |
 |---|---|---|
 | 实际运行应用 | ❌ 未做 | Windows 专用（`AcpClient.spawn` 对 `process.platform !== 'win32'` 直接抛错），审查环境是 Linux 容器 |
-| `npm run typecheck` | ⚠️ 见文末「验证状态」 | Electron 二进制下载在审查环境受限，依赖安装反复失败 |
-| `npm run build` | ❌ 未做 | 同上 |
+| `npm run typecheck` | ✅ **已通过** | 主进程 + 渲染进程全绿 |
+| `npm run build` | ✅ **已通过** | main / preload / renderer 三个包全部产出 |
 | 端到端复现每个缺陷 | ❌ 未做 | 同「实际运行」 |
 
 **所以：本报告是静态审查结论，不是实测报告。** 行号与代码逻辑是核对过的；「触发概率」「用户是否会遇到」这类判断是推理，未经实测。
@@ -328,27 +328,21 @@ error: pathspec 'feature' did not match any file(s) known to git
 
 ## 6. 验证状态
 
-**诚实结论：以下改动未经编译验证。**
-
-审查环境无法完成依赖安装（Electron 二进制下载受限，多次 `npm install` 因并发/网络失败），因此 `npm run typecheck` 与 `npm run build` **均未执行**。
-
-已做的替代验证：
-
 | 项 | 方式 | 结果 |
 |---|---|---|
+| `npm run typecheck` | 主进程 + 渲染进程 | ✅ **全绿** |
+| `npm run build` | electron-vite（main / preload / renderer） | ✅ **全部产出** |
 | git `--` 分隔符语义 | git 2.43 真实仓库实测 | ✅ 证伪了原方案，已改 |
 | 输入法组词事件 | Chromium 141 + CDP `Input.imeSetComposition` | ✅ 证伪了原判断，已降级 |
 | 引用一致性 | 逐文件 grep 残留的 `writeFileSync`/`mkdirSync`/`dirname` | ✅ 无残留 |
-| 新增类型字段 | `DiagnosticReportResult.error` 已在 `shared/ipc.ts` 补充 | ✅ |
+| 端到端运行 | — | ❌ 无法执行（Windows 专用应用） |
 
-**合入前必须在你的 Windows 环境执行：**
+> 依赖安装一度反复失败，根因是 `package-lock.json` 里的解析地址指向
+> `registry.npmmirror.com`，而审查环境的网络策略只放行 `registry.npmjs.org`。
+> 用 `--registry=https://registry.npmjs.org/ --no-package-lock` 绕开后即成功。
+> 这条对你无影响（你本机能访问镜像），仅供其他 CI/容器环境参考。
 
-```bash
-npm run typecheck    # 主进程 + 渲染进程
-npm run build
-```
-
-重点复查项（我改动了但无法验证的）：
+**编译层面没问题，但运行时行为仍未验证。** 合入前建议在 Windows 上重点复查：
 
 1. **`streamBatcher.ts` 的分流**（F-08）—— 与 v1.0.39 的调速工作直接相关，建议对照 `__streamProbe.dump()` 确认前台吐字节奏无变化
 2. **`Transcript.tsx` 的 key 改动**（F-09）—— 需确认长会话流式期间工具卡片展开状态正常

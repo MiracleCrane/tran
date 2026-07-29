@@ -205,5 +205,7 @@ GPU/渲染进程崩溃、`shutdown()` 里的未处理拒绝、外部 kill 都会
 | 建议保持 open | 8 |
 | 需你确认后决定 | 3（#37 #43 #26b，已含在上面 8 条内） |
 
-关闭前请在 Windows 上跑 `npm run typecheck` 和 `npm run build` —— 本次改动
-**未经编译验证**（详见 `docs/CODE-REVIEW-2026-07-29.md` §6）。
+本次改动已通过 `npm run typecheck` 与 `npm run build`（详见
+`docs/CODE-REVIEW-2026-07-29.md` §6）。但**运行时行为未验证** —— 应用是
+Windows 专用，审查环境跑不起来。关闭 issue 前建议在你本机实际验证一遍，
+尤其是 #25（看日志里 `spawning kimi server run` 是否还在每十几秒刷一次）。
