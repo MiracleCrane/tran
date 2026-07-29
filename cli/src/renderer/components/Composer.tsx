@@ -15,7 +15,7 @@ import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, Permission
 import DisclosureSelect from './DisclosureSelect'
 import ModePanel from './ModePanel'
 import { AGENT_TOOL_NAMES, BASH_TOOL_NAMES, countRunningTools, countTotalTools } from '../utils/toolStats'
-import { userAttachmentToPickedFile } from '../utils/attachments'
+import { pickedFileToUserAttachment, userAttachmentToPickedFile } from '../utils/attachments'
 import ChipPopover, { type ChipAnchor, type ChipKind } from './ChipPopover'
 import UsageRings from './UsageRings'
 import { defaultModelsForAgent, modelLabelForAgent } from '../../shared/models'
@@ -1057,24 +1057,51 @@ export default function Composer(): JSX.Element {
             className="composer-textarea w-full resize-none rounded-xl border border-transparent bg-transparent px-3 py-2 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-white/10 focus:bg-white/[0.025]"
           />
           {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 px-1 pt-2">
-              {attachments.map((a, i) => (
-                <span
-                  key={`${a.path}-${i}`}
-                  className="tran-enter glass-control flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-zinc-300"
-                  title={a.path}
-                >
-                  <span className="text-zinc-500">{a.kind === 'image' ? '🖼' : a.kind === 'text' ? '📄' : '📎'}</span>
-                  <span className="max-w-[12rem] truncate">{a.name}</span>
-                  <button
-                    onClick={() => removeAttachment(i)}
-                    className="text-zinc-500 transition hover:text-red-300"
-                    title="移除"
+            <div className="flex flex-wrap items-end gap-1.5 px-1 pt-2">
+              {attachments.map((a, i) =>
+                // 图片走缩略图：此前一律是「🖼 文件名」的文字 chip，发之前
+                // 看不出贴的是哪张。点击开预览面板，右上角 × 移除。
+                a.kind === 'image' && a.data ? (
+                  <div key={`${a.path}-${i}`} className="tran-enter group/att relative">
+                    <button
+                      type="button"
+                      onClick={() => useUiStore.getState().openAttachmentPreview(pickedFileToUserAttachment(a))}
+                      className="block overflow-hidden rounded-lg border border-white/10 outline-none ring-accent/50 transition hover:brightness-110 focus-visible:ring-2"
+                      title={`预览 ${a.name}`}
+                    >
+                      <img
+                        src={`data:${a.mimeType};base64,${a.data}`}
+                        alt={a.name}
+                        className="h-14 w-14 object-cover"
+                      />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(i)}
+                      className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-white/15 bg-bg-panel text-[10px] leading-none text-zinc-400 opacity-0 transition group-hover/att:opacity-100 hover:text-red-300"
+                      title="移除"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ) : (
+                  <span
+                    key={`${a.path}-${i}`}
+                    className="tran-enter glass-control flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-zinc-300"
+                    title={a.path}
                   >
-                    ×
-                  </button>
-                </span>
-              ))}
+                    <span className="text-zinc-500">{a.kind === 'text' ? '📄' : a.kind === 'directory' ? '📁' : '📎'}</span>
+                    <span className="max-w-[12rem] truncate">{a.name}</span>
+                    <button
+                      onClick={() => removeAttachment(i)}
+                      className="text-zinc-500 transition hover:text-red-300"
+                      title="移除"
+                    >
+                      ×
+                    </button>
+                  </span>
+                )
+              )}
             </div>
           )}
           {attachments.length > 0 && (

@@ -878,7 +878,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                       ) : diffView.loading ? (
                         <div className="rounded bg-[#0b0c10] p-2.5 text-[11px] text-zinc-600">…</div>
                       ) : diffView.text ? (
-                        <div className="max-h-64 overflow-hidden"><DiffView text={diffView.text} /></div>
+                        <div className="max-h-[min(60vh,32rem)] overflow-auto"><DiffView text={diffView.text} /></div>
                       ) : (
                         <div className="rounded bg-[#0b0c10] p-2.5 text-[11px] text-zinc-600">无差异</div>
                       )}

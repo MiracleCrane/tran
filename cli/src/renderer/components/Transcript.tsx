@@ -37,6 +37,42 @@ const USER_NAV_SMOOTH_MAX_ROWS = 40
 /** #45 无历史附件时的共享空 Map（避免每次渲染新引用击穿 UserMessage memo）。 */
 const EMPTY_HISTORY_ATTACHMENTS: ReadonlyMap<string, UserAttachment[]> = new Map()
 
+/**
+ * 底部状态区（"正在处理…"转圈）。
+ *
+ * 必须是模块级组件：此前它是写在 Virtuoso `components={{ Footer: () => ... }}`
+ * 里的内联箭头函数，每次 Transcript 重渲染都会产生一个新的组件类型，React
+ * 据此卸载旧节点、挂载新节点——CSS 动画随之从头播放。流式输出期间
+ * Transcript 每帧都重渲染，于是转圈不停被打断（用户可见为"转到一半跳回起点"）。
+ *
+ * running/compacting 自己从 store 订阅，bottomReserve 走 Virtuoso 的 context，
+ * 两者都是 props/state 变化而非类型变化，不会触发 remount。
+ */
+const TranscriptFooter = memo(function TranscriptFooter({
+  context
+}: {
+  context?: { bottomReserve: number }
+}): JSX.Element {
+  const compacting = useSessionStore((s) => s.status.compacting)
+  const running = useSessionStore((s) => s.status.running)
+  const bottomReserve = context?.bottomReserve ?? 0
+  return (
+    <div className="mx-auto w-full max-w-5xl px-6 py-2">
+      {compacting && <div className="text-center text-xs text-zinc-500">正在压缩上下文…</div>}
+      {running && (
+        <div className="flex items-center gap-2 text-xs text-zinc-500">
+          <span className="thinking-moon" aria-hidden />
+          Tran 正在处理…
+        </div>
+      )}
+      {bottomReserve > 0 && <div aria-hidden="true" style={{ height: bottomReserve }} />}
+    </div>
+  )
+})
+
+/** 稳定引用：components 对象每次新建同样会让 Virtuoso 重建内部结构。 */
+const VIRTUOSO_COMPONENTS = { Footer: TranscriptFooter }
+
 interface TranscriptProps {
   layoutTransitioning?: boolean
   bottomReserve?: number
@@ -275,7 +311,7 @@ const UserMessage = memo(function UserMessage({
     openAttachmentPreview(attachment)
   }
   return (
-    <div className="flex justify-end">
+    <div className="group/msg relative flex justify-end">
       <div className="max-w-[85%] rounded-[16px] rounded-tr-md border border-white/10 bg-gradient-to-br from-accent/[0.14] via-white/[0.06] to-white/[0.03] px-4 py-2.5 shadow-lg shadow-black/10">
         {(item.swarm || item.cutIn) && (
           <div className="mb-1 flex justify-end gap-1">
@@ -336,11 +372,9 @@ const UserMessage = memo(function UserMessage({
             })}
           </div>
         )}
-        {/* #43 轻量时间戳：常驻小号灰字；历史消息无事件时间，诚实缺省。 */}
+        {/* #43 时间戳：绝对定位 + 悬停延迟显示（见 AssistantMessage 处注释）。 */}
         {at !== undefined && (
-          <div className="mt-1 text-right text-[10px] leading-none text-zinc-600">
-            {formatMessageTime(at)}
-          </div>
+          <div className="tran-msg-time tran-msg-time-right">{formatMessageTime(at)}</div>
         )}
       </div>
     </div>
@@ -418,7 +452,7 @@ const AssistantMessage = memo(function AssistantMessage({
   const at = messageTime(item.id)
 
   return (
-    <div className={depth === 0 ? 'max-w-[92%]' : ''}>
+    <div className={`group/msg relative ${depth === 0 ? 'max-w-[92%]' : ''}`}>
       {item.error && (
         <div className="mb-2 rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-1.5 text-xs text-red-300">
           {item.error}
@@ -486,9 +520,11 @@ const AssistantMessage = memo(function AssistantMessage({
           输出中…
         </div>
       )}
-      {/* #43 轻量时间戳（流式结束后常驻；历史消息无事件时间，诚实缺省）。 */}
+      {/* #43 时间戳：绝对定位 + 悬停延迟显示。
+          常驻显示时每条消息（含每个工具调用）都挂一行小字，既冗余又把
+          bar 之间的间距撑开；改成不占布局空间，鼠标停留 500ms 才淡入。 */}
       {!isStreaming && at !== undefined && (
-        <div className="mt-1 text-[10px] leading-none text-zinc-600">{formatMessageTime(at)}</div>
+        <div className="tran-msg-time tran-msg-time-left">{formatMessageTime(at)}</div>
       )}
     </div>
   )
@@ -505,9 +541,9 @@ export default function Transcript({
   /** #45 附件持久化分桶键：sdkSessionId 重启 resume 后稳定（bridge id 每次都变）。 */
   const attachmentKey = useSessionStore((s) => s.meta?.sdkSessionId ?? s.meta?.sessionId ?? '')
   const agentBackend = useSessionStore((s) => s.meta?.agentBackend)
-  const running = useSessionStore((s) => s.status.running)
   const starting = useSessionStore((s) => s.starting)
-  const compacting = useSessionStore((s) => s.status.compacting)
+  // running / compacting 已下沉到 TranscriptFooter 自订阅：主组件不再因它们
+  // 变化而重渲染（每个 turn 起止都会触发一次全列表重渲染）。
   const setTranscriptScrolling = useSessionStore((s) => s.setTranscriptScrolling)
   // #36：turn 运行中发送会进 pendingQueue 而不是 items，只看 items 的话
   // 这一路不会回底（而排队恰恰是运行中发送的默认路径）。
@@ -534,6 +570,8 @@ export default function Transcript({
   /** #36 已处理过"发送滚到底"的用户消息 id（items 每次流式更新都变，去重）。 */
   const lastSendScrollItemIdRef = useRef<string | null>(null)
   const lastPendingQueueLengthRef = useRef(0)
+  // Footer 的 context：只在 bottomReserve 变化时换引用，不影响组件类型。
+  const footerContext = useMemo(() => ({ bottomReserve }), [bottomReserve])
   // "stick to bottom": Virtuoso reports this via atBottomStateChange. While at
   // the bottom, followOutput pins to the newest content; scroll up to read and
   // it stops following until the ↓ button returns you.
@@ -1125,20 +1163,8 @@ export default function Transcript({
         atBottomThreshold={FOLLOW_RESUME_AT_BOTTOM_THRESHOLD_PX}
         atBottomStateChange={handleAtBottomStateChange}
         className="transcript-scroll h-full"
-        components={{
-          Footer: () => (
-            <div className="mx-auto w-full max-w-5xl px-6 py-2">
-              {compacting && <div className="text-center text-xs text-zinc-500">正在压缩上下文…</div>}
-              {running && (
-                <div className="flex items-center gap-2 text-xs text-zinc-500">
-                  <span className="thinking-moon" aria-hidden />
-                  Tran 正在处理…
-                </div>
-              )}
-              {bottomReserve > 0 && <div aria-hidden="true" style={{ height: bottomReserve }} />}
-            </div>
-          )
-        }}
+        components={VIRTUOSO_COMPONENTS}
+        context={footerContext}
       />
       <UserMessageNav entries={userNavEntries} activeId={activeUserNavId} onJump={jumpToUserMessage} />
       {!layoutTransitioning && !atBottom && (

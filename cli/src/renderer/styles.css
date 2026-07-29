@@ -2830,3 +2830,33 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
 @keyframes tran-strike {
   to { transform: scaleX(1); }
 }
+
+/* #43 消息时间戳：绝对定位不占布局（此前常驻一行小字，把每个工具 bar 之间
+   的间距都撑开了），鼠标在该消息上停留 500ms 才淡入。离开立即隐藏。 */
+.tran-msg-time {
+  position: absolute;
+  bottom: -0.55rem;
+  z-index: 5;
+  padding: 0 0.25rem;
+  font-size: 10px;
+  line-height: 1;
+  color: rgb(113 113 122 / 0.9);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.tran-msg-time-left {
+  left: 0.15rem;
+}
+.tran-msg-time-right {
+  right: 0.15rem;
+}
+.group\/msg:hover .tran-msg-time {
+  opacity: 1;
+  transition-delay: 500ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tran-msg-time {
+    transition: none;
+  }
+}
