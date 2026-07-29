@@ -2596,6 +2596,23 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   to { transform: rotate(360deg) translateY(-4.75px); }
 }
 
+/* #46 chip 有运行中项：文字紫黄流光扫过（与 .thinking-moon 同一 #8b5cf6/#facc15
+ *  配色语言），由 Composer 在运行数 > 0 时给文字 span 挂此类，归零立即摘除恢复静态。
+ *  只动 background-position；reduced-motion 全局开关会把它降为近静止。 */
+.chip-flow-text {
+  background: linear-gradient(90deg, #8b5cf6 0%, #facc15 50%, #8b5cf6 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: chip-flow-text-sweep 2s linear infinite;
+}
+
+@keyframes chip-flow-text-sweep {
+  from { background-position: 0% 0; }
+  to { background-position: -200% 0; }
+}
+
 /* #12 任务行运行中：紫色微底 + 内描边高亮（状态图标自身的脉冲承担动效）。 */
 .tool-row-running {
   background: rgba(139, 92, 246, 0.08);

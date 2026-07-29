@@ -21,10 +21,16 @@ export function listProjects(): Project[] {
   return sortedList(loadSettings())
 }
 
+// #42 项目路径比较一律走归一化形式：session/list 返回正斜杠 cwd，用户显式
+// 添加的多是反斜杠形式，裸 === 去重会把同一目录当成两个项目条目进列表。
+function sameProjectPath(a: string, b: string): boolean {
+  return normalizeCwdForCompare(a) === normalizeCwdForCompare(b)
+}
+
 export function addProject(path: string, name?: string): Project[] {
   const s = loadSettings()
   const list = s.projects ? [...s.projects] : []
-  if (!list.some((p) => p.path === path)) {
+  if (!list.some((p) => sameProjectPath(p.path, path))) {
     list.push({ path, name: display(name, path), addedAt: Date.now() })
     s.projects = list
   }
@@ -36,8 +42,9 @@ export function addProject(path: string, name?: string): Project[] {
 
 export function removeProject(path: string): Project[] {
   const s = loadSettings()
-  s.projects = (s.projects ?? []).filter((p) => p.path !== path)
-  if (s.lastProjectPath === path) s.lastProjectPath = s.projects[0]?.path
+  s.projects = (s.projects ?? []).filter((p) => !sameProjectPath(p.path, path))
+  if (s.lastProjectPath && sameProjectPath(s.lastProjectPath, path))
+    s.lastProjectPath = s.projects[0]?.path
   saveSettings(s)
   return sortedList(s)
 }
@@ -45,7 +52,7 @@ export function removeProject(path: string): Project[] {
 export function renameProject(path: string, name: string): Project[] {
   const s = loadSettings()
   const list = s.projects ?? []
-  const p = list.find((x) => x.path === path)
+  const p = list.find((x) => sameProjectPath(x.path, path))
   if (p) p.name = display(name, path)
   s.projects = list
   saveSettings(s)

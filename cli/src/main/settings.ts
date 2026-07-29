@@ -12,6 +12,7 @@ import type {
   TranslateEngine
 } from '../shared/ipc'
 import { AGENT_BACKEND_IDS } from '../shared/agentBackends'
+import { normalizeCwdForCompare } from '../shared/paths'
 
 const SETTINGS_SCHEMA_VERSION = 1
 const EFFORT_LEVELS = new Set<EffortLevel>(['low', 'high', 'max'])
@@ -164,12 +165,15 @@ function normalizeProject(value: unknown): Project | null {
 
 function normalizeProjects(value: unknown): Project[] | undefined {
   if (!Array.isArray(value)) return undefined
+  // #42 去重键用归一化形式：历史设置里同一目录可能同时存在正/反斜杠两条。
   const seen = new Set<string>()
   const projects: Project[] = []
   for (const item of value) {
     const project = normalizeProject(item)
-    if (!project || seen.has(project.path)) continue
-    seen.add(project.path)
+    if (!project) continue
+    const key = normalizeCwdForCompare(project.path)
+    if (seen.has(key)) continue
+    seen.add(key)
     projects.push(project)
   }
   return projects

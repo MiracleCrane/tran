@@ -121,7 +121,9 @@ function normalizeCwd(value: string): string {
 }
 
 /** 空会话豁免窗口：最近 10 分钟内更新过的 "New Session" 不过滤（用户刚发
- *  首条消息、kimi title 未刷新时，活跃对话不能从侧栏消失）。 */
+ *  首条消息、kimi title 未刷新时，活跃对话不能从侧栏消失）。#42 豁免只对本
+ *  项目 cwd 生效：「全部」视图里其他目录的探针/测试空壳会话（Temp、
+ *  not-exist-dir-xyz 等）不再享豁免，立刻过滤。 */
 const EMPTY_SESSION_EXEMPTION_MS = 10 * 60 * 1000
 
 export async function listKimiSessions(
@@ -156,8 +158,10 @@ export async function listKimiSessions(
         manualSessionTitle(sessionId) ?? aiSessionTitle(sessionId) ?? kimiTitleValid ?? localSessionTitle(sessionId)
       const lastModified = asTimestamp(entry.updatedAt) ?? asTimestamp(entry.lastModified) ?? 0
       // 空壳治理：kimi 对从没发过消息的会话 title 恒为 "New Session"。无有效标题
-      // （无任何一级标题来源 = 没发过消息）且超出豁免窗口的空会话不显示。
-      if (!displayTitle && Date.now() - lastModified > EMPTY_SESSION_EXEMPTION_MS) continue
+      // （无任何一级标题来源 = 没发过消息）且超出豁免窗口的空会话不显示；豁免只
+      // 对本项目 cwd 生效（条目不带 cwd 时保守放行），见常量处注释。
+      const exempt = !entryCwd || normalizeCwd(entryCwd) === targetCwd
+      if (!displayTitle && (!exempt || Date.now() - lastModified > EMPTY_SESSION_EXEMPTION_MS)) continue
       sessions.push({
         sessionId,
         agentBackend: 'kimi',

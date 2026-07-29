@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.0.35 - 2026-07-28
+
+### 中文
+
+- 修复:侧边栏"全部"视图冒出大量莫名空会话/疑似幽灵工作区(#42)。真相:不存在自动注册项目的代码,幻影来自探针/测试目录的脏会话进"全部"视图按 cwd 分组。修复:项目增删改全部改归一化路径比较(正反斜杠重复条根除),空壳会话豁免收窄为仅当前项目 cwd。
+- 新增:消息时间戳(#43)。用户气泡右下角与 AI 块末常驻小灰字(今天 HH:mm/昨天 HH:mm/更早带日期,对齐 Kimi Web);历史消息因 ACP 重放无时间字段保持"诚实缺省"不显示。
+- 修复:顶部待办条宽度对齐(#44)——#9 收窄工具 bar 时漏了 PlanCard,现同为 max-w-[92%]。
+- 新增:历史对话显示粘贴给 AI 的图片(#45)。kimi ACP 重放不回传图片,现发送时按会话存 IndexedDB,历史重放按文本匹配补回附件;缩略图/点击预览/右键菜单全部复用现有路径。局限:纯图片(无文本)消息历史里无法恢复。
+- 新增:chip 运行中流光动效(#46)。后台命令/子 Agent/待办 chip 有运行中项时文字紫黄流光扫过(与彗星动画同色系),归零立即静态。
+
+### English
+
+- Fixed: phantom empty sessions / ghost workspace entries in the "All" sidebar view (#42). No auto-project-registration code ever existed — the phantom rows were dirty probe/test sessions grouped by cwd. Project add/remove/rename now uses normalized path comparison (kills slash-form duplicates), and the empty-shell exemption is scoped to the current project.
+- Added: message timestamps (#43) — small gray time on user bubbles and at the end of assistant blocks (today HH:mm / yesterday / with date, Kimi Web style); history messages honestly show nothing since ACP replay carries no timestamps.
+- Fixed: todo bar width aligned (#44) — PlanCard was missed when tool bars were unified to max-w-[92%].
+- Added: pasted images visible in conversation history (#45). ACP replay never returns images, so sent images are stored per-session in IndexedDB and re-attached by text match on replay; thumbnails/preview/context menu reuse existing paths. Limitation: image-only messages (no text) cannot be recovered.
+- Added: shimmer animation on chips with running items (#46) — background-command / sub-agent / todo chip text sweeps purple-yellow while anything is running, static again when done.
+
+#### 验证
+
+- typecheck/build 全绿;#42 机制经代码 + git 历史 + 用户 settings 三方验证
+
 ## v1.0.34 - 2026-07-28
 
 ### 中文

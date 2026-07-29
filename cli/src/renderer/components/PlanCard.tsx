@@ -63,7 +63,8 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
 
   return (
     <div className="mx-auto w-full max-w-5xl px-6 pt-3">
-      <div className="tool-call-card overflow-hidden rounded-lg border border-accent/30 bg-[#101116]">
+      {/* #44 与工具 bar 同宽（#9 统一 max-w-[92%] 时漏了待办条）。 */}
+      <div className="tool-call-card max-w-[92%] overflow-hidden rounded-lg border border-accent/30 bg-[#101116]">
         <button
           type="button"
           aria-expanded={!collapsed}

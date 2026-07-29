@@ -1893,6 +1893,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const meta = get().meta
     if (!meta) return
     // 先切到该会话所属项目，再 resume（不在原项目里跨 cwd load）。
+    // #42 打开会话只切换 cwd（switchProject → setLastProject），绝不 addProject：
+    // 项目列表只收录用户显式添加的目录，脏会话的 cwd 不会混进工作区列表。
     if (cwd && normalizeCwdForCompare(cwd) !== normalizeCwdForCompare(meta.cwd)) {
       await get().switchProject(cwd)
     }

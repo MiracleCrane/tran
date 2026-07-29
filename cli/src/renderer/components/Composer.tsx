@@ -210,6 +210,10 @@ export default function Composer(): JSX.Element {
   const agentTotal = useSessionStore((s) => countTotalTools(s.items, AGENT_TOOL_NAMES))
   const runningAgents = useSessionStore((s) => countRunningTools(s.items, AGENT_TOOL_NAMES))
   const planTotal = useSessionStore((s) => s.planEntries.length)
+  // #46：待办 chip 的"进行中"信号——只要存在 in_progress 项就走流光提示。
+  const planRunning = useSessionStore((s) =>
+    s.planEntries.some((e) => e.status === 'in_progress')
+  )
   const planDone = useSessionStore(
     (s) => s.planEntries.filter((e) => e.status === 'completed').length
   )
@@ -866,7 +870,10 @@ export default function Composer(): JSX.Element {
             }`}
             title="后台命令（点击查看面板）"
           >
-            <span>🕐</span>后台命令 ({bashTotal})
+            <span>🕐</span>
+            <span className={runningBash > 0 ? 'chip-flow-text' : undefined}>
+              后台命令 ({bashTotal})
+            </span>
           </button>
           <button
             type="button"
@@ -877,7 +884,10 @@ export default function Composer(): JSX.Element {
             }`}
             title="子 Agent（点击查看面板）"
           >
-            <span>✦</span>子 Agent ({runningAgents > 0 ? `${runningAgents}/` : ''}{agentTotal})
+            <span>✦</span>
+            <span className={runningAgents > 0 ? 'chip-flow-text' : undefined}>
+              子 Agent ({runningAgents > 0 ? `${runningAgents}/` : ''}{agentTotal})
+            </span>
           </button>
           <button
             type="button"
@@ -888,7 +898,10 @@ export default function Composer(): JSX.Element {
             }`}
             title="待办清单（点击查看面板）"
           >
-            <span>☰</span>待办 ({planDone}/{planTotal})
+            <span>☰</span>
+            <span className={planRunning ? 'chip-flow-text' : undefined}>
+              待办 ({planDone}/{planTotal})
+            </span>
           </button>
           {/* #5 忙碌态：明确提示输出中 + 排队语义，不再静默。#11 换 Kimi Web 同款旋转月亮。
               #39：指示固定在待办 chip 之后，三个 chip 位置不再被挤动。 */}

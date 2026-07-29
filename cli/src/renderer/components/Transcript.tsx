@@ -3,9 +3,11 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import { probeCommit, probeRender } from '../utils/streamProbe'
-import type { AssistantBlock, AssistantItem, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
+import type { AssistantBlock, AssistantItem, UserAttachment, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
 import MessageText from './MessageText'
 import { showImageContextMenu } from './ImageContextMenu'
+import { formatMessageTime, messageTime } from '../utils/messageTimes'
+import { initSentImageRecording, loadSentImages, matchHistoryImages } from '../utils/sentImages'
 import ToolCallCard from './ToolCallCard'
 import ToolGroupCard from './ToolGroupCard'
 import CompactionDivider from './CompactionDivider'
@@ -23,6 +25,8 @@ const FOLLOW_RESUME_AT_BOTTOM_THRESHOLD_PX = 40
 const BAR_HOVER_INTENT_WINDOW_MS = 600
 // 参与悬停/聚焦意图判定的 bar 元素。
 const TRANSCRIPT_BAR_SELECTOR = '.thinking-block, .tool-call-card'
+/** #45 无历史附件时的共享空 Map（避免每次渲染新引用击穿 UserMessage memo）。 */
+const EMPTY_HISTORY_ATTACHMENTS: ReadonlyMap<string, UserAttachment[]> = new Map()
 
 interface TranscriptProps {
   layoutTransitioning?: boolean
@@ -235,8 +239,16 @@ function EnvelopeGroupRow({ entries }: { entries: Array<{ id: string; text: stri
   )
 }
 
-const UserMessage = memo(function UserMessage({ item }: { item: UserItem }): JSX.Element {
-  const atts = item.attachments ?? []
+const UserMessage = memo(function UserMessage({
+  item,
+  hydratedAttachments
+}: {
+  item: UserItem
+  /** #45 历史重放补回的图片附件（发送时渲染层落盘，按文本匹配）。 */
+  hydratedAttachments?: UserAttachment[]
+}): JSX.Element {
+  const atts = item.attachments ?? hydratedAttachments ?? []
+  const at = messageTime(item.id)
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
   const openAttachmentPreview = useUiStore((s) => s.openAttachmentPreview)
   // kimi CLI 系统信封（后台任务通知等）：渲染成系统卡片而不是原始 XML 气泡
@@ -315,6 +327,12 @@ const UserMessage = memo(function UserMessage({ item }: { item: UserItem }): JSX
             })}
           </div>
         )}
+        {/* #43 轻量时间戳：常驻小号灰字；历史消息无事件时间，诚实缺省。 */}
+        {at !== undefined && (
+          <div className="mt-1 text-right text-[10px] leading-none text-zinc-600">
+            {formatMessageTime(at)}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -388,6 +406,7 @@ const AssistantMessage = memo(function AssistantMessage({
   expandedBlockKey?: string | null
 }): JSX.Element {
   const isStreaming = !!item.streaming
+  const at = messageTime(item.id)
 
   return (
     <div className={depth === 0 ? 'max-w-[92%]' : ''}>
@@ -441,6 +460,10 @@ const AssistantMessage = memo(function AssistantMessage({
           输出中…
         </div>
       )}
+      {/* #43 轻量时间戳（流式结束后常驻；历史消息无事件时间，诚实缺省）。 */}
+      {!isStreaming && at !== undefined && (
+        <div className="mt-1 text-[10px] leading-none text-zinc-600">{formatMessageTime(at)}</div>
+      )}
     </div>
   )
 })
@@ -453,6 +476,8 @@ export default function Transcript({
 }: TranscriptProps): JSX.Element {
   const items = useSessionStore((s) => s.items)
   const sessionKey = useSessionStore((s) => s.meta?.sessionId ?? '')
+  /** #45 附件持久化分桶键：sdkSessionId 重启 resume 后稳定（bridge id 每次都变）。 */
+  const attachmentKey = useSessionStore((s) => s.meta?.sdkSessionId ?? s.meta?.sessionId ?? '')
   const agentBackend = useSessionStore((s) => s.meta?.agentBackend)
   const running = useSessionStore((s) => s.status.running)
   const starting = useSessionStore((s) => s.starting)
@@ -485,6 +510,40 @@ export default function Transcript({
   const [atBottom, setAtBottom] = useState(true)
   const [deferHighlight, setDeferHighlight] = useState(true)
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null)
+  /** #45 历史用户消息补回的图片附件（itemId → 附件）。 */
+  const [historyAttachments, setHistoryAttachments] = useState<ReadonlyMap<string, UserAttachment[]>>(
+    EMPTY_HISTORY_ATTACHMENTS
+  )
+
+  // #45 发送成功的图片附件落盘（渲染层订阅 store，内部幂等）。
+  useEffect(() => {
+    initSentImageRecording()
+  }, [])
+
+  // #45 历史重放的用户消息不带图片（kimi ACP 重放只合成文本块）：从 IndexedDB
+  // 里按文本顺序匹配补回缩略图。historyUserIds 作签名，流式帧不触发重查。
+  const historyUserIds = useMemo(
+    () =>
+      items
+        .filter((it) => it.kind === 'user' && it.isHistory && !it.attachments?.length)
+        .map((it) => it.id)
+        .join(','),
+    [items]
+  )
+  useEffect(() => {
+    if (!attachmentKey || !historyUserIds) {
+      setHistoryAttachments(EMPTY_HISTORY_ATTACHMENTS)
+      return
+    }
+    let cancelled = false
+    void loadSentImages(attachmentKey).then((records) => {
+      if (cancelled) return
+      setHistoryAttachments(matchHistoryImages(useSessionStore.getState().items, records))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [attachmentKey, historyUserIds])
 
   const roots = useMemo(() => buildForest(items), [items])
   const displayRows = useMemo(() => buildDisplayRows(roots), [roots])
@@ -807,7 +866,13 @@ export default function Transcript({
     if (row.kind === 'envelopeGroup') {
       return <EnvelopeGroupRow entries={row.entries} />
     }
-    if (row.node.item.kind === 'user') return <UserMessage item={row.node.item as UserItem} />
+    if (row.node.item.kind === 'user')
+      return (
+        <UserMessage
+          item={row.node.item as UserItem}
+          hydratedAttachments={historyAttachments.get(row.node.item.id)}
+        />
+      )
     if (row.node.item.kind === 'compaction') return <CompactionDivider item={row.node.item} />
     if (row.node.item.kind === 'query') return <QueryResultCard item={row.node.item} />
     return (
