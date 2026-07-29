@@ -356,12 +356,19 @@ export interface DiagnosticReportOptions {
 }
 
 /** Kimi Code CLI 的版本检查结果（与 Tran 自更新分开，只查不装）。 */
+/** Kimi Code CLI 的安装方式 —— 升级手段完全不同，认错会装出第二份。
+ *  installer = 官方脚本（~/.kimi-code/bin，国内常用）；npm = 全局包。 */
+export type KimiInstallMethod = 'installer' | 'npm' | 'unknown'
+
 export interface KimiVersionInfo {
   currentVersion?: string
   latestVersion?: string
   updateAvailable: boolean
-  /** 用户可自行执行的升级命令。 */
+  /** 与安装方式匹配的升级命令（供复制）。 */
   upgradeCommand: string
+  installMethod?: KimiInstallMethod
+  /** 探测到的可执行文件路径。 */
+  installPath?: string
   error?: string
   checkedAt: number
 }

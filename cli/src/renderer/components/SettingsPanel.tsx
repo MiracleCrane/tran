@@ -799,6 +799,11 @@ export default function SettingsPanel(): JSX.Element {
                     <>
                       当前 {kimiVersion.currentVersion ?? '未知'}
                       {kimiVersion.latestVersion ? ` / 最新 ${kimiVersion.latestVersion}` : ''}
+                      {kimiVersion.installMethod === 'installer'
+                        ? ' · 官方脚本安装'
+                        : kimiVersion.installMethod === 'npm'
+                          ? ' · npm 全局安装'
+                          : ''}
                       {kimiVersion.updateAvailable ? (
                         <span className="ml-1 text-accent">· 有新版本</span>
                       ) : (
@@ -814,7 +819,12 @@ export default function SettingsPanel(): JSX.Element {
                     <button
                       type="button"
                       onClick={() => setKimiConfirmOpen(true)}
-                      disabled={upgradingKimi}
+                      disabled={upgradingKimi || kimiVersion.installMethod === 'unknown'}
+                      title={
+                        kimiVersion.installMethod === 'unknown'
+                          ? `无法判断安装方式（${kimiVersion.installPath ?? ''}），请手动升级`
+                          : kimiVersion.upgradeCommand
+                      }
                       className="rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {upgradingKimi ? '升级中…' : `一键升级到 ${kimiVersion.latestVersion ?? '最新版'}`}

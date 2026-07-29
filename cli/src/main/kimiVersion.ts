@@ -2,7 +2,7 @@ import { net } from 'electron'
 import { log } from './logger'
 import { resolveWindowsKimiCommand } from './windowsKimi'
 import { spawn } from 'node:child_process'
-import type { KimiUpgradeResult } from '../shared/ipc'
+import type { KimiInstallMethod, KimiUpgradeResult } from '../shared/ipc'
 
 /**
  * Kimi Code CLI 的版本检查（与 updater.ts 的 Tran 自更新分开）。
@@ -26,6 +26,10 @@ export interface KimiVersionInfo {
   updateAvailable: boolean
   /** 用户可自行执行的升级命令。 */
   upgradeCommand: string
+  /** 安装方式（决定升级手段）。 */
+  installMethod?: KimiInstallMethod
+  /** 探测到的可执行文件路径（认不出安装方式时反馈用）。 */
+  installPath?: string
   error?: string
   checkedAt: number
 }
@@ -119,16 +123,26 @@ async function fetchLatestVersion(): Promise<string | undefined> {
 export async function checkKimiVersion(force = false): Promise<KimiVersionInfo> {
   if (!force && cache && Date.now() - cache.checkedAt < CACHE_TTL_MS) return cache
 
-  const [currentVersion, latestVersion] = await Promise.all([
+  const [currentVersion, latestVersion, install] = await Promise.all([
     probeLocalVersion(),
-    fetchLatestVersion()
+    fetchLatestVersion(),
+    detectInstallMethod()
   ])
+
+  // 展示给用户复制的命令必须与安装方式一致：国内多用官方安装脚本
+  // （落在 ~/.kimi-code/bin），给 npm 命令会装出第二份互相打架。
+  const upgradeCommand =
+    install.method === 'installer'
+      ? `irm ${INSTALL_SCRIPT_URL} | iex`
+      : `npm install -g ${NPM_PACKAGE}@latest`
 
   const info: KimiVersionInfo = {
     ...(currentVersion ? { currentVersion } : {}),
     ...(latestVersion ? { latestVersion } : {}),
     updateAvailable: isNewer(latestVersion, currentVersion),
-    upgradeCommand: `npm install -g ${NPM_PACKAGE}@latest`,
+    upgradeCommand,
+    installMethod: install.method,
+    installPath: install.path,
     checkedAt: Date.now()
   }
   if (!currentVersion) info.error = '未能探测到本机 Kimi Code 版本（kimi 不在 PATH？）'
@@ -142,17 +156,32 @@ export async function checkKimiVersion(force = false): Promise<KimiVersionInfo> 
   return info
 }
 
-/** 升级超时：全局 npm 安装要拉整包，给足时间。 */
+/** 升级超时：无论哪种方式都要拉整包，给足时间。 */
 const UPGRADE_TIMEOUT_MS = 10 * 60 * 1000
 
+/** 官方安装脚本（国内安装方式；npm 包只是另一条发行渠道）。 */
+const INSTALL_SCRIPT_URL = 'https://code.kimi.com/kimi-code/install.ps1'
+
 /**
- * 一键升级 Kimi Code CLI（`npm install -g @moonshot-ai/kimi-code@latest`）。
+ * 判断本机是怎么装的 —— 升级方式完全不同，认错了会装出第二份互相打架。
  *
- * 调用方（ipc.ts）负责在升级前断开所有 ACP 会话——Windows 上正在运行的
- * kimi.exe 会占用文件，npm 覆盖安装会因 EBUSY/EPERM 失败；而且升级后旧连接
- * 指向的是被替换掉的可执行文件。
+ * - installer：`irm https://code.kimi.com/kimi-code/install.ps1 | iex`
+ *   落点是 %USERPROFILE%\.kimi-code\bin\（README 里的回退路径就是它）
+ * - npm：全局安装，落在 %APPDATA%\npm 或 node 的 prefix 下
+ *
+ * 注意 CLI 自身**没有** upgrade/update 子命令（0.30.0 实测命令列表只有
+ * export/provider/acp/web/server/login/doctor/vis），所以两条路都得靠外部手段。
  */
-export function upgradeKimi(): Promise<KimiUpgradeResult> {
+export async function detectInstallMethod(): Promise<{ method: KimiInstallMethod; path: string }> {
+  const resolved = await resolveWindowsKimiCommand()
+  const path = resolved.displayPath
+  const lower = path.replace(/\\/g, '/').toLowerCase()
+  if (lower.includes('/.kimi-code/bin/')) return { method: 'installer', path }
+  if (lower.includes('/npm/') || lower.includes('/node_modules/')) return { method: 'npm', path }
+  return { method: 'unknown', path }
+}
+
+function runUpgradeCommand(command: string, args: string[]): Promise<KimiUpgradeResult> {
   return new Promise((resolve) => {
     let settled = false
     let output = ''
@@ -160,22 +189,13 @@ export function upgradeKimi(): Promise<KimiUpgradeResult> {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      // 升级后本机版本变了，作废缓存，下次检查取真值。
-      cache = null
+      cache = null // 版本变了，作废缓存
       resolve(result)
     }
     const timer = setTimeout(
       () => done({ ok: false, error: `升级超时（${UPGRADE_TIMEOUT_MS / 60000} 分钟）`, output: output.slice(-4000) }),
       UPGRADE_TIMEOUT_MS
     )
-
-    // Windows 上 npm 是 npm.cmd，必须经 cmd.exe 起（直接 spawn npm 会 ENOENT）。
-    const isWindows = process.platform === 'win32'
-    const command = isWindows ? 'cmd.exe' : 'npm'
-    const args = isWindows
-      ? ['/d', '/s', '/c', 'npm', 'install', '-g', `${NPM_PACKAGE}@latest`]
-      : ['install', '-g', `${NPM_PACKAGE}@latest`]
-
     log('kimi-version', `开始升级：${command} ${args.join(' ')}`)
     let child
     try {
@@ -186,7 +206,6 @@ export function upgradeKimi(): Promise<KimiUpgradeResult> {
     }
     const collect = (chunk: Buffer): void => {
       output += chunk.toString()
-      // 只留尾部：npm 输出可能很长，全存没意义。
       if (output.length > 64 * 1024) output = output.slice(-64 * 1024)
     }
     child.stdout.on('data', collect)
@@ -200,9 +219,43 @@ export function upgradeKimi(): Promise<KimiUpgradeResult> {
       }
       done({
         ok: false,
-        error: `npm 退出码 ${code}。常见原因：权限不足（需管理员）、kimi 正在运行占用文件、网络/镜像不可达。`,
+        error: `退出码 ${code}。常见原因：权限不足、kimi 正在运行占用文件、网络/代理不可达。`,
         output: output.slice(-4000)
       })
     })
   })
+}
+
+/**
+ * 一键升级 Kimi Code CLI —— 按安装方式分流。
+ *
+ * 调用方（ipc.ts）负责先断开所有 ACP 会话：Windows 上正在运行的 kimi 会占用
+ * 可执行文件，覆盖安装必然 EBUSY/EPERM。
+ */
+export async function upgradeKimi(): Promise<KimiUpgradeResult> {
+  const { method, path } = await detectInstallMethod()
+
+  if (method === 'installer') {
+    // 官方脚本是幂等的安装器，重跑即升级（CLI 没有 upgrade 子命令）。
+    return runUpgradeCommand('powershell.exe', [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      `irm ${INSTALL_SCRIPT_URL} | iex`
+    ])
+  }
+
+  if (method === 'npm') {
+    const isWindows = process.platform === 'win32'
+    return isWindows
+      ? runUpgradeCommand('cmd.exe', ['/d', '/s', '/c', 'npm', 'install', '-g', `${NPM_PACKAGE}@latest`])
+      : runUpgradeCommand('npm', ['install', '-g', `${NPM_PACKAGE}@latest`])
+  }
+
+  // 认不出来就不动手：猜错会装出第二份，与现有安装互相覆盖。
+  return {
+    ok: false,
+    error: `无法判断安装方式（kimi 位于 ${path}）。请手动升级，或把该路径反馈给我们以便适配。`
+  }
 }
