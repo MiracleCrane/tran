@@ -355,6 +355,17 @@ export interface DiagnosticReportOptions {
   appearance?: Record<string, unknown>
 }
 
+/** Kimi Code CLI 的版本检查结果（与 Tran 自更新分开，只查不装）。 */
+export interface KimiVersionInfo {
+  currentVersion?: string
+  latestVersion?: string
+  updateAvailable: boolean
+  /** 用户可自行执行的升级命令。 */
+  upgradeCommand: string
+  error?: string
+  checkedAt: number
+}
+
 export interface DiagnosticReportResult {
   canceled?: boolean
   path?: string
@@ -744,6 +755,8 @@ export interface ForgeApi {
   checkForUpdates(): Promise<UpdateCheckResult>
   downloadAndInstallUpdate(options?: UpdateDownloadOptions): Promise<UpdateInstallResult>
   exportDiagnosticReport(options?: DiagnosticReportOptions): Promise<DiagnosticReportResult>
+  /** 查 Kimi Code CLI 版本（本机 vs npm 最新）。force 跳过 6 小时缓存。 */
+  checkKimiVersion(force?: boolean): Promise<KimiVersionInfo>
   exportSettings(appearance?: Record<string, unknown>): Promise<SettingsBackup>
   importSettings(backup: SettingsBackup): Promise<void>
 

@@ -8,7 +8,8 @@ import type {
   AgentBackendInfo,
   SettingsBackup,
   UpdateCheckResult,
-  UpdateDownloadProgress
+  UpdateDownloadProgress,
+  KimiVersionInfo
 } from '../../shared/ipc'
 import {
   MOTION_SPEED_MAX,
@@ -132,6 +133,10 @@ export default function SettingsPanel(): JSX.Element {
   const [diagnosticMessage, setDiagnosticMessage] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [appVersion, setAppVersion] = useState('')
+  // Kimi Code CLI 版本（与 Tran 自身更新分开：只查不装，升级要重启 ACP 连接）。
+  const [kimiVersion, setKimiVersion] = useState<KimiVersionInfo | null>(null)
+  const [checkingKimi, setCheckingKimi] = useState(false)
+  const [kimiCopied, setKimiCopied] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState(false)
   const importInputRef = useRef<HTMLInputElement | null>(null)
@@ -245,6 +250,33 @@ export default function SettingsPanel(): JSX.Element {
       setTimeout(() => setSavedAt(false), 1500)
     } catch {
       setAskOnClose(!next)
+    }
+  }
+
+  const checkKimi = async (force: boolean): Promise<void> => {
+    setCheckingKimi(true)
+    try {
+      setKimiVersion(await window.api.checkKimiVersion(force))
+    } catch (e) {
+      setKimiVersion({
+        updateAvailable: false,
+        upgradeCommand: 'npm install -g @moonshot-ai/kimi-code@latest',
+        error: e instanceof Error ? e.message : String(e),
+        checkedAt: Date.now()
+      })
+    } finally {
+      setCheckingKimi(false)
+    }
+  }
+
+  const copyKimiUpgrade = async (): Promise<void> => {
+    if (!kimiVersion) return
+    try {
+      await navigator.clipboard.writeText(kimiVersion.upgradeCommand)
+      setKimiCopied(true)
+      setTimeout(() => setKimiCopied(false), 1500)
+    } catch {
+      /* clipboard unavailable */
     }
   }
 
@@ -716,6 +748,55 @@ export default function SettingsPanel(): JSX.Element {
                   当前 {updateInfo.currentVersion}
                   {updateInfo.latestVersion ? ` / 最新 ${updateInfo.latestVersion}` : ''}
                   {updateInfo.asset?.name ? ` / ${updateInfo.asset.name}` : ''}
+                </div>
+              )}
+            </div>
+            <div className="border-t border-white/[0.06] pt-4">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs text-zinc-500">Kimi Code CLI 版本</div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                    只检查不自动安装 —— 升级需重装全局 npm 包并重连 ACP，正在跑的对话会断，时机由你定。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void checkKimi(true)}
+                  disabled={checkingKimi}
+                  className="shrink-0 rounded-lg border border-border-subtle bg-bg-elev px-3 py-2 text-xs text-zinc-300 transition hover:bg-bg-hover disabled:opacity-50"
+                >
+                  {checkingKimi ? '检查中...' : '检查版本'}
+                </button>
+              </div>
+              {kimiVersion && (
+                <div className="text-[11px] text-zinc-500">
+                  {kimiVersion.error ? (
+                    <span className="text-amber-400/90">{kimiVersion.error}</span>
+                  ) : (
+                    <>
+                      当前 {kimiVersion.currentVersion ?? '未知'}
+                      {kimiVersion.latestVersion ? ` / 最新 ${kimiVersion.latestVersion}` : ''}
+                      {kimiVersion.updateAvailable ? (
+                        <span className="ml-1 text-accent">· 有新版本</span>
+                      ) : (
+                        <span className="ml-1 text-zinc-600">· 已是最新</span>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+              {kimiVersion?.updateAvailable && (
+                <div className="mt-2 flex items-center gap-2 rounded-lg border border-white/[0.06] bg-bg-elev/60 px-3 py-2">
+                  <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-400">
+                    {kimiVersion.upgradeCommand}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => void copyKimiUpgrade()}
+                    className="shrink-0 rounded-md border border-border-subtle px-2 py-1 text-[11px] text-zinc-400 transition hover:bg-bg-hover hover:text-zinc-200"
+                  >
+                    {kimiCopied ? '已复制' : '复制命令'}
+                  </button>
                 </div>
               )}
               {(downloadingUpdate || updateProgress) && (

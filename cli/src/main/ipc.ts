@@ -41,6 +41,7 @@ import {
   runWslHealthCheck
 } from './runtimeDiagnostics'
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
+import { checkKimiVersion } from './kimiVersion'
 import { listKimiSessions } from './kimiHistory'
 import { getPlanUsageCached } from './usageService'
 import { getQuotaOverviewCached, fetchQuotaActions, runQuotaLogin } from './quotaService'
@@ -95,7 +96,8 @@ import type {
   QuotaActionsResult,
   AiTitlesBatchResult,
   SessionPreview,
-  SaveImageResult
+  SaveImageResult,
+  KimiVersionInfo
 } from '../shared/ipc'
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
@@ -627,6 +629,10 @@ export function registerIpc(
       }
       return { path: res.filePath }
     }
+  )
+  ipcMain.handle(
+    'forge:checkKimiVersion',
+    async (_e, force?: boolean): Promise<KimiVersionInfo> => checkKimiVersion(force === true)
   )
   ipcMain.handle(
     'forge:exportSettings',
