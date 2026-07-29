@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.41 - 2026-07-29
+
+### 中文
+
+- 修复:思考中动画（彗星/转圈）被流式渲染 remount 反复重置回第一帧的问题,动画现在连续播放不卡顿。
+- 优化:消息时间戳改为悬停显示,不再每条消息常驻占用视觉空间。
+- 新增:Diff 视图行内高亮与行号;附件缩略图预览。
+
+### English
+
+- Fixed: the thinking animation (comet/spinner) was remounted by streaming renders and kept resetting to its first frame; it now plays continuously.
+- Changed: message timestamps now show on hover instead of on every message.
+- Added: inline highlight and line numbers in the diff view; attachment thumbnails.
+
 ## v1.0.40 - 2026-07-29
 
 ### 中文
