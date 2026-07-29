@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.38 - 2026-07-28
+
+### 中文
+
+- 修复:待办卡状态卡旧帧(#49)。根因:每个用户 turn 结束后紧跟的隐藏轮(/usage、/mcp)会吞掉该轮除 agent_message_chunk 外的一切事件,而后台子代理恰在此时收尾推最后一帧全量 plan——"全部完成"帧被静默吞掉且无补偿,待办卡永远停在旧状态。现 plan 帧(会话级全量、幂等)移出隐藏轮拦截,与 replay 白名单处理一致。
+- 修复:chip 流光动效不触发(#46 的实际缺口)——Composer 的 chip 运行中计数没接 #32 的真实状态源(后台子代理恒数不到、计数恒 0)。现 countRunningTools 传入 swarmTasks(磁盘任务记录),后台运行中计数/流光/“N/总数”显示全部生效。
+
+### English
+
+- Fixed: todo card stuck on a stale frame (#49). Root cause: the hidden turns (/usage, /mcp) that run right after every user turn swallow all events except text chunks — and background sub-agents typically finish and push their final full plan frame exactly in that window. Plan frames (session-level, idempotent) are no longer intercepted by hidden turns, matching the replay whitelist.
+- Fixed: chip shimmer never triggering (the real gap behind #46) — the composer's chip running-count didn't use the #32 disk-backed task source, so background agents were never counted. countRunningTools now receives swarmTasks, enabling the count, the shimmer, and the "N/total" display.
+
+#### 验证
+
+- typecheck/build 全绿;#49 根因与时序链完整复现论证
+
 ## v1.0.37 - 2026-07-28
 
 ### 中文

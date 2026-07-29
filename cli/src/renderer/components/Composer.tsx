@@ -206,9 +206,9 @@ export default function Composer(): JSX.Element {
   const pending = useSessionStore((s) => s.pendingQueue)
   // 状态 chips（常驻行）：计数=会话累计（含历史重放），运行中数用于高亮和 (r/N) 显示。
   const bashTotal = useSessionStore((s) => countTotalTools(s.items, BASH_TOOL_NAMES))
-  const runningBash = useSessionStore((s) => countRunningTools(s.items, BASH_TOOL_NAMES))
+  const runningBash = useSessionStore((s) => countRunningTools(s.items, BASH_TOOL_NAMES, s.swarmTasks))
   const agentTotal = useSessionStore((s) => countTotalTools(s.items, AGENT_TOOL_NAMES))
-  const runningAgents = useSessionStore((s) => countRunningTools(s.items, AGENT_TOOL_NAMES))
+  const runningAgents = useSessionStore((s) => countRunningTools(s.items, AGENT_TOOL_NAMES, s.swarmTasks))
   const planTotal = useSessionStore((s) => s.planEntries.length)
   // #46：待办 chip 的"进行中"信号——只要存在 in_progress 项就走流光提示。
   const planRunning = useSessionStore((s) =>

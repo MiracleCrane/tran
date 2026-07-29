@@ -1327,6 +1327,19 @@ export class KimiBackend {
   private handleSessionUpdate(session: ActiveKimiSession, update: Record<string, unknown>): void {
     const type = asString(update.sessionUpdate)
     this.touchTurnActivity(session)
+    // #49：plan 是会话级全量待办状态，隐藏轮（afterTurn 的 /usage、/mcp 轮）期间
+    // 后台子代理收尾推送的 plan 帧也要照常转发——吞掉后无任何补偿重拉，
+    // 待办卡会一直停在旧快照。故放在 hiddenTurn 吞事件检查之前。
+    if (type === 'plan') {
+      // 待办清单（kimi 在计划模式下全量推送 entries），合成 system/plan 消息
+      // 走 onMessage 通道送到渲染层（同 slash_commands 的模式）。
+      this.h.onMessage(session.id, {
+        type: 'system',
+        subtype: 'plan',
+        entries: toPlanEntries(update.entries)
+      } as unknown as SDKMessage)
+      return
+    }
     // 隐藏轮：吞掉该轮所有事件，只累积 agent_message_chunk 文本供解析。
     if (session.hiddenTurn) {
       if (type === 'agent_message_chunk') session.hiddenText += textFromContentBlock(update.content)
@@ -1405,16 +1418,6 @@ export class KimiBackend {
     if (type === 'available_commands_update') {
       session.skills = toSkillInfos(update.availableCommands)
       this.emitSlashCommands(session)
-      return
-    }
-    if (type === 'plan') {
-      // 待办清单（kimi 在计划模式下全量推送 entries），合成 system/plan 消息
-      // 走 onMessage 通道送到渲染层（同 slash_commands 的模式）。
-      this.h.onMessage(session.id, {
-        type: 'system',
-        subtype: 'plan',
-        entries: toPlanEntries(update.entries)
-      } as unknown as SDKMessage)
       return
     }
     if (type === 'usage_update') {
