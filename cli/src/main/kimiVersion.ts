@@ -2,6 +2,7 @@ import { net } from 'electron'
 import { log } from './logger'
 import { resolveWindowsKimiCommand } from './windowsKimi'
 import { spawn } from 'node:child_process'
+import type { KimiUpgradeResult } from '../shared/ipc'
 
 /**
  * Kimi Code CLI 的版本检查（与 updater.ts 的 Tran 自更新分开）。
@@ -139,4 +140,69 @@ export async function checkKimiVersion(force = false): Promise<KimiVersionInfo> 
     `本机=${currentVersion ?? '未知'} 最新=${latestVersion ?? '未知'} 需更新=${info.updateAvailable}`
   )
   return info
+}
+
+/** 升级超时：全局 npm 安装要拉整包，给足时间。 */
+const UPGRADE_TIMEOUT_MS = 10 * 60 * 1000
+
+/**
+ * 一键升级 Kimi Code CLI（`npm install -g @moonshot-ai/kimi-code@latest`）。
+ *
+ * 调用方（ipc.ts）负责在升级前断开所有 ACP 会话——Windows 上正在运行的
+ * kimi.exe 会占用文件，npm 覆盖安装会因 EBUSY/EPERM 失败；而且升级后旧连接
+ * 指向的是被替换掉的可执行文件。
+ */
+export function upgradeKimi(): Promise<KimiUpgradeResult> {
+  return new Promise((resolve) => {
+    let settled = false
+    let output = ''
+    const done = (result: KimiUpgradeResult): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      // 升级后本机版本变了，作废缓存，下次检查取真值。
+      cache = null
+      resolve(result)
+    }
+    const timer = setTimeout(
+      () => done({ ok: false, error: `升级超时（${UPGRADE_TIMEOUT_MS / 60000} 分钟）`, output: output.slice(-4000) }),
+      UPGRADE_TIMEOUT_MS
+    )
+
+    // Windows 上 npm 是 npm.cmd，必须经 cmd.exe 起（直接 spawn npm 会 ENOENT）。
+    const isWindows = process.platform === 'win32'
+    const command = isWindows ? 'cmd.exe' : 'npm'
+    const args = isWindows
+      ? ['/d', '/s', '/c', 'npm', 'install', '-g', `${NPM_PACKAGE}@latest`]
+      : ['install', '-g', `${NPM_PACKAGE}@latest`]
+
+    log('kimi-version', `开始升级：${command} ${args.join(' ')}`)
+    let child
+    try {
+      child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+    } catch (error) {
+      done({ ok: false, error: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    const collect = (chunk: Buffer): void => {
+      output += chunk.toString()
+      // 只留尾部：npm 输出可能很长，全存没意义。
+      if (output.length > 64 * 1024) output = output.slice(-64 * 1024)
+    }
+    child.stdout.on('data', collect)
+    child.stderr.on('data', collect)
+    child.on('error', (error) => done({ ok: false, error: error.message, output: output.slice(-4000) }))
+    child.on('close', (code) => {
+      if (code === 0) {
+        log('kimi-version', '升级成功')
+        done({ ok: true, output: output.slice(-4000) })
+        return
+      }
+      done({
+        ok: false,
+        error: `npm 退出码 ${code}。常见原因：权限不足（需管理员）、kimi 正在运行占用文件、网络/镜像不可达。`,
+        output: output.slice(-4000)
+      })
+    })
+  })
 }

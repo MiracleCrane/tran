@@ -366,6 +366,14 @@ export interface KimiVersionInfo {
   checkedAt: number
 }
 
+/** 一键升级 Kimi Code CLI 的结果。 */
+export interface KimiUpgradeResult {
+  ok: boolean
+  error?: string
+  /** npm 输出尾部（失败时排查用）。 */
+  output?: string
+}
+
 export interface DiagnosticReportResult {
   canceled?: boolean
   path?: string
@@ -757,6 +765,8 @@ export interface ForgeApi {
   exportDiagnosticReport(options?: DiagnosticReportOptions): Promise<DiagnosticReportResult>
   /** 查 Kimi Code CLI 版本（本机 vs npm 最新）。force 跳过 6 小时缓存。 */
   checkKimiVersion(force?: boolean): Promise<KimiVersionInfo>
+  /** 一键升级 Kimi Code CLI。会先断开所有活跃会话（升级要替换正在运行的可执行文件）。 */
+  upgradeKimi(): Promise<KimiUpgradeResult>
   exportSettings(appearance?: Record<string, unknown>): Promise<SettingsBackup>
   importSettings(backup: SettingsBackup): Promise<void>
 

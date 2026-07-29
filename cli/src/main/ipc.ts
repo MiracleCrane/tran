@@ -41,7 +41,7 @@ import {
   runWslHealthCheck
 } from './runtimeDiagnostics'
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
-import { checkKimiVersion } from './kimiVersion'
+import { checkKimiVersion, upgradeKimi } from './kimiVersion'
 import { listKimiSessions } from './kimiHistory'
 import { listClaudeSessions } from './claudeHistory'
 import { getPlanUsageCached } from './usageService'
@@ -98,7 +98,8 @@ import type {
   AiTitlesBatchResult,
   SessionPreview,
   SaveImageResult,
-  KimiVersionInfo
+  KimiVersionInfo,
+  KimiUpgradeResult
 } from '../shared/ipc'
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
@@ -507,7 +508,13 @@ export function registerIpc(
     }
   })
 
-  ipcMain.handle('forge:getPlanUsage', async (): Promise<PlanUsageResult> => getPlanUsageCached())
+  ipcMain.handle('forge:getPlanUsage', async (): Promise<PlanUsageResult> => {
+    // Claude 后端有活跃会话且收到过 rate_limit_event 时用它的额度；
+    // 否则回落到 kimi 的 /usages 源。两者数据源完全不同，不能混算。
+    const claudeUsage = bridge.claudePlanUsage()
+    if (claudeUsage) return { ok: true, data: claudeUsage }
+    return getPlanUsageCached()
+  })
 
   // --- 额度总览/明细（MembershipService RPC；登录态取 kimi-desktop / 网页登录兜底）。
   // 总览走 60s 缓存（悬停卡/明细面板共用，悬停秒开）；明细翻页每次实时。 ---
@@ -635,6 +642,15 @@ export function registerIpc(
     'forge:checkKimiVersion',
     async (_e, force?: boolean): Promise<KimiVersionInfo> => checkKimiVersion(force === true)
   )
+  ipcMain.handle('forge:upgradeKimi', async (): Promise<KimiUpgradeResult> => {
+    // Windows 上正在运行的 kimi.exe 会占用文件，npm 覆盖安装必然 EBUSY/EPERM；
+    // 且升级后旧 ACP 连接指向的是已被替换的可执行文件。所以先全部收掉。
+    await bridge.shutdown().catch(() => {})
+    const result = await upgradeKimi()
+    // 会话已断，通知渲染层刷新列表（侧栏 running 标记要清）。
+    send('forge:sessions-changed', {})
+    return result
+  })
   ipcMain.handle(
     'forge:exportSettings',
     async (_e, appearance?: Record<string, unknown>): Promise<SettingsBackup> =>

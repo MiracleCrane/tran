@@ -9,8 +9,10 @@ import type {
   McpServerEntry,
   PermissionResponsePayload,
   SDKMessage,
+  PlanUsageInfo,
   SessionListItem,
   SessionUsageInfo,
+  UsageLimitWindow,
   SkillInfo,
   StartSessionOptions
 } from '../../shared/ipc'
@@ -114,6 +116,34 @@ const CLAUDE_MODELS: ComposerModel[] = [
   { id: 'sonnet', label: 'Sonnet' },
   { id: 'haiku', label: 'Haiku' }
 ]
+
+/**
+ * rate_limit_event → PlanUsageInfo。
+ *
+ * 实测帧（v2.1.220）：
+ *   {"rate_limit_info":{"status":"allowed","resetsAt":1785325800,
+ *     "rateLimitType":"five_hour","overageStatus":"allowed",
+ *     "overageResetsAt":1785321600,"isUsingOverage":false}}
+ *
+ * ⚠️ 它**只给窗口类型与重置时刻，不给已用量/上限**。所以这里只填 resetAt，
+ * used/limit 一律留空——UsageRings 对缺数值的窗口显示为无数据，不编造。
+ * 这是与 kimi 后端的实质差距（kimi 有 /usage 轮给出真实百分比）。
+ */
+function planUsageFromRateLimit(info: Record<string, unknown>): PlanUsageInfo | null {
+  const kind = asString(info.rateLimitType)
+  const resetsAt = typeof info.resetsAt === 'number' ? info.resetsAt * 1000 : undefined
+  if (resetsAt === undefined) return null
+
+  if (kind === 'five_hour') {
+    const rolling: UsageLimitWindow = { label: '5 小时', resetAt: resetsAt }
+    return { rolling }
+  }
+  if (kind === 'seven_day' || kind === 'weekly') {
+    const weekly: UsageLimitWindow = { label: '每周', resetAt: resetsAt }
+    return { weekly }
+  }
+  return null
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null
@@ -225,6 +255,8 @@ export class ClaudeBackend {
     // 这是 Claude 后端唯一的额度来源（没有 kimi 那套 /usage 隐藏轮）。
     if (type === 'rate_limit_event') {
       const info = asRecord(message.rate_limit_info)
+      // 渲染层的额度环走 IPC 拉取（forge:getPlanUsage），不是消息通道，
+      // 所以这里只留存，由 getPlanUsage 主动来取。
       if (info) session.rateLimit = info
     }
 
@@ -424,9 +456,17 @@ export class ClaudeBackend {
     return listClaudeSessions(cwd, opts ?? {})
   }
 
-  /** 最近一帧配额信息（rate_limit_event）。 */
-  getRateLimit(sessionId: string): Record<string, unknown> | null {
-    return this.sessions.get(sessionId)?.rateLimit ?? null
+  /** 最近一帧配额（rate_limit_event）转成 PlanUsageInfo。没有会话/没收到帧
+   *  时返回 null，调用方据此回落到 kimi 的额度源。 */
+  getPlanUsage(): PlanUsageInfo | null {
+    // 任取一个有配额帧的会话：额度是账号级的，不分会话。
+    for (const session of this.sessions.values()) {
+      if (session.rateLimit) {
+        const usage = planUsageFromRateLimit(session.rateLimit)
+        if (usage) return usage
+      }
+    }
+    return null
   }
 
   /** TODO(阶段 2)：接 `--permission-prompt-tool` 或 canUseTool 回调。
