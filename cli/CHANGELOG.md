@@ -1,5 +1,50 @@
 # Changelog
 
+## v1.0.40 - 2026-07-29
+
+### 中文
+
+- 修复:设置读取瞬时失败会把空配置覆写回真实文件(#51)。readFileSync 与 JSON.parse 共用一个 catch,任一失败都退回空默认值并写进 cache,随后任意一次保存就把 providers/projects/apiKey/百度密钥永久抹掉。Windows 上杀软占用文件即可触发。现区分「文件不存在」与「读取失败」,读失败时拒绝落盘并先重试读取。
+- 修复:MCP 配置解析失败时把 ~/.claude.json 整个覆写(#52)。读-改-写里解析失败返回 {},随后写入把整个文件替换成只剩 mcpServers——与模块自己的注释直接矛盾。现解析失败抛错、放弃写入。
+- 修复:AcpClient 可掀掉主进程(#53)。close() 只设 closing 不设 closed 也不置空 child,而守卫是 (closed || !child),'close' 事件到达前全部放行,数据写进已 kill 的进程 stdin;而 stdin 又没有 'error' 监听,EPIPE 成为未处理流错误直接崩主进程。
+- 修复:ACP 子进程退出时不回收、stderr 无限增长(#54)。AgentBridge 新增 dispose(),退出时 kill 子进程;stderr 只保留尾部 64KB。
+- 修复:六处 JSON store 非原子写入(#55)。新增 atomicWrite.ts(tmp+rename),goals/AI 标题/会话标题/token/凭证不再因写一半崩溃而全量丢失。
+- 修复:setWindowOpenHandler 不校验协议就 openExternal(#56)。与相邻的 will-navigate 白名单不一致,file:/smb:/自定义协议都会被交给操作系统。
+- 修复:后台会话的流式 delta 抢占前台显示预算(#57)。pending 是单一全局队列,后台 delta 消耗每帧字符预算,后台的任何结构性事件还会 flushAll 把前台缓冲整块倒出,破坏 #8 调好的匀速吐字。现按 sessionId 分流,前台路径逻辑与速率常量零改动。
+- 修复:工具卡片在流式期间 remount 丢展开状态(#58)。blocks 含空洞时用过滤后下标做 key,空洞填上后续 key 整体前移。改用过滤前的原始下标。
+- 修复:附件不按会话隔离(#59)。A 会话加的附件会跟着 B 发出去;切换时清空并作废在途异步读取。
+- 修复:token 过期判定与并发刷新(#60)。expires_at 为数字时 Date.parse 得 NaN 恒判过期,把轮换 refresh_token 转个不停;并发刷新重复消费轮换 token 导致误报「需要重新登录」。
+- 修复:kimi-server 反复拉起(#25)。ensureKimiServer 无失败记忆,每次轮询都重新 spawn;ipc.ts 的退避阶梯因 #34 的磁盘回退导致 swarmFailures 恒为 0 而从不启动。现加 5 分钟拉起冷却。
+- 修复:冷启动被同步全树遍历阻塞(#18)。sweepOrphanSessionDirs 排在 createWindow() 之前,移到之后并 setImmediate 让出一轮。
+- 修复:MCP 面板与 WSL 面板完全没有返回入口(#35),补吸顶返回栏。
+- 修复:运行中发送消息不回底(#36)。已修的是直发路径,但 turn 忙时消息进 pendingQueue、items 不变,effect 不触发——而排队正是运行中发送的默认路径。
+- 修复:健壮性与泄漏合集 14 条(#61)——swarm 定时器不 unref、init 看门狗从不取消、后台会话 Map 无上限增长、历史缓存 LRU 从未实现、切会话漏重置 slashCommands、乐观移除失败不回滚、updater fd 泄漏与预发布版本比较、git ref 参数注入校验等。
+- 新增:待办卡显示陈旧度与「后台任务已结束」提醒。kimi 源码实证:后台任务的完成通知只在「下一轮」注入 agent(原文 "The completion arrives automatically in a later turn"),所以发下一条消息之前待办物理上不会更新。Tran 靠磁盘任务记录比 agent 先知道,现在把这个时间差告诉用户,不自动发消息。
+- 新增:Kimi Code CLI 版本检查(设置→系统)。查本机 `kimi --version` 对比 npm 最新版,给出升级命令并支持复制。刻意不自动安装——升级要重连 ACP,正在跑的对话会断。
+
+### English
+
+- Fixed: a transient settings read failure overwrote the real config with defaults (#51) — `readFileSync` and `JSON.parse` shared one catch, so any failure fell back to empty defaults *and cached them*; the next save then wiped providers/projects/apiKey permanently. Now distinguishes "missing" from "unreadable" and refuses to persist after a read failure.
+- Fixed: MCP config save clobbered all of `~/.claude.json` when the file was momentarily unparseable (#52).
+- Fixed: AcpClient could take down the main process (#53) — `close()` left the write guards open until the async `'close'` event, and `child.stdin` had no `'error'` listener, so EPIPE became an unhandled stream error.
+- Fixed: the ACP child process was never killed on quit; stderr grew unbounded (#54).
+- Fixed: six JSON stores used non-atomic writes (#55) — new `atomicWrite.ts` (tmp+rename).
+- Fixed: `setWindowOpenHandler` called `openExternal` with no protocol allowlist (#56), inconsistent with the adjacent `will-navigate` guard.
+- Fixed: background-session stream deltas consumed the foreground display budget, and background structural events dumped the foreground buffer in one slab (#57), undoing the #8 pacing work. Now routed per session; the foreground path and rate constants are unchanged.
+- Fixed: tool cards remounted mid-stream and lost their expanded state (#58) — keys used the post-filter index over a sparse array.
+- Fixed: composer attachments were not scoped per session (#59).
+- Fixed: numeric `expires_at` always parsed as expired, and concurrent refreshes double-spent the rotating refresh token (#60).
+- Fixed: kimi-server was re-spawned on essentially every poll (#25) — `ensureKimiServer` had no failure memory, and the existing backoff never engaged because the #34 disk fallback kept the poll "successful".
+- Fixed: cold start blocked on a synchronous full-tree sweep (#18); MCP/WSL panels had no back button at all (#35); sending while a turn was running did not re-pin to bottom (#36).
+- Fixed: 14 robustness and leak issues (#61).
+- Added: todo card staleness indicator and a "background task finished" notice. Per kimi's own source, background completions are only injected "in a later turn", so the todo genuinely cannot update until you send another message — Tran knows sooner (disk task records) and now says so, without sending anything on your behalf.
+- Added: Kimi Code CLI version check (Settings → System). Check-only by design — upgrading restarts the ACP connection and would kill a running turn.
+
+#### 验证
+
+- `npm run typecheck` 与 `npm run build` 全绿
+- 运行时行为未验证(审查环境为 Linux 容器,应用为 Windows 专用)——本版建议先小范围验证
+
 ## v1.0.39 - 2026-07-29
 
 ### 中文
