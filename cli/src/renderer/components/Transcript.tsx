@@ -1,5 +1,5 @@
 import { memo, Profiler, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
+import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import { probeCommit, probeRender } from '../utils/streamProbe'
@@ -12,6 +12,7 @@ import ToolCallCard from './ToolCallCard'
 import ToolGroupCard from './ToolGroupCard'
 import CompactionDivider from './CompactionDivider'
 import QueryResultCard from './QueryResultCard'
+import UserMessageNav, { type UserNavEntry } from './UserMessageNav'
 
 const INITIAL_HIGHLIGHT_DELAY_MS = 420
 const SCROLL_HIGHLIGHT_RESUME_MS = 180
@@ -25,6 +26,9 @@ const FOLLOW_RESUME_AT_BOTTOM_THRESHOLD_PX = 40
 const BAR_HOVER_INTENT_WINDOW_MS = 600
 // 参与悬停/聚焦意图判定的 bar 元素。
 const TRANSCRIPT_BAR_SELECTOR = '.thinking-block, .tool-call-card'
+// #48 用户消息导航条：摘要截取长度与条目上限（超出只留最近若干条）。
+const USER_NAV_SUMMARY_CHARS = 24
+const USER_NAV_MAX_ENTRIES = 30
 /** #45 无历史附件时的共享空 Map（避免每次渲染新引用击穿 UserMessage memo）。 */
 const EMPTY_HISTORY_ATTACHMENTS: ReadonlyMap<string, UserAttachment[]> = new Map()
 
@@ -510,6 +514,8 @@ export default function Transcript({
   const [atBottom, setAtBottom] = useState(true)
   const [deferHighlight, setDeferHighlight] = useState(true)
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null)
+  /** #48 视口顶部附近对应的导航条目 id（高亮）。 */
+  const [activeUserNavId, setActiveUserNavId] = useState<string | null>(null)
   /** #45 历史用户消息补回的图片附件（itemId → 附件）。 */
   const [historyAttachments, setHistoryAttachments] = useState<ReadonlyMap<string, UserAttachment[]>>(
     EMPTY_HISTORY_ATTACHMENTS
@@ -547,6 +553,26 @@ export default function Transcript({
 
   const roots = useMemo(() => buildForest(items), [items])
   const displayRows = useMemo(() => buildDisplayRows(roots), [roots])
+  // #48 导航条目：顶层用户消息（排除系统信封；子代理转发的本就不在顶层行），
+  // 按行号顺序排列，最新在下；条数封顶只留最近若干条。
+  const userNavEntries = useMemo(() => {
+    const entries: UserNavEntry[] = []
+    displayRows.forEach((row, rowIndex) => {
+      if (row.kind !== 'item') return
+      const item = row.node.item
+      if (item.kind !== 'user') return
+      if (envelopeTextOf(row.node) !== null) return
+      const text = item.text.replace(/\s+/g, ' ').trim()
+      const summary = text
+        ? text.slice(0, USER_NAV_SUMMARY_CHARS)
+        : item.attachments?.length
+          ? '[附件]'
+          : ''
+      if (!summary) return
+      entries.push({ id: item.id, rowIndex, summary })
+    })
+    return entries.slice(-USER_NAV_MAX_ENTRIES)
+  }, [displayRows])
   // "最新块"保持展开：最新一条 live（非历史）assistant 消息里的最后一个思考/
   // 工具块。纯文本段落开头的消息 → 无最新块（上一个收起）；最新是历史 → 不收。
   const lastExpandableKey = useMemo(() => {
@@ -604,6 +630,33 @@ export default function Transcript({
     virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior })
     setReserveEligible(true, true)
     setPinnedAtBottom(true)
+  }
+
+  // #48 导航跳转 = 主动离开当前位置：解除底部钉住（若目标就在底部附近，落地
+  // 后 atBottomStateChange 会自动恢复跟随），并记一次滚动意图（途中延迟高亮）。
+  const jumpToUserMessage = (rowIndex: number): void => {
+    lockFollowOutput()
+    markScrollIntent()
+    setPinnedAtBottom(false)
+    virtuosoRef.current?.scrollToIndex({ index: rowIndex, align: 'start', behavior: 'smooth' })
+  }
+
+  const userNavEntriesRef = useRef(userNavEntries)
+  useEffect(() => {
+    userNavEntriesRef.current = userNavEntries
+  }, [userNavEntries])
+
+  // #48 视口高亮：由 Virtuoso 上报的可见范围推导"视口顶部附近"的用户消息，
+  // 只在结论变化时 setState，滚动途中不反复重渲染。
+  const handleRangeChanged = (range: ListRange): void => {
+    const entries = userNavEntriesRef.current
+    let active: string | null = null
+    for (const entry of entries) {
+      if (entry.rowIndex <= range.startIndex + 1) active = entry.id
+      else break
+    }
+    if (active === null && entries.length > 0) active = entries[0].id
+    setActiveUserNavId((current) => (current === active ? current : active))
   }
 
   const refreshReserveEligibleFromScroller = (element: HTMLElement | null = scrollElement): void => {
@@ -912,6 +965,8 @@ export default function Transcript({
         setPinnedAtBottom(false)
       }}
       onWheelCapture={(event) => {
+        // #48 导航条内部的滚轮（滚动摘要列表）不算转录区的滚动意图，不误解除跟随。
+        if ((event.target as HTMLElement).closest?.('[data-user-msg-nav]')) return
         lockFollowOutput()
         markScrollIntent()
         if (event.deltaY < 0) setPinnedAtBottom(false)
@@ -930,6 +985,7 @@ export default function Transcript({
           setScrollElement((current) => (current === nextElement ? current : nextElement))
         }}
         isScrolling={handleTranscriptScrolling}
+        rangeChanged={handleRangeChanged}
         itemContent={(index, row) => {
           // Per-row wrapper preserves the centered, padded column the old single
           // container provided; py-1.5 keeps the block rhythm tight (#9, Kimi Web feel).
@@ -978,6 +1034,7 @@ export default function Transcript({
           )
         }}
       />
+      <UserMessageNav entries={userNavEntries} activeId={activeUserNavId} onJump={jumpToUserMessage} />
       {!layoutTransitioning && !atBottom && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
           <button

@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.37 - 2026-07-28
+
+### 中文
+
+- 修复:跨目录切换会话会真实新建空会话(#47,CDP 复现铁证)。根因:openSessionCrossProject 借道 switchProject,后者无条件 startSession 全新空壳;空壳 session/new 在途时治理跳过删除,永久落盘。现跨项目打开只 setLastProject + openSession(带 targetCwd,attach/重放走原有路径),实测 A→B→A 往返零新增且回程命中后台 attach。
+- 新增:用户消息定位导航条(#48,Kimi Web 同款)。对话区右缘一列细条(每条用户消息一节),hover 展开摘要面板(前 24 字,最多 30 条),当前视口消息高亮,点击平滑跳转;跳转与滚动意图体系协调(离开底部阅读,回底自动恢复跟随)。
+
+### English
+
+- Fixed: switching sessions across directories created real empty sessions (#47, reproduced via CDP). Root cause: openSessionCrossProject borrowed switchProject, which unconditionally starts a fresh session shell; the in-flight shell escaped cleanup and persisted. Cross-project open now only sets lastProject and calls openSession with a target cwd — A→B→A round trips create zero new sessions and hit background attach on return.
+- Added: user-message navigation rail (#48, Kimi Web style) — a right-edge rail of ticks (one per user message), hover expands a summary panel (24-char previews, up to 30), the in-viewport message is highlighted, and clicking smooth-scrolls to it, integrated with the scroll-intent system.
+
+#### 验证
+
+- #47 CDP 复现修复前后对照(零新增、attach 命中、空壳治理无误删)
+- `npm run typecheck` 与 `npm run build` 全绿
+
 ## v1.0.36 - 2026-07-28
 
 ### 中文

@@ -200,7 +200,7 @@ interface SessionStore {
   answerElicitation: (toolUseID: string, optionId: string) => Promise<void>
   loadMoreSessions: () => Promise<void>
   newChat: () => Promise<void>
-  openSession: (sdkSessionId: string, backend?: ClaudeExecutionBackend) => Promise<void>
+  openSession: (sdkSessionId: string, backend?: ClaudeExecutionBackend, targetCwd?: string) => Promise<void>
   prefetchSessionHistory: (sdkSessionId: string, backend?: ClaudeExecutionBackend) => Promise<void>
   pruneSessionHistoryCache: (visibleSessionIds: string[]) => void
   setTranscriptScrolling: (scrolling: boolean) => void
@@ -1893,12 +1893,24 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const meta = get().meta
     if (!meta) return
     // 先切到该会话所属项目，再 resume（不在原项目里跨 cwd load）。
-    // #42 打开会话只切换 cwd（switchProject → setLastProject），绝不 addProject：
-    // 项目列表只收录用户显式添加的目录，脏会话的 cwd 不会混进工作区列表。
+    // #42 打开会话只切换 cwd（setLastProject），绝不 addProject：项目列表只收录
+    // 用户显式添加的目录，脏会话的 cwd 不会混进工作区列表。
+    // #47 只换 cwd，绝不走 switchProject：它会 startSession 一个全新空壳，而
+    // 随后的 openSession 只把它后台化（closeSession=background，不置 closed），
+    // discardEmptyShell 在 session/new 在途时拿不到 acpSessionId 直接跳过——
+    // 空壳就此落盘残留在目标项目（侧栏多出 "New Session"）。cwd 以 targetCwd
+    // 参数传给 openSession 而不提前改 meta：openSession 进去第一件事就是把当前
+    // 会话快照进后台缓冲，缓冲的 cwd 必须还是旧项目的，否则跨项目切回时
+    // attach 的 cwd 比对永远失配、历史缓存失效键也指错目录。
     if (cwd && normalizeCwdForCompare(cwd) !== normalizeCwdForCompare(meta.cwd)) {
-      await get().switchProject(cwd)
+      await window.api.setLastProject(cwd)
+      set({ sessions: [], sessionsHasMore: false })
+      await get().openSession(sdkSessionId, backend, cwd)
+    } else {
+      await get().openSession(sdkSessionId, backend)
     }
-    await get().openSession(sdkSessionId, backend)
+    // 侧栏列表还停在原项目：按新 cwd 重拉（openSession 仅 attach 分支会刷新）。
+    void get().refreshSessions()
   },
 
   async loadMoreSessions() {
@@ -2029,12 +2041,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     scheduleInitWatchdog(get, set, newId)
   },
 
-  async openSession(sdkSessionId: string, backend?: ClaudeExecutionBackend) {
+  async openSession(sdkSessionId: string, backend?: ClaudeExecutionBackend, targetCwd?: string) {
     const meta = get().meta
     if (!meta) return
     if (meta.sdkSessionId === sdkSessionId) return
     cancelActiveHistoryHydration()
-    const { cwd, model, permissionMode, agentBackend } = meta
+    const { model, permissionMode, agentBackend } = meta
+    // #47 跨项目打开时目标 cwd 由 openSessionCrossProject 以参数传入：meta.cwd
+    // 保持旧项目直到快照完成（后台缓冲的 cwd 用于切回 attach 比对与缓存失效）。
+    const cwd = targetCwd ?? meta.cwd
     // resume 不会带回会话模式（init 恒报 default）：优先用本地记住的该会话
     // 模式，其次沿用当前会话的模式，并在 startSession 时显式下发。
     const restoredMode: PermissionMode = readStoredPermissionMode(sdkSessionId) ?? (permissionMode as PermissionMode)
