@@ -43,6 +43,11 @@ interface ActiveClaudeSession {
   closed: boolean
   ready: Promise<void>
   lastUsage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number }
+  /** system/init 上报的上下文窗口（result.modelUsage 里才有真值，见 handleMessage）。 */
+  contextSize?: number
+  /** system/init 的 mcp_servers / slash_commands 快照。 */
+  mcpServers: McpServerEntry[]
+  skills: SkillInfo[]
 }
 
 /** Tran 的权限档 → Claude Code 的 --permission-mode（`claude --help` 实证值）。 */
@@ -53,8 +58,51 @@ const PERMISSION_MODE_MAP: Record<string, string> = {
   yolo: 'bypassPermissions'
 }
 
-/** 上下文窗口缺省值（Claude Code 的 result 帧不上报窗口上限）。 */
-const CLAUDE_CONTEXT_SIZE = 200_000
+/** 首个 result 帧到达前的兜底窗口值。真值来自 result.modelUsage
+ *  （实测 claude-sonnet-5 为 1_000_000）。 */
+const CLAUDE_CONTEXT_FALLBACK = 200_000
+
+/** system/init 的 mcp_servers → Tran 的 McpServerEntry。CLI 只给 name/status，
+ *  不给工具明细，面板据此显示。 */
+function parseInitMcpServers(value: unknown): McpServerEntry[] {
+  if (!Array.isArray(value)) return []
+  const out: McpServerEntry[] = []
+  for (const raw of value) {
+    const rec = asRecord(raw)
+    const name = rec ? asString(rec.name) : undefined
+    if (!name) continue
+    const status = rec ? asString(rec.status) : undefined
+    out.push({
+      name,
+      status:
+        status === 'connected' || status === 'failed' || status === 'needs-auth' || status === 'disabled'
+          ? status
+          : 'pending'
+    })
+  }
+  return out
+}
+
+/** slash_commands（字符串数组）或 commands（对象数组）→ SkillInfo。 */
+function parseInitSkills(value: unknown): SkillInfo[] {
+  if (!Array.isArray(value)) return []
+  const out: SkillInfo[] = []
+  for (const raw of value) {
+    if (typeof raw === 'string') {
+      out.push({ name: raw, description: '' })
+      continue
+    }
+    const rec = asRecord(raw)
+    const name = rec ? asString(rec.name) : undefined
+    if (!name) continue
+    out.push({
+      name,
+      description: (rec ? asString(rec.description) : undefined) ?? '',
+      ...(rec && asString(rec.argumentHint) ? { argumentHint: asString(rec.argumentHint) as string } : {})
+    })
+  }
+  return out
+}
 
 /** Composer 下拉的默认模型（别名形式，Claude Code 自行解析到具体版本）。 */
 const CLAUDE_MODELS: ComposerModel[] = [
@@ -93,6 +141,8 @@ export class ClaudeBackend {
       queue: [],
       running: false,
       closed: false,
+      mcpServers: [],
+      skills: [],
       ready: Promise.resolve()
     }
     this.sessions.set(sessionId, session)
@@ -147,20 +197,48 @@ export class ClaudeBackend {
       // Claude 回报的 session_id 是权威值（resume 时可能与请求的不同）。
       const reported = asString(message.session_id)
       if (reported) session.claudeSessionId = reported
+      session.mcpServers = parseInitMcpServers(message.mcp_servers)
+      session.skills = parseInitSkills(message.slash_commands)
       this.markRunning(session, false)
     }
 
-    if (type === 'stream_event' || type === 'assistant') {
-      // 有输出即视为该轮在跑（Claude Code 不单独推 turn 开始信号）。
-      if (!session.running) this.markRunning(session, true)
+    // 实测：turn 起止有明确信号，不必从 stream_event 反推。
+    //   {"type":"system","subtype":"status","status":"requesting"}
+    if (type === 'system' && message.subtype === 'status') {
+      if (asString(message.status) === 'requesting') this.markRunning(session, true)
+    }
+
+    // 实测：--replay-user-messages 的回显带 isReplay:true。它只是「已收到」的
+    // 确认信号，转发给渲染层会变成重复的用户气泡。
+    if (type === 'user' && message.isReplay === true) return
+
+    // 实测：斜杠命令是单独一帧推的（system/commands_changed），不只在 init 里。
+    if (type === 'system' && message.subtype === 'commands_changed') {
+      session.skills = parseInitSkills(message.commands)
     }
 
     if (type === 'result') {
       const usage = asRecord(message.usage)
       if (usage) {
+        const input = typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined
+        const output = typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined
         session.lastUsage = {
-          ...(typeof usage.input_tokens === 'number' ? { inputTokens: usage.input_tokens } : {}),
-          ...(typeof usage.output_tokens === 'number' ? { outputTokens: usage.output_tokens } : {})
+          ...(input !== undefined ? { inputTokens: input } : {}),
+          ...(output !== undefined ? { outputTokens: output } : {}),
+          ...(input !== undefined && output !== undefined ? { totalTokens: input + output } : {})
+        }
+      }
+      // 实测：result.modelUsage.<model>.contextWindow 才是真实窗口
+      //（sonnet-5 实测 1_000_000），不要按模型名猜。
+      const modelUsage = asRecord(message.modelUsage)
+      if (modelUsage) {
+        for (const entry of Object.values(modelUsage)) {
+          const rec = asRecord(entry)
+          const window = rec && typeof rec.contextWindow === 'number' ? rec.contextWindow : undefined
+          if (window) {
+            session.contextSize = window
+            break
+          }
         }
       }
       this.markRunning(session, false)
@@ -283,14 +361,17 @@ export class ClaudeBackend {
 
   // --- 阶段 2 待实现（先返回空值，不影响会话主流程） ---
 
-  /** TODO(阶段 2)：`claude mcp list --json` 或 stream-json 的 system/init
-   *  里的 mcp_servers 字段。 */
-  async listMcpServers(_sessionId: string): Promise<McpServerEntry[]> {
-    return []
+  /** system/init 的 mcp_servers 快照（实测该字段存在，形如
+   *  [{name, status}]；工具明细 CLI 不给，面板显示为无工具列表）。 */
+  async listMcpServers(sessionId: string): Promise<McpServerEntry[]> {
+    const session = this.sessions.get(sessionId)
+    await session?.ready.catch(() => {})
+    return [...(session?.mcpServers ?? [])]
   }
 
-  async refreshMcpServers(_sessionId: string): Promise<McpServerEntry[]> {
-    return []
+  /** CLI 侧没有「重连 MCP」的通道，只能返回最近一次 init 的快照。 */
+  async refreshMcpServers(sessionId: string): Promise<McpServerEntry[]> {
+    return this.listMcpServers(sessionId)
   }
 
   async toggleMcpServer(_sessionId: string, _name: string, _enabled: boolean): Promise<void> {
@@ -301,9 +382,11 @@ export class ClaudeBackend {
     return false
   }
 
-  /** TODO(阶段 2)：system/init 会带 slash_commands 列表。 */
-  async listSkills(_sessionId: string): Promise<SkillInfo[]> {
-    return []
+  /** system/init 与 system/commands_changed 都会带命令列表（实测）。 */
+  async listSkills(sessionId: string): Promise<SkillInfo[]> {
+    const session = this.sessions.get(sessionId)
+    await session?.ready.catch(() => {})
+    return [...(session?.skills ?? [])]
   }
 
   async getSessionUsage(sessionId: string): Promise<SessionUsageInfo> {
@@ -312,8 +395,7 @@ export class ClaudeBackend {
     return {
       ...(usage?.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
       ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
-      // TODO(阶段 2)：按模型查表。Claude Code 的 result 帧不带窗口上限。
-      contextSize: CLAUDE_CONTEXT_SIZE,
+      contextSize: session?.contextSize ?? CLAUDE_CONTEXT_FALLBACK,
       ...(session?.model ? { model: session.model } : {})
     }
   }

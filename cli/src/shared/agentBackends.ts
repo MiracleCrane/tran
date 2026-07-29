@@ -47,11 +47,12 @@ export const AGENT_BACKENDS: AgentBackendInfo[] = [
     runtimeModes: ['windows'],
     capabilities: {
       streaming: true,
-      // 阶段 2 待接：权限弹窗（当前由 --permission-mode 在 CLI 侧决策）、
-      // MCP 面板、技能、会话历史列表。
+      // 权限弹窗仍待接（当前由 --permission-mode 在 CLI 侧决策，Tran 不弹窗）；
+      // 会话历史列表待接。MCP 与技能已从 system/init 拿到（实测该帧带
+      // mcp_servers 与 slash_commands）。
       permissions: false,
-      mcp: false,
-      skills: false,
+      mcp: true,
+      skills: true,
       sessionHistory: false,
       subagents: true
     }
