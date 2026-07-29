@@ -328,6 +328,14 @@ export default function Composer(): JSX.Element {
   const heightBoundsRef = useRef(heightBounds)
   const resizeCancelRef = useRef<(() => void) | null>(null)
   const attachmentActionSeqRef = useRef(0)
+  // Composer 常驻挂载，切会话不重建组件。草稿文本按 draftKey 隔离，附件此前
+  // 没有——在 A 会话加了附件不发、切到 B，附件会跟着 B 一起发出去。切换时
+  // 清空，并递增 seq 作废在途的异步读取（readFiles / FileReader），
+  // 否则切换后才 resolve 的那批会把上一个会话的文件追加进来。
+  useEffect(() => {
+    setAttachments([])
+    ++attachmentActionSeqRef.current
+  }, [draftKey])
   const dragDepth = useRef(0)
   const [dragActive, setDragActive] = useState(false)
   const [dropError, setDropError] = useState<string | null>(null)
@@ -720,6 +728,15 @@ export default function Composer(): JSX.Element {
   }
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
+    // 输入法组词期间不响应回车/上下键。
+    //
+    // 实测（Chromium 141）：真实 Windows 输入法确认候选词时，keydown 的
+    // key 是 "Process"、keyCode 229，不会命中下面的 'Enter' 分支——所以这
+    // 不是当前会稳定复现的 bug，属于补齐防御。但合成事件（CDP）与部分第三方
+    // 输入法确实会派发 isComposing=true 的 Enter，此时若不拦，会把没上屏的
+    // 拼音当消息发出去，且 preventDefault 还会吞掉选字确认。
+    // 上下键同理：组词时那是在选候选词，不该被历史/斜杠菜单抢走。
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
       e.preventDefault() // 别触发浏览器保存
       void cutInSubmit()

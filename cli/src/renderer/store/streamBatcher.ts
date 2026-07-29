@@ -193,6 +193,12 @@ function flushAll(): void {
 
 /** Entry point wired to window.api.onAgentEvent in App.tsx. */
 export function pushAgentEvent(e: AgentEvent): void {
+  // 限速只服务于「看得见的那一路」。后台会话的 delta 直接落各自缓冲：
+  // 它们不上屏，进队列只会挤占前台的每帧字符预算，让可见文字变慢甚至卡住；
+  // 后台会话的结构性事件同理不该 flush 前台缓冲（不同会话状态互相独立，
+  // 顺序是按会话保证的），否则前台会被迫整块吐字，破坏匀速打字机。
+  const isForeground = e.sessionId === useSessionStore.getState().meta?.sessionId
+
   if (isContentBlockDelta(e)) {
     // isContentBlockDelta already confirmed this is an agent:message whose
     // event is a content_block_delta; narrow to the message variant to read it.
@@ -201,12 +207,19 @@ export function pushAgentEvent(e: AgentEvent): void {
       parent_tool_use_id: string | null
       event: Record<string, unknown>
     }
-    pending.push({
+    const batch: StreamDeltaBatch = {
       sessionId: e.sessionId,
       fallbackId: msg.uuid,
       parent: msg.parent_tool_use_id ?? null,
       event: msg.event
-    })
+    }
+    if (!isForeground) {
+      // 后台：立即折进该会话的缓冲（applyStreamBatch 按 sessionId 路由），
+      // 不排队、不计入预算、不触发 rAF。
+      useSessionStore.getState().applyStreamBatch([batch])
+      return
+    }
+    pending.push(batch)
     const t = deltaTextOf(msg.event)
     probeArrival(t?.value.length ?? 0, t?.key === 'text' ? 'text' : t?.key === 'thinking' ? 'thinking' : 'other')
     if (rafId === null) {
@@ -216,7 +229,7 @@ export function pushAgentEvent(e: AgentEvent): void {
   }
   // Structural / non-delta event: flush any buffered deltas first (in order),
   // then apply the event immediately so it sees the up-to-date state.
-  flushAll()
+  if (isForeground) flushAll()
   useSessionStore.getState().ingestAgentEvent(e)
 }
 

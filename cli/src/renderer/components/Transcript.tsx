@@ -424,9 +424,14 @@ const AssistantMessage = memo(function AssistantMessage({
           {item.error}
         </div>
       )}
+      {/* key 用「过滤前」的原始下标：blocks 在流式期间会出现空洞（子代理事件
+          交错，见文件头注释）。若用过滤后的下标做 key，空洞被填上时后续块的
+          key 会整体前移，React 认为是不同元素——工具卡片被 remount，展开状态、
+          滚动位置丢失或错位。原始下标不随空洞填充而变。 */}
       {item.blocks
-        .filter((b): b is AssistantBlock => !!b)
-        .map((block, i) => {
+        .map((block, index) => ({ block, index }))
+        .filter((entry): entry is { block: AssistantBlock; index: number } => !!entry.block)
+        .map(({ block, index: i }) => {
           if (block.kind === 'text') {
             const highlight = !isStreaming && !deferHighlight
             const md = <MessageText highlight={highlight}>{block.text}</MessageText>

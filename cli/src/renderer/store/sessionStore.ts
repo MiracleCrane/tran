@@ -283,6 +283,26 @@ interface SessionHistoryCacheEntry {
 const sessionHistoryCache = new Map<string, SessionHistoryCacheEntry>()
 const sessionStartPromises = new Map<string, Promise<void>>()
 
+/** 每条缓存都存着一份完整的会话记录副本（cloneTranscriptItems）。
+ *  lastTouched 一直在写但从没被用于淘汰，缓存只能靠外部调用
+ *  pruneSessionHistoryCache 收缩——跨项目翻会话时会一路涨上去。 */
+const SESSION_HISTORY_CACHE_MAX = 24
+
+/** LRU 淘汰：按 lastTouched 最旧的先丢。在途请求（只有 promise 没有 items）
+ *  不动，丢掉会让等待方拿不到结果。 */
+function evictSessionHistoryCache(): void {
+  if (sessionHistoryCache.size <= SESSION_HISTORY_CACHE_MAX) return
+  const evictable = [...sessionHistoryCache.entries()]
+    .filter(([, entry]) => entry.items !== undefined)
+    .sort((a, b) => a[1].lastTouched - b[1].lastTouched)
+  let excess = sessionHistoryCache.size - SESSION_HISTORY_CACHE_MAX
+  for (const [key] of evictable) {
+    if (excess <= 0) break
+    sessionHistoryCache.delete(key)
+    excess -= 1
+  }
+}
+
 /** #29 直达发送（非排队）后尚未被 agent 确认收到的用户消息：turn 以错误收尾
  *  （典型：僵尸 turn "another turn is active"）时回收到 pendingQueue，走 #20 的
  *  重发/清空出路，避免消息只剩一个气泡却被吞。agent 回显（user echo）或成功
@@ -384,6 +404,7 @@ function loadSessionHistory(
             items: cloneTranscriptItems(items),
             lastTouched: Date.now()
           })
+          evictSessionHistoryCache()
         }
       }
       return items
@@ -868,11 +889,18 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
     swarmTasks: s.swarmTasks,
     modePanel: s.modePanel
   })
+  // 优先淘汰空闲会话；全都在跑时（长 turn 叠着开）此前直接 break，Map 会
+  // 无上限增长——每个缓冲还在持续累积 items，底下的 bridge 会话也不释放。
+  // 超出硬上限后按插入序淘汰最旧的，哪怕它还在跑。
+  const HARD_CAP = BACKGROUND_SESSION_CAP * 2
   while (backgroundSessions.size > BACKGROUND_SESSION_CAP) {
-    const oldest = [...backgroundSessions.values()].find((bg) => !bg.running)
-    if (!oldest) break
-    backgroundSessions.delete(oldest.bridgeSessionId)
-    void window.api.destroySession(oldest.bridgeSessionId).catch(() => {})
+    const idle = [...backgroundSessions.values()].find((bg) => !bg.running)
+    const victim = idle ?? (backgroundSessions.size > HARD_CAP
+      ? backgroundSessions.values().next().value
+      : undefined)
+    if (!victim) break
+    backgroundSessions.delete(victim.bridgeSessionId)
+    void window.api.destroySession(victim.bridgeSessionId).catch(() => {})
   }
 }
 
@@ -1277,6 +1305,18 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
   }
 }
 
+/** 上一个在飞的 init 看门狗。每次导航都会排一个 60s 定时器，此前从不取消，
+ *  快速切会话时会攒下一堆（虽有 starting/sessionId 守卫不会误触发，但闭包
+ *  会被白留 60 秒）。同一时刻只需要一个。 */
+let initWatchdogTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelInitWatchdog(): void {
+  if (initWatchdogTimer !== null) {
+    clearTimeout(initWatchdogTimer)
+    initWatchdogTimer = null
+  }
+}
+
 /** If the SDK never sends system/init (e.g. the API backend hangs), unblock the
  *  UI after a timeout so the user can retry via New chat. */
 function scheduleInitWatchdog(
@@ -1284,7 +1324,9 @@ function scheduleInitWatchdog(
   set: (fn: (s: SessionStore) => Partial<SessionStore>) => void,
   sessionId?: string
 ): void {
-  setTimeout(() => {
+  cancelInitWatchdog()
+  initWatchdogTimer = setTimeout(() => {
+    initWatchdogTimer = null
     if (get().starting && (!sessionId || get().meta?.sessionId === sessionId)) {
       set((s) => ({
         starting: false,
@@ -1410,6 +1452,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         sessionConfigDirty: false,
         sessionModelDirty: false,
         bridgeEnded: false,
+        slashCommands: [],
         planEntries: [],
         contextUsage: null,
         mcpServers: null,
@@ -1696,6 +1739,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       bridgeEnded: false,
       sessions: [],
       sessionsHasMore: false,
+      slashCommands: [],
       planEntries: [],
       contextUsage: null,
       mcpServers: null,
@@ -1850,12 +1894,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   async answerElicitation(toolUseID, optionId) {
     // elicitation：原样回传用户点选的 optionId（answers 通道），从队列移除。
+    const removed = get().elicitationQueue.filter((q) => q.toolUseID === toolUseID)
     set((s) => ({ elicitationQueue: s.elicitationQueue.filter((q) => q.toolUseID !== toolUseID) }))
-    await window.api.respondPermission({
-      toolUseID,
-      behavior: 'allow',
-      answers: { optionId }
-    })
+    try {
+      await window.api.respondPermission({
+        toolUseID,
+        behavior: 'allow',
+        answers: { optionId }
+      })
+    } catch (error) {
+      // IPC 失败（桥接忙/已关闭）时把卡片放回去：先移除是为了界面即时反馈，
+      // 但不回滚的话卡片消失、agent 那一轮还在等一个用户再也给不了的回复。
+      if (removed.length) {
+        set((s) => ({ elicitationQueue: [...removed, ...s.elicitationQueue] }))
+      }
+      throw error
+    }
   },
 
   async refreshSessions() {
@@ -1992,6 +2046,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessionConfigDirty: false,
       sessionModelDirty: false,
       bridgeEnded: false,
+      slashCommands: [],
       planEntries: [],
       contextUsage: null,
       mcpServers: null,
@@ -2123,6 +2178,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessionConfigDirty: false,
       sessionModelDirty: false,
       bridgeEnded: false,
+      slashCommands: [],
       planEntries: [],
       contextUsage: null,
       mcpServers: null,
@@ -3054,9 +3110,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       ...(message ? { message } : {}),
       ...(answers ? { answers } : {})
     }
+    const removed = get().pendingPermissions.filter((p) => p.toolUseID === toolUseID)
     set((s) => ({
       pendingPermissions: s.pendingPermissions.filter((p) => p.toolUseID !== toolUseID)
     }))
-    await window.api.respondPermission(resp)
+    try {
+      await window.api.respondPermission(resp)
+    } catch (error) {
+      // 同 answerElicitation：回滚，否则授权弹窗消失而 turn 永远等不到回复。
+      if (removed.length) {
+        set((s) => ({ pendingPermissions: [...removed, ...s.pendingPermissions] }))
+      }
+      throw error
+    }
   }
 }))
