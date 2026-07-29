@@ -12,7 +12,7 @@ export interface UserNavEntry {
 
 interface UserMessageNavProps {
   entries: UserNavEntry[]
-  /** 当前视口顶部附近对应的条目 id（高亮），由 Transcript 按可见范围推导。 */
+  /** 当前视口顶部附近对应的条目 id（高亮），由 Transcript 按视口几何推导。 */
   activeId: string | null
   onJump: (rowIndex: number) => void
 }

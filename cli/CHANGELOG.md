@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.39 - 2026-07-29
+
+### 中文
+
+- 修复:正文流式仍卡顿(#8 第四轮,分型埋点定案)。思考到达 131 字/秒 > 限速 110(全程有水匀速),正文到达仅 84 字/秒 < 110(缓冲抽空退化跟随阵发)——统一限速对思考有效对正文失效。现分型限速:正文 75 字/秒(略低于平均到达,持续蓄水),思考/工具保持 110。确定性重放实测:正文 257/263 桶恒速、仅 1 次停顿(原 9 次)。埋点同步分型(`__streamProbe.dump()` 可分 thought/text 取数)。
+- 修复:导航条高亮偏移与长跳卡闪(#50)。高亮根因:react-virtuoso 的 rangeChanged 上报含 overscan 的渲染范围(顶部多 ~900px)非真实视口——改按 DOM 实际几何计算 + 贴底特判(在底部=高亮最新条);长跳(>40 行)改瞬时定位(原 smooth 边滚边重测高导致卡半途振荡)。真实 1195 条消息会话 CDP 复测:底部高亮正确、长跳 1.8s 一次到位零振荡。
+
+### English
+
+- Fixed: body-text streaming still stuttered (#8, round 4 — per-type instrumentation). Thinking arrives at 131 chars/s (above the 110 cap → always buffered, smooth), body text at only 84 chars/s (below the cap → buffer starves, display follows the bursts). Rates are now per-type: body 75 chars/s (just under average arrival), thinking/tools stay 110. Deterministic replay: 257/263 buckets steady with a single stall (was 9). The probe is per-type too (`__streamProbe.dump()`).
+- Fixed: nav-rail highlight offset and janky long jumps (#50). The highlight used virtuoso's overscan-inclusive range (≈900px above the real viewport) — now computed from actual DOM geometry with an at-bottom special case; long jumps (>40 rows) use instant positioning instead of smooth scrolling through re-measurements. Verified via CDP on the real 1195-message session: correct highlight, 1.8s single-shot jumps.
+
+#### 验证
+
+- 吐字:分型埋点 + 到达轨迹确定性重放;导航:真实长会话 CDP 复测三点
+- `npm run typecheck` 与 `npm run build` 全绿
+
 ## v1.0.38 - 2026-07-28
 
 ### 中文

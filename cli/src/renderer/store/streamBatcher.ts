@@ -26,11 +26,20 @@ import { probeArrival, probeFlush } from '../utils/streamProbe'
  * applyStreamEvent), so splitting is order-safe.
  *
  * Base-rate choice (#8 第三轮，埋点实测): kimi 后端的到达本身就是阵发的——
- * 实测瞬时 200~480 字/秒的一阵（20~48 字/100ms），随后 0.2~0.7s 完全静默，
- * 全程平均只有 ~88 字/秒。基础速率若高于平均到达（此前的 280），积压恒为 0、
- * 限速器从不启动，显示=忠实跟随到达："快一阵、卡一下"。基础速率降到贴近
- * 平均到达（110）后，阵发期蓄水、静默期放水，日常亚秒级间隙被熨平成
- * 匀速打字机；秒级以上的思考/工具停顿缓冲终会耗尽，那是到达侧的物理极限。
+ * 实测瞬时 200~480 字/秒的一阵（20~48 字/100ms），随后 0.2~0.7s 完全静默。
+ * 基础速率若高于平均到达（此前的 280），积压恒为 0、限速器从不启动，
+ * 显示=忠实跟随到达："快一阵、卡一下"。基础速率降到贴近平均到达后，
+ * 阵发期蓄水、静默期放水，日常亚秒级间隙被熨平成匀速打字机；
+ * 秒级以上的思考/工具停顿缓冲终会耗尽，那是到达侧的物理极限。
+ *
+ * 分类型基础速率（#8 第四轮，分型埋点实测）: 两类 delta 的平均到达速率
+ * 不同——思考块 ~131 字/秒、正文块 ~84 字/秒（正文含代码，突发更疏、
+ * 停顿更多）。统一的 110 对思考是"低于到达"（积压中位 ~350 字，全程
+ * 零停顿，释放恒 9~14 字/100ms），对正文却是"高于到达"（积压频繁归零，
+ * 显示退化为跟随到达：9% 桶停 0、10% 桶冲 15+ 字）。故正文单独用更低
+ * 的基础速率（75，略低于其平均到达 84），让正文也能持续蓄水熨平阵发；
+ * 代价是长输出末段会比生成慢几个字/秒，块末 flushAll 一次放掉余量。
+ * 速率按队首 delta 的类型选取：思考在前按思考速率、正文在前按正文速率。
  *
  * Ordering is preserved: any NON-delta event (block start/stop, message_start,
  * the final `assistant`/`result`, tool progress, system, agent:ended) flushes
@@ -40,13 +49,17 @@ import { probeArrival, probeFlush } from '../utils/streamProbe'
 let pending: StreamDeltaBatch[] = []
 let rafId: number | null = null
 
-/** Constant base rate (~1.8 chars/frame at 60fps). Time-based, so the cadence
- *  is identical on 120Hz+ displays — a per-frame budget would double there.
- *  Deliberately close to (just above) the backend's measured long-run average
- *  arrival (~88 chars/s): low enough that burst water covers the sub-second
- *  silences between bursts, high enough that the display never falls
- *  progressively behind on long outputs — see the header comment. */
+/** Default (thinking / tool-input) base rate (~1.8 chars/frame at 60fps).
+ *  Time-based, so the cadence is identical on 120Hz+ displays — a per-frame
+ *  budget would double there. Just below the thinking deltas' measured
+ *  long-run average arrival (~131 chars/s), so burst water covers the
+ *  sub-second silences between bursts — see the header comment. */
 const BASE_CHARS_PER_SEC = 110
+/** Lower base rate for 正文 text deltas (#8 第四轮): their measured average
+ *  arrival (~84 chars/s) is below BASE, so at BASE the buffer runs dry and
+ *  the display degenerates to following the bursty arrival. 75 sits just
+ *  below that average, keeping water in the buffer to iron out bursts. */
+const TEXT_BASE_CHARS_PER_SEC = 75
 /** Below this backlog the rate stays at the base rate — the backlog only
  *  buffers, it never changes the cadence. */
 const HIGH_WATER_CHARS = 800
@@ -139,20 +152,30 @@ function flushFrame(): void {
   lastFlushAt = now
   const backlog = pendingChars()
   const excess = Math.max(0, backlog - HIGH_WATER_CHARS)
-  const rate = Math.min(MAX_CHARS_PER_SEC, BASE_CHARS_PER_SEC + excess * RAMP_CHARS_PER_SEC)
+  // 基础速率按队首 delta 类型选取（正文更低，见 TEXT_BASE 注释）。
+  const base = deltaTextOf(pending[0].event)?.key === 'text' ? TEXT_BASE_CHARS_PER_SEC : BASE_CHARS_PER_SEC
+  const rate = Math.min(MAX_CHARS_PER_SEC, base + excess * RAMP_CHARS_PER_SEC)
   carry += rate * dt
   const budget = Math.floor(carry)
   carry -= budget
   const batch = drainBudget(budget)
-  probeFlush(batchChars(batch), pendingChars())
+  const { textChars, thinkChars } = batchChars(batch)
+  probeFlush(textChars, thinkChars, pendingChars())
   useSessionStore.getState().applyStreamBatch(batch)
   if (pending.length > 0) rafId = requestAnimationFrame(flushFrame)
 }
 
-function batchChars(batch: StreamDeltaBatch[]): number {
-  let total = 0
-  for (const b of batch) total += deltaTextOf(b.event)?.value.length ?? 0
-  return total
+/** batch 中按块类型（正文/思考）分计的字符数。 */
+function batchChars(batch: StreamDeltaBatch[]): { textChars: number; thinkChars: number } {
+  let textChars = 0
+  let thinkChars = 0
+  for (const b of batch) {
+    const t = deltaTextOf(b.event)
+    if (!t) continue
+    if (t.key === 'text') textChars += t.value.length
+    else if (t.key === 'thinking') thinkChars += t.value.length
+  }
+  return { textChars, thinkChars }
 }
 
 /** Full drain used before structural events and on teardown: ordering and
@@ -184,7 +207,8 @@ export function pushAgentEvent(e: AgentEvent): void {
       parent: msg.parent_tool_use_id ?? null,
       event: msg.event
     })
-    probeArrival(deltaTextOf(msg.event)?.value.length ?? 0)
+    const t = deltaTextOf(msg.event)
+    probeArrival(t?.value.length ?? 0, t?.key === 'text' ? 'text' : t?.key === 'thinking' ? 'thinking' : 'other')
     if (rafId === null) {
       rafId = requestAnimationFrame(flushFrame)
     }

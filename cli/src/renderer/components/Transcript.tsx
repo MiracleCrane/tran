@@ -29,6 +29,11 @@ const TRANSCRIPT_BAR_SELECTOR = '.thinking-block, .tool-call-card'
 // #48 用户消息导航条：摘要截取长度与条目上限（超出只留最近若干条）。
 const USER_NAV_SUMMARY_CHARS = 24
 const USER_NAV_MAX_ENTRIES = 30
+// #48/#50 高亮判定：用户消息行顶距视口顶多少 px 内算"视口顶部附近"。
+const USER_NAV_TOP_SLACK_PX = 8
+// #50 长距跳转（行数差超过该值）用 auto 一次到位——动态高度列表里 smooth
+// 长跳会边滚边补渲染重测高，卡在半途并持续闪；短距保留 smooth 过渡感。
+const USER_NAV_SMOOTH_MAX_ROWS = 40
 /** #45 无历史附件时的共享空 Map（避免每次渲染新引用击穿 UserMessage memo）。 */
 const EMPTY_HISTORY_ATTACHMENTS: ReadonlyMap<string, UserAttachment[]> = new Map()
 
@@ -441,13 +446,25 @@ const AssistantMessage = memo(function AssistantMessage({
             )
           }
           if (block.kind === 'thinking') {
-            return (
+            const think = (
               <ThinkingBlock
-                key={i}
                 text={block.text}
                 streaming={isStreaming}
                 forceExpanded={expandedBlockKey === `${item.id}:thinking`}
               />
+            )
+            return (
+              <div key={i}>
+                {/* #8 埋点：思考块同样在流式期间记录渲染耗时（thinkMs），
+                    与正文块的 mdMs 对照。 */}
+                {isStreaming ? (
+                  <Profiler id={`stream-think-${item.id}:${i}`} onRender={probeRender}>
+                    {think}
+                  </Profiler>
+                ) : (
+                  think
+                )}
+              </div>
             )
           }
           return (
@@ -634,11 +651,18 @@ export default function Transcript({
 
   // #48 导航跳转 = 主动离开当前位置：解除底部钉住（若目标就在底部附近，落地
   // 后 atBottomStateChange 会自动恢复跟随），并记一次滚动意图（途中延迟高亮）。
+  // #50 长距跳转用 auto：1000+ 动态高度列表里 smooth 会边滚边补渲染重测高，
+  // 滚动动画被高度修正反复打断（半途卡住、目标附近持续闪），auto 一次到位。
   const jumpToUserMessage = (rowIndex: number): void => {
     lockFollowOutput()
     markScrollIntent()
     setPinnedAtBottom(false)
-    virtuosoRef.current?.scrollToIndex({ index: rowIndex, align: 'start', behavior: 'smooth' })
+    const distance = Math.abs(rowIndex - lastRenderedRangeRef.current.startIndex)
+    virtuosoRef.current?.scrollToIndex({
+      index: rowIndex,
+      align: 'start',
+      behavior: distance > USER_NAV_SMOOTH_MAX_ROWS ? 'auto' : 'smooth'
+    })
   }
 
   const userNavEntriesRef = useRef(userNavEntries)
@@ -646,18 +670,70 @@ export default function Transcript({
     userNavEntriesRef.current = userNavEntries
   }, [userNavEntries])
 
-  // #48 视口高亮：由 Virtuoso 上报的可见范围推导"视口顶部附近"的用户消息，
-  // 只在结论变化时 setState，滚动途中不反复重渲染。
-  const handleRangeChanged = (range: ListRange): void => {
-    const entries = userNavEntriesRef.current
-    let active: string | null = null
-    for (const entry of entries) {
-      if (entry.rowIndex <= range.startIndex + 1) active = entry.id
-      else break
+  // #50 高亮按 DOM 实际几何算（不再用 range.startIndex 启发式）：rangeChanged
+  // 上报的是含 overscan 的渲染范围，kimi 后端顶部多渲染 900px（约 2~4 条消息），
+  // 滚到底时 startIndex 远在视口顶之上，启发式会把高亮偏到更早的用户消息。
+  // 改为：scroller 滚动/渲染范围变化后，在 rAF 里取视口顶上方最后一条用户消息行。
+  const lastRenderedRangeRef = useRef<ListRange>({ startIndex: 0, endIndex: 0 })
+  const navHighlightFrameRef = useRef<number | null>(null)
+
+  const cancelNavHighlightFrame = (): void => {
+    if (navHighlightFrameRef.current !== null) {
+      window.cancelAnimationFrame(navHighlightFrameRef.current)
+      navHighlightFrameRef.current = null
     }
-    if (active === null && entries.length > 0) active = entries[0].id
+  }
+
+  const updateActiveUserNav = (): void => {
+    const entries = userNavEntriesRef.current
+    if (entries.length === 0) {
+      setActiveUserNavId((current) => (current === null ? current : null))
+      return
+    }
+    if (!scrollElement) return
+    let active: string | null = null
+    // 贴底特判：底部时视口顶可能还落在倒数第二条消息的回合里（最新一条完整
+    // 露在视口中），纯几何规则会少算一格——用户预期"在底部 = 高亮最新条"。
+    const distanceFromBottom = scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight
+    if (distanceFromBottom <= FOLLOW_RESUME_AT_BOTTOM_THRESHOLD_PX) {
+      active = entries[entries.length - 1].id
+    } else {
+      const scrollerTop = scrollElement.getBoundingClientRect().top
+      const nodes = scrollElement.querySelectorAll<HTMLElement>('[data-user-msg-id]')
+      for (const node of nodes) {
+        if (node.getBoundingClientRect().top - scrollerTop <= USER_NAV_TOP_SLACK_PX) {
+          active = node.dataset.userMsgId ?? null
+        } else {
+          break
+        }
+      }
+    }
+    // 视口顶上方没有用户消息行（或该行在导航窗口之外，被 MAX_ENTRIES 截掉）：
+    // 视同处于窗口之上，高亮首条——与旧启发式的边界行为一致。
+    if (active === null || !entries.some((entry) => entry.id === active)) {
+      active = entries[0].id
+    }
     setActiveUserNavId((current) => (current === active ? current : active))
   }
+
+  const scheduleActiveUserNavUpdate = (): void => {
+    if (navHighlightFrameRef.current !== null) return
+    navHighlightFrameRef.current = window.requestAnimationFrame(() => {
+      navHighlightFrameRef.current = null
+      updateActiveUserNav()
+    })
+  }
+
+  const handleRangeChanged = (range: ListRange): void => {
+    lastRenderedRangeRef.current = range
+    scheduleActiveUserNavUpdate()
+  }
+
+  // 会话切换/新消息改变条目后重算高亮（不依赖滚动事件）；scrollElement 晚于
+  // 条目就绪时（如 HMR 重挂）也要补一次，否则高亮会一直空到下次滚动。
+  useEffect(() => {
+    scheduleActiveUserNavUpdate()
+  }, [userNavEntries, scrollElement])
 
   const refreshReserveEligibleFromScroller = (element: HTMLElement | null = scrollElement): void => {
     if (!element) return
@@ -683,6 +759,7 @@ export default function Transcript({
     return () => {
       cancelBottomReserveScrollFrame()
       cancelBottomReserveRestoreFrame()
+      cancelNavHighlightFrame()
     }
   }, [])
 
@@ -691,6 +768,9 @@ export default function Transcript({
 
     const updateReserveEligibility = (): void => {
       refreshReserveEligibleFromScroller(scrollElement)
+      // #50 滚动即重算导航高亮（rAF 节流；短距 smooth 跳不触发 rangeChanged，
+      // 只靠 rangeChanged 会漏更新）。
+      scheduleActiveUserNavUpdate()
     }
 
     updateReserveEligibility()
@@ -838,8 +918,10 @@ export default function Transcript({
     appliedScrollingRef.current = false
     seenItemIdsRef.current.clear()
     clearScrollIntentTimer()
+    cancelNavHighlightFrame()
     setReserveEligible(true, true)
     setPinnedAtBottom(true)
+    setActiveUserNavId(null)
     setDeferHighlight(true)
     resumeHighlightAfter(INITIAL_HIGHLIGHT_DELAY_MS)
 
@@ -999,8 +1081,14 @@ export default function Transcript({
           const prevItem = prevRow && prevRow.kind === 'item' ? prevRow.node.item : null
           const curItem = row.kind === 'item' ? row.node.item : null
           const showHistoryDivider = !!prevItem?.isHistory && !!curItem && !curItem.isHistory
+          // #50 顶层用户消息行打标：导航高亮按 DOM 几何定位（见 updateActiveUserNav）。
+          const userMsgId =
+            row.kind === 'item' && row.node.item.kind === 'user' && envelopeTextOf(row.node) === null
+              ? row.node.item.id
+              : undefined
           return (
             <div
+              data-user-msg-id={userMsgId}
               className={`mx-auto w-full max-w-5xl px-6 py-1.5 ${isNew ? 'tran-msg-enter' : ''}`}
               style={isNew ? { animationDelay: `${Math.min(index * 24, 280)}ms` } : undefined}
             >
