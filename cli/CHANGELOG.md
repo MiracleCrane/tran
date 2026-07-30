@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.43 - 2026-07-30
+
+### 中文
+
+- 新增:界面风格开关(设置 → 外观 → 界面风格),玻璃 / 简约二选一,切换即时生效。默认仍是玻璃。简约风:面板不再描边和投影,分区靠背景深浅;「新建对话」降为次要按钮,强调色收回给「进行中」状态和发送键;你的发言从右侧气泡改为左对齐加一条竖线(贴日志、贴代码时更好读);AI 回复保持居中全宽,只在宽屏下封顶留白。
+- 修复:markdown 列表**没有项目符号**。Tailwind 的 preflight 会把 `ul/ol` 的 `list-style` 重置成 none,而样式里只补回了缩进、没补回符号 —— 于是所有分点都塌成「缩进的普通段落」,层级信息全丢。现写回圆点/数字,嵌套层级用不同符号区分。
+- 修复:AI 回复的加粗过重。`<strong>` 此前吃浏览器默认的 700,而字体栈里**没有中文字族**,中文回落到系统字体后 700 在深色底上会发胖。降到 600 并禁用合成粗体。
+
+### English
+
+- Added: UI style switch (Settings → Appearance), glass or minimal, applied instantly. Glass remains the default. Minimal drops panel borders and shadows in favor of background steps, demotes the "New chat" button, and renders your own messages left-aligned with an accent rule instead of a right-side bubble (much better for pasted logs and code). AI replies stay centered and full-width, capped only on wide screens.
+- Fixed: markdown lists had no bullets. Tailwind's preflight resets `list-style` to none and the stylesheet only restored the indent, so every list collapsed into indented prose and lost its structure.
+- Fixed: bold text in AI replies was too heavy — `<strong>` inherited the browser default 700, and with no CJK family in the font stack Chinese fell back to a system font that blooms at 700 on a dark background.
+
 ## v1.0.42 - 2026-07-30
 
 ### 中文
