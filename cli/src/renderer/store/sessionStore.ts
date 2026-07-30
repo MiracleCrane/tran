@@ -42,13 +42,34 @@ import { emitForgeEvent } from '../events'
  *  否则切走再切回来 chip 会被 init 覆盖回 default。 */
 const PERMISSION_MODE_KEY_PREFIX = 'forge.permissionMode.'
 
+/** localStorage 里的值是历史遗留，不能直接 as。取值集变过（也还会再变），
+ *  老版本写下的字符串会被原样重放给后端——后端拿到不认识的档位，行为不可预期。
+ *  校验一次，认不出就当没存过（回落到调用方给的默认档）。 */
+const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'plan', 'auto', 'yolo']
+
 function readStoredPermissionMode(sdkSessionId: string | undefined): PermissionMode | null {
   if (!sdkSessionId) return null
   try {
     const v = window.localStorage.getItem(PERMISSION_MODE_KEY_PREFIX + sdkSessionId)
-    return v ? (v as PermissionMode) : null
+    return v && (PERMISSION_MODES as readonly string[]).includes(v) ? (v as PermissionMode) : null
   } catch {
     return null
+  }
+}
+
+/**
+ * 删会话时把该会话在 localStorage 里的残留一并清掉：权限档 + 草稿。
+ *
+ * 不清的话这两样**永不过期**——权限档一个会话一个键，删了会话键还在；草稿在
+ * 那个 JSON blob 里同样留着。日积月累就是一堆指向已删会话的死键，而 localStorage
+ * 是有配额的，写满之后 setItem 开始抛异常（这里到处 catch 掉了，表现是"草稿
+ * 静默存不上"这种极难查的故障）。
+ */
+function forgetSessionLocalState(sdkSessionId: string): void {
+  try {
+    window.localStorage.removeItem(PERMISSION_MODE_KEY_PREFIX + sdkSessionId)
+  } catch {
+    /* ignore */
   }
 }
 
@@ -2345,6 +2366,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       /* ignore */
     }
     deleteSessionHistoryCache(meta.cwd, sessionId, backend)
+    forgetSessionLocalState(sessionId)
+    get().setComposerDraft(sessionId, '')
     set((s) => ({ sessions: s.sessions.filter((x) => x.sessionId !== sessionId) }))
     // Deleted the active conversation → start fresh.
     if (meta.sdkSessionId === sessionId) {
@@ -2378,6 +2401,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         deleted += 1
         deletedIds.add(target.sessionId)
         deleteSessionHistoryCache(meta.cwd, target.sessionId, target.backend)
+        forgetSessionLocalState(target.sessionId)
+        get().setComposerDraft(target.sessionId, '')
       } catch {
         failed += 1
       }
