@@ -377,7 +377,7 @@ export function registerIpc(
   ipcMain.handle('forge:nudgeTodos', async (_e, sessionId: unknown): Promise<boolean> => {
     // 开关在主进程再校验一次：渲染层已经判过，但这一轮**会真的花额度**，
     // 不能只靠调用方自觉。
-    if (loadSettings().autoTodoNudge === false) return false
+    if (loadSettings().autoTodoNudge !== true) return false
     return bridge.requestTodoNudge(requireString(sessionId, 'sessionId'))
   })
 

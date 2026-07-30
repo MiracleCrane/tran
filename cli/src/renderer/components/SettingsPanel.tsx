@@ -127,7 +127,7 @@ export default function SettingsPanel(): JSX.Element {
   const [nativeNotifications, setNativeNotifications] = useState(true)
   const [aiNaming, setAiNaming] = useState(true)
   const [summaryModel, setSummaryModel] = useState('')
-  const [autoTodoNudge, setAutoTodoNudge] = useState(true)
+  const [autoTodoNudge, setAutoTodoNudge] = useState(false)
   const [probing, setProbing] = useState(false)
   const [probes, setProbes] = useState<SummaryModelProbe[] | null>(null)
   const [diagnosing, setDiagnosing] = useState(false)
@@ -178,7 +178,7 @@ export default function SettingsPanel(): JSX.Element {
       setNativeNotifications(p.nativeNotifications !== false)
       setAiNaming(p.aiNamingEnabled !== false)
       setSummaryModel(p.summaryModel ?? '')
-      setAutoTodoNudge(p.autoTodoNudge !== false)
+      setAutoTodoNudge(p.autoTodoNudge === true)
       setAskOnClose(!p.closePromptDismissed)
       setLoaded(true)
     })
@@ -785,7 +785,7 @@ export default function SettingsPanel(): JSX.Element {
             />
             <ToggleControl
               label="后台任务结束后自动更新待办"
-              description="后台任务收尾且待办还有未完成项时，Tran 替你向 AI 发一次「更新待办」的请求，省得你手动发消息。⚠ 这是一次真实对话轮，会消耗订阅额度（远高于命名那类小请求）；同一批任务只发一次，只在会话空闲时发，发过会在待办卡片上标出来。"
+              description="后台任务收尾且待办还有未完成项时，Tran 替你向 AI 发一次「更新待办」的请求。⚠ 默认关闭：这是一次完整对话轮，要把整个会话上下文重新过一遍——实测一个 42 条记录的会话约 88000 token，是命名那类小请求（约 120 token）的七百倍。而且你下次随便发条消息，AI 本来就会收到后台任务的完成通知并更新待办，所以它买到的只是「提前」，不是「否则就不会更新」。愿意花这个额度换及时性再开。"
               checked={autoTodoNudge}
               onChange={(checked) => void toggleAutoTodoNudge(checked)}
             />

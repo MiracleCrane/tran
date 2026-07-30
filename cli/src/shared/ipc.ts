@@ -272,7 +272,7 @@ export interface Preferences {
   closePromptDismissed?: boolean
   /** AI 自动命名（会话短标题，默认开；关闭后不做任何云端命名调用）。 */
   aiNamingEnabled?: boolean
-  /** 后台任务收尾后自动催模型更新待办（默认开；会发一次真实 turn）。 */
+  /** 后台任务收尾后自动催模型更新待办（**默认关**；一次完整 turn，约 88k token）。 */
   autoTodoNudge?: boolean
   /** 总结类杂活（命名、命令说明、思考摘要…）共用的型号。空 = 默认
    *  `kimi-for-coding`（唯一实证可用的）。设置页可探测其他型号能否用。 */

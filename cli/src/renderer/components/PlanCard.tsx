@@ -55,7 +55,7 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
   useEffect(() => {
     void window.api
       .getPreferences()
-      .then((p) => setAutoNudge(p?.autoTodoNudge !== false))
+      .then((p) => setAutoNudge(p?.autoTodoNudge === true))
       .catch(() => setAutoNudge(false))
   }, [])
 
