@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { writeFileAtomic } from './atomicWrite'
+import { readJsonSafe, writeFileAtomic } from './atomicWrite'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { log } from './logger'
@@ -32,6 +32,9 @@ const REQUEST_TIMEOUT_MS = 20000
 const BATCH_INTERVAL_MS = 300
 
 let cache: Record<string, string> | null = null
+/** 读盘失败（区别于"文件不存在"）后本次运行不再写入：ai-titles.json 里每条
+ *  都是花过 token 换来的，空对象写回去等于把整份缓存烧掉、下次全部重算。 */
+let loadFailed = false
 
 function storePath(): string {
   return join(app.getPath('userData'), 'ai-titles.json')
@@ -39,16 +42,26 @@ function storePath(): string {
 
 function load(): Record<string, string> {
   if (cache) return cache
-  try {
-    const raw = JSON.parse(readFileSync(storePath(), 'utf8')) as unknown
-    cache = raw && typeof raw === 'object' ? (raw as Record<string, string>) : {}
-  } catch {
+  const read = readJsonSafe<unknown>(storePath())
+  if (read.status === 'failed') {
+    log('ai-titles', `ai-titles.json 读取失败，本次运行不再写入：${read.error.message}`)
     cache = {}
+    loadFailed = true
+    return cache
   }
+  const raw = read.status === 'ok' ? read.value : null
+  if (read.status === 'ok' && (!raw || typeof raw !== 'object' || Array.isArray(raw))) {
+    log('ai-titles', 'ai-titles.json 内容不是对象，本次运行不再写入')
+    cache = {}
+    loadFailed = true
+    return cache
+  }
+  cache = (raw as Record<string, string> | null) ?? {}
   return cache
 }
 
 function save(): void {
+  if (loadFailed) return
   try {
     writeFileAtomic(storePath(), JSON.stringify(load(), null, 1))
   } catch (error) {

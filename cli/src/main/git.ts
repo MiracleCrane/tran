@@ -2,23 +2,56 @@ import { spawn } from 'node:child_process'
 import type { GitBranchInfo, GitCommit, GitStatus } from '../shared/ipc'
 import { log } from './logger'
 
+/**
+ * 单次 git 调用的输出上限。
+ *
+ * `git diff` 的体量完全由仓库决定：重新生成的 lockfile、误提交的构建产物、
+ * 压缩包，随手就是几十上百 MB。全量缓冲会在主进程里堆成同样大的字符串，
+ * 再原样过 IPC 塞给渲染层——主进程内存暴涨、序列化把界面卡死。
+ * 超限即停读并标记截断：diff 视图本来也只看前面几屏。
+ */
+const MAX_GIT_OUTPUT_CHARS = 2 * 1024 * 1024
+const TRUNCATION_NOTICE = '\n[输出超过 2MB，已截断]'
+
+/** 只读查询（status/diff/log…）加 --no-optional-locks：默认的 git status 会
+ *  顺手刷新并**写**索引，Tran 在旁边轮询时会和 agent 自己跑的 git 抢
+ *  index.lock，让 agent 侧报 "Unable to create '.git/index.lock': File exists"。
+ *  这个全局选项让只读命令不碰锁。 */
+const READ_ONLY_GIT_FLAGS = ['--no-optional-locks']
+
 /** Run a git command. Returns { stdout, stderr } or throws on non-zero exit. */
 function runGit(cwd: string, args: string[], timeout = 10_000): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, { cwd })
     let out = ''
     let err = ''
+    let truncated = false
     const timer = setTimeout(() => {
       child.kill()
       reject(new Error(`git ${args.join(' ')} timed out after ${timeout}ms`))
     }, timeout)
 
-    child.stdout.on('data', (d: Buffer) => { out += d.toString() })
-    child.stderr.on('data', (d: Buffer) => { err += d.toString() })
+    child.stdout.on('data', (d: Buffer) => {
+      if (out.length >= MAX_GIT_OUTPUT_CHARS) return
+      out += d.toString()
+      if (out.length >= MAX_GIT_OUTPUT_CHARS) {
+        out = out.slice(0, MAX_GIT_OUTPUT_CHARS) + TRUNCATION_NOTICE
+        truncated = true
+        // 上游还在写就让它写完（提前关管道会给 git 一个 EPIPE/非零退出），
+        // 只是不再往缓冲里堆。
+      }
+    })
+    child.stderr.on('data', (d: Buffer) => {
+      if (err.length < 64 * 1024) err += d.toString()
+    })
     child.on('close', (code) => {
       clearTimeout(timer)
       if (code === 0) resolve({ stdout: out.trim(), stderr: err.trim() })
-      else {
+      else if (truncated) {
+        // 已经截断说明拿到的内容够用了：此时的非零退出码多半来自下游写管道
+        // 失败之类的次要原因，不该让整个 diff 视图报错。
+        resolve({ stdout: out.trim(), stderr: err.trim() })
+      } else {
         const details = [err.trim(), out.trim()].filter(Boolean).join('\n')
         reject(new Error(`git ${args.join(' ')} failed (${code}): ${details}`))
       }
@@ -33,7 +66,7 @@ function runGit(cwd: string, args: string[], timeout = 10_000): Promise<{ stdout
 /** Check if a directory is a git repo. */
 export async function isGitRepo(cwd: string): Promise<boolean> {
   try {
-    await runGit(cwd, ['rev-parse', '--git-dir'])
+    await runGit(cwd, [...READ_ONLY_GIT_FLAGS, 'rev-parse', '--git-dir'])
     return true
   } catch {
     return false
@@ -43,7 +76,7 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 /** Get current branch name, or null if detached/not a repo. */
 export async function getCurrentBranch(cwd: string): Promise<string | null> {
   try {
-    const { stdout } = await runGit(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])
+    const { stdout } = await runGit(cwd, [...READ_ONLY_GIT_FLAGS, 'rev-parse', '--abbrev-ref', 'HEAD'])
     return stdout === 'HEAD' ? null : stdout || null
   } catch (e: unknown) {
     log('git', `getCurrentBranch failed cwd=${cwd}: ${e instanceof Error ? e.message : String(e)}`)
@@ -55,7 +88,7 @@ export async function getCurrentBranch(cwd: string): Promise<string | null> {
 export async function listBranches(cwd: string): Promise<GitBranchInfo[]> {
   try {
     const current = await getCurrentBranch(cwd)
-    const { stdout } = await runGit(cwd, ['branch', '--format=%(refname:short)'])
+    const { stdout } = await runGit(cwd, [...READ_ONLY_GIT_FLAGS, 'branch', '--format=%(refname:short)'])
     return stdout.split('\n').filter(Boolean).map((name) => ({
       name,
       current: name === current
@@ -83,8 +116,6 @@ function assertRef(value: string, label: string): string {
 
 /** Switch to a branch (checkout). */
 export async function checkoutBranch(cwd: string, branch: string): Promise<void> {
-  // `--` 分隔选项与 ref：不加的话名为 `-D`、`--upload-pack=...` 之类的
-  // 分支名会被 git 当成选项解析（spawn 无 shell，不涉及 shell 注入）。
   await runGit(cwd, ['checkout', assertRef(branch, '分支名')])
 }
 
@@ -113,7 +144,7 @@ export async function push(cwd: string): Promise<{ stdout: string; stderr: strin
 async function getAheadBehind(cwd: string): Promise<{ ahead: number | null; behind: number | null }> {
   try {
     // left = upstream-only (we are behind), right = HEAD-only (we are ahead)
-    const { stdout } = await runGit(cwd, ['rev-list', '--left-right', '--count', '@{upstream}...HEAD'])
+    const { stdout } = await runGit(cwd, [...READ_ONLY_GIT_FLAGS, 'rev-list', '--left-right', '--count', '@{upstream}...HEAD'])
     const [behind, ahead] = stdout.split(/\s+/).map((n) => Number(n))
     return {
       ahead: Number.isFinite(ahead) ? ahead : null,
@@ -127,44 +158,52 @@ async function getAheadBehind(cwd: string): Promise<{ ahead: number | null; behi
 /** Get working tree status, parsed from porcelain -z. Unlike the line-based
  *  form, -z never quotes paths (so spaces / special chars survive intact) and
  *  puts each entry behind a NUL — which is what lets us also read rename
- *  source-paths (a second NUL token) and classify per the XY status pair. */
+ *  source-paths (a second NUL token) and classify per the XY status pair.
+ *
+ *  抛错版本：调用方要么容错（getStatus 的轮询），要么需要区分"干净"和
+ *  "读不出来"（commit 的前置检查）。 */
+async function readStatus(cwd: string): Promise<Omit<GitStatus, 'ahead' | 'behind'>> {
+  const { stdout } = await runGit(cwd, [...READ_ONLY_GIT_FLAGS, 'status', '--porcelain', '-z'])
+  const staged: string[] = []
+  const unstaged: string[] = []
+  const untracked: string[] = []
+  const conflicts: string[] = []
+
+  // -z separates entries with NUL. A rename/copy entry occupies TWO tokens
+  // (new path, then source path); every other entry is a single token.
+  const tokens = stdout.split('\0')
+  for (let i = 0; i < tokens.length; i++) {
+    const entry = tokens[i]
+    if (!entry) continue
+    const x = entry[0] // index (staged) status
+    const y = entry[1] // worktree (unstaged) status
+    const path = entry.slice(3)
+    if ((x === 'R' || x === 'C') && i + 1 < tokens.length) i++ // consume source-path token
+
+    if (x === '?' && y === '?') {
+      untracked.push(path)
+    } else if (x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D')) {
+      conflicts.push(path)
+    } else {
+      // A file can be both staged and unstaged (e.g. MM) — check each side.
+      if (x !== ' ' && x !== '?') staged.push(path)
+      if (y !== ' ' && y !== '?') unstaged.push(path)
+    }
+  }
+
+  const clean = !staged.length && !unstaged.length && !untracked.length && !conflicts.length
+  return { staged, unstaged, untracked, conflicts, clean }
+}
+
 export async function getStatus(cwd: string): Promise<GitStatus> {
   const empty: GitStatus = {
     staged: [], unstaged: [], untracked: [], conflicts: [],
     clean: true, ahead: null, behind: null
   }
   try {
-    const { stdout } = await runGit(cwd, ['status', '--porcelain', '-z'])
-    const staged: string[] = []
-    const unstaged: string[] = []
-    const untracked: string[] = []
-    const conflicts: string[] = []
-
-    // -z separates entries with NUL. A rename/copy entry occupies TWO tokens
-    // (new path, then source path); every other entry is a single token.
-    const tokens = stdout.split('\0')
-    for (let i = 0; i < tokens.length; i++) {
-      const entry = tokens[i]
-      if (!entry) continue
-      const x = entry[0] // index (staged) status
-      const y = entry[1] // worktree (unstaged) status
-      const path = entry.slice(3)
-      if ((x === 'R' || x === 'C') && i + 1 < tokens.length) i++ // consume source-path token
-
-      if (x === '?' && y === '?') {
-        untracked.push(path)
-      } else if (x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D')) {
-        conflicts.push(path)
-      } else {
-        // A file can be both staged and unstaged (e.g. MM) — check each side.
-        if (x !== ' ' && x !== '?') staged.push(path)
-        if (y !== ' ' && y !== '?') unstaged.push(path)
-      }
-    }
-
-    const clean = !staged.length && !unstaged.length && !untracked.length && !conflicts.length
+    const status = await readStatus(cwd)
     const { ahead, behind } = await getAheadBehind(cwd)
-    return { staged, unstaged, untracked, conflicts, clean, ahead, behind }
+    return { ...status, ahead, behind }
   } catch {
     return empty
   }
@@ -173,14 +212,27 @@ export async function getStatus(cwd: string): Promise<GitStatus> {
 /** git add (paths or '.' for all). */
 export async function add(cwd: string, paths?: string[]): Promise<void> {
   const args = ['add']
-  if (paths && paths.length > 0) args.push(...paths)
+  // `--` 把路径与选项分开：文件名以 `-` 开头（`-foo.txt`、agent 生成的临时文件）
+  // 会被 git 当成选项解析。add 的 `--` 语义就是「后面全是路径」，加上是安全的
+  // （不同于 checkout —— 那里 `--` 会把切分支变成恢复文件，见 assertRef 注释）。
+  if (paths && paths.length > 0) args.push('--', ...paths)
   else args.push('.')
   await runGit(cwd, args)
 }
 
 /** git commit with message. */
 export async function commit(cwd: string, message: string): Promise<void> {
-  const status = await getStatus(cwd)
+  // 走 readStatus（会抛）而不是 getStatus（吞错回空）：`git status` 失败时
+  // getStatus 报的是"干净的空状态"，于是 index.lock 被 agent 占着的时候，
+  // 用户看到的提示是"没有已暂存的改动"——完全指错方向。
+  let status: Omit<GitStatus, 'ahead' | 'behind'>
+  try {
+    status = await readStatus(cwd)
+  } catch (error) {
+    throw new Error(
+      `无法读取仓库状态，提交已中止：${error instanceof Error ? error.message : String(error)}`
+    )
+  }
   if (status.conflicts.length > 0) {
     throw new Error('存在冲突文件，请先解决冲突后再提交。')
   }
@@ -194,7 +246,7 @@ export async function commit(cwd: string, message: string): Promise<void> {
 export async function logCommits(cwd: string, limit = 20): Promise<GitCommit[]> {
   try {
     const fmt = '%H%n%h%n%s%n%an%n%at'
-    const { stdout } = await runGit(cwd, ['log', `--max-count=${limit}`, '--format=' + fmt])
+    const { stdout } = await runGit(cwd, [...READ_ONLY_GIT_FLAGS, 'log', `--max-count=${limit}`, '--format=' + fmt])
     const lines: string[] = []
     for (const l of stdout.split('\n')) lines.push(l)
 
@@ -217,7 +269,7 @@ export async function logCommits(cwd: string, limit = 20): Promise<GitCommit[]> 
 /** git stash operations. */
 export async function stash(cwd: string, action = 'push', message?: string): Promise<string> {
   if (action === 'list') {
-    const { stdout } = await runGit(cwd, ['stash', 'list'])
+    const { stdout } = await runGit(cwd, [...READ_ONLY_GIT_FLAGS, 'stash', 'list'])
     return stdout || ''
   }
   if (action === 'pop') {
@@ -242,7 +294,7 @@ export async function diff(
   cwd: string,
   opts: { staged?: boolean; paths?: string[] } = {}
 ): Promise<string> {
-  const args = ['diff']
+  const args = [...READ_ONLY_GIT_FLAGS, 'diff']
   if (opts.staged) args.push('--cached')
   if (opts.paths && opts.paths.length) args.push('--', ...opts.paths)
   const { stdout } = await runGit(cwd, args)

@@ -118,6 +118,13 @@ export function probeCommit(): void {
 
 /** 流式块 Profiler onRender：actualDuration 即该块 React 渲染耗时。
  *  Profiler id 前缀区分：stream-text- 正文块 / stream-think- 思考块。 */
+/**
+ * ⚠️ 目前未接线。此前由 Transcript 在流式期间用 <Profiler> 包裹文本/思考块调用，
+ * 但那个包裹层随 isStreaming 出现/消失，会在 turn 结束时把整块 remount
+ * （思考块折叠态丢失、markdown 整树重建）；而 Profiler 的 onRender 在生产构建
+ * 里根本不回调。要重新启用得改成**恒定存在**的包裹层（Profiler 一直挂着，
+ * 由本函数内部判断是否记账），不能再用条件包裹。
+ */
 export function probeRender(id: string, _phase: string, actualDuration: number): void {
   const b = currentBucket()
   if (id.startsWith('stream-think-')) {

@@ -1,8 +1,8 @@
-import { memo, Profiler, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
-import { probeCommit, probeRender } from '../utils/streamProbe'
+import { probeCommit } from '../utils/streamProbe'
 import type { AssistantBlock, AssistantItem, UserAttachment, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
 import MessageText from './MessageText'
 import { showImageContextMenu } from './ImageContextMenu'
@@ -372,11 +372,13 @@ const UserMessage = memo(function UserMessage({
             })}
           </div>
         )}
-        {/* #43 时间戳：绝对定位 + 悬停延迟显示（见 AssistantMessage 处注释）。 */}
-        {at !== undefined && (
-          <div className="tran-msg-time tran-msg-time-right">{formatMessageTime(at)}</div>
-        )}
       </div>
+      {/* #43 时间戳：绝对定位 + 悬停延迟显示，落在气泡左侧的留白里
+          （见 styles.css 的 .tran-msg-time 注释）。挂在外层 flex 容器上而不是
+          气泡里——气泡是靠右的，留白在它外面。 */}
+      {at !== undefined && (
+        <div className="tran-msg-time tran-msg-time-gutter-left">{formatMessageTime(at)}</div>
+      )}
     </div>
   )
 })
@@ -461,48 +463,36 @@ const AssistantMessage = memo(function AssistantMessage({
       {/* key 用「过滤前」的原始下标：blocks 在流式期间会出现空洞（子代理事件
           交错，见文件头注释）。若用过滤后的下标做 key，空洞被填上时后续块的
           key 会整体前移，React 认为是不同元素——工具卡片被 remount，展开状态、
-          滚动位置丢失或错位。原始下标不随空洞填充而变。 */}
+          滚动位置丢失或错位。原始下标不随空洞填充而变。
+
+          同理：块的包裹层不能随 isStreaming 变化。这里原先在流式期间套一层
+          <Profiler>（#8 埋点），turn 结束时 isStreaming 翻转，包裹层类型从
+          Profiler 变成 MessageText/ThinkingBlock——React 按位置比对类型不同即
+          卸载重建，代价是每轮结束都：思考块的用户折叠/展开状态被丢弃（最新块
+          会自己弹回展开）、正文 markdown 整棵树重建 + highlight.js 重跑（正好
+          卡在用户开始读答案的那一刻）。而 Profiler 的 onRender 在生产构建里
+          本就不回调（要 react-dom/profiling 才生效），纯负收益，故移除。 */}
       {item.blocks
         .map((block, index) => ({ block, index }))
         .filter((entry): entry is { block: AssistantBlock; index: number } => !!entry.block)
         .map(({ block, index: i }) => {
           if (block.kind === 'text') {
             const highlight = !isStreaming && !deferHighlight
-            const md = <MessageText highlight={highlight}>{block.text}</MessageText>
             return (
               <div key={i}>
-                {/* #8 埋点：流式期间用 Profiler 记录该块每帧 React 渲染耗时
-                    （mdMs），结束后回到普通渲染，零包裹开销。 */}
-                {isStreaming ? (
-                  <Profiler id={`stream-text-${item.id}:${i}`} onRender={probeRender}>
-                    {md}
-                  </Profiler>
-                ) : (
-                  md
-                )}
+                <MessageText highlight={highlight}>{block.text}</MessageText>
                 {isStreaming && <span className="tran-stream-cursor" aria-hidden />}
               </div>
             )
           }
           if (block.kind === 'thinking') {
-            const think = (
-              <ThinkingBlock
-                text={block.text}
-                streaming={isStreaming}
-                forceExpanded={expandedBlockKey === `${item.id}:thinking`}
-              />
-            )
             return (
               <div key={i}>
-                {/* #8 埋点：思考块同样在流式期间记录渲染耗时（thinkMs），
-                    与正文块的 mdMs 对照。 */}
-                {isStreaming ? (
-                  <Profiler id={`stream-think-${item.id}:${i}`} onRender={probeRender}>
-                    {think}
-                  </Profiler>
-                ) : (
-                  think
-                )}
+                <ThinkingBlock
+                  text={block.text}
+                  streaming={isStreaming}
+                  forceExpanded={expandedBlockKey === `${item.id}:thinking`}
+                />
               </div>
             )
           }
@@ -520,11 +510,12 @@ const AssistantMessage = memo(function AssistantMessage({
           输出中…
         </div>
       )}
-      {/* #43 时间戳：绝对定位 + 悬停延迟显示。
-          常驻显示时每条消息（含每个工具调用）都挂一行小字，既冗余又把
-          bar 之间的间距撑开；改成不占布局空间，鼠标停留 500ms 才淡入。 */}
-      {!isStreaming && at !== undefined && (
-        <div className="tran-msg-time tran-msg-time-left">{formatMessageTime(at)}</div>
+      {/* #43 时间戳：绝对定位 + 悬停延迟显示，落在容器右侧的留白里
+          （见 styles.css 的 .tran-msg-time 注释）。
+          只在 depth 0 显示：嵌套的子代理消息没有那条 92% 宽度限制，右侧没有
+          留白可用，标上去只会压在字上——顶层那条时间已经够定位了。 */}
+      {!isStreaming && at !== undefined && depth === 0 && (
+        <div className="tran-msg-time tran-msg-time-gutter-right">{formatMessageTime(at)}</div>
       )}
     </div>
   )
