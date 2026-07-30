@@ -619,9 +619,9 @@ export default function SettingsPanel(): JSX.Element {
             <div>
               <div className="text-xs text-zinc-500">界面风格</div>
               <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-                简约：面板不再描边和投影，分区靠背景深浅；「新建对话」降为次要按钮；
-                你的发言从右侧气泡改为左对齐加一条竖线（贴日志贴代码时更好读）；
-                AI 回复仍是居中全宽，只在宽屏下封顶留白。
+                简约（默认）：面板不再描边和投影，分区靠背景深浅；「新建对话」降为
+                次要按钮；你的发言从右侧气泡改为左侧一条竖线（贴日志贴代码时更好读），
+                与 AI 回复共用同一条居中的正文列。
               </p>
               <div className="mt-2 flex gap-1.5">
                 {([

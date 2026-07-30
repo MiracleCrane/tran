@@ -23,8 +23,8 @@ export const MOTION_SPEED_STEP = 5
 export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
   motionSpeed: 50,
   glassGlow: false,
-  // 默认保持现状：换风格这种事应该由用户主动选，不该升级一次就变个样。
-  uiStyle: 'glass'
+  // 默认简约。玻璃那套仍然保留在设置里，只是不再是新装机看到的第一眼。
+  uiStyle: 'flat'
 }
 
 const LEGACY_STORAGE_KEY = 'forge.appearance.v1'
@@ -51,7 +51,12 @@ function normalizeSettings(value: Partial<AppearanceSettings> | null | undefined
   return {
     motionSpeed: normalizeMotionSpeed(value?.motionSpeed),
     glassGlow: value?.glassGlow ?? DEFAULT_APPEARANCE_SETTINGS.glassGlow,
-    uiStyle: value?.uiStyle === 'flat' ? 'flat' : DEFAULT_APPEARANCE_SETTINGS.uiStyle
+    // 两个值都要显式认。原先只认 'flat'、其余一律回落到默认——默认改成
+    // flat 之后，那样写会把「用户明确选了玻璃」也吞掉，设置里点不动。
+    uiStyle:
+      value?.uiStyle === 'flat' || value?.uiStyle === 'glass'
+        ? value.uiStyle
+        : DEFAULT_APPEARANCE_SETTINGS.uiStyle
   }
 }
 

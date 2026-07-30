@@ -1,9 +1,10 @@
 # Changelog
 
-## v1.0.44 - 未发布
+## v1.0.44 - 2026-07-30
 
 ### 中文
 
+- 变更:**默认界面风格改为简约**。玻璃那套仍在设置 → 外观里,已经选过的不受影响;这一条只改新装机的第一眼。
 - 修复:**自动待办催更会连着发**。开了「后台任务结束后自动请求待办更新」之后,同一批任务被反复催,聊天记录里出现一串一模一样的机器发言。防重复只记了「上一次已收尾任务集合」这个字符串,而这个集合会抖动——多一个子 Agent 收尾、服务端清掉过期任务、轮询拿到一份不完整的列表,都会让它与上次不等,于是再催一轮;组件重挂载还会把这个记录清空。现改成按任务 id 记账(每个任务终身只催一次)、每个会话最多催 2 次,主进程再加一道 5 分钟冷却闸——无论上游怎么判,都不可能连着发。
 - 优化:简约风下**用户发言与 AI 回复共用一列**。AI 回复是主体,现在整列在页面里居中;用户发言对齐到同一条左右边界,不再顶到最左边、也不再比 AI 那条宽。此前写的 62rem 封顶比实际列宽还大,等于没生效。
 - 优化:加粗再降一档。上一版降到 600 并没有用——微软雅黑只有 Regular/Bold 两档,600 按字体匹配规则往上取,落回的还是 700。现改成 500 加提亮到近白,靠亮度而不是字重做强调。
@@ -15,6 +16,7 @@
 
 ### English
 
+- Changed: **the minimal style is now the default**. Glass is still available under Settings → Appearance, and an explicit existing choice is preserved; this only changes what a fresh install looks like.
 - Fixed: **auto todo-nudge fired repeatedly**. With "auto-request a todo update after background tasks finish" enabled, the same batch was nudged over and over, filling the transcript with identical machine-sent messages. Deduplication keyed off a single string of the last settled-task set, which churns (another sub-agent settles, the server prunes an expired task, a poll returns a partial list) — any change re-armed it, and a component remount cleared it entirely. Now tracked per task id (each task nudges at most once ever), capped at 2 per session, with a 5-minute cooldown enforced in the main process.
 - Improved: in the minimal style, **user messages and AI replies share one column**. The AI reply is the main body, so the column is now centered in the page, and user messages align to exactly the same left and right edges instead of running to the far left and past the AI's right edge. The previous 62rem cap was wider than the column itself and never applied.
 - Improved: bold is lighter again. Dropping to 600 last version did nothing — Microsoft YaHei ships only Regular and Bold, and CSS font matching rounds 600 up to 700. Now 500 plus a near-white color, so emphasis comes from lightness rather than weight.
