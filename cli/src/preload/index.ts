@@ -84,6 +84,7 @@ const api: ForgeApi = {
   probeSummaryModels: (models) => ipcRenderer.invoke('forge:probeSummaryModels', models),
   diagnoseSummaryPrompt: () => ipcRenderer.invoke('forge:diagnoseSummaryPrompt'),
   getSessionTodos: (sessionId) => ipcRenderer.invoke('forge:getSessionTodos', sessionId),
+  nudgeTodos: (sessionId) => ipcRenderer.invoke('forge:nudgeTodos', sessionId),
   explainCommand: (command) => ipcRenderer.invoke('forge:explainCommand', command),
   summarizeThinking: (text) => ipcRenderer.invoke('forge:summarizeThinking', text),
   exportSettings: (appearance) => ipcRenderer.invoke('forge:exportSettings', appearance),

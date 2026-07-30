@@ -272,6 +272,8 @@ export interface Preferences {
   closePromptDismissed?: boolean
   /** AI 自动命名（会话短标题，默认开；关闭后不做任何云端命名调用）。 */
   aiNamingEnabled?: boolean
+  /** 后台任务收尾后自动催模型更新待办（默认开；会发一次真实 turn）。 */
+  autoTodoNudge?: boolean
   /** 总结类杂活（命名、命令说明、思考摘要…）共用的型号。空 = 默认
    *  `kimi-for-coding`（唯一实证可用的）。设置页可探测其他型号能否用。 */
   summaryModel?: string
@@ -833,6 +835,9 @@ export interface ForgeApi {
   diagnoseSummaryPrompt(): Promise<PromptDiagnosis[]>
   /** 待办真值（kimi 本地 server，零 token）。拉不到返回 null。 */
   getSessionTodos(sessionId: string): Promise<SessionTodosResult | null>
+  /** 后台任务收尾后催模型更新待办。**会发一次真实 turn、消耗额度**；
+   *  返回 true 表示这一轮真的发出去了（界面据此标注）。 */
+  nudgeTodos(sessionId: string): Promise<boolean>
   /** 一条 bash 命令在做什么（便宜模型 + 落盘缓存）。拿不到返回 null。 */
   explainCommand(command: string): Promise<string | null>
   /** 一段思考在做什么（便宜模型 + 落盘缓存）。拿不到返回 null。 */

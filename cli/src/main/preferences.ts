@@ -64,6 +64,7 @@ export function getPreferences(): Preferences {
     nativeNotifications: s.nativeNotifications,
     closePromptDismissed: s.closePromptDismissed,
     aiNamingEnabled: s.aiNamingEnabled,
+    autoTodoNudge: s.autoTodoNudge,
     summaryModel: s.summaryModel
   }
 }
@@ -102,6 +103,7 @@ export function savePreferences(prefs: Preferences): Preferences {
   if (prefs.nativeNotifications !== undefined) s.nativeNotifications = prefs.nativeNotifications
   if (prefs.closePromptDismissed !== undefined) s.closePromptDismissed = prefs.closePromptDismissed
   if (prefs.aiNamingEnabled !== undefined) s.aiNamingEnabled = prefs.aiNamingEnabled
+  if (prefs.autoTodoNudge !== undefined) s.autoTodoNudge = prefs.autoTodoNudge
   // 空串代表「用默认型号」，要能靠它清空——所以判 undefined 而不是 truthy。
   if (prefs.summaryModel !== undefined) s.summaryModel = prefs.summaryModel.trim() || undefined
   saveSettings(s)

@@ -72,6 +72,9 @@ interface PersistedSettings {
   closePromptDismissed?: boolean
   /** AI 自动命名（会话短标题，云端生成；默认开，关闭后任何路径不调 API）。 */
   aiNamingEnabled?: boolean
+  /** 后台任务收尾后自动催模型更新待办（默认开）。这会**发一次真实的 turn**，
+   *  消耗额度，所以给了独立开关——不跟 AI 命名共用。 */
+  autoTodoNudge?: boolean
   /** 总结类杂活（会话命名、命令说明、思考摘要…）用的型号。空 = 用
    *  cheapModel.DEFAULT_CHEAP_MODEL。别写死猜测的型号——设置页有探测按钮。 */
   summaryModel?: string
@@ -250,6 +253,7 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.startMaximized = optionalBoolean(source.startMaximized)
   settings.closePromptDismissed = optionalBoolean(source.closePromptDismissed)
   settings.aiNamingEnabled = optionalBoolean(source.aiNamingEnabled)
+  settings.autoTodoNudge = optionalBoolean(source.autoTodoNudge)
   settings.summaryModel = optionalString(source.summaryModel)
   settings.nativeNotifications = optionalBoolean(source.nativeNotifications)
 

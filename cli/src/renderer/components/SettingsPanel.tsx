@@ -127,6 +127,7 @@ export default function SettingsPanel(): JSX.Element {
   const [nativeNotifications, setNativeNotifications] = useState(true)
   const [aiNaming, setAiNaming] = useState(true)
   const [summaryModel, setSummaryModel] = useState('')
+  const [autoTodoNudge, setAutoTodoNudge] = useState(true)
   const [probing, setProbing] = useState(false)
   const [probes, setProbes] = useState<SummaryModelProbe[] | null>(null)
   const [diagnosing, setDiagnosing] = useState(false)
@@ -177,6 +178,7 @@ export default function SettingsPanel(): JSX.Element {
       setNativeNotifications(p.nativeNotifications !== false)
       setAiNaming(p.aiNamingEnabled !== false)
       setSummaryModel(p.summaryModel ?? '')
+      setAutoTodoNudge(p.autoTodoNudge !== false)
       setAskOnClose(!p.closePromptDismissed)
       setLoaded(true)
     })
@@ -248,6 +250,19 @@ export default function SettingsPanel(): JSX.Element {
       setTimeout(() => setSavedAt(false), 1500)
     } catch {
       setAiNaming(!next)
+    }
+  }
+
+  /** 后台任务收尾后自动催 AI 更新待办。与命名那类小请求**不是一个量级**：
+   *  那是一次真实对话轮，所以单独一个开关，不跟 AI 命名共用。 */
+  const toggleAutoTodoNudge = async (next: boolean): Promise<void> => {
+    setAutoTodoNudge(next)
+    try {
+      await window.api.savePreferences({ autoTodoNudge: next })
+      setSavedAt(true)
+      setTimeout(() => setSavedAt(false), 1500)
+    } catch {
+      setAutoTodoNudge(!next)
     }
   }
 
@@ -764,9 +779,15 @@ export default function SettingsPanel(): JSX.Element {
           <div className="space-y-4">
             <ToggleControl
               label="AI 自动命名"
-              description="新会话发第一条消息后自动生成短标题（每次约消耗一两百 token）；侧栏可一键补全老会话。关闭后不做任何命名调用。"
+              description="新会话发第一条消息后自动生成短标题（每次约消耗一两百 token）；侧栏可一键补全老会话。关闭后不做任何命名调用，命令说明和思考块摘要也一并停用。"
               checked={aiNaming}
               onChange={(checked) => void toggleAiNaming(checked)}
+            />
+            <ToggleControl
+              label="后台任务结束后自动更新待办"
+              description="后台任务收尾且待办还有未完成项时，Tran 替你向 AI 发一次「更新待办」的请求，省得你手动发消息。⚠ 这是一次真实对话轮，会消耗订阅额度（远高于命名那类小请求）；同一批任务只发一次，只在会话空闲时发，发过会在待办卡片上标出来。"
+              checked={autoTodoNudge}
+              onChange={(checked) => void toggleAutoTodoNudge(checked)}
             />
             {/* 总结型号：命名与后续的总结类杂活（命令说明、思考摘要）共用。
                 走 kimi CLI 的凭证打 coding 端点，所以消耗的是订阅额度窗口，

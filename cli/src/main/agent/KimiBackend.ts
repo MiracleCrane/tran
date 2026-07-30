@@ -997,6 +997,64 @@ export class KimiBackend {
     }
   }
 
+  /**
+   * 后台任务收尾后的「待办催更」隐藏轮。
+   *
+   * 为什么必须是一次真实的 turn：待办是 checkpointed model，**只有模型调
+   * todo_list 工具时才会变**；而 kimi 的后台任务完成通知也只在「下一轮」才注入
+   * 上下文（源码原文：The completion arrives automatically in a later turn）。
+   * 所以在有人发下一条消息之前，待办物理上不可能自己更新——补拉真值也拉不到
+   * 新的，因为服务端那份本来就还是旧的。这就是「完全修好」剩下的那一半。
+   *
+   * ⚠️ 这跟 /usage、/mcp 那两个隐藏轮**不是一回事**：那两个是斜杠命令，模型不
+   * 真干活；这一轮是真的把话说给模型听，它会消耗额度，也**可能顺手接着干活**。
+   * 所以：
+   * - 提示词写得尽量窄（只更新待办、别执行别的），把"顺手接着干"的概率压下去；
+   * - 触发条件由渲染层把关（后台任务刚收尾 + 有未完成待办 + 会话空闲 + 每个
+   *   任务只催一次 + 用户可关）；
+   * - 界面上必须标出来这一轮是 Tran 自己发的，不能是幽灵行为。
+   *
+   * 事件照常吞掉（hiddenTurn），但 plan 帧不吞（见 handleSessionUpdate 的
+   * #49 注释）——催更的**结果**正是要靠那一帧送回渲染层。
+   */
+  async requestTodoNudge(sessionId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.closed || !session.acpSessionId) return false
+    // 会话不空闲就放弃。不排队、不重试：催更是"有则更好"，抢 FIFO 会拖慢用户
+    // 自己的那一轮，而下一次后台任务收尾还会再有机会。
+    if (session.running || session.hiddenTurn || session.queue.length) return false
+
+    session.hiddenTurn = true
+    session.hiddenText = ''
+    try {
+      const client = await this.ensureClient()
+      await this.promptWithRecovery(
+        client,
+        session,
+        {
+          prompt: [
+            {
+              type: 'text',
+              text:
+                '后台任务已经结束。请只做一件事：检查后台任务的结果，把待办清单' +
+                '（todo_list）的状态更新到最新。不要执行其他操作，不要改动文件，' +
+                '更新完直接结束这一轮。'
+            }
+          ]
+        },
+        120000
+      )
+      return true
+    } catch (error) {
+      log('kimi', `hidden todo-nudge turn failed: ${error instanceof Error ? error.message : String(error)}`)
+      return false
+    } finally {
+      session.hiddenTurn = false
+      session.hiddenText = ''
+      if (!session.closed && !session.hiddenTurn && session.queue.length) void this.drain(session)
+    }
+  }
+
   /** 渲染层悬停上下文环触发的即时刷新：无轮直接跑，隐藏轮在途标记 pending 轮末
    *  补；用户轮在途/队列非空则跳过（turn 末 afterTurn 会补刷新）。 */
   async requestUsageRefresh(sessionId: string): Promise<void> {

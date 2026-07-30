@@ -374,6 +374,12 @@ export function registerIpc(
   ipcMain.handle('forge:refreshSessionUsage', async (_e, sessionId: string): Promise<void> => {
     await bridge.requestUsageRefresh(sessionId)
   })
+  ipcMain.handle('forge:nudgeTodos', async (_e, sessionId: unknown): Promise<boolean> => {
+    // 开关在主进程再校验一次：渲染层已经判过，但这一轮**会真的花额度**，
+    // 不能只靠调用方自觉。
+    if (loadSettings().autoTodoNudge === false) return false
+    return bridge.requestTodoNudge(requireString(sessionId, 'sessionId'))
+  })
 
   // 渲染层在“切走会话”时调用本通道：后台化语义——不 cancel turn、不删会话，
   // 后台 turn 继续跑、事件继续经 forge:agent-event 推送。
