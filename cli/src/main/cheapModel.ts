@@ -250,8 +250,18 @@ export function terseText(raw: string, maxChars: number): string | null {
  * 防线都放行了，最后死在这一行上。标题是要长期存进 ai-titles.json 的，切坏一次
  * 就一直难看。
  */
+/**
+ * 超出上限但只超一点点时，宁可让它超着也不切。
+ *
+ * 2026-07-30 实测（跑真实会话，15 条思考摘要）：中文没有词边界可依，切到上限
+ * 正好落在词中间的有两条——"排查 Claude Code 配"（配置）、"验证端到端 Claude
+ * 后端会"（后端会话）。这两条只超了 1 个字。UI 上多一两个字看不出来，
+ * 断掉的词却一眼就是坏的。
+ */
+const OVERFLOW_GRACE_CHARS = 3
+
 function trimToWidth(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text
+  if (text.length <= maxChars + OVERFLOW_GRACE_CHARS) return text
   let cut = maxChars
   // 落在 ASCII 词（英文/数字）内部就退到词首，别把 Electron 腰斩成 Electr。
   // 退得太多就算了——宁可少一个词，也不要半个词。
