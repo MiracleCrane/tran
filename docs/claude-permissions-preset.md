@@ -241,5 +241,15 @@ claude doctor          # 校验配置文件能否解析
 claude                 # 进 TUI 后 /permissions 看生效的规则
 ```
 
-Tran 侧把权限档设为「默认」，映射过去就是 `--permission-mode default`，即
-按上面的规则走。
+Tran 侧把权限档设为「默认」，映射过去是 `--permission-mode manual`，即按上面的
+规则走。
+
+⚠️ 两个枚举不一样，别混：
+
+| 位置 | 合法取值 |
+|---|---|
+| CLI `--permission-mode` | `manual` / `acceptEdits` / `auto` / `bypassPermissions` / `dontAsk` / `plan` —— **没有 `default`** |
+| settings.json `permissions.defaultMode` | `default` / `acceptEdits` / `auto` / `bypassPermissions` / `dontAsk` / `plan` —— **没有 `manual`** |
+
+（`claude --help` 与二进制内的枚举表实证。）配置文件里的 `default` 就是命令行的
+`manual`：每次询问。上面预设写的是配置文件，所以用 `default` 是对的。
