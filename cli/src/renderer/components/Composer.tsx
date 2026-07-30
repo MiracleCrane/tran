@@ -209,14 +209,6 @@ export default function Composer(): JSX.Element {
   const runningBash = useSessionStore((s) => countRunningTools(s.items, BASH_TOOL_NAMES, s.swarmTasks))
   const agentTotal = useSessionStore((s) => countTotalTools(s.items, AGENT_TOOL_NAMES))
   const runningAgents = useSessionStore((s) => countRunningTools(s.items, AGENT_TOOL_NAMES, s.swarmTasks))
-  const planTotal = useSessionStore((s) => s.planEntries.length)
-  // #46：待办 chip 的"进行中"信号——只要存在 in_progress 项就走流光提示。
-  const planRunning = useSessionStore((s) =>
-    s.planEntries.some((e) => e.status === 'in_progress')
-  )
-  const planDone = useSessionStore(
-    (s) => s.planEntries.filter((e) => e.status === 'completed').length
-  )
   // chips 独立浮层：openChip=哪个 chip 的浮层开着 + 锚点（portal fixed 定位）。
   const [openChip, setOpenChip] = useState<ChipKind | null>(null)
   const [chipAnchor, setChipAnchor] = useState<ChipAnchor | null>(null)
@@ -898,22 +890,9 @@ export default function Composer(): JSX.Element {
               子 Agent ({runningAgents > 0 ? `${runningAgents}/` : ''}{agentTotal})
             </span>
           </button>
-          <button
-            type="button"
-            data-chip="plan"
-            onClick={() => toggleChip('plan')}
-            className={`flex items-center gap-1 transition hover:brightness-125 ${
-              planTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
-            }`}
-            title="待办清单（点击查看面板）"
-          >
-            <span>☰</span>
-            <span className={planRunning ? 'chip-flow-text' : undefined}>
-              待办 ({planDone}/{planTotal})
-            </span>
-          </button>
-          {/* #5 忙碌态：明确提示输出中 + 排队语义，不再静默。#11 换 Kimi Web 同款旋转月亮。
-              #39：指示固定在待办 chip 之后，三个 chip 位置不再被挤动。 */}
+          {/* 这里原本还有一个「待办 (n/m)」chip。删掉了：正文顶部已经常驻一张
+              待办卡片，同一份数据在一屏里出现两次，底下这个只是噪声。 */}
+          {/* #5 忙碌态：明确提示输出中 + 排队语义，不再静默。#11 换 Kimi Web 同款旋转月亮。 */}
           {running && (
             <span className="flex shrink-0 items-center gap-1.5 text-accent/90">
               <span className="thinking-moon" aria-hidden />

@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.0.44 - 未发布
+
+### 中文
+
+- 修复:**自动待办催更会连着发**。开了「后台任务结束后自动请求待办更新」之后,同一批任务被反复催,聊天记录里出现一串一模一样的机器发言。防重复只记了「上一次已收尾任务集合」这个字符串,而这个集合会抖动——多一个子 Agent 收尾、服务端清掉过期任务、轮询拿到一份不完整的列表,都会让它与上次不等,于是再催一轮;组件重挂载还会把这个记录清空。现改成按任务 id 记账(每个任务终身只催一次)、每个会话最多催 2 次,主进程再加一道 5 分钟冷却闸——无论上游怎么判,都不可能连着发。
+- 优化:简约风下**用户发言与 AI 回复共用一列**。AI 回复是主体,现在整列在页面里居中;用户发言对齐到同一条左右边界,不再顶到最左边、也不再比 AI 那条宽。此前写的 62rem 封顶比实际列宽还大,等于没生效。
+- 优化:加粗再降一档。上一版降到 600 并没有用——微软雅黑只有 Regular/Bold 两档,600 按字体匹配规则往上取,落回的还是 700。现改成 500 加提亮到近白,靠亮度而不是字重做强调。
+- 优化:待办卡片默认收起。展开着长期占住正文顶部,一屏五六条把正在读的对话往下挤;标题行本身已经写了「已完成 2/5」。
+- 优化:删掉输入框上方那个「待办 (n/m)」chip。正文顶部已经常驻一张待办卡片,同一份数据在一屏里出现两次。
+- 优化:**切换会话时列表不再重排**。会话按最后修改时间倒序,而打开一个会话就会刷新它的时间戳——于是每切一次,刚点的那条就窜到最上面,其余整体下移,想回上一条得重新找。现在显示顺序在本次运行内保持稳定(置顶项和新建会话仍在最前),重启后回到时间序。
+- 优化:侧栏会话按所属分组缩进,组头(项目 / 时间段)从 10px/半透明抬到 11px 加粗并带条目数——此前组头比会话行还淡,从属关系读不出来。
+- 优化:侧栏顶部整体压扁,「按时间 / 按项目」并进「最近会话」标题行,省掉一整行,列表可视区更长。
+
+### English
+
+- Fixed: **auto todo-nudge fired repeatedly**. With "auto-request a todo update after background tasks finish" enabled, the same batch was nudged over and over, filling the transcript with identical machine-sent messages. Deduplication keyed off a single string of the last settled-task set, which churns (another sub-agent settles, the server prunes an expired task, a poll returns a partial list) — any change re-armed it, and a component remount cleared it entirely. Now tracked per task id (each task nudges at most once ever), capped at 2 per session, with a 5-minute cooldown enforced in the main process.
+- Improved: in the minimal style, **user messages and AI replies share one column**. The AI reply is the main body, so the column is now centered in the page, and user messages align to exactly the same left and right edges instead of running to the far left and past the AI's right edge. The previous 62rem cap was wider than the column itself and never applied.
+- Improved: bold is lighter again. Dropping to 600 last version did nothing — Microsoft YaHei ships only Regular and Bold, and CSS font matching rounds 600 up to 700. Now 500 plus a near-white color, so emphasis comes from lightness rather than weight.
+- Improved: the todo card starts collapsed, and the duplicate "todo (n/m)" chip above the composer is gone.
+- Improved: **the session list no longer reorders when you switch sessions**. Opening a session refreshes its timestamp, which pushed it to the top and shifted everything else down. Display order is now stable for the run (pinned and newly created sessions still come first).
+- Improved: sessions are indented under their group header, and the header (project or time bucket) is larger, brighter, and shows a count.
+- Improved: the sidebar header is more compact — the grouping toggle moved into the "Recent" row, freeing a full row for the list.
+
 ## v1.0.43 - 2026-07-30
 
 ### 中文

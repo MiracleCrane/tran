@@ -2903,12 +2903,20 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
    <strong> 此前没有规则，吃浏览器默认的 700。而 font-family 只写了
    Inter/system-ui，**没有中文字族**——中文回落到系统字体（Windows 上多为
    微软雅黑），700 在深色底上会「发胖」，整段读起来就是糊的。
-   降到 600，并显式禁用合成粗体（回落字体缺 Bold 字面时浏览器会把字形描粗，
-   那种假粗最难看）。这跟外观主题无关，两套风格都该这样。
+
+   先降到 600 并不够：微软雅黑只有 Regular/Bold 两档，600 按 CSS 字体匹配
+   规则往上取，落回的还是 700 Bold——中文该粗的地方一个没变。（拉丁字反而
+   正常，system-ui 的 Segoe UI 有 Semibold。）
+
+   所以强调改成「靠亮度、不靠字重」：500（中文取 Regular，拉丁取 Medium）
+   ＋提亮到近白。深色底上亮度差比字重差更好读，也不会一段里糊掉半屏。
+   并显式禁用合成粗体（回落字体缺字面时浏览器会把字形描粗，那种假粗最难看）。
+   这跟外观主题无关，两套风格都该这样。
    ========================================================================== */
 .prose-forge strong,
 .prose-forge b {
-  font-weight: 600;
+  font-weight: 500;
+  color: #fafafa;
 }
 .prose-forge {
   font-synthesis-weight: none;
@@ -2985,14 +2993,11 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.075);
   }
 
-  /* 5. 用户发言：从「右对齐气泡」改成「左对齐 + 左侧强调竖线」。
+  /* 5. 用户发言：从「右对齐气泡」改成「与 AI 同列 + 左侧强调竖线」。
         气泡是聊天软件的隐喻，而这里是工作台——贴日志/贴代码时窄气泡最难看。
-        区分说话人只需要一条竖线，不需要整块底色。 */
-  :root[data-ui='flat'] .tran-user-msg {
-    justify-content: flex-start;
-  }
+        区分说话人只需要一条竖线，不需要整块底色。
+        对齐（居中到与 AI 同一列）见下面修补块的第 3 条。 */
   :root[data-ui='flat'] .tran-user-bubble {
-    max-width: 100%;
     border: 0;
     border-left: 2px solid rgba(139, 92, 246, 0.55);
     border-radius: 0;
@@ -3002,13 +3007,7 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
     color: #a1a1aa;
   }
 
-  /* 6. AI 回复保持全宽居中，但封顶：窄窗口铺满，宽屏留白。
-        不限到 76ch —— 回复里有代码块/表格/diff，窄栏会逼出横向滚动。 */
-  :root[data-ui='flat'] .prose-forge {
-    max-width: 62rem;
-  }
-
-  /* 7. 收敛描边色与圆角：一个发丝色、一个圆角 */
+  /* 6. 收敛描边色与圆角：一个发丝色、一个圆角 */
   :root[data-ui='flat'] .glass-divider,
   :root[data-ui='flat'] .tran-hairline {
     border-color: rgba(255, 255, 255, 0.055);
@@ -3081,10 +3080,23 @@ div:has(textarea:focus) .composer-shortcut-hint {
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
   }
 
-  /* 3. 用户发言与 AI 回复对齐同一条右边界。原先只写了 max-width:100%，
-        于是用户那条比封顶 62rem 的 AI 正文还宽，右边界参差不齐。 */
+  /* 3. 一条正文列，两个说话人共用。
+        AI 回复是主体，所以让它在页面里居中（.tran-ai-col 是 depth-0 的 AI
+        容器和工具分组容器共用的钩子，宽度 92%，此前左对齐——右边空 8%，
+        整页看着是偏的）；用户发言再对齐到同一条列上，左右边界与 AI 一致。
+
+        原先这里写 max-width:62rem 想让两边右边界齐平，但 62rem(992px) 比
+        92% 的实际宽度还大，永远不生效——用户那条照样铺满整行，比 AI 宽、
+        且贴到最左边。改成同一个 92% 就不会再对不齐了。 */
+  :root[data-ui='flat'] .tran-ai-col {
+    margin-inline: auto;
+  }
+  :root[data-ui='flat'] .tran-user-msg {
+    justify-content: center;
+  }
   :root[data-ui='flat'] .tran-user-bubble {
-    max-width: 62rem;
+    width: 100%;
+    max-width: 92%;
   }
 
   /* 4. 连续几条用户发言之间要有呼吸。气泡拆掉之后就只剩竖线，

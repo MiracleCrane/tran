@@ -16,6 +16,19 @@ const AFTER_TURN_DELAY_MS = 1200
 /** 自动催更前的静置窗口。后台任务刚收尾时用户很可能正要自己发消息——先让一步，
  *  这几秒内他发了话，会话就不空闲了，催更自然不会触发。 */
 const NUDGE_DELAY_MS = 4000
+/** 一个会话最多催几次。催更是"有则更好"，连着发就是刷屏——用户看到的是
+ *  Tran 自己在跟 AI 聊天。宁可少催一次。 */
+const NUDGE_MAX_PER_SESSION = 2
+
+/** 已催过的任务：sessionId → 那些"收尾时催过一次"的任务 id + 已催次数。
+ *
+ *  放在模块级而不是 useRef：组件重挂载（切会话切回来、热更新）会把 ref 清成
+ *  null，于是同一批任务被重新催一遍。放模块级才是"每个任务只催一次"。
+ *
+ *  记 Set 而不是"上一次的 key"：原先存的是排序后拼起来的 key，只要任务集合
+ *  发生任何变化——多一个子 Agent 收尾、服务端把过期任务清掉、轮询拿到一份不
+ *  完整的列表——key 就跟上次不等，于是再催一轮。这正是"怎么一直在发"。 */
+const nudgeState = new Map<string, { ids: Set<string>; count: number }>()
 
 function staleLabel(sinceMs: number): string {
   const min = Math.floor(sinceMs / 60000)
@@ -43,11 +56,13 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
   const planUpdatedAt = useSessionStore((s) => s.planUpdatedAt)
   const running = useSessionStore((s) => s.status.running)
   const swarmTasks = useSessionStore((s) => s.swarmTasks)
-  const [collapsed, setCollapsed] = useState(false)
+  // 默认收起：待办是"想看时才看"的东西，展开着就长期占住正文顶部——一屏
+  // 五六条，把真正在读的对话往下挤。标题行本身已经带了"已完成 2/5"。
+  const [collapsed, setCollapsed] = useState(true)
   // 陈旧文案要随时间走，但待办本身不会再变——用一个低频 tick 驱动重算。
   const [, setTick] = useState(0)
-  // 自动催更：已催过的任务集合（防重复），以及最近一次催更时刻（界面标注用）。
-  const nudgedKeyRef = useRef<string | null>(null)
+  // 自动催更：最近一次催更时刻（界面标注用）。防重复的账记在模块级
+  // nudgeState 里——组件重挂载不能把它清掉。
   const [nudgedAt, setNudgedAt] = useState<number | null>(null)
   // 开关读设置（默认开）。主进程侧还会再校验一次——这一轮会真的花额度，
   // 不能只靠渲染层自觉。
@@ -110,9 +125,14 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
 
   useEffect(() => {
     if (!autoNudge || !bridgeSessionId || running || !hasUnfinished || !settledTaskKey) return
-    // 同一批已收尾的任务只催一次：任务集合没变就不再发。
-    if (nudgedKeyRef.current === settledTaskKey) return
-    nudgedKeyRef.current = settledTaskKey
+    const state = nudgeState.get(bridgeSessionId) ?? { ids: new Set<string>(), count: 0 }
+    nudgeState.set(bridgeSessionId, state)
+    if (state.count >= NUDGE_MAX_PER_SESSION) return
+    // 只为「这次新收尾、以前没催过」的任务催一轮；老任务再怎么进出列表都不算。
+    const fresh = settledTaskKey.split(',').filter((id) => !state.ids.has(id))
+    if (fresh.length === 0) return
+    fresh.forEach((id) => state.ids.add(id))
+    state.count += 1
     let cancelled = false
     const timer = window.setTimeout(() => {
       void window.api

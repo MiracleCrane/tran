@@ -124,6 +124,9 @@ const MIME: Record<string, string> = {
 }
 const MAX_TEXT_INLINE = 512 * 1024 // inline at most 512KB of a text file
 const MAX_DIRECTORY_ENTRIES = 300
+/** 待办自动催更的最小间隔（同一会话）。见 forge:nudgeTodos。 */
+const NUDGE_COOLDOWN_MS = 5 * 60_000
+const lastNudgeAt = new Map<string, number>()
 const PATH_PREVIEW_READ_TIMEOUT_MS = 4500
 
 function withPathReadTimeout<T>(
@@ -377,7 +380,18 @@ export function registerIpc(
     // 开关在主进程再校验一次：渲染层已经判过，但这一轮**会真的花额度**，
     // 不能只靠调用方自觉。
     if (loadSettings().autoTodoNudge !== true) return false
-    return bridge.requestTodoNudge(requireString(sessionId, 'sessionId'))
+    const id = requireString(sessionId, 'sessionId')
+    // 冷却闸。渲染层那边已经按"每个任务只催一次"把关了，但那层判断依赖
+    // 后台任务列表的稳定性——列表一抖动就会重新触发，用户看到的就是 Tran
+    // 自己在跟 AI 连着聊。这里是最后一道：同一会话两次催更之间至少隔
+    // NUDGE_COOLDOWN_MS，无论上游怎么判。
+    const last = lastNudgeAt.get(id) ?? 0
+    if (Date.now() - last < NUDGE_COOLDOWN_MS) {
+      log('ipc', `todo-nudge 冷却中，跳过 ${id}`)
+      return false
+    }
+    lastNudgeAt.set(id, Date.now())
+    return bridge.requestTodoNudge(id)
   })
 
   // 渲染层在“切走会话”时调用本通道：后台化语义——不 cancel turn、不删会话，

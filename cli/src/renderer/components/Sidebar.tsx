@@ -935,14 +935,40 @@ export default function Sidebar(): JSX.Element {
       })
   }, [pinnedSessionKeys, sessionSearch, sessions, wslSupportEnabled])
 
+  // 显示顺序在本次挂载期间保持稳定。
+  // 上面那个排序按 lastModified 倒序——而**打开一个会话就会刷新它的 mtime**，
+  // 于是每切一次会话，被点的那条就窜到列表最上面，其余整体下移：用户刚点的
+  // 位置在他手底下变了，想回上一条得重新找。列表的价值是"位置可记忆"，
+  // 不是"永远按最新排"。
+  // 规则：置顶项永远在前（那是显式操作，就该动）；见过的会话保持上一次的
+  // 相对次序；这一轮新出现的排最前（新建的会话确实该在顶上），彼此按时间。
+  // 只在本次挂载内有效——重启后回到纯时间序。
+  const displayOrderRef = useRef<string[]>([])
+  const orderedSessions = useMemo(() => {
+    const rank = new Map(displayOrderRef.current.map((key, index) => [key, index]))
+    const next = filteredSessions.slice().sort((a, b) => {
+      const ka = sessionKey(a)
+      const kb = sessionKey(b)
+      const ap = pinnedSessionKeys.has(ka)
+      const bp = pinnedSessionKeys.has(kb)
+      if (ap !== bp) return ap ? -1 : 1
+      const ra = rank.get(ka) ?? -1
+      const rb = rank.get(kb) ?? -1
+      if (ra !== rb) return ra - rb
+      return b.lastModified - a.lastModified
+    })
+    displayOrderRef.current = next.map(sessionKey)
+    return next
+  }, [filteredSessions, pinnedSessionKeys])
+
   const sessionGroups = useMemo(
     () =>
       groupMode === 'project'
         ? sessionScope === 'all'
-          ? groupSessionsByCwd(filteredSessions, meta?.cwd ?? '')
-          : groupSessionsByProject(filteredSessions, meta?.cwd ?? '')
-        : groupSessionsByTime(filteredSessions),
-    [filteredSessions, groupMode, meta?.cwd, sessionScope]
+          ? groupSessionsByCwd(orderedSessions, meta?.cwd ?? '')
+          : groupSessionsByProject(orderedSessions, meta?.cwd ?? '')
+        : groupSessionsByTime(orderedSessions),
+    [orderedSessions, groupMode, meta?.cwd, sessionScope]
   )
   sessionGroupsRef.current = sessionGroups
 
@@ -1196,9 +1222,11 @@ export default function Sidebar(): JSX.Element {
   const renderSessionSnapshot = (snapshot: SessionListSnapshot): JSX.Element[] =>
     snapshot.groups.map((g) => (
       <div key={g.label} className="mb-2">
-        <div className="px-2 py-1 text-[10px] font-medium tracking-wide text-zinc-500/70">
+        {/* 组头/缩进与实时列表保持一致，否则过渡快照一换就整体位移。 */}
+        <div className="px-2 py-1 text-[11px] font-semibold tracking-wide text-zinc-400">
           {g.label}
         </div>
+        <div className="ml-2.5 border-l border-white/[0.07] pl-1.5">
         {g.items.map((s) => {
           const active = s.sessionId === snapshot.activeSessionId && view === 'chat'
           return (
@@ -1225,6 +1253,7 @@ export default function Sidebar(): JSX.Element {
             </div>
           )
         })}
+        </div>
       </div>
     ))
 
@@ -1244,25 +1273,36 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       {/* project switcher + new chat + provider */}
-      <div className="sidebar-deferred-content is-ready relative z-[70] space-y-3 px-4 pb-3.5 pt-2.5">
+      {/* 顶部这一坨整体压扁：项目选择 + 新建对话 + 「最近会话」标题 + 视图切换
+          + 搜索 + 分组切换，六段东西各占一行，会话列表被推到半屏以下。
+          这里收紧间距、按钮矮一档，并把「按时间/按项目」并进标题行——省掉
+          一整行只放一个小按钮的浪费。 */}
+      <div className="sidebar-deferred-content is-ready relative z-[70] space-y-2 px-4 pb-2 pt-2">
         <ProjectSwitcher collapsed={false} />
         <button
           onClick={() => {
             void newChat()
             setView('chat')
           }}
-          className="accent-soft-button flex h-10 w-full items-center justify-center gap-2 rounded-[14px] px-3 text-sm font-medium text-white transition hover:brightness-110"
+          className="accent-soft-button flex h-9 w-full items-center justify-center gap-2 rounded-[12px] px-3 text-[13px] font-medium text-white transition hover:brightness-110"
         >
           + 新建对话
         </button>
       </div>
 
       {/* session list label */}
-      <div className="flex items-center justify-between px-4 py-1">
+      <div className="flex items-center justify-between px-4 py-0.5">
         <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500/80">
           最近会话
         </span>
         <span className="flex items-center gap-1">
+          <button
+            onClick={() => setGroupMode((mode) => (mode === 'time' ? 'project' : 'time'))}
+            className="rounded-md px-1.5 py-0.5 text-[10px] text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
+            title="切换分组"
+          >
+            {groupMode === 'time' ? '按时间' : '按项目'}
+          </button>
           <button
             onClick={() => void handleAiNaming()}
             disabled={aiNamingBusy}
@@ -1315,7 +1355,7 @@ export default function Sidebar(): JSX.Element {
 
       <div className="min-h-0 flex flex-1 flex-col">
         {/* grouped sessions */}
-        <div className="space-y-2 px-4 pb-2 pt-1">
+        <div className="space-y-1.5 px-4 pb-1.5 pt-0.5">
           {/* 视图切换：当前项目 / 全部（跨项目）。进「全部」默认按项目分组。 */}
           <div className="flex rounded-lg border border-white/[0.08] bg-white/[0.025] p-0.5 text-[11px]">
             {(['project', 'all'] as const).map((value) => (
@@ -1342,18 +1382,7 @@ export default function Sidebar(): JSX.Element {
             placeholder="搜索会话"
             className="h-8 w-full rounded-lg border border-white/[0.08] bg-bg-elev/60 px-2.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-accent/60"
           />
-          {/* 分组切换：两个视图共用 —— 「当前项目」按时间/按项目（目录名）；
-              「全部」按项目（完整 cwd 可折叠）/按时间（混排）。 */}
-          <div className="flex items-center">
-            <button
-              type="button"
-              onClick={() => setGroupMode((mode) => (mode === 'time' ? 'project' : 'time'))}
-              className="ml-auto rounded-md px-1.5 py-1 text-[10px] text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
-              title="切换分组"
-            >
-              {groupMode === 'time' ? '按时间' : '按项目'}
-            </button>
-          </div>
+          {/* 分组切换（按时间/按项目）挪到上面的「最近会话」标题行了。 */}
         </div>
 
         {/* grouped sessions */}
@@ -1399,26 +1428,33 @@ export default function Sidebar(): JSX.Element {
             className="session-list-grow-group mb-2"
             style={{ '--session-grow-delay': `${Math.min(groupIndex * 28, 120)}ms` } as CSSProperties}
           >
+            {/* 组头（项目 / 时间段）。原先是 10px、zinc-500/70 —— 比会话行还
+                淡，看着不像"这些属于哪个项目"的标题，倒像一行灰噪声。抬到
+                11px/zinc-400 并加粗一档；下面的会话再缩进一格，从属关系才
+                读得出来。 */}
             {cwdGroupHeader ? (
               <button
                 type="button"
                 onClick={() => toggleGroupCollapsed(g.label)}
-                className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-zinc-500/70 transition hover:text-zinc-400"
+                className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[11px] font-semibold tracking-wide text-zinc-400 transition hover:text-zinc-200"
                 title={g.label}
               >
-                <span className="text-[8px]">{groupCollapsed ? '▸' : '▾'}</span>
+                <span className="text-[8px] text-zinc-500">{groupCollapsed ? '▸' : '▾'}</span>
                 <span className="truncate">{g.label}</span>
                 {meta && normalizeCwdForCompare(g.label) === normalizeCwdForCompare(meta.cwd) && (
-                  <span className="shrink-0 rounded bg-accent/15 px-1 text-accent">当前</span>
+                  <span className="shrink-0 rounded bg-accent/15 px-1 font-normal text-accent">当前</span>
                 )}
-                <span className="ml-auto shrink-0">{g.items.length}</span>
+                <span className="ml-auto shrink-0 font-normal text-zinc-500">{g.items.length}</span>
               </button>
             ) : (
-              <div className="px-2 py-1 text-[10px] font-medium tracking-wide text-zinc-500/70">
-                {g.label}
+              <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-semibold tracking-wide text-zinc-400">
+                <span className="truncate">{g.label}</span>
+                <span className="ml-auto shrink-0 font-normal text-zinc-500">{g.items.length}</span>
               </div>
             )}
-            {!groupCollapsed && g.items.map((item, rowIndex) => {
+            {!groupCollapsed && (
+            <div className="ml-2.5 border-l border-white/[0.07] pl-1.5">
+            {g.items.map((item, rowIndex) => {
               const s = item.session
               const key = sessionKey(s)
               const active = s.sessionId === meta.sdkSessionId && view === 'chat'
@@ -1551,6 +1587,8 @@ export default function Sidebar(): JSX.Element {
                 </div>
               )
             })}
+            </div>
+            )}
           </div>
           )
         })}

@@ -513,7 +513,7 @@ const AssistantMessage = memo(function AssistantMessage({
   const at = messageTime(item.id)
 
   return (
-    <div className={`group/msg relative ${depth === 0 ? 'max-w-[92%]' : ''}`}>
+    <div className={`group/msg relative ${depth === 0 ? 'tran-ai-col max-w-[92%]' : ''}`}>
       {item.error && (
         <div className="mb-2 rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-1.5 text-xs text-red-300">
           {item.error}
@@ -1093,9 +1093,10 @@ export default function Transcript({
   const renderRow = (row: DisplayRow): JSX.Element => {
     if (row.kind === 'toolGroup') {
       // 与 AssistantMessage 的 depth-0 容器同宽（max-w-[92%]），保证工具
-      // 分组 bar 与思考/文本/单个工具 bar 等宽（#9）。
+      // 分组 bar 与思考/文本/单个工具 bar 等宽（#9）。tran-ai-col 是给外观
+      // 主题用的稳定钩子：简约风把这一列居中，用户发言再对齐到同一列。
       return (
-        <div className="max-w-[92%]">
+        <div className="tran-ai-col max-w-[92%]">
           <ToolGroupCard
             blocks={row.blocks}
             forceOpen={row.blocks.some((b) => b.toolUseId === lastExpandableKey)}
