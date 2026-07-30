@@ -3014,3 +3014,91 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
     border-color: rgba(255, 255, 255, 0.055);
   }
 }
+
+/* ============================================================================
+   输入框快捷键提示：只在输入时出现
+   常驻的话它是教学文案占着常驻位置——学会之后就是纯噪声。
+   用 :has() 匹配「祖先里有获得焦点的 textarea」，不需要额外的 state。
+   ========================================================================== */
+.composer-shortcut-hint {
+  opacity: 0;
+  transition: opacity 160ms ease;
+  pointer-events: none;
+}
+div:has(> textarea:focus) .composer-shortcut-hint,
+div:has(textarea:focus) .composer-shortcut-hint {
+  opacity: 1;
+}
+
+/* 流光文字：思考进行中的提示。取代原来那颗彗星/月亮——
+   动效落在文字本身上，比在文字前面再挂一个转圈的小东西干净。 */
+.tran-shimmer {
+  background: linear-gradient(
+    100deg,
+    rgba(161, 161, 170, 0.75) 20%,
+    rgba(226, 232, 240, 1) 45%,
+    rgba(161, 161, 170, 0.75) 70%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: tran-shimmer-sweep 2.1s linear infinite;
+}
+@keyframes tran-shimmer-sweep {
+  from { background-position: 180% 0; }
+  to { background-position: -80% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tran-shimmer { animation: none; color: rgb(212 212 216); }
+}
+
+@layer components {
+  /* ==========================================================================
+     简约风的修补（都是把「拆玻璃」拆过头的地方补回来）
+     ========================================================================== */
+
+  /* 1. 底色别那么黑。原壳底是近黑的 #05060A，去掉玻璃的高光和渐变之后
+        整片死黑、层次全无。抬到 #101116 一档，卡片的 +2.6% 才看得出来。 */
+  :root[data-ui='flat'] .app-shell {
+    background: #101116;
+  }
+  :root[data-ui='flat'] .app-shell::before,
+  :root[data-ui='flat'] .app-shell::after {
+    display: none;
+  }
+
+  /* 2. 浮层必须是不透明的。ChipPopover / 各种下拉都用 .glass-panel，
+        而上面那条把 .glass-panel 的背景清成了 transparent——于是「子 Agent」
+        「待办」这些 chip 点开是透明的，字叠在正文上完全看不清。
+        浮层脱离文档流、下面就是内容，必须自己有底。 */
+  :root[data-ui='flat'] .glass-panel:where(.fixed, .absolute),
+  :root[data-ui='flat'] .glass-panel-soft:where(.fixed, .absolute),
+  :root[data-ui='flat'] .glass-control:where(.fixed, .absolute) {
+    background: #16171d;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  }
+
+  /* 3. 用户发言与 AI 回复对齐同一条右边界。原先只写了 max-width:100%，
+        于是用户那条比封顶 62rem 的 AI 正文还宽，右边界参差不齐。 */
+  :root[data-ui='flat'] .tran-user-bubble {
+    max-width: 62rem;
+  }
+
+  /* 4. 连续几条用户发言之间要有呼吸。气泡拆掉之后就只剩竖线，
+        挨在一起会糊成一整块，分不出是几条。 */
+  :root[data-ui='flat'] .tran-user-msg {
+    margin: 0.85rem 0;
+  }
+
+  /* 5. 悬停时间戳改用右侧留白。原来用户那条是右对齐气泡，时间放左边空白处；
+        现在用户也左对齐了，left:0 正好压在正文上（表现为「时间不见了」）。 */
+  :root[data-ui='flat'] .tran-msg-time-gutter-left {
+    left: auto;
+    right: -0.5rem;
+    transform: translateX(100%);
+    top: 0.2rem;
+  }
+}

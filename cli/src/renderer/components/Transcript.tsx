@@ -29,9 +29,13 @@ const BAR_HOVER_INTENT_WINDOW_MS = 600
 const TRANSCRIPT_BAR_SELECTOR = '.thinking-block, .tool-call-card'
 // #48 用户消息导航条：摘要截取长度与条目上限（超出只留最近若干条）。
 const USER_NAV_SUMMARY_CHARS = 24
-// 短于这个长度的思考块不送去总结：60 字截断已经把它显示全了，再花一次调用
-// （约 1s + 一点额度）换不来任何信息。
-const THINKING_SUMMARY_MIN_CHARS = 120
+// 短于这个长度的思考块不送去总结：折叠态本来就把前 60 字显示全了，再花一次
+// 调用换不来任何信息。
+//
+// 阈值从 120 降到 70：120 太高，一屏里常出现「有的有摘要、有的没有」，看起来
+// 像是坏了而不像是有意为之。70 之后绝大多数思考块都有摘要；剩下真正的短块
+// （"Done. Report briefly." 这种）原文就是它自己的摘要，不需要再概括一遍。
+const THINKING_SUMMARY_MIN_CHARS = 70
 // 模块级常量，保证 useCheapNote 的依赖项稳定（每次渲染新建函数会反复触发 effect）。
 const fetchThinkingNote = (text: string): Promise<string | null> => window.api.summarizeThinking(text)
 const USER_NAV_MAX_ENTRIES = 30
@@ -430,11 +434,14 @@ const ThinkingBlock = memo(function ThinkingBlock({
         className="flex w-full cursor-pointer select-none items-center gap-1.5 text-left text-xs font-medium text-zinc-500 hover:text-zinc-400"
       >
         <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
-        <span className="shrink-0">思考过程 · {text.length} 字</span>
+        {/* 进行中用流光扫过文字本身，不再在前面挂一颗转圈的月亮：
+            动效落在正在变化的东西上，比额外加一个装饰件干净。 */}
+        <span className={`shrink-0 ${streaming ? 'tran-shimmer' : ''}`}>
+          思考过程 · {text.length} 字
+        </span>
         {!open && (
           <span className="min-w-0 truncate font-normal text-zinc-600">{preview}</span>
         )}
-        {streaming && <span className="thinking-moon" aria-hidden />}
       </button>
       {open && (
         <div
