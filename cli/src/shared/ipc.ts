@@ -272,6 +272,19 @@ export interface Preferences {
   closePromptDismissed?: boolean
   /** AI 自动命名（会话短标题，默认开；关闭后不做任何云端命名调用）。 */
   aiNamingEnabled?: boolean
+  /** 总结类杂活（命名、命令说明、思考摘要…）共用的型号。空 = 默认
+   *  `kimi-for-coding`（唯一实证可用的）。设置页可探测其他型号能否用。 */
+  summaryModel?: string
+}
+
+/** 一个候选型号的探测结果（设置页「探测可用型号」）。 */
+export interface SummaryModelProbe {
+  model: string
+  ok: boolean
+  /** 失败原因（服务端返回片段，用来区分"不认这个型号"和"额度不足"）。 */
+  error?: string
+  /** 往返耗时。这活儿在 UI 上，延迟比能力重要——挑最快的。 */
+  latencyMs?: number
 }
 
 export interface ProviderProfile {
@@ -774,6 +787,9 @@ export interface ForgeApi {
   checkKimiVersion(force?: boolean): Promise<KimiVersionInfo>
   /** 一键升级 Kimi Code CLI。会先断开所有活跃会话（升级要替换正在运行的可执行文件）。 */
   upgradeKimi(): Promise<KimiUpgradeResult>
+  /** 探测总结用型号：逐个打一发最小请求，报通/不通与延迟。串行，避免被限流
+   *  误判成"型号不认"。传空用内置候选表。 */
+  probeSummaryModels(models?: string[]): Promise<SummaryModelProbe[]>
   exportSettings(appearance?: Record<string, unknown>): Promise<SettingsBackup>
   importSettings(backup: SettingsBackup): Promise<void>
 

@@ -42,6 +42,7 @@ import {
 } from './runtimeDiagnostics'
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { checkKimiVersion, upgradeKimi } from './kimiVersion'
+import { probeCheapModels } from './cheapModel'
 import { listKimiSessions } from './kimiHistory'
 import { listClaudeSessions } from './claudeHistory'
 import { getPlanUsageCached } from './usageService'
@@ -99,7 +100,8 @@ import type {
   SessionPreview,
   SaveImageResult,
   KimiVersionInfo,
-  KimiUpgradeResult
+  KimiUpgradeResult,
+  SummaryModelProbe
 } from '../shared/ipc'
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
@@ -641,6 +643,11 @@ export function registerIpc(
   ipcMain.handle(
     'forge:checkKimiVersion',
     async (_e, force?: boolean): Promise<KimiVersionInfo> => checkKimiVersion(force === true)
+  )
+  ipcMain.handle(
+    'forge:probeSummaryModels',
+    async (_e, models?: string[]): Promise<SummaryModelProbe[]> =>
+      probeCheapModels(Array.isArray(models) ? models.filter((m) => typeof m === 'string') : undefined)
   )
   ipcMain.handle('forge:upgradeKimi', async (): Promise<KimiUpgradeResult> => {
     // Windows 上正在运行的 kimi 会占用可执行文件，覆盖安装必然 EBUSY/EPERM；

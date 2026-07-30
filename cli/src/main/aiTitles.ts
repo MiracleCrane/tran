@@ -4,12 +4,15 @@ import { readJsonSafe, writeFileAtomic } from './atomicWrite'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { log } from './logger'
-import { getValidAccessToken } from './usageService'
+import { cheapComplete } from './cheapModel'
 import { loadSettings } from './settings'
 import { manualSessionTitle } from './sessionTitles'
 
 /**
- * AI 会话命名：用 kimi 云端 chat/completions 把用户发言概括成短标题。
+ * AI 会话命名：把用户发言概括成短标题。
+ *
+ * 请求本身走 cheapModel.ts 那条共用旁路（端点/鉴权/型号/超时都在那边），
+ * 这里只管命名的策略与缓存。型号是设置项——命名和其他总结类杂活共用同一个。
  *
  * 成本硬约束（用户已确认"目的是好区分，不追求完美"）：
  * - 每会话至多 2 次调用：首轮结束用首条发言快速命名；攒够前 3 次发言后
@@ -18,17 +21,10 @@ import { manualSessionTitle } from './sessionTitles'
  * - 单次输入截断 ~500 字符，thinking 关闭 + max_tokens=50，
  *   实测单次调用 ≈100-200 token；
  * - 失败静默回退原标题，单次尝试不重试。
- *
- * 端点已实证：POST https://api.kimi.com/coding/v1/chat/completions，
- * model kimi-for-coding + thinking:{type:'disabled'} → 53 tokens 出标题。
- * access_token 走 usageService 的凭证刷新链，绝不写日志、不进渲染层。
  */
 
-const CHAT_COMPLETIONS_URL = 'https://api.kimi.com/coding/v1/chat/completions'
-const TITLE_MODEL = 'kimi-for-coding'
 const MAX_PROMPT_CHARS = 500
 const MAX_TITLE_CHARS = 30
-const REQUEST_TIMEOUT_MS = 20000
 const BATCH_INTERVAL_MS = 300
 
 let cache: Record<string, string> | null = null
@@ -106,46 +102,22 @@ export async function generateAiTitle(
   if (existing && !opts?.overwriteAiTitle) return existing
   if (manualSessionTitle(sessionId)) return null
 
-  const token = await getValidAccessToken()
-  if (!token) return null
-
   const prompt = firstUserText.replace(/\s+/g, ' ').trim().slice(0, MAX_PROMPT_CHARS)
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-  try {
-    const response = await fetch(CHAT_COMPLETIONS_URL, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: TITLE_MODEL,
-        max_tokens: 50,
-        thinking: { type: 'disabled' },
-        messages: [
-          { role: 'system', content: '用 12 个字以内概括这个对话的主题，只输出标题本身，不要标点结尾。' },
-          { role: 'user', content: prompt }
-        ]
-      }),
-      signal: controller.signal
-    })
-    if (!response.ok) {
-      log('ai-titles', `title request rejected: ${response.status}`)
-      return null
-    }
-    const json = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>
-    }
-    const title = cleanTitle(json.choices?.[0]?.message?.content ?? '')
-    if (!title) return null
-    load()[sessionId] = title
-    save()
-    log('ai-titles', `named ${sessionId}: ${title}`)
-    return title
-  } catch (error) {
-    log('ai-titles', `title request failed: ${error instanceof Error ? error.message : String(error)}`)
+  const result = await cheapComplete({
+    system: '用 12 个字以内概括这个对话的主题，只输出标题本身，不要标点结尾。',
+    user: prompt,
+    maxTokens: 50
+  })
+  if (!result.ok) {
+    log('ai-titles', `命名失败（回退原标题）：${result.error}`)
     return null
-  } finally {
-    clearTimeout(timer)
   }
+  const title = cleanTitle(result.text)
+  if (!title) return null
+  load()[sessionId] = title
+  save()
+  log('ai-titles', `named ${sessionId}: ${title}`)
+  return title
 }
 
 /** 从磁盘读会话的首条/最近用户消息（~/.kimi-code/sessions/wd_*​/sessionId/

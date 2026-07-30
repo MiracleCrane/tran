@@ -10,7 +10,8 @@ import type {
   SettingsBackup,
   UpdateCheckResult,
   UpdateDownloadProgress,
-  KimiVersionInfo
+  KimiVersionInfo,
+  SummaryModelProbe
 } from '../../shared/ipc'
 import {
   MOTION_SPEED_MAX,
@@ -124,6 +125,9 @@ export default function SettingsPanel(): JSX.Element {
   const [startMaximized, setStartMaximized] = useState(false)
   const [nativeNotifications, setNativeNotifications] = useState(true)
   const [aiNaming, setAiNaming] = useState(true)
+  const [summaryModel, setSummaryModel] = useState('')
+  const [probing, setProbing] = useState(false)
+  const [probes, setProbes] = useState<SummaryModelProbe[] | null>(null)
   const [askOnClose, setAskOnClose] = useState(true)
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
@@ -169,6 +173,7 @@ export default function SettingsPanel(): JSX.Element {
       setStartMaximized(!!p.startMaximized)
       setNativeNotifications(p.nativeNotifications !== false)
       setAiNaming(p.aiNamingEnabled !== false)
+      setSummaryModel(p.summaryModel ?? '')
       setAskOnClose(!p.closePromptDismissed)
       setLoaded(true)
     })
@@ -240,6 +245,32 @@ export default function SettingsPanel(): JSX.Element {
       setTimeout(() => setSavedAt(false), 1500)
     } catch {
       setAiNaming(!next)
+    }
+  }
+
+  /** 总结型号：存的是原样字符串，空串 = 用主进程的默认值（kimi-for-coding）。
+   *  不做前端校验——能不能用只有服务端说了算，所以旁边给了探测按钮。 */
+  const saveSummaryModel = async (next: string): Promise<void> => {
+    setSummaryModel(next)
+    try {
+      await window.api.savePreferences({ summaryModel: next.trim() })
+      setSavedAt(true)
+      setTimeout(() => setSavedAt(false), 1500)
+    } catch {
+      /* 保存失败就留在输入框里，不回滚用户输入 */
+    }
+  }
+
+  /** 逐个探测候选型号能否在 kimi 的 coding 端点上用。串行，主进程侧实现。 */
+  const runProbeSummaryModels = async (): Promise<void> => {
+    setProbing(true)
+    setProbes(null)
+    try {
+      setProbes(await window.api.probeSummaryModels())
+    } catch (e) {
+      setProbes([{ model: '(探测失败)', ok: false, error: e instanceof Error ? e.message : String(e) }])
+    } finally {
+      setProbing(false)
     }
   }
 
@@ -715,6 +746,65 @@ export default function SettingsPanel(): JSX.Element {
               checked={aiNaming}
               onChange={(checked) => void toggleAiNaming(checked)}
             />
+            {/* 总结型号：命名与后续的总结类杂活（命令说明、思考摘要）共用。
+                走 kimi CLI 的凭证打 coding 端点，所以消耗的是订阅额度窗口，
+                不是按 token 计费——换小模型省的是额度和延迟，不是钱。 */}
+            <div className="space-y-2">
+              <div>
+                <div className="text-xs font-medium text-zinc-300">总结用型号</div>
+                <div className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
+                  命名和后续的总结类杂活共用。留空 = <code className="font-mono">kimi-for-coding</code>
+                  （唯一实证可用的）。其他型号能不能用只有服务端说了算，先探测再填。
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={summaryModel}
+                  spellCheck={false}
+                  placeholder="kimi-for-coding"
+                  onChange={(e) => setSummaryModel(e.target.value)}
+                  onBlur={(e) => void saveSummaryModel(e.target.value)}
+                  className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-elev/60 px-2.5 py-1.5 font-mono text-[11px] text-zinc-200 outline-none focus:border-accent/50"
+                />
+                <button
+                  type="button"
+                  onClick={() => void runProbeSummaryModels()}
+                  disabled={probing}
+                  className="shrink-0 rounded-lg border border-border-subtle px-2.5 py-1.5 text-[11px] text-zinc-300 transition hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {probing ? '探测中…' : '探测可用型号'}
+                </button>
+              </div>
+              {probes && (
+                <div className="space-y-1 rounded-lg border border-white/[0.06] bg-bg-elev/60 p-2">
+                  {probes.map((p) => (
+                    <div key={p.model} className="flex items-baseline gap-2 text-[11px]">
+                      <span className={p.ok ? 'text-emerald-400' : 'text-zinc-600'}>{p.ok ? '✓' : '✕'}</span>
+                      <button
+                        type="button"
+                        disabled={!p.ok}
+                        onClick={() => void saveSummaryModel(p.model)}
+                        className="font-mono text-zinc-300 enabled:hover:text-accent enabled:hover:underline disabled:cursor-default disabled:text-zinc-600"
+                        title={p.ok ? '点击选用该型号' : undefined}
+                      >
+                        {p.model}
+                      </button>
+                      {p.ok ? (
+                        <span className="text-zinc-500">{p.latencyMs} ms</span>
+                      ) : (
+                        <span className="min-w-0 truncate text-zinc-600" title={p.error}>
+                          {p.error}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                  <div className="pt-1 text-[10px] leading-relaxed text-zinc-600">
+                    这活儿在界面上，延迟比能力重要——都通的话挑最快的那个。
+                  </div>
+                </div>
+              )}
+            </div>
             <ToggleControl
               label="最小化到系统托盘"
               description="关闭窗口时最小化到托盘而非退出应用。点击托盘图标可恢复窗口。"

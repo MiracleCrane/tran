@@ -72,6 +72,9 @@ interface PersistedSettings {
   closePromptDismissed?: boolean
   /** AI 自动命名（会话短标题，云端生成；默认开，关闭后任何路径不调 API）。 */
   aiNamingEnabled?: boolean
+  /** 总结类杂活（会话命名、命令说明、思考摘要…）用的型号。空 = 用
+   *  cheapModel.DEFAULT_CHEAP_MODEL。别写死猜测的型号——设置页有探测按钮。 */
+  summaryModel?: string
   /** Show OS native notifications when a session ends while window is inactive
    *  (default true). */
   nativeNotifications?: boolean
@@ -247,6 +250,7 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.startMaximized = optionalBoolean(source.startMaximized)
   settings.closePromptDismissed = optionalBoolean(source.closePromptDismissed)
   settings.aiNamingEnabled = optionalBoolean(source.aiNamingEnabled)
+  settings.summaryModel = optionalString(source.summaryModel)
   settings.nativeNotifications = optionalBoolean(source.nativeNotifications)
 
   settings.composerModels = normalizeComposerModels(source.composerModels)
