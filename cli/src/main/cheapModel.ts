@@ -236,7 +236,39 @@ export function terseText(raw: string, maxChars: number): string | null {
   if (ESSAY_OPENERS.some((re) => re.test(text))) return null
   // 宽限一倍：略微超字数还能用，成倍超说明它在写文章。
   if (text.length > maxChars * 2) return null
-  return text.slice(0, maxChars)
+  return trimToWidth(text, maxChars)
+}
+
+/**
+ * 切到 maxChars 以内，但**不切在词中间**。
+ *
+ * 2026-07-30 实测：硬 `slice(0, maxChars)` 会切出
+ *   "压缩 Electron "（尾部空格 + 词被腰斩）
+ *   "定位流式导致 remount 的"（挂着一个孤零零的"的"）
+ *   "git push 代理配"（切在"配置"中间）
+ * 这些还都是**判废兜不住的**——长度在 maxChars 和 2×maxChars 之间，前面每一道
+ * 防线都放行了，最后死在这一行上。标题是要长期存进 ai-titles.json 的，切坏一次
+ * 就一直难看。
+ */
+function trimToWidth(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text
+  let cut = maxChars
+  // 落在 ASCII 词（英文/数字）内部就退到词首，别把 Electron 腰斩成 Electr。
+  // 退得太多就算了——宁可少一个词，也不要半个词。
+  const isWordChar = (ch: string): boolean => /[A-Za-z0-9_.-]/.test(ch)
+  if (cut < text.length && isWordChar(text[cut]!) && isWordChar(text[cut - 1]!)) {
+    let back = cut
+    while (back > 0 && isWordChar(text[back - 1]!)) back--
+    if (back >= Math.ceil(maxChars / 2)) cut = back
+  }
+  // 尾部的空白、标点、以及悬空的虚词——单独留着只会让人以为文本被截断了。
+  const trimmed = text
+    .slice(0, cut)
+    .replace(/[\s，,、。.:：;；·—-]+$/, '')
+    .replace(/(的|了|和|与|在|把|被|对|从|到|个|之|其)$/, '')
+    .trim()
+  // 全被修没了（整段都是标点/虚词）就退回朴素切法，别返回空串。
+  return trimmed || text.slice(0, maxChars).trim()
 }
 
 /**
