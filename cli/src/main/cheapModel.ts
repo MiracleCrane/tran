@@ -15,42 +15,71 @@ import { loadSettings } from './settings'
  *   Bearer = Kimi CLI 的 OAuth access_token（usageService 的续期链）
  * access_token 绝不写日志、绝不进渲染层。
  *
- * --- 2026-07-30 实测（用户机器，LEVEL_ADVANCED 订阅，每型号 5 发热连接） ---
+ * --- 2026-07-30 实测（用户机器，LEVEL_ADVANCED 订阅） ---
  *
- * 型号：这个端点**认任意 model 值**。kimi-for-coding / kimi-k2.6 /
- * kimi-k2.6-turbo / kimi-k2.7-code / kimi-k2.7-code-turbo / kimi-k3 全部通。
+ * 【型号】chat 端点**完全不校验 model 值**：随便写什么都回 200，并把这个值原样
+ *   回声在 `response.model` 里。实测连 `gpt-4o` 和现编的
+ *   `zzz-not-a-real-model-20260730` 都"通"。
+ *   → **"打得通"不能证明型号存在**，只有 GET /coding/v1/models 能。
+ *   → 目录里真实存在的只有四个（见 listServerModels 的注释），
+ *      早前候选表里的 kimi-k2.6 / kimi-k2.6-turbo / kimi-k2.7-code /
+ *      kimi-k2.7-code-turbo / kimi-k3 **一个都不存在**，服务端静默回落到默认
+ *      型号。所以早前那份"所有型号延迟都一样、差异在噪声里"的基准，其实是
+ *      **把同一个型号测了六遍**。
+ *   → 回落到哪个也是可测的：虚构 id 的 prompt_tokens = 82，与
+ *      kimi-for-coding 一致；k3 系是 134/137（系统预置不同）。即虚构 id 落到
+ *      的就是 kimi-for-coding。
  *
- * 延迟：除 k3（中位 2951ms）外**全部 1.7~1.8s，差异在噪声内**——
- *   for-coding 1813 / k2.6 1784 / k2.6-turbo 1707 / k2.7-code 1693。
- *   所谓"极速版"在这个端点上没有可测的优势（早前单发看到的 809ms 是冷启动
- *   握手 + 抖动造成的假象）。**所以默认型号保持 kimi-for-coding，不折腾。**
+ * 【延迟】用真实 id + 正确提示词（少样本 + stop）重测，3 发热连接的中位数
+ *   （两轮，相隔约半小时）：
+ *      kimi-for-coding             885 / 971ms   ← 保持默认
+ *      kimi-for-coding-highspeed  1098 / 990ms
+ *      k3                         1237 / 1147ms
+ *      k3-256k                    5547 / 2052ms  ← 抖得厉害，唯一有尾延迟风险的
+ *   两轮之间 for-coding 和 highspeed 互换了名次，差值一两百毫秒——**这两个在
+ *   这个任务上分不出快慢**，别拿延迟当选型依据。
+ *   注意这比早前记的 1.7~1.8s 快了一倍——**不是网络变好了**：早前的基准里
+ *   `outTok` 恒等于 max_tokens，说明模型每发都在写长文写到被截断，延迟是被
+ *   "生成 N 个 token"撑起来的。提示词修好后输出只有 4~16 个 token，延迟自然
+ *   掉下来。→ **"1.7s 延迟是硬伤"这个结论已作废**，但"不阻塞 UI、结果要缓存"
+ *   仍然照做。
  *
- * 额度：/usages 的 limit 恒为 100——那是**百分比**，不是 token 数。31 发
+ * 【额度】/usages 的 limit 恒为 100——那是**百分比**，不是 token 数。31 发
  *   （约 2100 token）两个窗口的 used 都没动，这只说明"低于计数器分辨率"，
  *   **不能解读为不计费**。按同端点同凭证的常理，几乎肯定计入订阅窗口。
  *
- * 指令遵循：⚠️ **这是真正的坑，而且踩了两层**。
- *   第一层：裸提示词（只在 system 里写"只输出结果、不超过 12 字"）——六个
- *     型号全部无视，一律开始写 markdown 长文然后被 max_tokens 截断。
+ * 【指令遵循】⚠️ 踩了两层：
+ *   第一层：裸提示词（只在 system 里写"只输出结果、不超过 12 字"）——全部无视，
+ *     一律开始写 markdown 长文然后被 max_tokens 截断。
  *   第二层：把少样本写成纯文本塞进单条 user 消息——**答非所问**，模型抓住
  *     第一个示例当主题，真正的输入被完全忽略（详见 cheapSummarize 的注释）。
- *   → 结论：少样本必须用真正的 user/assistant 轮次；加 stop 序列；再叠一层
- *     terseText() 输出侧清洗。三道防线，任何一道兜住都算。
+ *   → 改成真正的 user/assistant 多轮少样本 + stop 序列后，12 条不同命令
+ *      12 条都答对且都在 12 字内（kimi-for-coding 与 highspeed 各 6 条）。
+ *      terseText() 仍保留作第三道防线。
+ *
+ * 【两个必须原样保留的参数】
+ *   - `thinking: { type: 'disabled' }` 是**载重参数，不是优化**。目录里四个型号
+ *     全是 `supports_thinking_type: "only"`；把这个字段整个去掉，max_tokens=36
+ *     的预算会被推理吃光，`content` 回**空字符串**（实测）。
+ *   - `temperature` 一律不要传：传 0 直接 400
+ *     `invalid temperature: only 0.6 is allowed for this model`。
  */
 
 const CHAT_COMPLETIONS_URL = 'https://api.kimi.com/coding/v1/chat/completions'
+const MODELS_URL = 'https://api.kimi.com/coding/v1/models'
 
-/** 唯一实证可用的型号，也是默认值。 */
+/** 目录实证存在、且实测最快的型号，也是默认值。 */
 export const DEFAULT_CHEAP_MODEL = 'kimi-for-coding'
 
-/** 探测时依次尝试的候选（含默认值）。都是"听说存在"，通不通看服务端。 */
+/**
+ * 拿不到目录时的兜底候选。**只列目录里实证存在的**——绝不再往这里加"听说存在"
+ * 的名字：chat 端点对不存在的 id 也回 200，加进来只会探测出一排假的 ✓。
+ */
 export const CHEAP_MODEL_CANDIDATES = [
   DEFAULT_CHEAP_MODEL,
-  'kimi-k2.6',
-  'kimi-k2.6-turbo',
-  'kimi-k2.7-code',
-  'kimi-k2.7-code-turbo',
-  'kimi-k3'
+  'kimi-for-coding-highspeed',
+  'k3',
+  'k3-256k'
 ] as const
 
 const REQUEST_TIMEOUT_MS = 20000
@@ -264,11 +293,17 @@ export async function cheapSummarize(opts: {
  * 一并带回来。
  *
  * 存在的理由：我在提示词上连摔两跤（裸提示词写长文、单条 user 塞少样本导致
- * 答非所问），第三版改成多轮 + stop 之后服务端直接 400，而 400 的原因无法
+ * 答非所问），第三版改成多轮 + stop 之后疑似被服务端 400，而 400 的原因无法
  * 从外部推断——必须看服务端那句话。与其让用户一遍遍在 PowerShell 里贴脚本
  * （还得手动解 HttpWebResponse 才能看到错误正文），不如做成设置页一个按钮。
  *
  * 四种形态是为了二分定位：stop 和多轮角色是两个独立变量，一次只动一个。
+ *
+ * 2026-07-30 直连实测结果：**四种形态全部 200**，多轮 + stop 输出
+ * "构建并启动容器"，完全合格。那次 400 复现不出来——已知会 400 的只有
+ * `temperature`（传 0 即 `only 0.6 is allowed for this model`），而这里从不传
+ * temperature。按 stop/多轮被拒来设计是**没有依据的**，所以正式路径直接用
+ * 形态 4。这个按钮保留作回归自检。
  */
 export interface PromptDiagnosis {
   label: string
@@ -342,18 +377,91 @@ export interface CheapModelProbe {
   error?: string
   /** 往返耗时（ms）。这个任务在 UI 上，延迟比能力重要——挑最快的那个。 */
   latencyMs?: number
+  /** 是否出现在服务端目录里。false + ok=true = 服务端在静默回落，不是真可用。 */
+  known: boolean
+  displayName?: string
+  contextLength?: number
+}
+
+/** GET /coding/v1/models 的一条。 */
+export interface ServerModel {
+  id: string
+  displayName?: string
+  contextLength?: number
 }
 
 /**
- * 逐个探测候选型号：每个打一发最小请求（max_tokens=1），报通/不通与延迟。
+ * 服务端的**权威**型号目录。
  *
- * 串行而不是并行：并行会在同一瞬间打 6 发，额度窗口紧的时候容易被限流，
- * 那样得到的"不通"是假阴性。
+ * 这是唯一能回答"某个型号存不存在"的接口——chat 端点对任意 model 值都回 200，
+ * 拿它做存在性判断只会得到一排假的 ✓（2026-07-30 实测，见文件头）。
+ *
+ * 实测返回四个：
+ *   kimi-for-coding            K2.7 Coding             262144
+ *   kimi-for-coding-highspeed  K2.7 Coding Highspeed   262144
+ *   k3                         K3                     1048576  （支持 think_efforts）
+ *   k3-256k                    K3-256k                 262144
+ */
+export async function listServerModels(): Promise<ServerModel[] | null> {
+  const token = await getValidAccessToken()
+  if (!token) return null
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
+  try {
+    const response = await fetch(MODELS_URL, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: controller.signal
+    })
+    if (!response.ok) {
+      log('cheap-model', `型号目录请求被拒 status=${response.status}`)
+      return null
+    }
+    const json = (await response.json()) as {
+      data?: Array<{ id?: unknown; display_name?: unknown; context_length?: unknown }>
+    }
+    if (!Array.isArray(json.data)) return null
+    return json.data
+      .filter((entry): entry is { id: string } & typeof entry => typeof entry?.id === 'string' && !!entry.id)
+      .map((entry) => ({
+        id: entry.id,
+        ...(typeof entry.display_name === 'string' ? { displayName: entry.display_name } : {}),
+        ...(typeof entry.context_length === 'number' ? { contextLength: entry.context_length } : {})
+      }))
+  } catch (error) {
+    log('cheap-model', `型号目录请求失败: ${error instanceof Error ? error.message : String(error)}`)
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * 探测可用型号：**先拉目录定"存不存在"，再逐个打一发定"通不通 + 多快"**。
+ *
+ * 两件事必须分开报，因为它们的失败模式完全不同：目录说了算的是存在性，打一发
+ * 说了算的是当下的额度/网络。早前只做后者，于是六个不存在的型号全报 ✓——
+ * 用户照着挑一个填进设置，实际跑的还是默认型号，而且毫无提示。
+ *
+ * 串行而不是并行：并行会在同一瞬间打满，额度窗口紧的时候容易被限流，那样得到
+ * 的"不通"是假阴性。
  */
 export async function probeCheapModels(models?: string[]): Promise<CheapModelProbe[]> {
-  const list = models?.length ? models : [...CHEAP_MODEL_CANDIDATES]
+  const catalog = await listServerModels()
+  const known = new Map((catalog ?? []).map((m) => [m.id, m]))
+
+  // 探测目标：目录（拿不到就用兜底表）+ 用户当前填的那个（可能是目录外的，
+  // 正因为在目录外才更该让他看到警告）。
+  const configured = cheapModelId()
+  const base = models?.length
+    ? models
+    : catalog?.length
+      ? catalog.map((m) => m.id)
+      : [...CHEAP_MODEL_CANDIDATES]
+  const list = base.includes(configured) ? base : [...base, configured]
+
   const out: CheapModelProbe[] = []
   for (const model of list) {
+    const entry = known.get(model)
     const startedAt = Date.now()
     const result = await cheapComplete({
       model,
@@ -363,12 +471,21 @@ export async function probeCheapModels(models?: string[]): Promise<CheapModelPro
       timeoutMs: PROBE_TIMEOUT_MS
     })
     const latencyMs = Date.now() - startedAt
-    out.push(
-      result.ok
-        ? { model, ok: true, latencyMs }
-        : { model, ok: false, error: result.error, latencyMs }
-    )
+    // catalog 为 null 时无从判断存在性，一律按"未知"处理而不是谎报 known。
+    const isKnown = catalog ? known.has(model) : false
+    out.push({
+      model,
+      ok: result.ok,
+      latencyMs,
+      known: isKnown,
+      ...(entry?.displayName ? { displayName: entry.displayName } : {}),
+      ...(entry?.contextLength ? { contextLength: entry.contextLength } : {}),
+      ...(result.ok ? {} : { error: result.error })
+    })
   }
-  log('cheap-model', `探测完成：可用 ${out.filter((r) => r.ok).map((r) => r.model).join(', ') || '无'}`)
+  log(
+    'cheap-model',
+    `探测完成：目录 ${catalog ? `${catalog.length} 个` : '不可用'}，可用 ${out.filter((r) => r.ok && r.known).map((r) => r.model).join(', ') || '无'}`
+  )
   return out
 }

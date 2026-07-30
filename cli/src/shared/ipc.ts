@@ -299,6 +299,18 @@ export interface SummaryModelProbe {
   error?: string
   /** 往返耗时。这活儿在 UI 上，延迟比能力重要——挑最快的。 */
   latencyMs?: number
+  /**
+   * 该 id 是否出现在服务端 `/models` 目录里。
+   *
+   * ⚠️ false 时 ok 也可能是 true——chat 端点**不校验 model 值**，随便写什么都回
+   * 200 并原样回声（实测连 `gpt-4o` 和一个现编的名字都"通"）。所以「打得通」
+   * 完全不能证明这个型号存在，只有目录能。
+   */
+  known: boolean
+  /** 目录里的展示名，例如 `K2.7 Coding`。 */
+  displayName?: string
+  /** 目录里的上下文长度（token）。 */
+  contextLength?: number
 }
 
 export interface ProviderProfile {

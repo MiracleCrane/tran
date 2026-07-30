@@ -271,7 +271,9 @@ export default function SettingsPanel(): JSX.Element {
     try {
       setProbes(await window.api.probeSummaryModels())
     } catch (e) {
-      setProbes([{ model: '(探测失败)', ok: false, error: e instanceof Error ? e.message : String(e) }])
+      setProbes([
+        { model: '(探测失败)', ok: false, known: false, error: e instanceof Error ? e.message : String(e) }
+      ])
     } finally {
       setProbing(false)
     }
@@ -774,7 +776,8 @@ export default function SettingsPanel(): JSX.Element {
                 <div className="text-xs font-medium text-zinc-300">总结用型号</div>
                 <div className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
                   命名和后续的总结类杂活共用。留空 = <code className="font-mono">kimi-for-coding</code>
-                  （唯一实证可用的）。其他型号能不能用只有服务端说了算，先探测再填。
+                  （实测四个真实型号里最快的）。填之前先探测——服务端目录之外的名字也会"通"，
+                  但实际跑的还是默认型号。
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -809,16 +812,28 @@ export default function SettingsPanel(): JSX.Element {
                 <div className="space-y-1 rounded-lg border border-white/[0.06] bg-bg-elev/60 p-2">
                   {probes.map((p) => (
                     <div key={p.model} className="flex items-baseline gap-2 text-[11px]">
-                      <span className={p.ok ? 'text-emerald-400' : 'text-zinc-600'}>{p.ok ? '✓' : '✕'}</span>
+                      {/* ✓ 只给"目录里有 + 打得通"的。目录外的即使回 200 也是
+                          假象——服务端不校验 model 值，会静默回落到默认型号。 */}
+                      <span
+                        className={
+                          p.ok && p.known ? 'text-emerald-400' : p.ok ? 'text-amber-400' : 'text-zinc-600'
+                        }
+                      >
+                        {p.ok && p.known ? '✓' : p.ok ? '⚠' : '✕'}
+                      </span>
                       <button
                         type="button"
-                        disabled={!p.ok}
+                        disabled={!p.ok || !p.known}
                         onClick={() => void saveSummaryModel(p.model)}
                         className="font-mono text-zinc-300 enabled:hover:text-accent enabled:hover:underline disabled:cursor-default disabled:text-zinc-600"
-                        title={p.ok ? '点击选用该型号' : undefined}
+                        title={p.ok && p.known ? '点击选用该型号' : undefined}
                       >
                         {p.model}
                       </button>
+                      {p.displayName && <span className="text-zinc-500">{p.displayName}</span>}
+                      {p.contextLength && (
+                        <span className="text-zinc-600">{Math.round(p.contextLength / 1024)}k</span>
+                      )}
                       {p.ok ? (
                         <span className="text-zinc-500">{p.latencyMs} ms</span>
                       ) : (
@@ -826,10 +841,15 @@ export default function SettingsPanel(): JSX.Element {
                           {p.error}
                         </span>
                       )}
+                      {p.ok && !p.known && (
+                        <span className="text-amber-400/80">目录里没有，服务端会悄悄换成默认型号</span>
+                      )}
                     </div>
                   ))}
                   <div className="pt-1 text-[10px] leading-relaxed text-zinc-600">
-                    这活儿在界面上，延迟比能力重要——都通的话挑最快的那个。
+                    型号是否存在以服务端目录（<code className="font-mono">/models</code>）为准——chat
+                    端点不校验 model 值，随便写个名字也回 200，所以"打得通"证明不了什么。
+                    都通的话挑最快的：这活儿在界面上，延迟比能力重要。
                   </div>
                 </div>
               )}
@@ -856,7 +876,8 @@ export default function SettingsPanel(): JSX.Element {
                   ))}
                   <div className="pt-1 text-[10px] leading-relaxed text-zinc-600">
                     形态 2 失败 = 端点不支持 stop；形态 3 失败 = 不接受 assistant 角色消息。
-                    失败行显示的是服务端原文。
+                    失败行显示的是服务端原文。2026-07-30 实测四种形态**全部可用**，
+                    正式路径用的是形态 4（多轮少样本 + stop）。
                   </div>
                 </div>
               )}
