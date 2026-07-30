@@ -41,7 +41,7 @@ import {
   runWslHealthCheck
 } from './runtimeDiagnostics'
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
-import { checkKimiVersion } from './kimiVersion'
+import { checkKimiVersion, upgradeKimi } from './kimiVersion'
 import { listKimiSessions } from './kimiHistory'
 import { getPlanUsageCached } from './usageService'
 import { getQuotaOverviewCached, fetchQuotaActions, runQuotaLogin } from './quotaService'
@@ -97,7 +97,8 @@ import type {
   AiTitlesBatchResult,
   SessionPreview,
   SaveImageResult,
-  KimiVersionInfo
+  KimiVersionInfo,
+  KimiUpgradeResult
 } from '../shared/ipc'
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
@@ -634,6 +635,15 @@ export function registerIpc(
     'forge:checkKimiVersion',
     async (_e, force?: boolean): Promise<KimiVersionInfo> => checkKimiVersion(force === true)
   )
+  ipcMain.handle('forge:upgradeKimi', async (): Promise<KimiUpgradeResult> => {
+    // Windows 上正在运行的 kimi 会占用可执行文件，覆盖安装必然 EBUSY/EPERM；
+    // 且升级后旧 ACP 连接指向的是已被替换的文件。所以先把会话全部收掉。
+    await bridge.shutdown().catch(() => {})
+    const result = await upgradeKimi()
+    // 会话已断，通知渲染层刷新列表（侧栏 running 标记要清）。
+    send('forge:sessions-changed', {})
+    return result
+  })
   ipcMain.handle(
     'forge:exportSettings',
     async (_e, appearance?: Record<string, unknown>): Promise<SettingsBackup> =>

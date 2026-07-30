@@ -355,15 +355,30 @@ export interface DiagnosticReportOptions {
   appearance?: Record<string, unknown>
 }
 
-/** Kimi Code CLI 的版本检查结果（与 Tran 自更新分开，只查不装）。 */
+/** Kimi Code CLI 的安装方式 —— 升级手段完全不同，认错会装出第二份。
+ *  installer = 官方脚本（~/.kimi-code/bin，国内常用）；npm = 全局包。 */
+export type KimiInstallMethod = 'installer' | 'npm' | 'unknown'
+
+/** Kimi Code CLI 的版本检查结果（与 Tran 自更新分开）。 */
 export interface KimiVersionInfo {
   currentVersion?: string
   latestVersion?: string
   updateAvailable: boolean
-  /** 用户可自行执行的升级命令。 */
+  /** 与安装方式匹配的升级命令（供复制）。 */
   upgradeCommand: string
+  installMethod?: KimiInstallMethod
+  /** 探测到的可执行文件路径。 */
+  installPath?: string
   error?: string
   checkedAt: number
+}
+
+/** 一键升级 Kimi Code CLI 的结果。 */
+export interface KimiUpgradeResult {
+  ok: boolean
+  error?: string
+  /** 安装器/npm 输出的尾部（失败时排查用）。 */
+  output?: string
 }
 
 export interface DiagnosticReportResult {
@@ -757,6 +772,8 @@ export interface ForgeApi {
   exportDiagnosticReport(options?: DiagnosticReportOptions): Promise<DiagnosticReportResult>
   /** 查 Kimi Code CLI 版本（本机 vs npm 最新）。force 跳过 6 小时缓存。 */
   checkKimiVersion(force?: boolean): Promise<KimiVersionInfo>
+  /** 一键升级 Kimi Code CLI。会先断开所有活跃会话（升级要替换正在运行的可执行文件）。 */
+  upgradeKimi(): Promise<KimiUpgradeResult>
   exportSettings(appearance?: Record<string, unknown>): Promise<SettingsBackup>
   importSettings(backup: SettingsBackup): Promise<void>
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import ConfirmDialog from './ConfirmDialog'
 import type {
   ComposerModel,
   EffortLevel,
@@ -137,6 +138,9 @@ export default function SettingsPanel(): JSX.Element {
   const [kimiVersion, setKimiVersion] = useState<KimiVersionInfo | null>(null)
   const [checkingKimi, setCheckingKimi] = useState(false)
   const [kimiCopied, setKimiCopied] = useState(false)
+  const [upgradingKimi, setUpgradingKimi] = useState(false)
+  const [kimiUpgradeMsg, setKimiUpgradeMsg] = useState<string | null>(null)
+  const [kimiConfirmOpen, setKimiConfirmOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState(false)
   const importInputRef = useRef<HTMLInputElement | null>(null)
@@ -266,6 +270,25 @@ export default function SettingsPanel(): JSX.Element {
       })
     } finally {
       setCheckingKimi(false)
+    }
+  }
+
+  const runKimiUpgrade = async (): Promise<void> => {
+    setKimiConfirmOpen(false)
+    setUpgradingKimi(true)
+    setKimiUpgradeMsg('正在断开会话并安装…')
+    try {
+      const result = await window.api.upgradeKimi()
+      if (result.ok) {
+        setKimiUpgradeMsg('升级完成。请重新打开会话。')
+        setKimiVersion(await window.api.checkKimiVersion(true))
+      } else {
+        setKimiUpgradeMsg(`升级失败：${result.error ?? '未知错误'}`)
+      }
+    } catch (e) {
+      setKimiUpgradeMsg(`升级失败：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setUpgradingKimi(false)
     }
   }
 
@@ -776,6 +799,11 @@ export default function SettingsPanel(): JSX.Element {
                     <>
                       当前 {kimiVersion.currentVersion ?? '未知'}
                       {kimiVersion.latestVersion ? ` / 最新 ${kimiVersion.latestVersion}` : ''}
+                      {kimiVersion.installMethod === 'installer'
+                        ? ' · 官方脚本安装'
+                        : kimiVersion.installMethod === 'npm'
+                          ? ' · npm 全局安装'
+                          : ''}
                       {kimiVersion.updateAvailable ? (
                         <span className="ml-1 text-accent">· 有新版本</span>
                       ) : (
@@ -786,19 +814,43 @@ export default function SettingsPanel(): JSX.Element {
                 </div>
               )}
               {kimiVersion?.updateAvailable && (
-                <div className="mt-2 flex items-center gap-2 rounded-lg border border-white/[0.06] bg-bg-elev/60 px-3 py-2">
-                  <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-400">
-                    {kimiVersion.upgradeCommand}
-                  </code>
-                  <button
-                    type="button"
-                    onClick={() => void copyKimiUpgrade()}
-                    className="shrink-0 rounded-md border border-border-subtle px-2 py-1 text-[11px] text-zinc-400 transition hover:bg-bg-hover hover:text-zinc-200"
-                  >
-                    {kimiCopied ? '已复制' : '复制命令'}
-                  </button>
+                <div className="mt-2 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setKimiConfirmOpen(true)}
+                      disabled={upgradingKimi || kimiVersion.installMethod === 'unknown'}
+                      title={
+                        kimiVersion.installMethod === 'unknown'
+                          ? `无法判断安装方式（${kimiVersion.installPath ?? ''}），请手动升级`
+                          : kimiVersion.upgradeCommand
+                      }
+                      className="rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {upgradingKimi ? '升级中…' : `一键升级到 ${kimiVersion.latestVersion ?? '最新版'}`}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void copyKimiUpgrade()}
+                      className="rounded-md border border-border-subtle px-2 py-1.5 text-[11px] text-zinc-400 transition hover:bg-bg-hover hover:text-zinc-200"
+                      title={kimiVersion.upgradeCommand}
+                    >
+                      {kimiCopied ? '已复制' : '复制命令'}
+                    </button>
+                  </div>
+                  {kimiUpgradeMsg && (
+                    <div className="text-[11px] leading-relaxed text-zinc-400">{kimiUpgradeMsg}</div>
+                  )}
                 </div>
               )}
+              <ConfirmDialog
+                open={kimiConfirmOpen}
+                title="升级 Kimi Code CLI"
+                message={`将执行 ${kimiVersion?.upgradeCommand ?? ''}。\n\n升级前会断开全部会话——Windows 上正在运行的 kimi 会占用文件，不断开必然安装失败。正在进行的对话会中断，历史不受影响。`}
+                confirmLabel="断开会话并升级"
+                onConfirm={() => void runKimiUpgrade()}
+                onCancel={() => setKimiConfirmOpen(false)}
+              />
               {(downloadingUpdate || updateProgress) && (
                 <div className="mt-3 rounded-xl border border-white/[0.06] bg-bg-elev/60 p-3">
                   <div className="mb-2 flex items-center justify-between gap-3 text-[11px]">
