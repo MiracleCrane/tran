@@ -5,12 +5,16 @@
 ### 中文
 
 - 新增:界面风格开关(设置 → 外观 → 界面风格),玻璃 / 简约二选一,切换即时生效。默认仍是玻璃。简约风:面板不再描边和投影,分区靠背景深浅;「新建对话」降为次要按钮,强调色收回给「进行中」状态和发送键;你的发言从右侧气泡改为左对齐加一条竖线(贴日志、贴代码时更好读);AI 回复保持居中全宽,只在宽屏下封顶留白。
+- 新增:**思考过程整段译成中文**。模型内部推理用什么语言 Tran 控制不了,所以 Kimi 的思考大量是英文——折叠态有中文摘要还好,展开之后就是一屏英文。现在展开时按需翻译(不展开不花这次调用),判据是「CJK 占比 < 15%」而非「有没有英文」,夹几个英文术语的中文思考不会被整段翻。译出来了才给「看原文 / 看译文」切换;失败就安静显示原文。走已实证免费的网页通道,缓存命中 0ms。
+- 优化:简约风的八处修补——弹层补回不透明底(此前「子 Agent」「待办」点开是透明的);悬停时间戳改挂右侧留白(左对齐后原位置正好压在正文上);用户发言与 AI 正文统一封顶 62rem;底色从近黑的 #05060A 抬到 #101116(玻璃拆掉后死黑一片,卡片的层次看不出来);连续发言之间补间距;输入框快捷键提示改为聚焦才显示;思考进行中改用流光文字,去掉前面那颗转圈的月亮;思考摘要阈值从 120 字降到 70(120 太高,一屏里常出现「有的有摘要、有的没有」,看着像坏了)。
 - 修复:markdown 列表**没有项目符号**。Tailwind 的 preflight 会把 `ul/ol` 的 `list-style` 重置成 none,而样式里只补回了缩进、没补回符号 —— 于是所有分点都塌成「缩进的普通段落」,层级信息全丢。现写回圆点/数字,嵌套层级用不同符号区分。
 - 修复:AI 回复的加粗过重。`<strong>` 此前吃浏览器默认的 700,而字体栈里**没有中文字族**,中文回落到系统字体后 700 在深色底上会发胖。降到 600 并禁用合成粗体。
 
 ### English
 
 - Added: UI style switch (Settings → Appearance), glass or minimal, applied instantly. Glass remains the default. Minimal drops panel borders and shadows in favor of background steps, demotes the "New chat" button, and renders your own messages left-aligned with an accent rule instead of a right-side bubble (much better for pasted logs and code). AI replies stay centered and full-width, capped only on wide screens.
+- Added: **thinking blocks translated to Chinese**. Tran can't control what language the model reasons in, so Kimi's thinking is largely English — fine while collapsed (there's a Chinese summary), unreadable once expanded. Expanding now translates on demand, gated on "CJK ratio < 15%" rather than "contains English", so Chinese thinking with a few English terms is left alone. The original/translation toggle appears only if translation succeeded; failures silently show the original. Runs on the zero-cost web channel; cache hits are instant.
+- Improved: eight fixes to the minimal style — opaque backgrounds restored for popovers (the sub-agent and todo chips opened transparent), hover timestamps moved to the right gutter, user messages capped at the same 62rem as AI replies, base background lifted from near-black #05060A to #101116, spacing between consecutive user messages, composer shortcut hints shown only on focus, in-progress thinking uses shimmering text instead of a spinner, and the thinking-summary threshold lowered from 120 to 70 characters.
 - Fixed: markdown lists had no bullets. Tailwind's preflight resets `list-style` to none and the stylesheet only restored the indent, so every list collapsed into indented prose and lost its structure.
 - Fixed: bold text in AI replies was too heavy — `<strong>` inherited the browser default 700, and with no CJK family in the font stack Chinese fell back to a system font that blooms at 700 on a dark background.
 
