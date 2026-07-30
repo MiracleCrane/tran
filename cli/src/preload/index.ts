@@ -208,7 +208,7 @@ const api: ForgeApi = {
   generateAiTitles: (sessionIds) => ipcRenderer.invoke('forge:generateAiTitles', sessionIds),
   getSessionPreview: (sessionId) => ipcRenderer.invoke('forge:getSessionPreview', sessionId),
   subscribeSwarmTasks: (sessionId) => ipcRenderer.invoke('forge:subscribeSwarmTasks', sessionId),
-  unsubscribeSwarmTasks: () => ipcRenderer.invoke('forge:unsubscribeSwarmTasks'),
+  unsubscribeSwarmTasks: (sessionId) => ipcRenderer.invoke('forge:unsubscribeSwarmTasks', sessionId),
   onSwarmTasks: (cb) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: SwarmTasksEvent): void => cb(payload)
     ipcRenderer.on('forge:swarm-tasks', listener)

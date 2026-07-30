@@ -851,31 +851,50 @@ export function registerIpc(
   )
 
   // --- Swarm tasks 轮询（kimi 本地 server；连接失败静默降级，绝不影响聊天） ---
-  let swarmTimer: ReturnType<typeof setTimeout> | null = null
-  let swarmSessionId: string | null = null
-  let swarmFailures = 0
+  //
+  // 每个被观察的会话各持一个 poller。**此前是单例**（一个 swarmSessionId +
+  // 一个 timer），切会话就把上一个会话的轮询停掉——于是后台那个跑着 Bash/
+  // 子代理的会话，任务状态从此不再更新：待办卡永远停在旧状态，"后台任务已
+  // 结束"的提醒也永远不会触发。渲染层里 `foldBackgroundSwarmTasks`（处理
+  // 非当前会话的推送）因此是条死路径，主进程根本不会给它推。
+  //
+  // 现在：前台会话 + 任何还有 running 任务的会话都各自轮询。后台会话一旦
+  // 任务全部收尾就自动退休，避免"每个开过的会话永久占一个定时器"。
+  interface SwarmPoller {
+    timer: ReturnType<typeof setTimeout> | null
+    failures: number
+    /** 前台会话（渲染层正在看的那个）。后台会话任务收尾后会被回收。 */
+    foreground: boolean
+  }
+  const swarmPollers = new Map<string, SwarmPoller>()
+  /** 后台 poller 上限：正常最多一两个，设个上限防病态增长（比如脚本连开会话）。 */
+  const MAX_SWARM_POLLERS = 8
 
-  const stopSwarmPolling = (): void => {
-    if (swarmTimer !== null) {
-      clearTimeout(swarmTimer)
-      swarmTimer = null
+  const stopSwarmPolling = (sessionId?: string): void => {
+    const ids = sessionId === undefined ? [...swarmPollers.keys()] : [sessionId]
+    for (const id of ids) {
+      const poller = swarmPollers.get(id)
+      if (!poller) continue
+      if (poller.timer !== null) clearTimeout(poller.timer)
+      swarmPollers.delete(id)
     }
-    swarmSessionId = null
   }
 
-  const scheduleSwarmPoll = (delayMs: number): void => {
-    swarmTimer = setTimeout(() => void pollSwarmTasks(), delayMs)
+  const scheduleSwarmPoll = (sessionId: string, delayMs: number): void => {
+    const poller = swarmPollers.get(sessionId)
+    if (!poller) return
+    poller.timer = setTimeout(() => void pollSwarmTasks(sessionId), delayMs)
     // 轮询不该拖住事件循环、阻止进程退出。
-    swarmTimer.unref?.()
+    poller.timer.unref?.()
   }
 
-  // 失败重试退避：15s→60s→5min 封顶（成功后 swarmFailures 清零自动重置）。
+  // 失败重试退避：15s→60s→5min 封顶（成功后 failures 清零自动重置）。
   const swarmRetryDelay = (failures: number): number =>
     Math.min(15000 * 4 ** (failures - 1), 300000)
 
-  const pollSwarmTasks = async (): Promise<void> => {
-    const sessionId = swarmSessionId
-    if (!sessionId) return
+  const pollSwarmTasks = async (sessionId: string): Promise<void> => {
+    const poller = swarmPollers.get(sessionId)
+    if (!poller) return
     // 窗口没了就彻底停：渲染层重载/关窗时不会发退订，继续轮询是纯空转。
     const win = getMainWindow()
     if (!win || win.isDestroyed()) {
@@ -883,39 +902,75 @@ export function registerIpc(
       return
     }
     const tasks = await getSessionTasks(sessionId).catch(() => null)
-    if (swarmSessionId !== sessionId) return
+    // 期间被退订/回收了就别再续期。
+    if (swarmPollers.get(sessionId) !== poller) return
     if (tasks === null) {
-      swarmFailures += 1
+      poller.failures += 1
       // server 持续不可用：推一次降级态，之后按指数退避继续重试（15s→60s→5min
       // 封顶），server 恢复后自动回到正常轮询。
-      if (swarmFailures === 3) {
+      if (poller.failures === 3) {
         send('forge:swarm-tasks', { sessionId, tasks: null })
       }
-      scheduleSwarmPoll(swarmRetryDelay(swarmFailures))
+      scheduleSwarmPoll(sessionId, swarmRetryDelay(poller.failures))
       return
     }
-    swarmFailures = 0
+    poller.failures = 0
     send('forge:swarm-tasks', { sessionId, tasks })
-    // 有 running 子代理时 2s 高频轮询，否则 15s 降频。
-    const active = tasks.some((t) => t.kind === 'subagent' && t.status === 'running')
-    scheduleSwarmPoll(active ? 2000 : 15000)
+
+    const active = tasks.some((t) => t.status === 'running')
+    // 后台会话的任务已全部收尾：最后这一帧已经推给渲染层了（"已结束"的判断
+    // 依赖它），此后没有新信息，回收定时器。
+    if (!poller.foreground && !active) {
+      stopSwarmPolling(sessionId)
+      return
+    }
+    // 有 running 任务时 2s 高频；前台空闲 15s 降频；后台留着的一律 5s
+    // （它之所以还留着就是因为有任务在跑）。
+    scheduleSwarmPoll(sessionId, active ? (poller.foreground ? 2000 : 5000) : 15000)
+  }
+
+  /** 起一个 poller（已存在则只更新前台标记）。 */
+  const ensureSwarmPoller = (sessionId: string, foreground: boolean): void => {
+    const existing = swarmPollers.get(sessionId)
+    if (existing) {
+      existing.foreground = existing.foreground || foreground
+      return
+    }
+    if (swarmPollers.size >= MAX_SWARM_POLLERS) {
+      // 满了就挤掉一个后台的；前台的永不挤掉。
+      const victim = [...swarmPollers.entries()].find(([, p]) => !p.foreground)?.[0]
+      if (victim === undefined) return
+      log('ipc', `swarm poller 上限已满，回收后台会话 ${victim}`)
+      stopSwarmPolling(victim)
+    }
+    swarmPollers.set(sessionId, { timer: null, failures: 0, foreground })
+    void pollSwarmTasks(sessionId)
   }
 
   ipcMain.handle('forge:subscribeSwarmTasks', async (_e, sessionId: string): Promise<void> => {
-    if (swarmSessionId === sessionId && swarmTimer !== null) return
-    stopSwarmPolling()
-    swarmFailures = 0
-    swarmSessionId = sessionId
-    void pollSwarmTasks()
+    const id = requireString(sessionId, 'sessionId')
+    // 换前台：上一个前台**降级为后台**而不是停掉——它可能正跑着后台任务，
+    // 停了就又回到"切走即失联"。它的任务收尾后 pollSwarmTasks 自己回收。
+    for (const [other, poller] of swarmPollers) {
+      if (other !== id) poller.foreground = false
+    }
+    ensureSwarmPoller(id, true)
   })
 
-  ipcMain.handle('forge:unsubscribeSwarmTasks', async (): Promise<void> => {
+  ipcMain.handle('forge:unsubscribeSwarmTasks', async (_e, sessionId?: string): Promise<void> => {
+    // 带 sessionId：只把它降级为后台（有任务在跑就继续轮，收尾后自动回收）。
+    // 不带（老调用方/窗口卸载）：全停。
+    if (typeof sessionId === 'string' && sessionId) {
+      const poller = swarmPollers.get(sessionId)
+      if (poller) poller.foreground = false
+      return
+    }
     stopSwarmPolling()
   })
 
-  // 渲染层不一定会退订（重载、隐藏到托盘、直接关窗），不挂这两个钩子的话
+  // 渲染层不一定会退订（重载、隐藏到托盘、直接关窗），不挂这个钩子的话
   // pollSwarmTasks 会一直自我续期地轮询下去。
-  app.once('before-quit', stopSwarmPolling)
+  app.once('before-quit', () => stopSwarmPolling())
 
   ipcMain.handle(
     'forge:deleteSession',

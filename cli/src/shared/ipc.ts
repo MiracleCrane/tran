@@ -881,7 +881,10 @@ export interface ForgeApi {
   /** 订阅某 ACP 会话（session_<uuid>）的 tasks 推送：有 running 子代理 2s 一次，
    *  空闲 15s 降频。 */
   subscribeSwarmTasks(sessionId: string): Promise<void>
-  unsubscribeSwarmTasks(): Promise<void>
+  /** 退订。带 sessionId = 「这个会话不再是前台」：它若还有任务在跑会继续被
+   *  观察（后台会话的任务状态不能因为切走就停更），任务收尾后主进程自动回收。
+   *  不带参数 = 全停（窗口卸载用）。 */
+  unsubscribeSwarmTasks(sessionId?: string): Promise<void>
   onSwarmTasks(cb: (e: SwarmTasksEvent) => void): () => void
 }
 
