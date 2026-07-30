@@ -2324,13 +2324,37 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   padding: 1px 5px;
   border-radius: 4px;
 }
+/* Tailwind 的 preflight 把 ul/ol 的 list-style 重置成 none。这里原先只补回了
+   padding-left，**没补回符号**，于是所有 markdown 列表都塌成"缩进的普通段落"：
+   分点看起来和正文一样，层级全丢。必须显式写回 list-style-type。 */
 .prose-forge ul,
 .prose-forge ol {
   margin: 0.45em 0;
   padding-left: 1.4em;
 }
+.prose-forge ul {
+  list-style-type: disc;
+}
+.prose-forge ol {
+  list-style-type: decimal;
+}
+/* 嵌套层级也要有区分，否则二级列表和一级看起来一样。 */
+.prose-forge ul ul {
+  list-style-type: circle;
+}
+.prose-forge ul ul ul {
+  list-style-type: square;
+}
 .prose-forge li {
   margin: 0.15em 0;
+}
+/* 符号比正文暗一档：它是结构提示，不该和内容抢注意力。 */
+.prose-forge li::marker {
+  color: rgba(255, 255, 255, 0.32);
+}
+/* GFM 任务列表（- [ ] / - [x]）自带勾选框，再叠一个圆点就重复了。 */
+.prose-forge li:has(> input[type='checkbox']) {
+  list-style-type: none;
 }
 .prose-forge h1,
 .prose-forge h2,
