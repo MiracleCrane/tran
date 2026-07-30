@@ -29,12 +29,13 @@ import { loadSettings } from './settings'
  *   （约 2100 token）两个窗口的 used 都没动，这只说明"低于计数器分辨率"，
  *   **不能解读为不计费**。按同端点同凭证的常理，几乎肯定计入订阅窗口。
  *
- * 指令遵循：⚠️ **这是真正的坑**。要求"一句话、不超过 12 字、只输出结果"，
- *   六个型号**全部无视**，一律开始写 markdown 长文（"我来解析这个命令：
- *   ## 命令分解 ..."）然后被 max_tokens 截断。inTok=36 说明服务端没注入大段
- *   系统提示词，是模型本身的"解释给你听"反射压不住。
- *   → 故所有调用方必须走 terseText() 做输出侧防守，且不能指望提示词单独生效：
- *     少样本示例 + 约束重复放进 user 消息 + 输出侧清洗，三样一起上。
+ * 指令遵循：⚠️ **这是真正的坑，而且踩了两层**。
+ *   第一层：裸提示词（只在 system 里写"只输出结果、不超过 12 字"）——六个
+ *     型号全部无视，一律开始写 markdown 长文然后被 max_tokens 截断。
+ *   第二层：把少样本写成纯文本塞进单条 user 消息——**答非所问**，模型抓住
+ *     第一个示例当主题，真正的输入被完全忽略（详见 cheapSummarize 的注释）。
+ *   → 结论：少样本必须用真正的 user/assistant 轮次；加 stop 序列；再叠一层
+ *     terseText() 输出侧清洗。三道防线，任何一道兜住都算。
  */
 
 const CHAT_COMPLETIONS_URL = 'https://api.kimi.com/coding/v1/chat/completions'
@@ -62,11 +63,21 @@ export function cheapModelId(): string {
   return typeof configured === 'string' && configured.trim() ? configured.trim() : DEFAULT_CHEAP_MODEL
 }
 
+export interface CheapMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
 export interface CheapCallOptions {
-  system: string
-  user: string
+  /** 简单形态：一条 system + 一条 user。与 messages 二选一。 */
+  system?: string
+  user?: string
+  /** 完整消息序列（少样本要用真正的 user/assistant 轮次，见 cheapSummarize）。 */
+  messages?: CheapMessage[]
   /** 输出上限。总结类任务给足一句话就行。 */
   maxTokens?: number
+  /** 停止序列。`['\n']` 能从协议层砍掉多行输出，比事后清洗可靠。 */
+  stop?: string[]
   /** 覆盖设置里的型号（探测用）。 */
   model?: string
   timeoutMs?: number
@@ -86,6 +97,12 @@ export async function cheapComplete(opts: CheapCallOptions): Promise<CheapCallRe
   if (!token) return { ok: false, error: '未登录（找不到 Kimi CLI 的凭证）' }
 
   const model = opts.model ?? cheapModelId()
+  const messages: CheapMessage[] =
+    opts.messages ??
+    [
+      ...(opts.system ? [{ role: 'system' as const, content: opts.system }] : []),
+      { role: 'user' as const, content: opts.user ?? '' }
+    ]
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? REQUEST_TIMEOUT_MS)
   try {
@@ -96,10 +113,8 @@ export async function cheapComplete(opts: CheapCallOptions): Promise<CheapCallRe
         model,
         max_tokens: opts.maxTokens ?? 50,
         thinking: { type: 'disabled' },
-        messages: [
-          { role: 'system', content: opts.system },
-          { role: 'user', content: opts.user }
-        ]
+        ...(opts.stop?.length ? { stop: opts.stop } : {}),
+        messages
       }),
       signal: controller.signal
     })
@@ -196,10 +211,23 @@ export function terseText(raw: string, maxChars: number): string | null {
 }
 
 /**
- * 短总结的标准调用：少样本 + 约束重复进 user 消息 + 输出侧 terseText。
+ * 短总结的标准调用：**多轮角色少样本** + stop 序列 + 输出侧 terseText。
  *
- * 单靠 system 里写"只输出结果"是**实测无效**的（见文件头）。少样本示例是
- * 目前最可靠的格式约束手段，所以调用方必须给 examples。
+ * ⚠️ 少样本必须用真正的 user/assistant 轮次，**不能把示例塞进一条 user 消息**。
+ * 2026-07-30 实测：把示例写成
+ *     输入：git status --porcelain
+ *     输出：查看改动
+ *     输入：<真正的命令>
+ *     输出：
+ * 这种纯文本形式塞进单条 user 消息，模型不把它当示例——它把整段当成"一堆待
+ * 处理的内容"，然后按 coding 调优的本能去写一份《命令速查表》，主题取的是
+ * **第一个示例**。于是不管真正的输入是什么，六个型号全都在回答
+ * `git status --porcelain`（命名任务里则全都在回答示例里的"401 排查"）。
+ * 真正的输入被完全忽略——这比"不听格式"严重得多，是答非所问。
+ *
+ * 换成多轮角色后，模型看到的是"这段对话里我一直这么答"，才是真的 few-shot。
+ * 再加 stop: ['\n'] 从协议层砍掉多行，比事后清洗可靠。
+ * terseText 仍然保留：三道防线，任何一道兜住都算。
  */
 export async function cheapSummarize(opts: {
   /** 任务说明，例如"说明这条命令在做什么"。 */
@@ -209,13 +237,22 @@ export async function cheapSummarize(opts: {
   input: string
   maxChars: number
 }): Promise<string | null> {
-  const shots = opts.examples.map(([q, a]) => `输入：${q}\n输出：${a}`).join('\n')
+  const messages: CheapMessage[] = [
+    {
+      role: 'system',
+      content: `${opts.instruction}。只输出结果本身，不要解释、不要 markdown、不超过 ${opts.maxChars} 字。`
+    }
+  ]
+  for (const [q, a] of opts.examples) {
+    messages.push({ role: 'user', content: q })
+    messages.push({ role: 'assistant', content: a })
+  }
+  messages.push({ role: 'user', content: opts.input })
+
   const result = await cheapComplete({
-    system: `${opts.instruction}。只输出结果本身，不要解释、不要 markdown、不要标点结尾，不超过 ${opts.maxChars} 字。`,
-    // 约束在 user 里再说一遍：system 单独说服不了它。
-    user: `${shots}\n输入：${opts.input}\n输出：`,
-    // 给到 maxChars 的几倍空间：太小的话即使格式对了也会被截断，
-    // 而写文章的那种无论给多少都会超——由 terseText 判废。
+    messages,
+    stop: ['\n'],
+    // 给到 maxChars 的几倍空间：太小的话即使格式对了也会被截断。
     maxTokens: Math.max(32, opts.maxChars * 3)
   })
   if (!result.ok) return null
