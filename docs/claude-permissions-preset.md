@@ -48,6 +48,9 @@ Tool(pattern)
 
 ## 预设：写进 `~/.claude/settings.json`
 
+成品文件就在同目录：[`claude-settings.json`](./claude-settings.json)（内容与下面一致，
+可直接整份拷到 `~/.claude/settings.json`）。
+
 ```json
 {
   "permissions": {
