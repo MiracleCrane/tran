@@ -1,5 +1,6 @@
 import type {
   ComposerModel,
+  PlanUsageInfo,
   MarketplacePlugin,
   McpServerEntry,
   PermissionResponsePayload,
@@ -15,6 +16,7 @@ import {
 import { getPreferences } from '../preferences'
 import { log } from '../logger'
 import { KimiBackend } from './KimiBackend'
+import { ClaudeBackend } from './ClaudeBackend'
 import type { GoalControlAction, GoalInfo, GoalStartOptions } from '../goalStore'
 import type { PermissionRequestPayload, SDKMessage } from '../../shared/ipc'
 
@@ -86,8 +88,8 @@ export class AgentBridge {
       }
     }
     this.backends = {
-      // 目前只实例化 Kimi 一个后端；新增后端时在此挂接新的 adapter。
-      kimi: new KimiBackend(wrappedHandlers)
+      kimi: new KimiBackend(wrappedHandlers),
+      claude: new ClaudeBackend(wrappedHandlers)
     }
   }
 
@@ -148,6 +150,13 @@ export class AgentBridge {
   /** 切走/后台化：会话留在后端继续跑（turn、事件推送不受影响），路由映射保留。 */
   background(sessionId: string): void {
     this.maybeBackendForSession(sessionId)?.background?.(sessionId)
+  }
+
+  /** Claude 后端的额度（来自 rate_limit_event）。没有则返回 null，
+   *  调用方回落到 kimi 的额度源。 */
+  claudePlanUsage(): PlanUsageInfo | null {
+    const backend = this.backends['claude'] as unknown as { getPlanUsage?(): PlanUsageInfo | null }
+    return backend?.getPlanUsage?.() ?? null
   }
 
   /** 正在跑 turn 的 ACP 会话 id 集合（跨后端合并；listSessions 打 running 标记用）。 */

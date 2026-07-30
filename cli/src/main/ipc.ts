@@ -46,6 +46,7 @@ import { probeCheapModels, diagnoseSummaryPrompt } from './cheapModel'
 import { explainCommand, summarizeThinking, translateThinking } from './cheapNotes'
 import { fetchSessionTodos } from './kimiTodos'
 import { listKimiSessions } from './kimiHistory'
+import { listClaudeSessions } from './claudeHistory'
 import { getPlanUsageCached } from './usageService'
 import { getQuotaOverviewCached, fetchQuotaActions, runQuotaLogin } from './quotaService'
 import { deleteKimiSession } from './sessionDelete'
@@ -519,7 +520,13 @@ export function registerIpc(
     }
   })
 
-  ipcMain.handle('forge:getPlanUsage', async (): Promise<PlanUsageResult> => getPlanUsageCached())
+  ipcMain.handle('forge:getPlanUsage', async (): Promise<PlanUsageResult> => {
+    // Claude 后端有活跃会话且收到过 rate_limit_event 时用它的额度；
+    // 否则回落到 kimi 的 /usages 源。两者数据源完全不同，不能混算。
+    const claudeUsage = bridge.claudePlanUsage()
+    if (claudeUsage) return { ok: true, data: claudeUsage }
+    return getPlanUsageCached()
+  })
 
   // --- 额度总览/明细（MembershipService RPC；登录态取 kimi-desktop / 网页登录兜底）。
   // 总览走 60s 缓存（悬停卡/明细面板共用，悬停秒开）；明细翻页每次实时。 ---
@@ -812,7 +819,14 @@ export function registerIpc(
     const all = opts?.scope === 'all'
     const limit = all ? 200 : opts?.limit && opts.limit > 0 ? opts.limit : 50
     const offset = opts?.offset && opts.offset > 0 ? opts.offset : 0
-    const items = (await listKimiSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' }))
+    // 两个后端的历史各自落盘、互不相通：kimi 在 ~/.kimi-code/sessions，
+    // Claude Code 在 ~/.claude/projects。合并后按时间统一排序，条目自带
+    // agentBackend 供打开时路由到正确的后端。
+    const [kimiItems, claudeItems] = await Promise.all([
+      listKimiSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' }),
+      Promise.resolve(listClaudeSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' }))
+    ])
+    const items = [...kimiItems, ...claudeItems]
       .sort((a, b) => b.lastModified - a.lastModified)
       .slice(0, limit)
     // 合并主进程内存中的运行状态（SessionListItem.sessionId 即 ACP 会话 id）。
