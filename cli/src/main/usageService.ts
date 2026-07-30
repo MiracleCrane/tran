@@ -283,23 +283,41 @@ export async function fetchPlanUsage(): Promise<PlanUsageResult> {
  *  <30s 直接回缓存；30–60s 先回缓存、后台刷新；>60s 等刷新。 */
 const CACHE_FRESH_MS = 30_000
 const CACHE_MAX_MS = 60_000
+/**
+ * 失败兜底的**保质期**。超过这个时长的缓存宁可不给，让调用方看到错误。
+ *
+ * 原来是无上限回落：只要成功过一次，之后不管失败多少次都继续返回那份旧数据。
+ * 掉登录之后的表现是——额度环永远显示掉线前那一刻的数字，不报错、不变灰，
+ * 用户完全看不出它已经停更了。**过期的额度比没有额度更有害**：它看起来是对的。
+ */
+const STALE_FALLBACK_MAX_MS = 5 * 60_000
 
 let planUsageCache: { at: number; result: PlanUsageResult } | null = null
 let planUsageInflight: Promise<PlanUsageResult> | null = null
+
+/** 刷新失败时：缓存还在保质期内就先顶着，过期了就如实报错。 */
+function fallbackOnFailure(failure: PlanUsageResult): PlanUsageResult {
+  const cached = planUsageCache
+  if (cached && Date.now() - cached.at < STALE_FALLBACK_MAX_MS) return cached.result
+  planUsageCache = null
+  return failure
+}
 
 function refreshPlanUsage(): Promise<PlanUsageResult> {
   if (!planUsageInflight) {
     planUsageInflight = fetchPlanUsage()
       .then((result) => {
-        // 失败时保留旧缓存兜底（有缓存回缓存，没缓存回错误）。
-        if (result.ok) planUsageCache = { at: Date.now(), result }
         planUsageInflight = null
-        return planUsageCache?.result ?? result
+        if (result.ok) {
+          planUsageCache = { at: Date.now(), result }
+          return result
+        }
+        return fallbackOnFailure(result)
       })
       .catch((error) => {
         planUsageInflight = null
         log('usage', `plan usage refresh failed: ${error instanceof Error ? error.message : String(error)}`)
-        return planUsageCache?.result ?? { ok: false as const, error: NETWORK_ERROR_MESSAGE }
+        return fallbackOnFailure({ ok: false as const, error: NETWORK_ERROR_MESSAGE })
       })
   }
   return planUsageInflight

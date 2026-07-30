@@ -42,13 +42,34 @@ import { emitForgeEvent } from '../events'
  *  否则切走再切回来 chip 会被 init 覆盖回 default。 */
 const PERMISSION_MODE_KEY_PREFIX = 'forge.permissionMode.'
 
+/** localStorage 里的值是历史遗留，不能直接 as。取值集变过（也还会再变），
+ *  老版本写下的字符串会被原样重放给后端——后端拿到不认识的档位，行为不可预期。
+ *  校验一次，认不出就当没存过（回落到调用方给的默认档）。 */
+const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'plan', 'auto', 'yolo']
+
 function readStoredPermissionMode(sdkSessionId: string | undefined): PermissionMode | null {
   if (!sdkSessionId) return null
   try {
     const v = window.localStorage.getItem(PERMISSION_MODE_KEY_PREFIX + sdkSessionId)
-    return v ? (v as PermissionMode) : null
+    return v && (PERMISSION_MODES as readonly string[]).includes(v) ? (v as PermissionMode) : null
   } catch {
     return null
+  }
+}
+
+/**
+ * 删会话时把该会话在 localStorage 里的残留一并清掉：权限档 + 草稿。
+ *
+ * 不清的话这两样**永不过期**——权限档一个会话一个键，删了会话键还在；草稿在
+ * 那个 JSON blob 里同样留着。日积月累就是一堆指向已删会话的死键，而 localStorage
+ * 是有配额的，写满之后 setItem 开始抛异常（这里到处 catch 掉了，表现是"草稿
+ * 静默存不上"这种极难查的故障）。
+ */
+function forgetSessionLocalState(sdkSessionId: string): void {
+  try {
+    window.localStorage.removeItem(PERMISSION_MODE_KEY_PREFIX + sdkSessionId)
+  } catch {
+    /* ignore */
   }
 }
 
@@ -173,6 +194,15 @@ interface SessionStore {
   /** Switch the active working directory (project): close the current session and
    *  start a fresh one in the new cwd (history is per-cwd in the sidebar). */
   switchProject: (path: string) => Promise<void>
+
+  /**
+   * 从 kimi 本地 server 补拉待办真值（零 token）。
+   *
+   * 待办原先**只有** ACP `plan` 帧一个来源，而 plan 帧只在模型跑 turn 且恰好
+   * 调了 todo_list 时才推。于是切走再切回、或重启之后待办面板就是空的——
+   * 用户反复提的「待办一直不更新」有一半是这么来的。这条补拉把真值接上。
+   */
+  refreshTodos: () => Promise<void>
 
   /** Sidebar actions */
   refreshSessions: () => Promise<void>
@@ -1409,6 +1439,25 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   elicitationQueue: [],
   composerDrafts: readStoredComposerDrafts(),
 
+  async refreshTodos() {
+    const sdkSessionId = get().meta?.sdkSessionId
+    if (!sdkSessionId) return
+    const result = await window.api.getSessionTodos(sdkSessionId).catch(() => null)
+    // null = 拉不到（server 没起/网络错）。**不能当成"待办为空"**——那会把
+    // 界面上刚推来的待办清掉。
+    if (!result) return
+
+    const localAt = get().planUpdatedAt
+    if (result.updatedAt === null) {
+      // 服务端没有待办记录。本地也没有就无事发生；本地有则以本地为准
+      // （实时 plan 帧刚推来、服务端还没落盘的情况）。
+      return
+    }
+    // 实时 plan 帧比服务端记录新就不覆盖：ACP 那条是推送，永远更及时。
+    if (localAt !== null && localAt >= result.updatedAt) return
+    set({ planEntries: result.entries, planUpdatedAt: result.updatedAt })
+  },
+
   setComposerDraft(sessionKey, text) {
     const drafts = { ...get().composerDrafts }
     if (text) drafts[sessionKey] = text
@@ -2345,6 +2394,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       /* ignore */
     }
     deleteSessionHistoryCache(meta.cwd, sessionId, backend)
+    forgetSessionLocalState(sessionId)
+    get().setComposerDraft(sessionId, '')
     set((s) => ({ sessions: s.sessions.filter((x) => x.sessionId !== sessionId) }))
     // Deleted the active conversation → start fresh.
     if (meta.sdkSessionId === sessionId) {
@@ -2378,6 +2429,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         deleted += 1
         deletedIds.add(target.sessionId)
         deleteSessionHistoryCache(meta.cwd, target.sessionId, target.backend)
+        forgetSessionLocalState(target.sessionId)
+        get().setComposerDraft(target.sessionId, '')
       } catch {
         failed += 1
       }
@@ -2566,7 +2619,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             },
             sessionModelDirty: false,
             bridgeEnded: false,
-            // 新会话/恢复会话时清空上一会话残留的待办清单（新 plan 事件会重建）。
+            // 新会话/恢复会话时清空上一会话残留的待办清单。原先只等新 plan
+            // 事件重建——而 plan 事件要等模型下一次动待办才来，中间这段时间
+            // 面板一直是空的。现在紧接着补拉一次真值（见下面的 refreshTodos）。
             planEntries: [],
             planUpdatedAt: null,
             contextUsage: null,
@@ -2576,6 +2631,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             elicitationQueue: [],
             status: { ...s.status }
           }))
+          // 会话刚 load 完，立刻补拉待办真值（零 token，失败静默）。
+          void get().refreshTodos()
         } else if (subtype === 'status') {
           const status = (msg as unknown as { status: string | null }).status
           set((s) => ({ status: { ...s.status, compacting: status === 'compacting' } }))

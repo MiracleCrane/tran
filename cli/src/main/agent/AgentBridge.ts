@@ -54,6 +54,9 @@ interface AgentBackendAdapter {
   getSessionUsage?(sessionId: string): Promise<SessionUsageInfo>
   /** 可选：触发一次隐藏 /usage 轮刷新上下文用量（悬停上下文环时）。 */
   requestUsageRefresh?(sessionId: string): Promise<void>
+  /** 可选：后台任务收尾后催模型更新待办（一次真实 turn，见 KimiBackend 的注释）。
+   *  返回 true 表示这一轮真的发出去了（渲染层据此在界面上标注）。 */
+  requestTodoNudge?(sessionId: string): Promise<boolean>
   /** 可选：goal 循环（目标模式，客户端侧目标引擎）。 */
   goalStart?(sessionId: string, opts: GoalStartOptions): Promise<GoalInfo | null>
   goalControl?(sessionId: string, action: GoalControlAction): Promise<GoalInfo | null>
@@ -129,6 +132,10 @@ export class AgentBridge {
 
   requestUsageRefresh(sessionId: string): Promise<void> {
     return this.maybeBackendForSession(sessionId)?.requestUsageRefresh?.(sessionId) ?? Promise.resolve()
+  }
+
+  requestTodoNudge(sessionId: string): Promise<boolean> {
+    return this.maybeBackendForSession(sessionId)?.requestTodoNudge?.(sessionId) ?? Promise.resolve(false)
   }
 
   async close(sessionId: string): Promise<void> {

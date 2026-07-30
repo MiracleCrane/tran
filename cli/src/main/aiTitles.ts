@@ -1,15 +1,18 @@
 import { app } from 'electron'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { writeFileAtomic } from './atomicWrite'
+import { readJsonSafe, writeFileAtomic } from './atomicWrite'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { log } from './logger'
-import { getValidAccessToken } from './usageService'
+import { cheapSummarize } from './cheapModel'
 import { loadSettings } from './settings'
 import { manualSessionTitle } from './sessionTitles'
 
 /**
- * AI 会话命名：用 kimi 云端 chat/completions 把用户发言概括成短标题。
+ * AI 会话命名：把用户发言概括成短标题。
+ *
+ * 请求本身走 cheapModel.ts 那条共用旁路（端点/鉴权/型号/超时都在那边），
+ * 这里只管命名的策略与缓存。型号是设置项——命名和其他总结类杂活共用同一个。
  *
  * 成本硬约束（用户已确认"目的是好区分，不追求完美"）：
  * - 每会话至多 2 次调用：首轮结束用首条发言快速命名；攒够前 3 次发言后
@@ -18,20 +21,17 @@ import { manualSessionTitle } from './sessionTitles'
  * - 单次输入截断 ~500 字符，thinking 关闭 + max_tokens=50，
  *   实测单次调用 ≈100-200 token；
  * - 失败静默回退原标题，单次尝试不重试。
- *
- * 端点已实证：POST https://api.kimi.com/coding/v1/chat/completions，
- * model kimi-for-coding + thinking:{type:'disabled'} → 53 tokens 出标题。
- * access_token 走 usageService 的凭证刷新链，绝不写日志、不进渲染层。
  */
 
-const CHAT_COMPLETIONS_URL = 'https://api.kimi.com/coding/v1/chat/completions'
-const TITLE_MODEL = 'kimi-for-coding'
 const MAX_PROMPT_CHARS = 500
-const MAX_TITLE_CHARS = 30
-const REQUEST_TIMEOUT_MS = 20000
+/** 标题字数上限。少样本示例也按这个长度给，两边要一致。 */
+const MAX_TITLE_CHARS = 12
 const BATCH_INTERVAL_MS = 300
 
 let cache: Record<string, string> | null = null
+/** 读盘失败（区别于"文件不存在"）后本次运行不再写入：ai-titles.json 里每条
+ *  都是花过 token 换来的，空对象写回去等于把整份缓存烧掉、下次全部重算。 */
+let loadFailed = false
 
 function storePath(): string {
   return join(app.getPath('userData'), 'ai-titles.json')
@@ -39,16 +39,26 @@ function storePath(): string {
 
 function load(): Record<string, string> {
   if (cache) return cache
-  try {
-    const raw = JSON.parse(readFileSync(storePath(), 'utf8')) as unknown
-    cache = raw && typeof raw === 'object' ? (raw as Record<string, string>) : {}
-  } catch {
+  const read = readJsonSafe<unknown>(storePath())
+  if (read.status === 'failed') {
+    log('ai-titles', `ai-titles.json 读取失败，本次运行不再写入：${read.error.message}`)
     cache = {}
+    loadFailed = true
+    return cache
   }
+  const raw = read.status === 'ok' ? read.value : null
+  if (read.status === 'ok' && (!raw || typeof raw !== 'object' || Array.isArray(raw))) {
+    log('ai-titles', 'ai-titles.json 内容不是对象，本次运行不再写入')
+    cache = {}
+    loadFailed = true
+    return cache
+  }
+  cache = (raw as Record<string, string> | null) ?? {}
   return cache
 }
 
 function save(): void {
+  if (loadFailed) return
   try {
     writeFileAtomic(storePath(), JSON.stringify(load(), null, 1))
   } catch (error) {
@@ -69,16 +79,6 @@ export function allAiTitles(): Record<string, string> {
   return { ...load() }
 }
 
-function cleanTitle(raw: string): string | null {
-  const title = raw
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^["'「『《]+|["'」』》。.\s]+$/g, '')
-    .slice(0, MAX_TITLE_CHARS)
-    .trim()
-  return title || null
-}
-
 /** 为单个会话生成 AI 标题（有缓存/手动命名/开关关闭时直接跳过；
  *  opts.overwriteAiTitle 允许覆盖已有 AI 标题——#17 前几次发言精修用）。
  *  手动重命名永远最高优先，AI 不覆盖。 */
@@ -93,46 +93,25 @@ export async function generateAiTitle(
   if (existing && !opts?.overwriteAiTitle) return existing
   if (manualSessionTitle(sessionId)) return null
 
-  const token = await getValidAccessToken()
-  if (!token) return null
-
   const prompt = firstUserText.replace(/\s+/g, ' ').trim().slice(0, MAX_PROMPT_CHARS)
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-  try {
-    const response = await fetch(CHAT_COMPLETIONS_URL, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: TITLE_MODEL,
-        max_tokens: 50,
-        thinking: { type: 'disabled' },
-        messages: [
-          { role: 'system', content: '用 12 个字以内概括这个对话的主题，只输出标题本身，不要标点结尾。' },
-          { role: 'user', content: prompt }
-        ]
-      }),
-      signal: controller.signal
-    })
-    if (!response.ok) {
-      log('ai-titles', `title request rejected: ${response.status}`)
-      return null
-    }
-    const json = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>
-    }
-    const title = cleanTitle(json.choices?.[0]?.message?.content ?? '')
-    if (!title) return null
-    load()[sessionId] = title
-    save()
-    log('ai-titles', `named ${sessionId}: ${title}`)
-    return title
-  } catch (error) {
-    log('ai-titles', `title request failed: ${error instanceof Error ? error.message : String(error)}`)
+  // 少样本是压住"开始写长文"反射的关键（单靠 system 里的约束实测无效）。
+  const title = await cheapSummarize({
+    instruction: '用一个短标题概括这段对话要做的事',
+    examples: [
+      ['帮我看看这个登录接口为什么 401，token 明明是新的', '排查登录接口 401'],
+      ['把侧边栏的会话列表改成虚拟滚动，现在几百条很卡', '侧边栏虚拟滚动']
+    ],
+    input: prompt,
+    maxChars: MAX_TITLE_CHARS
+  })
+  if (!title) {
+    log('ai-titles', '命名未得到可用结果（回退原标题）')
     return null
-  } finally {
-    clearTimeout(timer)
   }
+  load()[sessionId] = title
+  save()
+  log('ai-titles', `named ${sessionId}: ${title}`)
+  return title
 }
 
 /** 从磁盘读会话的首条/最近用户消息（~/.kimi-code/sessions/wd_*​/sessionId/

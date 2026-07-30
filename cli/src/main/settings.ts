@@ -72,6 +72,16 @@ interface PersistedSettings {
   closePromptDismissed?: boolean
   /** AI 自动命名（会话短标题，云端生成；默认开，关闭后任何路径不调 API）。 */
   aiNamingEnabled?: boolean
+  /** 后台任务收尾后自动催模型更新待办（**默认关**）。这会发一次完整的 turn，
+   *  要把整个会话上下文重新过一遍——实测约 88k token，是命名那类小请求的七百倍。
+   *  而且下一条真实消息本来就会让 AI 收到完成通知，所以它买到的只是「提前」。 */
+  autoTodoNudge?: boolean
+  /** 总结类杂活（会话命名、命令说明、思考摘要…）用的型号。空 = 用
+   *  cheapModel.DEFAULT_CHEAP_MODEL。别写死猜测的型号——设置页有探测按钮。 */
+  summaryModel?: string
+  /** 总结类请求走哪条通道：'web' = 网页版（实测**不计费**，但会限流，失败自动
+   *  回落到 code）；'code' = 只走 Kimi Code 端点。默认 'web'。 */
+  summaryChannel?: 'web' | 'code'
   /** Show OS native notifications when a session ends while window is inactive
    *  (default true). */
   nativeNotifications?: boolean
@@ -247,6 +257,10 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.startMaximized = optionalBoolean(source.startMaximized)
   settings.closePromptDismissed = optionalBoolean(source.closePromptDismissed)
   settings.aiNamingEnabled = optionalBoolean(source.aiNamingEnabled)
+  settings.autoTodoNudge = optionalBoolean(source.autoTodoNudge)
+  settings.summaryModel = optionalString(source.summaryModel)
+  settings.summaryChannel =
+    source.summaryChannel === 'code' ? 'code' : source.summaryChannel === 'web' ? 'web' : undefined
   settings.nativeNotifications = optionalBoolean(source.nativeNotifications)
 
   settings.composerModels = normalizeComposerModels(source.composerModels)

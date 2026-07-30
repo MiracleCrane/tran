@@ -178,6 +178,18 @@ async function getValidTokenUncached(forceRefresh: boolean): Promise<TokenContex
   return null
 }
 
+/**
+ * 把这条链的 access_token 借给别的模块用（cheapModel 的「网页免费通道」）。
+ *
+ * 与 getValidToken 共用同一套在飞合并 + 过期刷新写回，所以外部调用不会把
+ * refresh_token 转坏。拿不到返回 null——调用方一律要有回落，绝不能因为这条
+ * 链没登录就让功能挂掉。
+ */
+export async function getWebAccessToken(): Promise<string | null> {
+  const ctx = await getValidToken()
+  return ctx?.token ?? null
+}
+
 interface RpcResponse {
   status: number
   json: unknown

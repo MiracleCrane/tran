@@ -571,8 +571,12 @@ export default function Composer(): JSX.Element {
     resizeCancelRef.current?.()
     const startY = event.clientY
     const startHeight = textareaHeight
-    let nextHeight = clampComposerHeight(startHeight, heightBoundsRef.current)
     let finished = false
+    /** 位移阈值：只是点了一下手柄（0 位移）不该锁死高度。原先在 pointerdown
+     *  里就 setManualTextareaHeight，于是误点一次自动增高就此关闭，只能靠
+     *  「恢复自动高度」按钮救回来——手柄本身很窄，误点是常态。 */
+    const DRAG_THRESHOLD_PX = 3
+    let dragging = false
 
     const finish = (): void => {
       if (finished) return
@@ -585,12 +589,15 @@ export default function Composer(): JSX.Element {
     }
 
     const move = (moveEvent: PointerEvent): void => {
-      nextHeight = clampComposerHeight(startHeight + startY - moveEvent.clientY, heightBoundsRef.current)
-      setManualTextareaHeight(nextHeight)
+      const delta = startY - moveEvent.clientY
+      if (!dragging) {
+        if (Math.abs(delta) < DRAG_THRESHOLD_PX) return
+        dragging = true
+        setComposerResizing(true)
+      }
+      setManualTextareaHeight(clampComposerHeight(startHeight + delta, heightBoundsRef.current))
     }
 
-    setComposerResizing(true)
-    setManualTextareaHeight(nextHeight)
     resizeCancelRef.current = finish
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', finish)

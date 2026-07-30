@@ -2832,24 +2832,36 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
 }
 
 /* #43 消息时间戳：绝对定位不占布局（此前常驻一行小字，把每个工具 bar 之间
-   的间距都撑开了），鼠标在该消息上停留 500ms 才淡入。离开立即隐藏。 */
+   的间距都撑开了），鼠标在该消息上停留 500ms 才淡入。离开立即隐藏。
+
+   位置从"消息下方"改到"消息侧边的留白里"，与首行对齐：贴底时它压在消息与
+   下一条之间，视觉上归属不清，还要跟工具卡片的边框抢那几个像素。侧边选的是
+   **气泡对面**那一侧——那里才有真的空白：
+   - AI 容器宽 92%，右侧剩 8%（≈80px）；
+   - 用户气泡最宽 85% 且靠右，左侧至少剩 15%（≈150px）。
+   写成"AI 靠左、用户靠右"反而会压在正文上，因为那正是气泡所在的一侧。 */
 .tran-msg-time {
   position: absolute;
-  bottom: -0.55rem;
   z-index: 5;
   padding: 0 0.25rem;
   font-size: 10px;
   line-height: 1;
+  white-space: nowrap;
   color: rgb(113 113 122 / 0.9);
   pointer-events: none;
   opacity: 0;
   transition: opacity 140ms ease;
 }
-.tran-msg-time-left {
-  left: 0.15rem;
+/* AI：右侧留白，与正文首行对齐。 */
+.tran-msg-time-gutter-right {
+  left: 100%;
+  margin-left: 0.5rem;
+  top: 0.2rem;
 }
-.tran-msg-time-right {
-  right: 0.15rem;
+/* 用户：左侧留白，与气泡首行对齐（气泡有 py-2.5 的内边距）。 */
+.tran-msg-time-gutter-left {
+  left: 0;
+  top: 0.8rem;
 }
 .group\/msg:hover .tran-msg-time {
   opacity: 1;

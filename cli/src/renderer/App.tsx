@@ -628,7 +628,10 @@ export default function App(): JSX.Element {
     })
     return () => {
       off()
-      void window.api.unsubscribeSwarmTasks().catch(() => {})
+      // 带上 sessionId：这只是"不再是前台"，不是"停止观察"。该会话若还有后台
+      // 任务在跑，主进程继续轮它并把结果折进后台缓冲（foldBackgroundSwarmTasks），
+      // 任务收尾后自己回收。不带参数会全停，那正是"切走就再也不更新"的老毛病。
+      void window.api.unsubscribeSwarmTasks(sdkSessionId).catch(() => {})
     }
   }, [sdkSessionId])
 

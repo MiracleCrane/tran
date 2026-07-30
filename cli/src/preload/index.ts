@@ -81,6 +81,12 @@ const api: ForgeApi = {
   exportDiagnosticReport: (options) => ipcRenderer.invoke('forge:exportDiagnosticReport', options),
   checkKimiVersion: (force) => ipcRenderer.invoke('forge:checkKimiVersion', force),
   upgradeKimi: () => ipcRenderer.invoke('forge:upgradeKimi'),
+  probeSummaryModels: (models) => ipcRenderer.invoke('forge:probeSummaryModels', models),
+  diagnoseSummaryPrompt: () => ipcRenderer.invoke('forge:diagnoseSummaryPrompt'),
+  getSessionTodos: (sessionId) => ipcRenderer.invoke('forge:getSessionTodos', sessionId),
+  nudgeTodos: (sessionId) => ipcRenderer.invoke('forge:nudgeTodos', sessionId),
+  explainCommand: (command) => ipcRenderer.invoke('forge:explainCommand', command),
+  summarizeThinking: (text) => ipcRenderer.invoke('forge:summarizeThinking', text),
   exportSettings: (appearance) => ipcRenderer.invoke('forge:exportSettings', appearance),
   importSettings: (backup) => ipcRenderer.invoke('forge:importSettings', backup),
   listAgentBackends: () => ipcRenderer.invoke('forge:listAgentBackends'),
@@ -207,7 +213,7 @@ const api: ForgeApi = {
   generateAiTitles: (sessionIds) => ipcRenderer.invoke('forge:generateAiTitles', sessionIds),
   getSessionPreview: (sessionId) => ipcRenderer.invoke('forge:getSessionPreview', sessionId),
   subscribeSwarmTasks: (sessionId) => ipcRenderer.invoke('forge:subscribeSwarmTasks', sessionId),
-  unsubscribeSwarmTasks: () => ipcRenderer.invoke('forge:unsubscribeSwarmTasks'),
+  unsubscribeSwarmTasks: (sessionId) => ipcRenderer.invoke('forge:unsubscribeSwarmTasks', sessionId),
   onSwarmTasks: (cb) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: SwarmTasksEvent): void => cb(payload)
     ipcRenderer.on('forge:swarm-tasks', listener)

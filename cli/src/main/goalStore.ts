@@ -1,6 +1,5 @@
 import { app } from 'electron'
-import { readFileSync } from 'node:fs'
-import { writeFileAtomic } from './atomicWrite'
+import { readJsonSafe, writeFileAtomic } from './atomicWrite'
 import { join } from 'node:path'
 import { log } from './logger'
 
@@ -18,6 +17,9 @@ export type { GoalControlAction, GoalInfo, GoalStartOptions, GoalStatus }
 const DEFAULT_MAX_TURNS = 20
 
 let cache: Record<string, GoalInfo> | null = null
+/** 读盘失败（区别于"文件不存在"）后本次运行不再写入：目标是用户设的长期任务，
+ *  空对象写回去会把所有目标（含进度 turnCount）永久删掉。 */
+let loadFailed = false
 
 function storePath(): string {
   return join(app.getPath('userData'), 'goal-store.json')
@@ -25,12 +27,21 @@ function storePath(): string {
 
 function load(): Record<string, GoalInfo> {
   if (cache) return cache
-  try {
-    const raw = JSON.parse(readFileSync(storePath(), 'utf8')) as unknown
-    cache = raw && typeof raw === 'object' ? (raw as Record<string, GoalInfo>) : {}
-  } catch {
+  const read = readJsonSafe<unknown>(storePath())
+  if (read.status === 'failed') {
+    log('goal', `goal-store.json 读取失败，本次运行不再写入：${read.error.message}`)
     cache = {}
+    loadFailed = true
+    return cache
   }
+  const raw = read.status === 'ok' ? read.value : null
+  if (read.status === 'ok' && (!raw || typeof raw !== 'object' || Array.isArray(raw))) {
+    log('goal', 'goal-store.json 内容不是对象，本次运行不再写入')
+    cache = {}
+    loadFailed = true
+    return cache
+  }
+  cache = (raw as Record<string, GoalInfo> | null) ?? {}
   // 进程重启时循环已中断：active 一律降为 paused（需用户手动继续）。
   let migrated = false
   for (const goal of Object.values(cache)) {
@@ -45,7 +56,7 @@ function load(): Record<string, GoalInfo> {
 }
 
 function save(): void {
-  if (!cache) return
+  if (!cache || loadFailed) return
   try {
     writeFileAtomic(storePath(), JSON.stringify(cache, null, 1))
   } catch (error) {

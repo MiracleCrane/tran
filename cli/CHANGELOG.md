@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.0.42 - 2026-07-30
+
+### 中文
+
+- 新增:待办不再只等模型推送。会话打开后、每轮结束时、以及开着时每 10 秒,Tran 会直接从 kimi 本地 server 拉待办真值(零 token)。此前待办只有模型跑 turn 且恰好调 todo_list 时才会更新,切走再切回或重启后面板就是空的——这是「待办更新总是不及时」的一半原因。
+- 新增:后台任务结束后可自动请求一次待办更新(设置 → 系统,**默认关闭**)。它是一次完整对话轮,实测约 88000 token(约订阅额度的 0.26%),而你下次随便发条消息模型本来就会收到完成通知并更新待办——所以它买到的只是「提前」。开启后每批任务只发一次、只在会话空闲时发,发过会在待办卡片上标明。
+- 新增:命令一句话说明与思考块摘要。Kimi 没给 description 的 bash 命令旁边显示用途;思考块折叠时显示一句概括,替代原来的前 60 字截断。按内容哈希落盘缓存,不在流式期间请求。
+- 新增:总结类请求默认走 www.kimi.com 的对话通道 —— 实测这条在额度流水里记 FEATURE_CHAT、**扣费为 0**,而 Kimi Code 端点每次约 0.0001。凭证复用「额度明细」那条登录态。该通道会限流,被拒时自动回落,不影响功能。
+- 修复:「探测可用型号」把不存在的型号全报可用。Kimi 的 chat 端点不校验 model 值,随便写个名字也回 200(实测连 gpt-4o 和现编的名字都"通"),所以「打得通」证明不了型号存在。现改为先拉服务端 /models 目录,目录之外的标警告且不可选。
+- 修复:删除会话时不清理该会话在本地留下的权限档与草稿,日积月累会写满 localStorage 配额,表现为草稿静默存不上。
+- 修复:本地存的权限档不校验就重放给后端,老版本留下的值会让后端行为不可预期。
+- 修复:额度查询失败时无限回落陈旧缓存 —— 掉登录后额度环会永远显示旧数字且不报错。现在缓存超过 5 分钟就如实报错。
+- 修复:AI 生成的短标题会切在词中间(如"压缩 Electron "),标题是长期存盘的,切坏一次就一直难看。
+- 优化:删除 301 行无人引用的死代码。
+
+### English
+
+- Added: todos no longer wait for the model to push them. Tran now pulls the authoritative todo list straight from the local kimi server (zero tokens) when a session opens, after each turn, and every 10s while open. Previously todos only changed when the model happened to call `todo_list` during a turn, so the panel was empty after switching sessions or restarting.
+- Added: optional auto-request for a todo update after a background task finishes (Settings → System, **off by default**). It costs a full conversation turn — measured at ~88,000 tokens (~0.26% of the subscription) — and your next message would have updated the todos anyway, so it only buys you "sooner". When on, it fires once per batch, only while the session is idle, and is labeled on the todo card.
+- Added: one-line explanations for bash commands, and summaries for thinking blocks. Cached to disk by content hash; never requested during streaming.
+- Added: summary requests now default to the www.kimi.com chat channel — measured as **zero-cost** in the balance ledger (recorded as FEATURE_CHAT), versus ~0.0001 per call on the Kimi Code endpoint. Reuses the existing quota-panel login. Falls back automatically when rate-limited.
+- Fixed: "probe available models" reported every candidate as available. Kimi's chat endpoint does not validate the `model` value (even `gpt-4o` and a made-up name return 200), so a successful call proves nothing. It now reads the server's `/models` catalog first.
+- Fixed: deleting a session left its permission mode and draft in localStorage forever, eventually exhausting the quota and making drafts silently fail to save.
+- Fixed: stored permission modes were replayed to the backend without validation.
+- Fixed: quota lookups fell back to a stale cache indefinitely — after a logout the usage ring would show old numbers forever without erroring.
+- Fixed: AI-generated short titles could be cut mid-word.
+- Changed: removed 301 lines of unreferenced dead code.
+
 ## v1.0.41 - 2026-07-29
 
 ### 中文

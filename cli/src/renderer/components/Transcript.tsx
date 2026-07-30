@@ -1,8 +1,8 @@
-import { memo, Profiler, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
-import { probeCommit, probeRender } from '../utils/streamProbe'
+import { probeCommit } from '../utils/streamProbe'
 import type { AssistantBlock, AssistantItem, UserAttachment, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
 import MessageText from './MessageText'
 import { showImageContextMenu } from './ImageContextMenu'
@@ -13,6 +13,7 @@ import ToolGroupCard from './ToolGroupCard'
 import CompactionDivider from './CompactionDivider'
 import QueryResultCard from './QueryResultCard'
 import UserMessageNav, { type UserNavEntry } from './UserMessageNav'
+import { useCheapNote } from '../hooks/useCheapNote'
 
 const INITIAL_HIGHLIGHT_DELAY_MS = 420
 const SCROLL_HIGHLIGHT_RESUME_MS = 180
@@ -28,6 +29,11 @@ const BAR_HOVER_INTENT_WINDOW_MS = 600
 const TRANSCRIPT_BAR_SELECTOR = '.thinking-block, .tool-call-card'
 // #48 用户消息导航条：摘要截取长度与条目上限（超出只留最近若干条）。
 const USER_NAV_SUMMARY_CHARS = 24
+// 短于这个长度的思考块不送去总结：60 字截断已经把它显示全了，再花一次调用
+// （约 1s + 一点额度）换不来任何信息。
+const THINKING_SUMMARY_MIN_CHARS = 120
+// 模块级常量，保证 useCheapNote 的依赖项稳定（每次渲染新建函数会反复触发 effect）。
+const fetchThinkingNote = (text: string): Promise<string | null> => window.api.summarizeThinking(text)
 const USER_NAV_MAX_ENTRIES = 30
 // #48/#50 高亮判定：用户消息行顶距视口顶多少 px 内算"视口顶部附近"。
 const USER_NAV_TOP_SLACK_PX = 8
@@ -372,11 +378,13 @@ const UserMessage = memo(function UserMessage({
             })}
           </div>
         )}
-        {/* #43 时间戳：绝对定位 + 悬停延迟显示（见 AssistantMessage 处注释）。 */}
-        {at !== undefined && (
-          <div className="tran-msg-time tran-msg-time-right">{formatMessageTime(at)}</div>
-        )}
       </div>
+      {/* #43 时间戳：绝对定位 + 悬停延迟显示，落在气泡左侧的留白里
+          （见 styles.css 的 .tran-msg-time 注释）。挂在外层 flex 容器上而不是
+          气泡里——气泡是靠右的，留白在它外面。 */}
+      {at !== undefined && (
+        <div className="tran-msg-time tran-msg-time-gutter-left">{formatMessageTime(at)}</div>
+      )}
     </div>
   )
 })
@@ -403,9 +411,14 @@ const ThinkingBlock = memo(function ThinkingBlock({
     if (open && streaming && body) body.scrollTop = body.scrollHeight
   }, [text, open, streaming])
 
+  // 折叠态摘要：优先便宜模型给的一句话概括，拿不到就退回正文前 ~60 字截断。
+  // 只在块收尾后才请求（流式期间输入还不完整，而且不该跟主链路抢带宽）；
+  // 太短的思考块不值得花一次调用——60 字截断本来就把它显示全了。
+  const worthSummarizing = !streaming && text.length >= THINKING_SUMMARY_MIN_CHARS
+  const note = useCheapNote(fetchThinkingNote, text, worthSummarizing)
+
   if (!text) return <></>
-  // 折叠态摘要：正文前 ~60 字符单行截断（流式期间随 text 实时更新）。
-  const preview = text.replace(/\s+/g, ' ').trim().slice(0, 60)
+  const preview = note ?? text.replace(/\s+/g, ' ').trim().slice(0, 60)
   return (
     <div className="thinking-block glass-panel-soft my-1 rounded-xl px-3 py-2">
       <button
@@ -461,48 +474,36 @@ const AssistantMessage = memo(function AssistantMessage({
       {/* key 用「过滤前」的原始下标：blocks 在流式期间会出现空洞（子代理事件
           交错，见文件头注释）。若用过滤后的下标做 key，空洞被填上时后续块的
           key 会整体前移，React 认为是不同元素——工具卡片被 remount，展开状态、
-          滚动位置丢失或错位。原始下标不随空洞填充而变。 */}
+          滚动位置丢失或错位。原始下标不随空洞填充而变。
+
+          同理：块的包裹层不能随 isStreaming 变化。这里原先在流式期间套一层
+          <Profiler>（#8 埋点），turn 结束时 isStreaming 翻转，包裹层类型从
+          Profiler 变成 MessageText/ThinkingBlock——React 按位置比对类型不同即
+          卸载重建，代价是每轮结束都：思考块的用户折叠/展开状态被丢弃（最新块
+          会自己弹回展开）、正文 markdown 整棵树重建 + highlight.js 重跑（正好
+          卡在用户开始读答案的那一刻）。而 Profiler 的 onRender 在生产构建里
+          本就不回调（要 react-dom/profiling 才生效），纯负收益，故移除。 */}
       {item.blocks
         .map((block, index) => ({ block, index }))
         .filter((entry): entry is { block: AssistantBlock; index: number } => !!entry.block)
         .map(({ block, index: i }) => {
           if (block.kind === 'text') {
             const highlight = !isStreaming && !deferHighlight
-            const md = <MessageText highlight={highlight}>{block.text}</MessageText>
             return (
               <div key={i}>
-                {/* #8 埋点：流式期间用 Profiler 记录该块每帧 React 渲染耗时
-                    （mdMs），结束后回到普通渲染，零包裹开销。 */}
-                {isStreaming ? (
-                  <Profiler id={`stream-text-${item.id}:${i}`} onRender={probeRender}>
-                    {md}
-                  </Profiler>
-                ) : (
-                  md
-                )}
+                <MessageText highlight={highlight}>{block.text}</MessageText>
                 {isStreaming && <span className="tran-stream-cursor" aria-hidden />}
               </div>
             )
           }
           if (block.kind === 'thinking') {
-            const think = (
-              <ThinkingBlock
-                text={block.text}
-                streaming={isStreaming}
-                forceExpanded={expandedBlockKey === `${item.id}:thinking`}
-              />
-            )
             return (
               <div key={i}>
-                {/* #8 埋点：思考块同样在流式期间记录渲染耗时（thinkMs），
-                    与正文块的 mdMs 对照。 */}
-                {isStreaming ? (
-                  <Profiler id={`stream-think-${item.id}:${i}`} onRender={probeRender}>
-                    {think}
-                  </Profiler>
-                ) : (
-                  think
-                )}
+                <ThinkingBlock
+                  text={block.text}
+                  streaming={isStreaming}
+                  forceExpanded={expandedBlockKey === `${item.id}:thinking`}
+                />
               </div>
             )
           }
@@ -520,11 +521,12 @@ const AssistantMessage = memo(function AssistantMessage({
           输出中…
         </div>
       )}
-      {/* #43 时间戳：绝对定位 + 悬停延迟显示。
-          常驻显示时每条消息（含每个工具调用）都挂一行小字，既冗余又把
-          bar 之间的间距撑开；改成不占布局空间，鼠标停留 500ms 才淡入。 */}
-      {!isStreaming && at !== undefined && (
-        <div className="tran-msg-time tran-msg-time-left">{formatMessageTime(at)}</div>
+      {/* #43 时间戳：绝对定位 + 悬停延迟显示，落在容器右侧的留白里
+          （见 styles.css 的 .tran-msg-time 注释）。
+          只在 depth 0 显示：嵌套的子代理消息没有那条 92% 宽度限制，右侧没有
+          留白可用，标上去只会压在字上——顶层那条时间已经够定位了。 */}
+      {!isStreaming && at !== undefined && depth === 0 && (
+        <div className="tran-msg-time tran-msg-time-gutter-right">{formatMessageTime(at)}</div>
       )}
     </div>
   )

@@ -272,6 +272,62 @@ export interface Preferences {
   closePromptDismissed?: boolean
   /** AI 自动命名（会话短标题，默认开；关闭后不做任何云端命名调用）。 */
   aiNamingEnabled?: boolean
+  /** 后台任务收尾后自动催模型更新待办（**默认关**；一次完整 turn，约 88k token）。 */
+  autoTodoNudge?: boolean
+  /** 总结类杂活（命名、命令说明、思考摘要…）共用的型号。空 = 默认
+   *  `kimi-for-coding`（唯一实证可用的）。设置页可探测其他型号能否用。 */
+  summaryModel?: string
+  /** 总结类请求走哪条通道：'web'（默认，实测不计费、会限流、失败自动回落）/ 'code'。 */
+  summaryChannel?: 'web' | 'code'
+}
+
+/** 提示词策略自检的一项结果（设置页「提示词自检」）。四种请求形态各打一发，
+ *  用来二分定位 stop / 多轮角色这两个变量哪个被服务端拒绝。 */
+export interface PromptDiagnosis {
+  label: string
+  ok: boolean
+  /** 模型原样输出（换行已换成 ⏎）。 */
+  output?: string
+  /** 失败时服务端返回的原文片段——400 的真实原因只能从这里看。 */
+  error?: string
+  latencyMs: number
+  /** 清洗后的结果；null = 这一形态的输出不可用。 */
+  cleaned?: string | null
+}
+
+/** 待办条目（与渲染层 PlanEntry 同形；主进程侧也要用，故放在 shared）。 */
+export interface PlanEntryInfo {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
+/** 从 kimi 本地 server 拉到的待办真值。null 表示"拉不到"，与"待办为空"不同。 */
+export interface SessionTodosResult {
+  entries: PlanEntryInfo[]
+  /** 服务端记的最后更新时刻（epoch ms），用来和实时 plan 帧比新旧。 */
+  updatedAt: number | null
+}
+
+/** 一个候选型号的探测结果（设置页「探测可用型号」）。 */
+export interface SummaryModelProbe {
+  model: string
+  ok: boolean
+  /** 失败原因（服务端返回片段，用来区分"不认这个型号"和"额度不足"）。 */
+  error?: string
+  /** 往返耗时。这活儿在 UI 上，延迟比能力重要——挑最快的。 */
+  latencyMs?: number
+  /**
+   * 该 id 是否出现在服务端 `/models` 目录里。
+   *
+   * ⚠️ false 时 ok 也可能是 true——chat 端点**不校验 model 值**，随便写什么都回
+   * 200 并原样回声（实测连 `gpt-4o` 和一个现编的名字都"通"）。所以「打得通」
+   * 完全不能证明这个型号存在，只有目录能。
+   */
+  known: boolean
+  /** 目录里的展示名，例如 `K2.7 Coding`。 */
+  displayName?: string
+  /** 目录里的上下文长度（token）。 */
+  contextLength?: number
 }
 
 export interface ProviderProfile {
@@ -774,6 +830,20 @@ export interface ForgeApi {
   checkKimiVersion(force?: boolean): Promise<KimiVersionInfo>
   /** 一键升级 Kimi Code CLI。会先断开所有活跃会话（升级要替换正在运行的可执行文件）。 */
   upgradeKimi(): Promise<KimiUpgradeResult>
+  /** 探测总结用型号：逐个打一发最小请求，报通/不通与延迟。串行，避免被限流
+   *  误判成"型号不认"。传空用内置候选表。 */
+  probeSummaryModels(models?: string[]): Promise<SummaryModelProbe[]>
+  /** 提示词策略自检：四种请求形态各打一发（共约 400 token），带回服务端原始报错。 */
+  diagnoseSummaryPrompt(): Promise<PromptDiagnosis[]>
+  /** 待办真值（kimi 本地 server，零 token）。拉不到返回 null。 */
+  getSessionTodos(sessionId: string): Promise<SessionTodosResult | null>
+  /** 后台任务收尾后催模型更新待办。**会发一次真实 turn、消耗额度**；
+   *  返回 true 表示这一轮真的发出去了（界面据此标注）。 */
+  nudgeTodos(sessionId: string): Promise<boolean>
+  /** 一条 bash 命令在做什么（便宜模型 + 落盘缓存）。拿不到返回 null。 */
+  explainCommand(command: string): Promise<string | null>
+  /** 一段思考在做什么（便宜模型 + 落盘缓存）。拿不到返回 null。 */
+  summarizeThinking(text: string): Promise<string | null>
   exportSettings(appearance?: Record<string, unknown>): Promise<SettingsBackup>
   importSettings(backup: SettingsBackup): Promise<void>
 
@@ -865,7 +935,10 @@ export interface ForgeApi {
   /** 订阅某 ACP 会话（session_<uuid>）的 tasks 推送：有 running 子代理 2s 一次，
    *  空闲 15s 降频。 */
   subscribeSwarmTasks(sessionId: string): Promise<void>
-  unsubscribeSwarmTasks(): Promise<void>
+  /** 退订。带 sessionId = 「这个会话不再是前台」：它若还有任务在跑会继续被
+   *  观察（后台会话的任务状态不能因为切走就停更），任务收尾后主进程自动回收。
+   *  不带参数 = 全停（窗口卸载用）。 */
+  unsubscribeSwarmTasks(sessionId?: string): Promise<void>
   onSwarmTasks(cb: (e: SwarmTasksEvent) => void): () => void
 }
 
