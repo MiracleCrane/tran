@@ -1,6 +1,7 @@
 import { log } from './logger'
 import { getValidAccessToken } from './usageService'
 import { loadSettings } from './settings'
+import { webSummarize } from './kimiWebChat'
 
 /**
  * 「便宜模型」旁路：把不需要精确的杂活（会话命名、命令一句话说明、思考块
@@ -66,6 +67,34 @@ import { loadSettings } from './settings'
  */
 
 const CHAT_COMPLETIONS_URL = 'https://api.kimi.com/coding/v1/chat/completions'
+
+/**
+ * 网页通道的提示词：少样本**内嵌进同一条消息**。
+ *
+ * ⚠️ 这跟下面 cheapSummarize 给 coding 端点用的形态**正好相反**，别统一：
+ * - coding 端点：少样本塞进单条消息会「答非所问」（模型抓住第一个示例当主题），
+ *   必须用真正的 user/assistant 多轮；
+ * - 网页端点：一次只吃一条消息（`messages[0]` 之外全丢），多轮根本送不进去，
+ *   只能内嵌——好在网页那个是消费级助手，指令遵循强得多，内嵌就压得住。
+ */
+function webPrompt(opts: {
+  instruction: string
+  examples: Array<[string, string]>
+  input: string
+  maxChars: number
+}): string {
+  const shots = opts.examples.map(([q, a]) => `输入 ${q} → 输出 ${a}`).join('\n')
+  return [
+    `${opts.instruction}。只输出结果本身，不要解释、不要 markdown、不超过 ${opts.maxChars} 字。`,
+    '',
+    '示例：',
+    shots,
+    '',
+    '现在处理这一条：',
+    opts.input
+  ].join('\n')
+}
+
 const MODELS_URL = 'https://api.kimi.com/coding/v1/models'
 
 /** 目录实证存在、且实测最快的型号，也是默认值。 */
@@ -308,6 +337,19 @@ export async function cheapSummarize(opts: {
   input: string
   maxChars: number
 }): Promise<string | null> {
+  // 先试免费的网页通道（实测计费为 0，见 kimiWebChat.ts 的流水证据）。
+  // 它会限流，所以只当"能省则省"：拿不到就照常走 coding 端点。
+  if (loadSettings().summaryChannel !== 'code') {
+    const viaWeb = await webSummarize(webPrompt(opts))
+    if (viaWeb) {
+      const cleaned = terseText(viaWeb, opts.maxChars)
+      if (cleaned) return cleaned
+      // 拿到了但清洗后判废：说明这次输出不可用，回落再打一发不划算
+      // （两条通道背后是同一家的模型，第二发多半也一样）。直接放弃。
+      return null
+    }
+  }
+
   const messages: CheapMessage[] = [
     {
       role: 'system',

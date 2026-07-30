@@ -79,6 +79,9 @@ interface PersistedSettings {
   /** 总结类杂活（会话命名、命令说明、思考摘要…）用的型号。空 = 用
    *  cheapModel.DEFAULT_CHEAP_MODEL。别写死猜测的型号——设置页有探测按钮。 */
   summaryModel?: string
+  /** 总结类请求走哪条通道：'web' = 网页版（实测**不计费**，但会限流，失败自动
+   *  回落到 code）；'code' = 只走 Kimi Code 端点。默认 'web'。 */
+  summaryChannel?: 'web' | 'code'
   /** Show OS native notifications when a session ends while window is inactive
    *  (default true). */
   nativeNotifications?: boolean
@@ -256,6 +259,8 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.aiNamingEnabled = optionalBoolean(source.aiNamingEnabled)
   settings.autoTodoNudge = optionalBoolean(source.autoTodoNudge)
   settings.summaryModel = optionalString(source.summaryModel)
+  settings.summaryChannel =
+    source.summaryChannel === 'code' ? 'code' : source.summaryChannel === 'web' ? 'web' : undefined
   settings.nativeNotifications = optionalBoolean(source.nativeNotifications)
 
   settings.composerModels = normalizeComposerModels(source.composerModels)

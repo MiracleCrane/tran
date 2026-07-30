@@ -128,6 +128,7 @@ export default function SettingsPanel(): JSX.Element {
   const [aiNaming, setAiNaming] = useState(true)
   const [summaryModel, setSummaryModel] = useState('')
   const [autoTodoNudge, setAutoTodoNudge] = useState(false)
+  const [summaryFree, setSummaryFree] = useState(true)
   const [probing, setProbing] = useState(false)
   const [probes, setProbes] = useState<SummaryModelProbe[] | null>(null)
   const [diagnosing, setDiagnosing] = useState(false)
@@ -179,6 +180,7 @@ export default function SettingsPanel(): JSX.Element {
       setAiNaming(p.aiNamingEnabled !== false)
       setSummaryModel(p.summaryModel ?? '')
       setAutoTodoNudge(p.autoTodoNudge === true)
+      setSummaryFree(p.summaryChannel !== 'code')
       setAskOnClose(!p.closePromptDismissed)
       setLoaded(true)
     })
@@ -250,6 +252,19 @@ export default function SettingsPanel(): JSX.Element {
       setTimeout(() => setSavedAt(false), 1500)
     } catch {
       setAiNaming(!next)
+    }
+  }
+
+  /** 总结类请求优先走网页版通道（实测不计费）。限流时自动回落到 Kimi Code 端点，
+   *  所以关掉它只影响「省不省额度」，不影响功能可用。 */
+  const toggleSummaryFree = async (next: boolean): Promise<void> => {
+    setSummaryFree(next)
+    try {
+      await window.api.savePreferences({ summaryChannel: next ? 'web' : 'code' })
+      setSavedAt(true)
+      setTimeout(() => setSavedAt(false), 1500)
+    } catch {
+      setSummaryFree(!next)
     }
   }
 
@@ -782,6 +797,12 @@ export default function SettingsPanel(): JSX.Element {
               description="新会话发第一条消息后自动生成短标题（每次约消耗一两百 token）；侧栏可一键补全老会话。关闭后不做任何命名调用，命令说明和思考块摘要也一并停用。"
               checked={aiNaming}
               onChange={(checked) => void toggleAiNaming(checked)}
+            />
+            <ToggleControl
+              label="总结走网页版通道（不计额度）"
+              description="命名 / 命令说明 / 思考摘要优先走 www.kimi.com 的对话接口 —— 实测这条通道在额度流水里记 FEATURE_CHAT、扣费为 0，而 Kimi Code 端点每次约 0.0001。凭证复用「额度明细」那条登录态，不用另外登录。这条会限流（连发容易被拒），被拒时自动回落到 Kimi Code 端点，所以关掉只影响省不省额度，不影响功能。"
+              checked={summaryFree}
+              onChange={(checked) => void toggleSummaryFree(checked)}
             />
             <ToggleControl
               label="后台任务结束后自动更新待办"

@@ -277,6 +277,8 @@ export interface Preferences {
   /** 总结类杂活（命名、命令说明、思考摘要…）共用的型号。空 = 默认
    *  `kimi-for-coding`（唯一实证可用的）。设置页可探测其他型号能否用。 */
   summaryModel?: string
+  /** 总结类请求走哪条通道：'web'（默认，实测不计费、会限流、失败自动回落）/ 'code'。 */
+  summaryChannel?: 'web' | 'code'
 }
 
 /** 提示词策略自检的一项结果（设置页「提示词自检」）。四种请求形态各打一发，
