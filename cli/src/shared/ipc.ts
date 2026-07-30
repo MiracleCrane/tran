@@ -291,6 +291,19 @@ export interface PromptDiagnosis {
   cleaned?: string | null
 }
 
+/** 待办条目（与渲染层 PlanEntry 同形；主进程侧也要用，故放在 shared）。 */
+export interface PlanEntryInfo {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
+/** 从 kimi 本地 server 拉到的待办真值。null 表示"拉不到"，与"待办为空"不同。 */
+export interface SessionTodosResult {
+  entries: PlanEntryInfo[]
+  /** 服务端记的最后更新时刻（epoch ms），用来和实时 plan 帧比新旧。 */
+  updatedAt: number | null
+}
+
 /** 一个候选型号的探测结果（设置页「探测可用型号」）。 */
 export interface SummaryModelProbe {
   model: string
@@ -818,6 +831,12 @@ export interface ForgeApi {
   probeSummaryModels(models?: string[]): Promise<SummaryModelProbe[]>
   /** 提示词策略自检：四种请求形态各打一发（共约 400 token），带回服务端原始报错。 */
   diagnoseSummaryPrompt(): Promise<PromptDiagnosis[]>
+  /** 待办真值（kimi 本地 server，零 token）。拉不到返回 null。 */
+  getSessionTodos(sessionId: string): Promise<SessionTodosResult | null>
+  /** 一条 bash 命令在做什么（便宜模型 + 落盘缓存）。拿不到返回 null。 */
+  explainCommand(command: string): Promise<string | null>
+  /** 一段思考在做什么（便宜模型 + 落盘缓存）。拿不到返回 null。 */
+  summarizeThinking(text: string): Promise<string | null>
   exportSettings(appearance?: Record<string, unknown>): Promise<SettingsBackup>
   importSettings(backup: SettingsBackup): Promise<void>
 

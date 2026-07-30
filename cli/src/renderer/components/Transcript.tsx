@@ -13,6 +13,7 @@ import ToolGroupCard from './ToolGroupCard'
 import CompactionDivider from './CompactionDivider'
 import QueryResultCard from './QueryResultCard'
 import UserMessageNav, { type UserNavEntry } from './UserMessageNav'
+import { useCheapNote } from '../hooks/useCheapNote'
 
 const INITIAL_HIGHLIGHT_DELAY_MS = 420
 const SCROLL_HIGHLIGHT_RESUME_MS = 180
@@ -28,6 +29,11 @@ const BAR_HOVER_INTENT_WINDOW_MS = 600
 const TRANSCRIPT_BAR_SELECTOR = '.thinking-block, .tool-call-card'
 // #48 用户消息导航条：摘要截取长度与条目上限（超出只留最近若干条）。
 const USER_NAV_SUMMARY_CHARS = 24
+// 短于这个长度的思考块不送去总结：60 字截断已经把它显示全了，再花一次调用
+// （约 1s + 一点额度）换不来任何信息。
+const THINKING_SUMMARY_MIN_CHARS = 120
+// 模块级常量，保证 useCheapNote 的依赖项稳定（每次渲染新建函数会反复触发 effect）。
+const fetchThinkingNote = (text: string): Promise<string | null> => window.api.summarizeThinking(text)
 const USER_NAV_MAX_ENTRIES = 30
 // #48/#50 高亮判定：用户消息行顶距视口顶多少 px 内算"视口顶部附近"。
 const USER_NAV_TOP_SLACK_PX = 8
@@ -405,9 +411,14 @@ const ThinkingBlock = memo(function ThinkingBlock({
     if (open && streaming && body) body.scrollTop = body.scrollHeight
   }, [text, open, streaming])
 
+  // 折叠态摘要：优先便宜模型给的一句话概括，拿不到就退回正文前 ~60 字截断。
+  // 只在块收尾后才请求（流式期间输入还不完整，而且不该跟主链路抢带宽）；
+  // 太短的思考块不值得花一次调用——60 字截断本来就把它显示全了。
+  const worthSummarizing = !streaming && text.length >= THINKING_SUMMARY_MIN_CHARS
+  const note = useCheapNote(fetchThinkingNote, text, worthSummarizing)
+
   if (!text) return <></>
-  // 折叠态摘要：正文前 ~60 字符单行截断（流式期间随 text 实时更新）。
-  const preview = text.replace(/\s+/g, ' ').trim().slice(0, 60)
+  const preview = note ?? text.replace(/\s+/g, ' ').trim().slice(0, 60)
   return (
     <div className="thinking-block glass-panel-soft my-1 rounded-xl px-3 py-2">
       <button

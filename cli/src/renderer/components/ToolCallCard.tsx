@@ -5,6 +5,7 @@ import Collapse from './Collapse'
 import CodeBlock, { langForTool } from './CodeBlock'
 import DiffView from './DiffView'
 import SwarmCard from './SwarmCard'
+import { useCheapNote } from '../hooks/useCheapNote'
 
 function normalizeResult(result: unknown): string {
   if (result == null) return ''
@@ -108,6 +109,38 @@ function bashCommandSummary(command: string): string {
   return truncated ? `${summary} …` : summary
 }
 
+/** 模块级常量，保证 useCheapNote 的依赖稳定（每次渲染新建函数会反复触发 effect）。 */
+const fetchCommandNote = (command: string): Promise<string | null> =>
+  window.api.explainCommand(command)
+
+/**
+ * 取 Bash 卡片的命令原文，并判断 Kimi 有没有自带 description。
+ * 与 summaryForTool 同样的防御式解析：rawInput 可能是对象、JSON 字符串，
+ * 或流式拼接到一半的 JSON 残片。
+ */
+function bashCommandFor(block: ToolBlock): {
+  isBash: boolean
+  command: string
+  hasDescription: boolean
+} {
+  const isBash = block.name === 'Bash' || block.name === 'terminal'
+  if (!isBash) return { isBash: false, command: '', hasDescription: false }
+  let value: unknown = block.input
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return { isBash: true, command: '', hasDescription: false }
+    }
+  }
+  const inp = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>
+  return {
+    isBash: true,
+    command: typeof inp.command === 'string' ? inp.command : '',
+    hasDescription: typeof inp.description === 'string' && inp.description.trim() !== ''
+  }
+}
+
 /** 折叠态摘要：按工具类型从 rawInput 提取关键信息（命令行/路径/pattern/
  *  description）。rawInput 可能是对象或 JSON 字符串，防御式解析；失败回落通用摘要。 */
 export function summaryForTool(name: string, input: unknown): string {
@@ -193,6 +226,13 @@ const ToolCallCard = memo(function ToolCallCard({
     !collapsed && block.name === 'Bash' ? ((block.input as { command?: string })?.command ?? '') : ''
   const streaming = isSubagent && block.status === 'running'
 
+  // 命令一句话说明（便宜模型）。只在 Kimi **没给** description 时问——给了就说明
+  // 意图已经有了，再问一遍是白花额度。pending 期间不问：那时 command 可能还在
+  // 流式拼接（见 #30），拿到的是半条命令。
+  const bashInfo = bashCommandFor(block)
+  const wantsNote = bashInfo.isBash && !bashInfo.hasDescription && block.status !== 'pending'
+  const commandNote = useCheapNote(fetchCommandNote, bashInfo.command, wantsNote)
+
   // AgentSwarm（kimi 并行子代理）：专门的可视化卡片（进度条 + 子代理行）。
   // 分支在 hooks 之后，同实例块名变化不违反 hooks 规则。
   if (block.name === 'AgentSwarm') return <SwarmCard block={block} />
@@ -229,6 +269,13 @@ const ToolCallCard = memo(function ToolCallCard({
         )}
         {summary && (
           <span className="truncate font-mono text-xs text-zinc-500">{summary}</span>
+        )}
+        {/* 说明跟在命令**后面**而不是取代它：用户需要看见真正要跑的是什么，
+            说明只是帮他一眼看懂。拿不到说明时这里什么都不显示。 */}
+        {commandNote && (
+          <span className="shrink-0 truncate text-xs text-zinc-600" title={commandNote}>
+            · {commandNote}
+          </span>
         )}
         <span key={block.status} className={`ml-auto shrink-0 text-[11px] ${meta.text}`}>
           {/* 完成瞬间：状态勾弹入（key 随状态重挂载，动画只播一次） */}

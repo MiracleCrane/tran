@@ -43,6 +43,8 @@ import {
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { checkKimiVersion, upgradeKimi } from './kimiVersion'
 import { probeCheapModels, diagnoseSummaryPrompt } from './cheapModel'
+import { explainCommand, summarizeThinking } from './cheapNotes'
+import { fetchSessionTodos } from './kimiTodos'
 import { listKimiSessions } from './kimiHistory'
 import { listClaudeSessions } from './claudeHistory'
 import { getPlanUsageCached } from './usageService'
@@ -102,7 +104,8 @@ import type {
   KimiVersionInfo,
   KimiUpgradeResult,
   SummaryModelProbe,
-  PromptDiagnosis
+  PromptDiagnosis,
+  SessionTodosResult
 } from '../shared/ipc'
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
@@ -648,6 +651,21 @@ export function registerIpc(
   ipcMain.handle(
     'forge:diagnoseSummaryPrompt',
     async (): Promise<PromptDiagnosis[]> => diagnoseSummaryPrompt()
+  )
+  ipcMain.handle(
+    'forge:getSessionTodos',
+    async (_e, sessionId: unknown): Promise<SessionTodosResult | null> =>
+      fetchSessionTodos(requireString(sessionId, 'sessionId'))
+  )
+  ipcMain.handle(
+    'forge:explainCommand',
+    async (_e, command: unknown): Promise<string | null> =>
+      explainCommand(requireString(command, 'command'))
+  )
+  ipcMain.handle(
+    'forge:summarizeThinking',
+    async (_e, text: unknown): Promise<string | null> =>
+      summarizeThinking(requireString(text, 'text'))
   )
   ipcMain.handle(
     'forge:probeSummaryModels',
