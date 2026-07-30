@@ -24,11 +24,18 @@ export function collectToolBlocks(items: TranscriptItem[], names?: Set<string>):
 /** 统计运行中（pending/running）的指定类工具调用数。
  *  后台 agent（run_in_background）的块 status 已是 done（launch ack），其运行
  *  语义只在传入 swarmTasks 且 server task 确认 running 时才计入（#32）；
- *  不传/为 null（server 不可用）时保守不计——静态猜测会让计数永远卡住。 */
+ *  不传/为 null（server 不可用）时保守不计——静态猜测会让计数永远卡住。
+ *
+ *  turnRunning：当前是否有一轮在跑。**前台工具的 running 只在轮内成立**——
+ *  轮一结束，还挂在 pending/running 的块就是没等到结果帧的残留（中断、
+ *  历史重放缺帧都会留下），它们会让 chip 永远闪着流光说"有命令在跑"，而
+ *  实际什么都没跑。显式传 false 时这类块一律不计；后台任务不受影响，它们
+ *  本来就跨轮存活，由上面的 swarmTasks 分支判定。 */
 export function countRunningTools(
   items: TranscriptItem[],
   names: Set<string>,
-  swarmTasks?: KimiTaskInfo[] | null
+  swarmTasks?: KimiTaskInfo[] | null,
+  turnRunning?: boolean
 ): number {
   let count = 0
   for (const block of collectToolBlocks(items, names)) {
@@ -37,6 +44,7 @@ export function countRunningTools(
       if (swarmTasks && withServerTaskStatus(bg, swarmTasks).running) count += 1
       continue
     }
+    if (turnRunning === false) continue
     if (block.status === 'running' || block.status === 'pending') count += 1
   }
   return count

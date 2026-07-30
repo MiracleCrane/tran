@@ -438,6 +438,17 @@ export class KimiBackend {
     }
   }
 
+  /** 本进程当前还持有的 ACP 会话 id（含后台化、空闲的；不含已关闭的）。
+   *  空壳过滤用：没有标题的会话只有"就是你现在开着的这个"才值得显示，
+   *  历次运行残留下来的从没说过话的会话一律不列。 */
+  liveAcpSessionIds(): Set<string> {
+    const ids = new Set<string>()
+    for (const session of this.sessions.values()) {
+      if (!session.closed && session.acpSessionId) ids.add(session.acpSessionId)
+    }
+    return ids
+  }
+
   /** 侧栏列表合并用：正在跑 turn 的 ACP 会话 id 集合。 */
   runningAcpSessionIds(): Set<string> {
     const ids = new Set<string>()

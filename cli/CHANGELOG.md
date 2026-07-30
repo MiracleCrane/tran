@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.0.45 - 2026-07-30
+
+### 中文
+
+- 变更:**「+ 新建对话」不再立刻建会话**,改成发出第一条消息时才建。此前一点就在后端落一个会话,kimi 给它的标题恒为 "New Session"—— 于是每点一次、每开一次窗口,侧栏就多一条你从没说过话的空会话。没说话就没有会话,也就没有空壳要清理。(开机启动和切换项目仍是立即创建,那两条路径这版没动。)
+- 修复:侧栏那些残留的空会话。原先的过滤是「最近 10 分钟更新过的无标题会话就放行」,太宽——任何刚被写过的空壳都会现身、过一会儿又自己消失,看着像时好时坏。现在只放行**本进程当前还持有的**那个会话(也就是你正开着的),历次运行留下的一律不列。
+- 修复:「后台命令」chip 明明没有命令在跑却一直闪流光。轮结束后仍挂在 running/pending 的工具块是没等到结果帧的残留(中断、历史重放缺帧都会留下),它们被当成"在跑"。现在前台工具只在轮内才算在跑;后台任务不受影响,它们本来就跨轮存活。
+- 修复:切会话时会话悬停预览卡卡在左上角不消失。收起只挂在行的 `pointerleave` 上,而切会话会重建列表行,旧元素直接消失,事件根本不触发。
+- 修复:切到别的项目的会话时,侧栏整个列表先清空再重填,表现为"目录收缩重载一次"。现在留着旧列表,新数据到了原地替换。
+- 优化:悬停预览卡的摆位夹住四边——左边至少推到侧栏之外(此前压在项目选择器上),右边和下边不超出窗口。
+- 优化:输入框不聚焦时也有边界了。简约风把玻璃面板的底和描边一起拆了,于是不聚焦时整个输入区一点框都没有;聚焦时又跳到一圈会呼吸的紫色渐变。现在常驻淡底加发丝描边,聚焦只把描边染成低饱和的紫,呼吸光环在简约风下关掉。
+- 优化:空态页面。图标框和四个建议原先挂在玻璃类上,简约风下等于没有样式,是四个浮在底色上的裸字;现在自带底色。四个建议也从假按钮改成真按钮,点一下把话填进输入框。
+- 优化:待办条、目标条与 AI 回复对齐同一条居中的正文列(此前它们仍是左对齐)。
+
+### English
+
+- Changed: **"New chat" no longer creates a session immediately** — the backend session is created when you send the first message. Previously every click (and every app launch) persisted a session that kimi titles "New Session", so the sidebar filled up with conversations you never had. (Startup and project switching still create eagerly; not touched in this version.)
+- Fixed: leftover empty sessions in the sidebar. The old filter passed any untitled session modified in the last 10 minutes, so shells appeared and then vanished on their own. Now only the session this process currently holds is exempt.
+- Fixed: the "background commands" chip shimmered as if something were running when nothing was. Tool blocks left at running/pending after a turn ends are stale frames (interrupts, replays with missing frames); foreground tools now only count as running inside a turn.
+- Fixed: the session hover preview could stick in the top-left corner when switching sessions — it was only dismissed on the row's `pointerleave`, and switching rebuilds the rows.
+- Fixed: opening a session in another project blanked and refilled the whole sidebar list.
+- Improved: the hover preview is clamped on all four sides — pushed clear of the sidebar on the left, kept inside the window on the right and bottom.
+- Improved: the composer has a visible border when not focused, and a much gentler one when focused (no breathing gradient ring in the minimal style).
+- Improved: the empty state has real surfaces again, and the four suggestions are real buttons that fill the composer.
+- Improved: the todo and goal bars share the same centered column as AI replies.
+
 ## v1.0.44 - 2026-07-30
 
 ### 中文

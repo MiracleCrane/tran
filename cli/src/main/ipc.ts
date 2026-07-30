@@ -826,7 +826,13 @@ export function registerIpc(
     const all = opts?.scope === 'all'
     const limit = all ? 200 : opts?.limit && opts.limit > 0 ? opts.limit : 50
     const offset = opts?.offset && opts.offset > 0 ? opts.offset : 0
-    const items = (await listKimiSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' }))
+    const items = (await listKimiSessions(cwd, {
+      limit,
+      offset,
+      scope: all ? 'all' : 'project',
+      // 无标题会话只豁免"本进程还持有的"那些，见 listKimiSessions 注释。
+      liveIds: bridge.liveAcpSessionIds()
+    }))
       .sort((a, b) => b.lastModified - a.lastModified)
       .slice(0, limit)
     // 合并主进程内存中的运行状态（SessionListItem.sessionId 即 ACP 会话 id）。

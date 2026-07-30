@@ -49,6 +49,10 @@ const SESSION_CACHE_IDLE_RELEASE_MS = 5_000
 const SESSION_PREFETCH_RESUME_MS = 180
 const SESSION_PREFETCH_FAST_SCROLL_PX_PER_MS = 1.15
 const SESSION_LOAD_MORE_THRESHOLD_PX = 180
+/** 悬停预览卡的摆位夹取参数（宽度与 w-64 一致，高度按内容上限估）。 */
+const PREVIEW_WIDTH_PX = 256
+const PREVIEW_MAX_HEIGHT_PX = 168
+const PREVIEW_GAP_PX = 10
 const BACKEND_SORT_ORDER: Record<ClaudeExecutionBackend, number> = { windows: 0, wsl: 1 }
 
 function bucketOf(ts: number): string {
@@ -369,14 +373,27 @@ export default function Sidebar(): JSX.Element {
     previewTimerRef.current = window.setTimeout(() => {
       previewTimerRef.current = null
       const rect = el.getBoundingClientRect()
+      // 摆位要夹住两头。原先直接用 rect.right + 8：会话行是缩进的，行的右边
+      // 缘在侧栏里面，于是预览卡压在侧栏自己身上（挡住项目选择器那一片）；
+      // 行滚到很靠下时又会顶穿视口底部。
+      // 左边界：至少推到侧栏右缘之外；右边界：不超出视口。上下同理。
+      const sidebarRight = el.closest('.glass-sidebar')?.getBoundingClientRect().right ?? rect.right
+      const left = Math.min(
+        Math.max(rect.right + PREVIEW_GAP_PX, sidebarRight + PREVIEW_GAP_PX),
+        Math.max(PREVIEW_GAP_PX, window.innerWidth - PREVIEW_WIDTH_PX - PREVIEW_GAP_PX)
+      )
+      const top = Math.min(
+        Math.max(PREVIEW_GAP_PX, rect.top - 4),
+        Math.max(PREVIEW_GAP_PX, window.innerHeight - PREVIEW_MAX_HEIGHT_PX)
+      )
       void window.api
         .getSessionPreview(s.sessionId)
         .catch(() => ({} as SessionPreview))
         .then((data) => {
           setPreview({
             key,
-            top: Math.max(8, rect.top - 4),
-            left: rect.right + 8,
+            top,
+            left,
             summary: s.summary || '(未命名)',
             ...(s.cwd ? { cwd: s.cwd } : {}),
             lastModified: s.lastModified,
@@ -798,6 +815,13 @@ export default function Sidebar(): JSX.Element {
     }
   }, [])
 
+  // 兜底：当前会话一变就收预览。上面 handleOpenSession 里已经收了一次，但
+  // 会话也可能从别处切换（跨项目打开、恢复后台会话），那些路径不经过这里。
+  useEffect(() => {
+    hidePreview()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta?.sdkSessionId])
+
   const togglePinnedSession = (session: SessionListItem): void => {
     const key = sessionKey(session)
     setPinnedSessionKeys((prev) => {
@@ -820,6 +844,10 @@ export default function Sidebar(): JSX.Element {
 
   /** 「全部」视图点其他项目的会话：先切项目再 resume；本项目内直接打开。 */
   const handleOpenSession = (s: SessionListItem): void => {
+    // 点下去就收预览。原先只挂在行的 onPointerLeave 上——切会话会重建列表
+    // 行（列表过渡 / 快照切换），旧元素直接消失，pointerleave 根本不触发，
+    // 预览卡就永远挂在那儿了。
+    hidePreview()
     if (
       sessionScope === 'all' &&
       s.cwd &&

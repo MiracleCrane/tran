@@ -120,15 +120,22 @@ function normalizeCwd(value: string): string {
   return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
 }
 
-/** 空会话豁免窗口：最近 10 分钟内更新过的 "New Session" 不过滤（用户刚发
- *  首条消息、kimi title 未刷新时，活跃对话不能从侧栏消失）。#42 豁免只对本
- *  项目 cwd 生效：「全部」视图里其他目录的探针/测试空壳会话（Temp、
- *  not-exist-dir-xyz 等）不再享豁免，立刻过滤。 */
-const EMPTY_SESSION_EXEMPTION_MS = 10 * 60 * 1000
-
+/**
+ * 无标题会话的显示豁免。
+ *
+ * kimi 对从没发过消息的会话，title 恒为 "New Session"。这类空壳不该出现在
+ * 侧栏，但有一个必须留的例外：用户刚发出第一条消息、kimi 那边标题还没刷新
+ * 的那几秒——正在说话的对话不能从列表里消失。
+ *
+ * 原先用的是「最近 10 分钟更新过就豁免」。太宽了：任何在 10 分钟内被写过的
+ * 空会话都会现身，用户看到的就是"切个会话又冒出来一条 New Session，过一会儿
+ * 自己又没了"。现在改成只豁免**本进程当前还持有的那些 ACP 会话**（liveIds，
+ * 由主进程的 AgentBridge 提供）——即"你现在开着的/刚后台化的"，历次运行残留
+ * 的空壳一律立刻过滤。
+ */
 export async function listKimiSessions(
   cwd: string,
-  opts: { limit: number; offset: number; scope?: 'project' | 'all' }
+  opts: { limit: number; offset: number; scope?: 'project' | 'all'; liveIds?: Set<string> }
 ): Promise<SessionListItem[]> {
   try {
     const acp = await ensureClient()
@@ -157,11 +164,9 @@ export async function listKimiSessions(
       const displayTitle =
         manualSessionTitle(sessionId) ?? aiSessionTitle(sessionId) ?? kimiTitleValid ?? localSessionTitle(sessionId)
       const lastModified = asTimestamp(entry.updatedAt) ?? asTimestamp(entry.lastModified) ?? 0
-      // 空壳治理：kimi 对从没发过消息的会话 title 恒为 "New Session"。无有效标题
-      // （无任何一级标题来源 = 没发过消息）且超出豁免窗口的空会话不显示；豁免只
-      // 对本项目 cwd 生效（条目不带 cwd 时保守放行），见常量处注释。
-      const exempt = !entryCwd || normalizeCwd(entryCwd) === targetCwd
-      if (!displayTitle && (!exempt || Date.now() - lastModified > EMPTY_SESSION_EXEMPTION_MS)) continue
+      // 空壳治理：无有效标题（= 没发过消息）的会话只有当它还被本进程持有时
+      // 才显示，见上面 listKimiSessions 的注释。
+      if (!displayTitle && !opts.liveIds?.has(sessionId)) continue
       sessions.push({
         sessionId,
         agentBackend: 'kimi',

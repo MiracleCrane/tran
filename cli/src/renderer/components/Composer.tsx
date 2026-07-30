@@ -206,9 +206,13 @@ export default function Composer(): JSX.Element {
   const pending = useSessionStore((s) => s.pendingQueue)
   // 状态 chips（常驻行）：计数=会话累计（含历史重放），运行中数用于高亮和 (r/N) 显示。
   const bashTotal = useSessionStore((s) => countTotalTools(s.items, BASH_TOOL_NAMES))
-  const runningBash = useSessionStore((s) => countRunningTools(s.items, BASH_TOOL_NAMES, s.swarmTasks))
+  const runningBash = useSessionStore((s) =>
+    countRunningTools(s.items, BASH_TOOL_NAMES, s.swarmTasks, s.status.running)
+  )
   const agentTotal = useSessionStore((s) => countTotalTools(s.items, AGENT_TOOL_NAMES))
-  const runningAgents = useSessionStore((s) => countRunningTools(s.items, AGENT_TOOL_NAMES, s.swarmTasks))
+  const runningAgents = useSessionStore((s) =>
+    countRunningTools(s.items, AGENT_TOOL_NAMES, s.swarmTasks, s.status.running)
+  )
   // chips 独立浮层：openChip=哪个 chip 的浮层开着 + 锚点（portal fixed 定位）。
   const [openChip, setOpenChip] = useState<ChipKind | null>(null)
   const [chipAnchor, setChipAnchor] = useState<ChipAnchor | null>(null)

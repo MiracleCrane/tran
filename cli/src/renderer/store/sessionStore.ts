@@ -1372,8 +1372,30 @@ function scheduleInitWatchdog(
   }, 60000)
 }
 
+/**
+ * 待创建的会话（懒起）。
+ *
+ * 「+ 新建对话」原先立刻 startSession —— 后端当场落一个会话到磁盘，kimi 给它
+ * 的 title 恒为 "New Session"，于是每点一次、每开一次窗口，侧栏就多一条你从
+ * 没说过话的空会话。改成：点击只切界面，把「怎么起」记在这里，等真的发第一
+ * 条消息时才起后端。没说话就没有会话，也就没有空壳可清理。
+ *
+ * 只留一个槽位：任何一次会话导航（nextSessionNavigationSeq）都会作废它——
+ * 用户点了新建又转头去开历史会话，那个从没起过的会话就该消失得干干净净。
+ */
+let pendingSessionStart: { sessionId: string; start: () => Promise<void> } | null = null
+
+/** 取走并清空该会话的待起任务（没有则返回 null）。 */
+function takePendingSessionStart(sessionId: string): (() => Promise<void>) | null {
+  if (!pendingSessionStart || pendingSessionStart.sessionId !== sessionId) return null
+  const { start } = pendingSessionStart
+  pendingSessionStart = null
+  return start
+}
+
 function nextSessionNavigationSeq(): number {
   sessionNavigationSeq += 1
+  pendingSessionStart = null
   return sessionNavigationSeq
 }
 
@@ -1640,6 +1662,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }))
     }
     try {
+      // 懒起的会话在这里才真正落地：「+ 新建对话」只切了界面，后端要等到
+      // 第一条消息（见 pendingSessionStart）。没有待起任务时这就是个空操作。
+      const deferredStart = takePendingSessionStart(meta.sessionId)
+      if (deferredStart) await deferredStart()
       await sessionStartPromises.get(meta.sessionId)
       if (get().meta?.sessionId !== meta.sessionId) return
       await window.api.sendMessage(meta.sessionId, content)
@@ -2013,7 +2039,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // attach 的 cwd 比对永远失配、历史缓存失效键也指错目录。
     if (cwd && normalizeCwdForCompare(cwd) !== normalizeCwdForCompare(meta.cwd)) {
       await window.api.setLastProject(cwd)
-      set({ sessions: [], sessionsHasMore: false })
+      // 这里原先 set({ sessions: [] })：侧栏当场清空 → 骨架/空态 → 新列表填回，
+      // 表现就是"切个会话，左边目录整个收缩重载一次"。而「全部」视图本来就是
+      // 跨项目的,清掉的多半还是同一批会话。改成留着旧列表,等下面
+      // refreshSessions 拿到新数据再原地替换,只有真正变了的行会走进出动画。
       await get().openSession(sdkSessionId, backend, cwd)
     } else {
       await get().openSession(sdkSessionId, backend)
@@ -2078,7 +2107,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const oldSessionId = meta.sessionId
     const newId = uid()
     const requestSeq = nextSessionNavigationSeq()
-    const startGate = createSessionStartGate(newId)
     const isLatestRequest = (): boolean => isCurrentSessionNavigation(get, requestSeq, newId)
     // #6 切走=后台化：快照当前会话进事件缓冲（turn 继续跑，切回可 attach）。
     snapshotActiveSessionIntoBackground(get)
@@ -2088,20 +2116,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // 全新会话应用设置里的默认档；resume 历史会话仍走原模式（见 openSession）。
     const prefs = await window.api.getPreferences().catch(() => null)
     const permissionMode = prefs?.defaultPermissionMode ?? 'default'
-    if (!isLatestRequest()) {
-      startGate.resolve()
-      return
-    }
-    // Switch the UI to a fresh session instantly (unlocked). claude.exe spawns
-    // in the background; any messages sent now queue and flush once ready.
+    if (!isLatestRequest()) return
+    // 界面立刻切到空会话；后端不起（见 pendingSessionStart）。
+    // starting 保持 false：没有任何东西在启动，不该显示"正在进入会话"骨架。
+    // slashCommands / mcpServers 故意不清空：它们是 agent 级的、跟具体会话
+    // 无关，清掉的话新会话在发出第一条消息之前 "/" 菜单是空的。
     set({
-      starting: true,
+      starting: false,
       items: [],
       tasks: [], pendingQueue: [],
       sessionConfigDirty: false,
       sessionModelDirty: false,
       bridgeEnded: false,
-      slashCommands: [],
       planEntries: [],
       planUpdatedAt: null,
       contextUsage: null,
@@ -2121,35 +2147,44 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
     })
     void window.api.closeSession(oldSessionId).catch(() => {})
-    try {
-      await window.api.startSession({
-        cwd,
-        ...(modelForAgent(agentBackend, model) ? { model: modelForAgent(agentBackend, model) } : {}),
-        ...(agentBackend ? { agentBackend } : {}),
-        effort: get().effort,
-        permissionMode,
-        bridgeSessionId: newId
-      })
-      startGate.resolve()
-    } catch (error: unknown) {
-      startGate.reject(error)
-      if (!isLatestRequest()) return
-      set((s) => ({
-        starting: false,
-        status: {
-          ...s.status,
-          error: error instanceof Error ? error.message : String(error)
+    // 后端推迟到第一条消息：send() 会先取走这个任务跑完，再走原本的
+    // sessionStartPromises 等待。gate 也在这里面才创建——若这个会话最终没
+    // 被使用，就不会在 sessionStartPromises 里留下一个永不落定的 promise。
+    pendingSessionStart = {
+      sessionId: newId,
+      start: async () => {
+        const startGate = createSessionStartGate(newId)
+        try {
+          await window.api.startSession({
+            cwd,
+            ...(modelForAgent(agentBackend, model) ? { model: modelForAgent(agentBackend, model) } : {}),
+            ...(agentBackend ? { agentBackend } : {}),
+            effort: get().effort,
+            permissionMode,
+            bridgeSessionId: newId
+          })
+          startGate.resolve()
+        } catch (error: unknown) {
+          startGate.reject(error)
+          if (!isLatestRequest()) return
+          set((s) => ({
+            starting: false,
+            status: {
+              ...s.status,
+              error: error instanceof Error ? error.message : String(error)
+            }
+          }))
+          return
         }
-      }))
-      return
+        if (!isLatestRequest()) {
+          await window.api.destroySession(newId).catch(() => {})
+          return
+        }
+        set({ starting: false })
+        void get().refreshSessions()
+        scheduleInitWatchdog(get, set, newId)
+      }
     }
-    if (!isLatestRequest()) {
-      await window.api.destroySession(newId).catch(() => {})
-      return
-    }
-    set({ starting: false })
-    void get().refreshSessions()
-    scheduleInitWatchdog(get, set, newId)
   },
 
   async openSession(sdkSessionId: string, backend?: ClaudeExecutionBackend, targetCwd?: string) {

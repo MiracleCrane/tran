@@ -3029,6 +3029,21 @@ div:has(textarea:focus) .composer-shortcut-hint {
   opacity: 1;
 }
 
+/* 空态（发送消息开始对话）的两块表面。自带底色，不挂 .glass-*——
+   那两个类在简约风下被整体拆掉，挂上去就等于什么都没有。 */
+.tran-empty-badge {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+}
+.tran-empty-chip {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.065);
+}
+.tran-empty-chip:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
 /* 流光文字：思考进行中的提示。取代原来那颗彗星/月亮——
    动效落在文字本身上，比在文字前面再挂一个转圈的小东西干净。 */
 .tran-shimmer {
@@ -3097,6 +3112,27 @@ div:has(textarea:focus) .composer-shortcut-hint {
   :root[data-ui='flat'] .tran-user-bubble {
     width: 100%;
     max-width: 92%;
+  }
+
+  /* 3b. 输入框得有个框。第 1 条把 .glass-panel 的底和描边一起清了，输入框
+        用的正是它——于是不聚焦时整个输入区一点边界都没有，占位文字浮在
+        底色上。而聚焦时又跳到一圈会呼吸的紫色渐变描边，反差过大。
+        这里给它一个常驻的淡底 + 发丝描边，聚焦只把描边染成低饱和的紫，
+        呼吸光环在简约风下整个关掉。 */
+  :root[data-ui='flat'] .composer-panel {
+    background: rgba(255, 255, 255, 0.028);
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    border-radius: 14px;
+    transition:
+      border-color var(--motion-med) var(--easing-out),
+      background-color var(--motion-med) var(--easing-out);
+  }
+  :root[data-ui='flat'] .composer-panel:focus-within {
+    border-color: rgba(139, 92, 246, 0.32);
+    background: rgba(255, 255, 255, 0.038);
+  }
+  :root[data-ui='flat'] .composer-focus-ring {
+    display: none;
   }
 
   /* 4. 连续几条用户发言之间要有呼吸。气泡拆掉之后就只剩竖线，

@@ -104,6 +104,14 @@ interface TranscriptProps {
   onAtBottomChange?: (atBottom: boolean) => void
 }
 
+/** 空态的四个起手式。label 是按钮上的短词，prompt 是真正填进输入框的话。 */
+const EMPTY_SUGGESTIONS = [
+  { label: '列出文件', prompt: '列出这个项目的目录结构，说明每个顶层目录是做什么的' },
+  { label: '总结项目', prompt: '读一遍这个项目，告诉我它是做什么的、技术栈是什么、入口在哪' },
+  { label: '查找代码', prompt: '帮我找一下：' },
+  { label: '修复问题', prompt: '这里有个问题需要修：' }
+] as const
+
 const TerminalGlyph = (): JSX.Element => (
   <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
     <path
@@ -592,6 +600,11 @@ export default function Transcript({
   const attachmentKey = useSessionStore((s) => s.meta?.sdkSessionId ?? s.meta?.sessionId ?? '')
   const agentBackend = useSessionStore((s) => s.meta?.agentBackend)
   const starting = useSessionStore((s) => s.starting)
+  // 空态四个建议：点一下填进输入框（草稿分桶键与 Composer 保持一致）。
+  const setComposerDraft = useSessionStore((s) => s.setComposerDraft)
+  const applySuggestion = (prompt: string): void => {
+    if (attachmentKey) setComposerDraft(attachmentKey, prompt)
+  }
   // running / compacting 已下沉到 TranscriptFooter 自订阅：主组件不再因它们
   // 变化而重渲染（每个 turn 起止都会触发一次全列表重渲染）。
   const setTranscriptScrolling = useSessionStore((s) => s.setTranscriptScrolling)
@@ -1071,16 +1084,26 @@ export default function Transcript({
             </div>
           ) : (
             <>
-          <div className="glass-panel mb-7 flex h-20 w-20 items-center justify-center rounded-[18px] text-zinc-100 shadow-[0_0_34px_rgba(94,168,255,0.18)]">
+          {/* 空态。简约风把 .glass-panel / .glass-control 的底和描边都拆了，
+              这里原样式全落在那两个类上——于是图标框和四个建议都成了浮在
+              底色上的裸字，看着像没加载完。改成自带底色的方块，两套风格
+              下都成立。四个建议原本是 <span>，长得像按钮却点不动；改成真
+              按钮，点一下把词填进输入框。 */}
+          <div className="tran-empty-badge mb-7 flex h-20 w-20 items-center justify-center rounded-[20px] text-zinc-100">
             <TerminalGlyph />
           </div>
           <h1 className="text-brand-gradient text-2xl font-semibold">发送消息开始对话</h1>
           <p className="mt-2 text-sm text-zinc-500">我可以帮助你编写代码、分析问题、执行任务</p>
-          <div className="mt-7 flex flex-wrap justify-center gap-3">
-            {['列出文件', '总结项目', '查找代码', '修复问题'].map((label) => (
-              <span key={label} className="glass-control rounded-xl px-4 py-2 text-sm text-zinc-300">
-                {label}
-              </span>
+          <div className="mt-7 flex flex-wrap justify-center gap-2.5">
+            {EMPTY_SUGGESTIONS.map((s) => (
+              <button
+                key={s.label}
+                type="button"
+                onClick={() => applySuggestion(s.prompt)}
+                className="tran-empty-chip rounded-xl px-3.5 py-2 text-[13px] text-zinc-400 transition hover:text-zinc-100"
+              >
+                {s.label}
+              </button>
             ))}
           </div>
             </>

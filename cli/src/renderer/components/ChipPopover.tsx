@@ -30,6 +30,8 @@ export default function ChipPopover({
   const planEntries = useSessionStore((s) => s.planEntries)
   // #32 后台 agent 的运行中计数/置顶以 server 校正后的状态为准。
   const swarmTasks = useSessionStore((s) => s.swarmTasks)
+  // 轮结束后仍挂着 running 的前台块是残留帧，别再报"在跑"（见 countRunningTools）。
+  const turnRunning = useSessionStore((s) => s.status.running)
   const cardRef = useRef<HTMLDivElement | null>(null)
   const [showAllHistory, setShowAllHistory] = useState(false)
 
@@ -47,7 +49,8 @@ export default function ChipPopover({
 
   const bashBlocks = kind === 'bash' ? collectToolBlocks(items, BASH_TOOL_NAMES) : []
   const agentBlocks = kind === 'agent' ? collectToolBlocks(items, AGENT_TOOL_NAMES) : []
-  const runningAgents = kind === 'agent' ? countRunningTools(items, AGENT_TOOL_NAMES, swarmTasks) : 0
+  const runningAgents =
+    kind === 'agent' ? countRunningTools(items, AGENT_TOOL_NAMES, swarmTasks, turnRunning) : 0
   const planDone = planEntries.filter((e) => e.status === 'completed').length
 
   const title =

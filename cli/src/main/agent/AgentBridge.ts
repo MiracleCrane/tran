@@ -45,6 +45,8 @@ interface AgentBackendAdapter {
   background?(sessionId: string): void
   /** 可选：正在跑 turn 的 ACP 会话 id 集合（侧栏列表合并 running 标记用）。 */
   runningAcpSessionIds?(): Set<string>
+  /** 可选：本进程还持有的 ACP 会话 id（含空闲/后台化；空壳过滤用）。 */
+  liveAcpSessionIds?(): Set<string>
   listMcpServers(sessionId: string): Promise<McpServerEntry[]>
   refreshMcpServers(sessionId: string): Promise<McpServerEntry[]>
   toggleMcpServer(sessionId: string, name: string, enabled: boolean): Promise<void>
@@ -155,6 +157,15 @@ export class AgentBridge {
     const ids = new Set<string>()
     for (const backend of Object.values(this.backends)) {
       for (const id of backend.runningAcpSessionIds?.() ?? []) ids.add(id)
+    }
+    return ids
+  }
+
+  /** 本进程还持有的 ACP 会话 id（跨后端合并；无标题会话的显示豁免用）。 */
+  liveAcpSessionIds(): Set<string> {
+    const ids = new Set<string>()
+    for (const backend of Object.values(this.backends)) {
+      for (const id of backend.liveAcpSessionIds?.() ?? []) ids.add(id)
     }
     return ids
   }
