@@ -46,8 +46,6 @@ import { probeCheapModels, diagnoseSummaryPrompt } from './cheapModel'
 import { explainCommand, summarizeThinking, translateThinking } from './cheapNotes'
 import { fetchSessionTodos } from './kimiTodos'
 import { listKimiSessions } from './kimiHistory'
-import { getPlanUsageCached } from './usageService'
-import { getQuotaOverviewCached, fetchQuotaActions, runQuotaLogin } from './quotaService'
 import { deleteKimiSession } from './sessionDelete'
 import { removeSessionTitle, recordManualTitle } from './sessionTitles'
 import { allAiTitles, generateAiTitlesBatch, getSessionPreview } from './aiTitles'
@@ -94,9 +92,6 @@ import type {
   DiagnosticReportOptions,
   DiagnosticReportResult,
   SessionUsageInfo,
-  PlanUsageResult,
-  QuotaOverviewResult,
-  QuotaActionsResult,
   AiTitlesBatchResult,
   SessionPreview,
   SaveImageResult,
@@ -532,17 +527,6 @@ export function registerIpc(
       return { contextSize: 1_048_576 }
     }
   })
-
-  ipcMain.handle('forge:getPlanUsage', async (): Promise<PlanUsageResult> => getPlanUsageCached())
-
-  // --- 额度总览/明细（MembershipService RPC；登录态取 kimi-desktop / 网页登录兜底）。
-  // 总览走 60s 缓存（悬停卡/明细面板共用，悬停秒开）；明细翻页每次实时。 ---
-  ipcMain.handle('forge:getQuotaOverview', async (): Promise<QuotaOverviewResult> => getQuotaOverviewCached())
-  ipcMain.handle(
-    'forge:listQuotaActions',
-    async (_e, pageToken?: string): Promise<QuotaActionsResult> => fetchQuotaActions(pageToken)
-  )
-  ipcMain.handle('forge:quotaLogin', async (): Promise<{ ok: boolean; error?: string }> => runQuotaLogin())
 
   ipcMain.handle(
     'forge:listMarketplacePlugins',

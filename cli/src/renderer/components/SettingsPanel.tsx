@@ -126,9 +126,10 @@ export default function SettingsPanel(): JSX.Element {
   const [startMaximized, setStartMaximized] = useState(false)
   const [nativeNotifications, setNativeNotifications] = useState(true)
   const [aiNaming, setAiNaming] = useState(true)
+  const [summaryApiBaseUrl, setSummaryApiBaseUrl] = useState('https://api.deepseek.com')
+  const [summaryApiKey, setSummaryApiKey] = useState('')
   const [summaryModel, setSummaryModel] = useState('')
   const [autoTodoNudge, setAutoTodoNudge] = useState(false)
-  const [summaryFree, setSummaryFree] = useState(true)
   const [probing, setProbing] = useState(false)
   const [probes, setProbes] = useState<SummaryModelProbe[] | null>(null)
   const [diagnosing, setDiagnosing] = useState(false)
@@ -164,8 +165,9 @@ export default function SettingsPanel(): JSX.Element {
     void window.api.getAppVersion().then(setAppVersion).catch(() => {})
     void Promise.all([
       window.api.getPreferences(),
-      window.api.listAgentBackends().catch(() => [] as AgentBackendInfo[])
-    ]).then(([p, backends]) => {
+      window.api.listAgentBackends().catch(() => [] as AgentBackendInfo[]),
+      window.api.getApiKey().catch(() => null)
+    ]).then(([p, backends, apiKey]) => {
       setAgentBackend(p.agentBackend ?? 'kimi')
       setAgentBackends(backends)
       setEffort(p.defaultEffort ?? 'high')
@@ -178,9 +180,10 @@ export default function SettingsPanel(): JSX.Element {
       setStartMaximized(!!p.startMaximized)
       setNativeNotifications(p.nativeNotifications !== false)
       setAiNaming(p.aiNamingEnabled !== false)
+      setSummaryApiBaseUrl(p.summaryApiBaseUrl ?? 'https://api.deepseek.com')
+      setSummaryApiKey(apiKey ?? '')
       setSummaryModel(p.summaryModel ?? '')
       setAutoTodoNudge(p.autoTodoNudge === true)
-      setSummaryFree(p.summaryChannel !== 'code')
       setAskOnClose(!p.closePromptDismissed)
       setLoaded(true)
     })
@@ -255,16 +258,25 @@ export default function SettingsPanel(): JSX.Element {
     }
   }
 
-  /** 总结类请求优先走网页版通道（实测不计费）。限流时自动回落到 Kimi Code 端点，
-   *  所以关掉它只影响「省不省额度」，不影响功能可用。 */
-  const toggleSummaryFree = async (next: boolean): Promise<void> => {
-    setSummaryFree(next)
+  const saveSummaryApiBaseUrl = async (next: string): Promise<void> => {
+    setSummaryApiBaseUrl(next)
     try {
-      await window.api.savePreferences({ summaryChannel: next ? 'web' : 'code' })
+      await window.api.savePreferences({ summaryApiBaseUrl: next.trim() })
       setSavedAt(true)
       setTimeout(() => setSavedAt(false), 1500)
     } catch {
-      setSummaryFree(!next)
+      /* 保留输入，方便用户修正后重试 */
+    }
+  }
+
+  const saveSummaryApiKey = async (next: string): Promise<void> => {
+    setSummaryApiKey(next)
+    try {
+      await window.api.setApiKey(next.trim())
+      setSavedAt(true)
+      setTimeout(() => setSavedAt(false), 1500)
+    } catch {
+      /* 保留输入，方便用户修正后重试 */
     }
   }
 
@@ -281,7 +293,7 @@ export default function SettingsPanel(): JSX.Element {
     }
   }
 
-  /** 总结型号：存的是原样字符串，空串 = 用主进程的默认值（kimi-for-coding）。
+  /** 总结型号：存的是原样字符串，空串 = 用主进程的默认值（deepseek-v4-flash）。
    *  不做前端校验——能不能用只有服务端说了算，所以旁边给了探测按钮。 */
   const saveSummaryModel = async (next: string): Promise<void> => {
     setSummaryModel(next)
@@ -294,7 +306,7 @@ export default function SettingsPanel(): JSX.Element {
     }
   }
 
-  /** 逐个探测候选型号能否在 kimi 的 coding 端点上用。串行，主进程侧实现。 */
+  /** 逐个探测候选型号能否在用户配置的兼容 API 上使用。串行，主进程侧实现。 */
   const runProbeSummaryModels = async (): Promise<void> => {
     setProbing(true)
     setProbes(null)
@@ -827,35 +839,51 @@ export default function SettingsPanel(): JSX.Element {
               onChange={(checked) => void toggleAiNaming(checked)}
             />
             <ToggleControl
-              label="总结走网页版通道（不计额度）"
-              description="命名 / 命令说明 / 思考摘要优先走 www.kimi.com 的对话接口 —— 实测这条通道在额度流水里记 FEATURE_CHAT、扣费为 0，而 Kimi Code 端点每次约 0.0001。凭证复用「额度明细」那条登录态，不用另外登录。这条会限流（连发容易被拒），被拒时自动回落到 Kimi Code 端点，所以关掉只影响省不省额度，不影响功能。"
-              checked={summaryFree}
-              onChange={(checked) => void toggleSummaryFree(checked)}
-            />
-            <ToggleControl
               label="后台任务结束后自动更新待办"
               description="后台任务收尾且待办还有未完成项时，Tran 替你向 AI 发一次「更新待办」的请求。⚠ 默认关闭：这是一次完整对话轮，要把整个会话上下文重新过一遍——实测一个 42 条记录的会话约 88000 token，是命名那类小请求（约 120 token）的七百倍。而且你下次随便发条消息，AI 本来就会收到后台任务的完成通知并更新待办，所以它买到的只是「提前」，不是「否则就不会更新」。愿意花这个额度换及时性再开。"
               checked={autoTodoNudge}
               onChange={(checked) => void toggleAutoTodoNudge(checked)}
             />
-            {/* 总结型号：命名与后续的总结类杂活（命令说明、思考摘要）共用。
-                走 kimi CLI 的凭证打 coding 端点，所以消耗的是订阅额度窗口，
-                不是按 token 计费——换小模型省的是额度和延迟，不是钱。 */}
+            {/* 独立摘要 API：不复用 Kimi 的任何登录态或内部接口。 */}
             <div className="space-y-2">
               <div>
-                <div className="text-xs font-medium text-zinc-300">总结用型号</div>
+                <div className="text-xs font-medium text-zinc-300">摘要 / 命名 API</div>
                 <div className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
-                  命名和后续的总结类杂活共用。留空 = <code className="font-mono">kimi-for-coding</code>
-                  （实测四个真实型号里最快的）。填之前先探测——服务端目录之外的名字也会"通"，
-                  但实际跑的还是默认型号。
+                  会话命名、命令说明、思考摘要和思考翻译统一走这里。支持 DeepSeek
+                  等 OpenAI 兼容接口；API Key 使用系统安全存储，不会发送给 Kimi。
                 </div>
               </div>
+              <label className="block">
+                <span className="mb-1 block text-[11px] text-zinc-500">API Base URL</span>
+                <input
+                  type="url"
+                  value={summaryApiBaseUrl}
+                  spellCheck={false}
+                  placeholder="https://api.deepseek.com"
+                  onChange={(e) => setSummaryApiBaseUrl(e.target.value)}
+                  onBlur={(e) => void saveSummaryApiBaseUrl(e.target.value)}
+                  className="w-full rounded-lg border border-border-subtle bg-bg-elev/60 px-2.5 py-1.5 font-mono text-[11px] text-zinc-200 outline-none focus:border-accent/50"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[11px] text-zinc-500">API Key</span>
+                <input
+                  type="password"
+                  value={summaryApiKey}
+                  spellCheck={false}
+                  autoComplete="off"
+                  placeholder="sk-..."
+                  onChange={(e) => setSummaryApiKey(e.target.value)}
+                  onBlur={(e) => void saveSummaryApiKey(e.target.value)}
+                  className="w-full rounded-lg border border-border-subtle bg-bg-elev/60 px-2.5 py-1.5 font-mono text-[11px] text-zinc-200 outline-none focus:border-accent/50"
+                />
+              </label>
               <div className="flex items-center gap-2">
                 <input
                   type="text"
                   value={summaryModel}
                   spellCheck={false}
-                  placeholder="kimi-for-coding"
+                  placeholder="deepseek-v4-flash"
                   onChange={(e) => setSummaryModel(e.target.value)}
                   onBlur={(e) => void saveSummaryModel(e.target.value)}
                   className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-elev/60 px-2.5 py-1.5 font-mono text-[11px] text-zinc-200 outline-none focus:border-accent/50"
@@ -866,7 +894,7 @@ export default function SettingsPanel(): JSX.Element {
                   disabled={probing}
                   className="shrink-0 rounded-lg border border-border-subtle px-2.5 py-1.5 text-[11px] text-zinc-300 transition hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {probing ? '探测中…' : '探测可用型号'}
+                  {probing ? '探测中…' : '测试接口'}
                 </button>
                 <button
                   type="button"
@@ -882,8 +910,6 @@ export default function SettingsPanel(): JSX.Element {
                 <div className="space-y-1 rounded-lg border border-white/[0.06] bg-bg-elev/60 p-2">
                   {probes.map((p) => (
                     <div key={p.model} className="flex items-baseline gap-2 text-[11px]">
-                      {/* ✓ 只给"目录里有 + 打得通"的。目录外的即使回 200 也是
-                          假象——服务端不校验 model 值，会静默回落到默认型号。 */}
                       <span
                         className={
                           p.ok && p.known ? 'text-emerald-400' : p.ok ? 'text-amber-400' : 'text-zinc-600'
@@ -911,15 +937,12 @@ export default function SettingsPanel(): JSX.Element {
                           {p.error}
                         </span>
                       )}
-                      {p.ok && !p.known && (
-                        <span className="text-amber-400/80">目录里没有，服务端会悄悄换成默认型号</span>
-                      )}
+                      {p.ok && !p.known && <span className="text-amber-400/80">接口可用，模型目录未确认</span>}
                     </div>
                   ))}
                   <div className="pt-1 text-[10px] leading-relaxed text-zinc-600">
-                    型号是否存在以服务端目录（<code className="font-mono">/models</code>）为准——chat
-                    端点不校验 model 值，随便写个名字也回 200，所以"打得通"证明不了什么。
-                    都通的话挑最快的：这活儿在界面上，延迟比能力重要。
+                    Tran 会先尝试读取 <code className="font-mono">/models</code>，再向当前模型发送
+                    一条最小测试请求。部分兼容服务不提供模型目录，此时只报告接口是否可用。
                   </div>
                 </div>
               )}

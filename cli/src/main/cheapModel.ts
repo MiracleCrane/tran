@@ -1,114 +1,22 @@
 import { log } from './logger'
-import { getValidAccessToken } from './usageService'
-import { loadSettings } from './settings'
-import { webSummarize } from './kimiWebChat'
+import { getApiKey, loadSettings } from './settings'
 
 /**
- * 「便宜模型」旁路：把不需要精确的杂活（会话命名、命令一句话说明、思考块
- * 摘要…）交给一次小请求，而不是让主 agent 在自己的上下文里做。
+ * 轻量摘要旁路：会话命名、命令说明、思考摘要和翻译通过用户配置的
+ * OpenAI 兼容 API 完成，避免占用主 Agent 的上下文。
  *
- * 省的不是钱——你走的是 Kimi Code 订阅，额度是 5 小时/每周的窗口而不是按
- * token 计费——**省的是主会话的上下文窗口**，那才是稀缺的。让主 agent 总结
- * 得把整段内容再过一遍上下文；走这里，主会话一个 token 都不动。
- *
- * 端点与鉴权沿用 aiTitles 已实证的那条：
- *   POST https://api.kimi.com/coding/v1/chat/completions
- *   Bearer = Kimi CLI 的 OAuth access_token（usageService 的续期链）
- * access_token 绝不写日志、绝不进渲染层。
- *
- * --- 2026-07-30 实测（用户机器，LEVEL_ADVANCED 订阅） ---
- *
- * 【型号】chat 端点**完全不校验 model 值**：随便写什么都回 200，并把这个值原样
- *   回声在 `response.model` 里。实测连 `gpt-4o` 和现编的
- *   `zzz-not-a-real-model-20260730` 都"通"。
- *   → **"打得通"不能证明型号存在**，只有 GET /coding/v1/models 能。
- *   → 目录里真实存在的只有四个（见 listServerModels 的注释），
- *      早前候选表里的 kimi-k2.6 / kimi-k2.6-turbo / kimi-k2.7-code /
- *      kimi-k2.7-code-turbo / kimi-k3 **一个都不存在**，服务端静默回落到默认
- *      型号。所以早前那份"所有型号延迟都一样、差异在噪声里"的基准，其实是
- *      **把同一个型号测了六遍**。
- *   → 回落到哪个也是可测的：虚构 id 的 prompt_tokens = 82，与
- *      kimi-for-coding 一致；k3 系是 134/137（系统预置不同）。即虚构 id 落到
- *      的就是 kimi-for-coding。
- *
- * 【延迟】用真实 id + 正确提示词（少样本 + stop）重测，3 发热连接的中位数
- *   （两轮，相隔约半小时）：
- *      kimi-for-coding             885 / 971ms   ← 保持默认
- *      kimi-for-coding-highspeed  1098 / 990ms
- *      k3                         1237 / 1147ms
- *      k3-256k                    5547 / 2052ms  ← 抖得厉害，唯一有尾延迟风险的
- *   两轮之间 for-coding 和 highspeed 互换了名次，差值一两百毫秒——**这两个在
- *   这个任务上分不出快慢**，别拿延迟当选型依据。
- *   注意这比早前记的 1.7~1.8s 快了一倍——**不是网络变好了**：早前的基准里
- *   `outTok` 恒等于 max_tokens，说明模型每发都在写长文写到被截断，延迟是被
- *   "生成 N 个 token"撑起来的。提示词修好后输出只有 4~16 个 token，延迟自然
- *   掉下来。→ **"1.7s 延迟是硬伤"这个结论已作废**，但"不阻塞 UI、结果要缓存"
- *   仍然照做。
- *
- * 【额度】/usages 的 limit 恒为 100——那是**百分比**，不是 token 数。31 发
- *   （约 2100 token）两个窗口的 used 都没动，这只说明"低于计数器分辨率"，
- *   **不能解读为不计费**。按同端点同凭证的常理，几乎肯定计入订阅窗口。
- *
- * 【指令遵循】⚠️ 踩了两层：
- *   第一层：裸提示词（只在 system 里写"只输出结果、不超过 12 字"）——全部无视，
- *     一律开始写 markdown 长文然后被 max_tokens 截断。
- *   第二层：把少样本写成纯文本塞进单条 user 消息——**答非所问**，模型抓住
- *     第一个示例当主题，真正的输入被完全忽略（详见 cheapSummarize 的注释）。
- *   → 改成真正的 user/assistant 多轮少样本 + stop 序列后，12 条不同命令
- *      12 条都答对且都在 12 字内（kimi-for-coding 与 highspeed 各 6 条）。
- *      terseText() 仍保留作第三道防线。
- *
- * 【两个必须原样保留的参数】
- *   - `thinking: { type: 'disabled' }` 是**载重参数，不是优化**。目录里四个型号
- *     全是 `supports_thinking_type: "only"`；把这个字段整个去掉，max_tokens=36
- *     的预算会被推理吃光，`content` 回**空字符串**（实测）。
- *   - `temperature` 一律不要传：传 0 直接 400
- *     `invalid temperature: only 0.6 is allowed for this model`。
+ * 这里不会读取或复用 Kimi CLI、Kimi Desktop、Kimi 网页端的任何凭证。
+ * DeepSeek 默认关闭 thinking；其他兼容服务不发送该厂商专用字段。
  */
 
-const CHAT_COMPLETIONS_URL = 'https://api.kimi.com/coding/v1/chat/completions'
+const DEFAULT_SUMMARY_API_BASE_URL = 'https://api.deepseek.com'
 
-/**
- * 网页通道的提示词：少样本**内嵌进同一条消息**。
- *
- * ⚠️ 这跟下面 cheapSummarize 给 coding 端点用的形态**正好相反**，别统一：
- * - coding 端点：少样本塞进单条消息会「答非所问」（模型抓住第一个示例当主题），
- *   必须用真正的 user/assistant 多轮；
- * - 网页端点：一次只吃一条消息（`messages[0]` 之外全丢），多轮根本送不进去，
- *   只能内嵌——好在网页那个是消费级助手，指令遵循强得多，内嵌就压得住。
- */
-function webPrompt(opts: {
-  instruction: string
-  examples: Array<[string, string]>
-  input: string
-  maxChars: number
-}): string {
-  const shots = opts.examples.map(([q, a]) => `输入 ${q} → 输出 ${a}`).join('\n')
-  return [
-    `${opts.instruction}。只输出结果本身，不要解释、不要 markdown、不超过 ${opts.maxChars} 字。`,
-    '',
-    '示例：',
-    shots,
-    '',
-    '现在处理这一条：',
-    opts.input
-  ].join('\n')
-}
+/** 默认使用 DeepSeek 的非思考聊天模型；用户可在设置中改成任意 OpenAI 兼容服务。 */
+export const DEFAULT_CHEAP_MODEL = 'deepseek-v4-flash'
 
-const MODELS_URL = 'https://api.kimi.com/coding/v1/models'
-
-/** 目录实证存在、且实测最快的型号，也是默认值。 */
-export const DEFAULT_CHEAP_MODEL = 'kimi-for-coding'
-
-/**
- * 拿不到目录时的兜底候选。**只列目录里实证存在的**——绝不再往这里加"听说存在"
- * 的名字：chat 端点对不存在的 id 也回 200，加进来只会探测出一排假的 ✓。
- */
+/** 拿不到模型目录时，只探测默认模型，避免测试按钮产生一串无意义请求。 */
 export const CHEAP_MODEL_CANDIDATES = [
-  DEFAULT_CHEAP_MODEL,
-  'kimi-for-coding-highspeed',
-  'k3',
-  'k3-256k'
+  DEFAULT_CHEAP_MODEL
 ] as const
 
 const REQUEST_TIMEOUT_MS = 20000
@@ -119,6 +27,13 @@ const PROBE_TIMEOUT_MS = 8000
 export function cheapModelId(): string {
   const configured = loadSettings().summaryModel
   return typeof configured === 'string' && configured.trim() ? configured.trim() : DEFAULT_CHEAP_MODEL
+}
+
+function summaryApiBaseUrl(): string {
+  const configured = loadSettings().summaryApiBaseUrl
+  return typeof configured === 'string' && configured.trim()
+    ? configured.trim().replace(/\/+$/, '')
+    : DEFAULT_SUMMARY_API_BASE_URL
 }
 
 export interface CheapMessage {
@@ -151,8 +66,8 @@ export type CheapCallResult =
  * 失败一律不重试：这些功能全是"有则更好"，重试只会在云端抖动时把额度翻倍。
  */
 export async function cheapComplete(opts: CheapCallOptions): Promise<CheapCallResult> {
-  const token = await getValidAccessToken()
-  if (!token) return { ok: false, error: '未登录（找不到 Kimi CLI 的凭证）' }
+  const token = getApiKey()
+  if (!token) return { ok: false, error: '未配置摘要 API Key（设置 → 系统）' }
 
   const model = opts.model ?? cheapModelId()
   const messages: CheapMessage[] =
@@ -163,14 +78,16 @@ export async function cheapComplete(opts: CheapCallOptions): Promise<CheapCallRe
     ]
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? REQUEST_TIMEOUT_MS)
+  const baseUrl = summaryApiBaseUrl()
+  const isDeepSeek = /^https:\/\/api\.deepseek\.com(?:\/|$)/i.test(baseUrl)
   try {
-    const response = await fetch(CHAT_COMPLETIONS_URL, {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify({
         model,
         max_tokens: opts.maxTokens ?? 50,
-        thinking: { type: 'disabled' },
+        ...(isDeepSeek ? { thinking: { type: 'disabled' } } : {}),
         ...(opts.stop?.length ? { stop: opts.stop } : {}),
         messages
       }),
@@ -337,19 +254,6 @@ export async function cheapSummarize(opts: {
   input: string
   maxChars: number
 }): Promise<string | null> {
-  // 先试免费的网页通道（实测计费为 0，见 kimiWebChat.ts 的流水证据）。
-  // 它会限流，所以只当"能省则省"：拿不到就照常走 coding 端点。
-  if (loadSettings().summaryChannel !== 'code') {
-    const viaWeb = await webSummarize(webPrompt(opts))
-    if (viaWeb) {
-      const cleaned = terseText(viaWeb, opts.maxChars)
-      if (cleaned) return cleaned
-      // 拿到了但清洗后判废：说明这次输出不可用，回落再打一发不划算
-      // （两条通道背后是同一家的模型，第二发多半也一样）。直接放弃。
-      return null
-    }
-  }
-
   const messages: CheapMessage[] = [
     {
       role: 'system',
@@ -467,32 +371,21 @@ export interface CheapModelProbe {
   contextLength?: number
 }
 
-/** GET /coding/v1/models 的一条。 */
+/** OpenAI 兼容 `/models` 响应中的一条。 */
 export interface ServerModel {
   id: string
   displayName?: string
   contextLength?: number
 }
 
-/**
- * 服务端的**权威**型号目录。
- *
- * 这是唯一能回答"某个型号存不存在"的接口——chat 端点对任意 model 值都回 200，
- * 拿它做存在性判断只会得到一排假的 ✓（2026-07-30 实测，见文件头）。
- *
- * 实测返回四个：
- *   kimi-for-coding            K2.7 Coding             262144
- *   kimi-for-coding-highspeed  K2.7 Coding Highspeed   262144
- *   k3                         K3                     1048576  （支持 think_efforts）
- *   k3-256k                    K3-256k                 262144
- */
+/** 读取用户所配置服务的模型目录；不支持 `/models` 时返回 null。 */
 export async function listServerModels(): Promise<ServerModel[] | null> {
-  const token = await getValidAccessToken()
+  const token = getApiKey()
   if (!token) return null
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
   try {
-    const response = await fetch(MODELS_URL, {
+    const response = await fetch(`${summaryApiBaseUrl()}/models`, {
       headers: { authorization: `Bearer ${token}` },
       signal: controller.signal
     })
@@ -538,9 +431,7 @@ export async function probeCheapModels(models?: string[]): Promise<CheapModelPro
   const configured = cheapModelId()
   const base = models?.length
     ? models
-    : catalog?.length
-      ? catalog.map((m) => m.id)
-      : [...CHEAP_MODEL_CANDIDATES]
+    : [...CHEAP_MODEL_CANDIDATES]
   const list = base.includes(configured) ? base : [...base, configured]
 
   const out: CheapModelProbe[] = []

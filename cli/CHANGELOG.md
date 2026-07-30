@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.46 - 2026-07-30
+
+### 中文
+
+- 安全调整：彻底移除 Kimi 网页内部接口、Cookie/Session 登录、套餐总额度查询及相关后台轮询。
+- 用量展示只读取当前 Kimi ACP 会话的 `/usage` 结果，显示上下文占用及输入、输出、缓存 token；不再请求网页版服务。
+- 会话命名、命令说明、思考摘要与翻译改走用户配置的 OpenAI 兼容 API。Base URL、模型和 API Key 均可在 Tran 内填写，API Key 使用 Electron `safeStorage` 加密保存。
+- 默认摘要服务改为 DeepSeek API，默认模型为 `deepseek-v4-flash`；短总结请求显式关闭思考模式，减少延迟和费用。
+
+### English
+
+- Security: removed all Kimi web-internal API, cookie/session login, plan-quota lookup, and related background polling code.
+- Usage now comes only from the active Kimi ACP session's `/usage` response, showing context usage plus input, output, and cache tokens.
+- Session titles, command notes, thinking summaries, and translations now use a user-configured OpenAI-compatible API. Base URL, model, and API key are configurable in Tran; the key is encrypted with Electron `safeStorage`.
+- DeepSeek is the default summary provider with `deepseek-v4-flash`; thinking is explicitly disabled for short summary requests to reduce latency and cost.
+
 ## v1.0.45 - 2026-07-30
 
 ### 中文

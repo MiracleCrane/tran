@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { readJsonSafe, writeFileAtomic } from './atomicWrite'
 import { log } from './logger'
 import { cheapSummarize, cheapComplete } from './cheapModel'
-import { webSummarize } from './kimiWebChat'
 import { loadSettings } from './settings'
 
 /**
@@ -148,7 +147,7 @@ async function note(
 /**
  * 一条 bash 命令在做什么。
  *
- * 调用前提：这条命令**没有 description**。有 description 时 Kimi 已经给了意图，
+ * 调用前提：这条命令**没有 description**。有 description 时 Agent 已经给了意图，
  * 再问一遍是白花额度（见 ToolCallCard 的 summaryForTool）。
  */
 export async function explainCommand(command: string): Promise<string | null> {
@@ -163,14 +162,8 @@ export async function explainCommand(command: string): Promise<string | null> {
   })
 }
 
-/**
- * 整段文本的「免费通道优先」调用：与 cheapSummarize 同一条路，但**不做
- * terseText 清洗**——翻译要的是全文和分段，清洗会把它压成一行。
- */
-async function webSummarizeRaw(prompt: string): Promise<string | null> {
-  const viaWeb = await webSummarize(prompt)
-  if (viaWeb) return viaWeb
-  // 网页通道限流时回落到 coding 端点（会计 Kimi Code 的额度）。
+/** 整段文本走用户配置的摘要 API，不做 terseText 清洗。 */
+async function summarizeRaw(prompt: string): Promise<string | null> {
   const result = await cheapComplete({
     user: prompt,
     maxTokens: 2048,
@@ -191,8 +184,7 @@ async function webSummarizeRaw(prompt: string): Promise<string | null> {
  * - 展开后 → 全文翻译（真要读的时候）
  * 两者都缓存，键不同。
  *
- * 走 cheapSummarize 那条链，所以**优先免费的网页通道**（实测扣费为 0），
- * 限流才回落到 Kimi Code 端点。思考块可以很长，这里不做 terseText 清洗——
+ * 使用用户配置的摘要 API。思考块可以很长，这里不做 terseText 清洗——
  * 要的就是全文，不是一行。
  */
 export async function translateThinking(text: string): Promise<string | null> {
@@ -218,7 +210,7 @@ export async function translateThinking(text: string): Promise<string | null> {
     input
   ].join('\n')
 
-  const run = webSummarizeRaw(prompt)
+  const run = summarizeRaw(prompt)
     .then((result) => {
       const value = result?.trim() ?? ''
       // 判废也存空串：同一段思考每次展开都重打一发不划算。

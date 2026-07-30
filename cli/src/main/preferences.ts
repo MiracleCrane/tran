@@ -66,7 +66,7 @@ export function getPreferences(): Preferences {
     aiNamingEnabled: s.aiNamingEnabled,
     autoTodoNudge: s.autoTodoNudge,
     summaryModel: s.summaryModel,
-    summaryChannel: s.summaryChannel
+    summaryApiBaseUrl: s.summaryApiBaseUrl
   }
 }
 
@@ -107,7 +107,9 @@ export function savePreferences(prefs: Preferences): Preferences {
   if (prefs.autoTodoNudge !== undefined) s.autoTodoNudge = prefs.autoTodoNudge
   // 空串代表「用默认型号」，要能靠它清空——所以判 undefined 而不是 truthy。
   if (prefs.summaryModel !== undefined) s.summaryModel = prefs.summaryModel.trim() || undefined
-  if (prefs.summaryChannel !== undefined) s.summaryChannel = prefs.summaryChannel
+  if (prefs.summaryApiBaseUrl !== undefined) {
+    s.summaryApiBaseUrl = prefs.summaryApiBaseUrl.trim() || undefined
+  }
   saveSettings(s)
   return getPreferences()
 }
