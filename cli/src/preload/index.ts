@@ -82,6 +82,7 @@ const api: ForgeApi = {
   checkKimiVersion: (force) => ipcRenderer.invoke('forge:checkKimiVersion', force),
   upgradeKimi: () => ipcRenderer.invoke('forge:upgradeKimi'),
   probeSummaryModels: (models) => ipcRenderer.invoke('forge:probeSummaryModels', models),
+  diagnoseSummaryPrompt: () => ipcRenderer.invoke('forge:diagnoseSummaryPrompt'),
   exportSettings: (appearance) => ipcRenderer.invoke('forge:exportSettings', appearance),
   importSettings: (backup) => ipcRenderer.invoke('forge:importSettings', backup),
   listAgentBackends: () => ipcRenderer.invoke('forge:listAgentBackends'),

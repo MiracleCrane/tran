@@ -259,6 +259,82 @@ export async function cheapSummarize(opts: {
   return terseText(result.text, opts.maxChars)
 }
 
+/**
+ * 提示词策略自检：同一个任务用四种请求形态各打一发，把**服务端原始报错**
+ * 一并带回来。
+ *
+ * 存在的理由：我在提示词上连摔两跤（裸提示词写长文、单条 user 塞少样本导致
+ * 答非所问），第三版改成多轮 + stop 之后服务端直接 400，而 400 的原因无法
+ * 从外部推断——必须看服务端那句话。与其让用户一遍遍在 PowerShell 里贴脚本
+ * （还得手动解 HttpWebResponse 才能看到错误正文），不如做成设置页一个按钮。
+ *
+ * 四种形态是为了二分定位：stop 和多轮角色是两个独立变量，一次只动一个。
+ */
+export interface PromptDiagnosis {
+  label: string
+  ok: boolean
+  /** 模型原样输出（换行换成 ⏎ 便于单行展示）。 */
+  output?: string
+  /** 失败时服务端返回的原文片段。 */
+  error?: string
+  latencyMs: number
+  /** terseText 清洗后的结果；null 表示这一形态的输出不可用。 */
+  cleaned?: string | null
+}
+
+const DIAG_INSTRUCTION = '说明这条命令在做什么。只输出结果本身，不要解释、不要 markdown、不超过 12 字。'
+const DIAG_INPUT = 'docker compose up -d --build web worker'
+const DIAG_SHOTS: Array<[string, string]> = [
+  ['git status --porcelain', '查看改动'],
+  ['pytest tests/api -k login', '跑登录相关测试']
+]
+
+export async function diagnoseSummaryPrompt(): Promise<PromptDiagnosis[]> {
+  const plain: CheapMessage[] = [
+    { role: 'system', content: DIAG_INSTRUCTION },
+    { role: 'user', content: DIAG_INPUT }
+  ]
+  const multiTurn: CheapMessage[] = [{ role: 'system', content: DIAG_INSTRUCTION }]
+  for (const [q, a] of DIAG_SHOTS) {
+    multiTurn.push({ role: 'user', content: q })
+    multiTurn.push({ role: 'assistant', content: a })
+  }
+  multiTurn.push({ role: 'user', content: DIAG_INPUT })
+
+  const variants: Array<{ label: string; messages: CheapMessage[]; stop?: string[] }> = [
+    { label: '1 基线：单轮，无 stop', messages: plain },
+    { label: '2 单轮 + stop', messages: plain, stop: ['\n'] },
+    { label: '3 多轮少样本，无 stop', messages: multiTurn },
+    { label: '4 多轮少样本 + stop', messages: multiTurn, stop: ['\n'] }
+  ]
+
+  const out: PromptDiagnosis[] = []
+  for (const v of variants) {
+    const startedAt = Date.now()
+    const result = await cheapComplete({
+      messages: v.messages,
+      ...(v.stop ? { stop: v.stop } : {}),
+      maxTokens: 36
+    })
+    const latencyMs = Date.now() - startedAt
+    out.push(
+      result.ok
+        ? {
+            label: v.label,
+            ok: true,
+            output: result.text.replace(/\r?\n/g, ' ⏎ ').slice(0, 300),
+            cleaned: terseText(result.text, 12),
+            latencyMs
+          }
+        : { label: v.label, ok: false, error: result.error.slice(0, 400), latencyMs }
+    )
+    // 串行 + 间隔：并发打会被限流，那样的失败会被误读成"这个形态不支持"。
+    await new Promise((resolve) => setTimeout(resolve, 400))
+  }
+  log('cheap-model', `提示词自检完成：${out.filter((r) => r.ok).length}/${out.length} 形态可用`)
+  return out
+}
+
 export interface CheapModelProbe {
   model: string
   ok: boolean

@@ -42,7 +42,7 @@ import {
 } from './runtimeDiagnostics'
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { checkKimiVersion, upgradeKimi } from './kimiVersion'
-import { probeCheapModels } from './cheapModel'
+import { probeCheapModels, diagnoseSummaryPrompt } from './cheapModel'
 import { listKimiSessions } from './kimiHistory'
 import { listClaudeSessions } from './claudeHistory'
 import { getPlanUsageCached } from './usageService'
@@ -101,7 +101,8 @@ import type {
   SaveImageResult,
   KimiVersionInfo,
   KimiUpgradeResult,
-  SummaryModelProbe
+  SummaryModelProbe,
+  PromptDiagnosis
 } from '../shared/ipc'
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
@@ -643,6 +644,10 @@ export function registerIpc(
   ipcMain.handle(
     'forge:checkKimiVersion',
     async (_e, force?: boolean): Promise<KimiVersionInfo> => checkKimiVersion(force === true)
+  )
+  ipcMain.handle(
+    'forge:diagnoseSummaryPrompt',
+    async (): Promise<PromptDiagnosis[]> => diagnoseSummaryPrompt()
   )
   ipcMain.handle(
     'forge:probeSummaryModels',

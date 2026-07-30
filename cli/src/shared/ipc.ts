@@ -277,6 +277,20 @@ export interface Preferences {
   summaryModel?: string
 }
 
+/** 提示词策略自检的一项结果（设置页「提示词自检」）。四种请求形态各打一发，
+ *  用来二分定位 stop / 多轮角色这两个变量哪个被服务端拒绝。 */
+export interface PromptDiagnosis {
+  label: string
+  ok: boolean
+  /** 模型原样输出（换行已换成 ⏎）。 */
+  output?: string
+  /** 失败时服务端返回的原文片段——400 的真实原因只能从这里看。 */
+  error?: string
+  latencyMs: number
+  /** 清洗后的结果；null = 这一形态的输出不可用。 */
+  cleaned?: string | null
+}
+
 /** 一个候选型号的探测结果（设置页「探测可用型号」）。 */
 export interface SummaryModelProbe {
   model: string
@@ -790,6 +804,8 @@ export interface ForgeApi {
   /** 探测总结用型号：逐个打一发最小请求，报通/不通与延迟。串行，避免被限流
    *  误判成"型号不认"。传空用内置候选表。 */
   probeSummaryModels(models?: string[]): Promise<SummaryModelProbe[]>
+  /** 提示词策略自检：四种请求形态各打一发（共约 400 token），带回服务端原始报错。 */
+  diagnoseSummaryPrompt(): Promise<PromptDiagnosis[]>
   exportSettings(appearance?: Record<string, unknown>): Promise<SettingsBackup>
   importSettings(backup: SettingsBackup): Promise<void>
 

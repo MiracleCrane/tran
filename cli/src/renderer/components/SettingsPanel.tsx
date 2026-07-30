@@ -11,7 +11,8 @@ import type {
   UpdateCheckResult,
   UpdateDownloadProgress,
   KimiVersionInfo,
-  SummaryModelProbe
+  SummaryModelProbe,
+  PromptDiagnosis
 } from '../../shared/ipc'
 import {
   MOTION_SPEED_MAX,
@@ -128,6 +129,8 @@ export default function SettingsPanel(): JSX.Element {
   const [summaryModel, setSummaryModel] = useState('')
   const [probing, setProbing] = useState(false)
   const [probes, setProbes] = useState<SummaryModelProbe[] | null>(null)
+  const [diagnosing, setDiagnosing] = useState(false)
+  const [diagnosis, setDiagnosis] = useState<PromptDiagnosis[] | null>(null)
   const [askOnClose, setAskOnClose] = useState(true)
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
@@ -271,6 +274,23 @@ export default function SettingsPanel(): JSX.Element {
       setProbes([{ model: '(探测失败)', ok: false, error: e instanceof Error ? e.message : String(e) }])
     } finally {
       setProbing(false)
+    }
+  }
+
+  /** 提示词策略自检：四种请求形态各打一发（共约 400 token），把服务端原始
+   *  报错带回来。这些型号对格式要求的遵循很差，而 400 的真实原因只能从服务端
+   *  那句话里看——做成按钮，免得每次都要在 PowerShell 里手工解 HTTP 响应。 */
+  const runDiagnoseSummaryPrompt = async (): Promise<void> => {
+    setDiagnosing(true)
+    setDiagnosis(null)
+    try {
+      setDiagnosis(await window.api.diagnoseSummaryPrompt())
+    } catch (e) {
+      setDiagnosis([
+        { label: '(自检失败)', ok: false, error: e instanceof Error ? e.message : String(e), latencyMs: 0 }
+      ])
+    } finally {
+      setDiagnosing(false)
     }
   }
 
@@ -775,6 +795,15 @@ export default function SettingsPanel(): JSX.Element {
                 >
                   {probing ? '探测中…' : '探测可用型号'}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => void runDiagnoseSummaryPrompt()}
+                  disabled={diagnosing}
+                  title="四种请求形态各打一发（约 400 token），定位服务端拒绝哪个参数"
+                  className="shrink-0 rounded-lg border border-border-subtle px-2.5 py-1.5 text-[11px] text-zinc-300 transition hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {diagnosing ? '自检中…' : '提示词自检'}
+                </button>
               </div>
               {probes && (
                 <div className="space-y-1 rounded-lg border border-white/[0.06] bg-bg-elev/60 p-2">
@@ -801,6 +830,33 @@ export default function SettingsPanel(): JSX.Element {
                   ))}
                   <div className="pt-1 text-[10px] leading-relaxed text-zinc-600">
                     这活儿在界面上，延迟比能力重要——都通的话挑最快的那个。
+                  </div>
+                </div>
+              )}
+              {diagnosis && (
+                <div className="space-y-1.5 rounded-lg border border-white/[0.06] bg-bg-elev/60 p-2">
+                  {diagnosis.map((d) => (
+                    <div key={d.label} className="space-y-0.5 text-[11px]">
+                      <div className="flex items-baseline gap-2">
+                        <span className={d.ok ? 'text-emerald-400' : 'text-red-400'}>{d.ok ? '✓' : '✕'}</span>
+                        <span className="text-zinc-300">{d.label}</span>
+                        <span className="text-zinc-600">{d.latencyMs} ms</span>
+                        {d.ok && (
+                          <span className={d.cleaned ? 'text-emerald-400' : 'text-amber-400'}>
+                            {d.cleaned ? `清洗后：${d.cleaned}` : '清洗后判废'}
+                          </span>
+                        )}
+                      </div>
+                      {(d.output || d.error) && (
+                        <div className="break-all pl-5 font-mono text-[10px] leading-relaxed text-zinc-500">
+                          {d.output ?? d.error}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <div className="pt-1 text-[10px] leading-relaxed text-zinc-600">
+                    形态 2 失败 = 端点不支持 stop；形态 3 失败 = 不接受 assistant 角色消息。
+                    失败行显示的是服务端原文。
                   </div>
                 </div>
               )}
