@@ -4,7 +4,7 @@ import { readJsonSafe, writeFileAtomic } from './atomicWrite'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { log } from './logger'
-import { cheapComplete } from './cheapModel'
+import { cheapSummarize } from './cheapModel'
 import { loadSettings } from './settings'
 import { manualSessionTitle } from './sessionTitles'
 
@@ -24,7 +24,8 @@ import { manualSessionTitle } from './sessionTitles'
  */
 
 const MAX_PROMPT_CHARS = 500
-const MAX_TITLE_CHARS = 30
+/** 标题字数上限。少样本示例也按这个长度给，两边要一致。 */
+const MAX_TITLE_CHARS = 12
 const BATCH_INTERVAL_MS = 300
 
 let cache: Record<string, string> | null = null
@@ -78,16 +79,6 @@ export function allAiTitles(): Record<string, string> {
   return { ...load() }
 }
 
-function cleanTitle(raw: string): string | null {
-  const title = raw
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^["'「『《]+|["'」』》。.\s]+$/g, '')
-    .slice(0, MAX_TITLE_CHARS)
-    .trim()
-  return title || null
-}
-
 /** 为单个会话生成 AI 标题（有缓存/手动命名/开关关闭时直接跳过；
  *  opts.overwriteAiTitle 允许覆盖已有 AI 标题——#17 前几次发言精修用）。
  *  手动重命名永远最高优先，AI 不覆盖。 */
@@ -103,17 +94,20 @@ export async function generateAiTitle(
   if (manualSessionTitle(sessionId)) return null
 
   const prompt = firstUserText.replace(/\s+/g, ' ').trim().slice(0, MAX_PROMPT_CHARS)
-  const result = await cheapComplete({
-    system: '用 12 个字以内概括这个对话的主题，只输出标题本身，不要标点结尾。',
-    user: prompt,
-    maxTokens: 50
+  // 少样本是压住"开始写长文"反射的关键（单靠 system 里的约束实测无效）。
+  const title = await cheapSummarize({
+    instruction: '用一个短标题概括这段对话要做的事',
+    examples: [
+      ['帮我看看这个登录接口为什么 401，token 明明是新的', '排查登录接口 401'],
+      ['把侧边栏的会话列表改成虚拟滚动，现在几百条很卡', '侧边栏虚拟滚动']
+    ],
+    input: prompt,
+    maxChars: MAX_TITLE_CHARS
   })
-  if (!result.ok) {
-    log('ai-titles', `命名失败（回退原标题）：${result.error}`)
+  if (!title) {
+    log('ai-titles', '命名未得到可用结果（回退原标题）')
     return null
   }
-  const title = cleanTitle(result.text)
-  if (!title) return null
   load()[sessionId] = title
   save()
   log('ai-titles', `named ${sessionId}: ${title}`)

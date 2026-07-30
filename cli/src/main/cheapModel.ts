@@ -15,10 +15,26 @@ import { loadSettings } from './settings'
  *   Bearer = Kimi CLI 的 OAuth access_token（usageService 的续期链）
  * access_token 绝不写日志、绝不进渲染层。
  *
- * ⚠️ 型号：实证可用的只有 `kimi-for-coding`（bundle 里也只有这一个 model id，
- * 大概是个别名，服务端解析到具体版本）。`kimi-k2.6` / `kimi-k2.7-code` 之类
- * 能不能在**这个**端点上用，只能拿真 token 打一发才知道——所以型号是设置项，
- * 并且提供 probeModels() 让用户自己探。不硬编码任何猜测。
+ * --- 2026-07-30 实测（用户机器，LEVEL_ADVANCED 订阅，每型号 5 发热连接） ---
+ *
+ * 型号：这个端点**认任意 model 值**。kimi-for-coding / kimi-k2.6 /
+ * kimi-k2.6-turbo / kimi-k2.7-code / kimi-k2.7-code-turbo / kimi-k3 全部通。
+ *
+ * 延迟：除 k3（中位 2951ms）外**全部 1.7~1.8s，差异在噪声内**——
+ *   for-coding 1813 / k2.6 1784 / k2.6-turbo 1707 / k2.7-code 1693。
+ *   所谓"极速版"在这个端点上没有可测的优势（早前单发看到的 809ms 是冷启动
+ *   握手 + 抖动造成的假象）。**所以默认型号保持 kimi-for-coding，不折腾。**
+ *
+ * 额度：/usages 的 limit 恒为 100——那是**百分比**，不是 token 数。31 发
+ *   （约 2100 token）两个窗口的 used 都没动，这只说明"低于计数器分辨率"，
+ *   **不能解读为不计费**。按同端点同凭证的常理，几乎肯定计入订阅窗口。
+ *
+ * 指令遵循：⚠️ **这是真正的坑**。要求"一句话、不超过 12 字、只输出结果"，
+ *   六个型号**全部无视**，一律开始写 markdown 长文（"我来解析这个命令：
+ *   ## 命令分解 ..."）然后被 max_tokens 截断。inTok=36 说明服务端没注入大段
+ *   系统提示词，是模型本身的"解释给你听"反射压不住。
+ *   → 故所有调用方必须走 terseText() 做输出侧防守，且不能指望提示词单独生效：
+ *     少样本示例 + 约束重复放进 user 消息 + 输出侧清洗，三样一起上。
  */
 
 const CHAT_COMPLETIONS_URL = 'https://api.kimi.com/coding/v1/chat/completions'
@@ -118,6 +134,92 @@ export async function cheapComplete(opts: CheapCallOptions): Promise<CheapCallRe
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * 这些开场白是模型准备开始写长文的信号（实测六个型号无一例外）。命中即判废，
+ * 绝不能把它当结果存下来——存进 ai-titles.json 是会一直留着的。
+ */
+const ESSAY_OPENERS = [
+  /^我来/,
+  /^让我/,
+  /^好的[，,：:]/,
+  /^这(是|条|个)/,
+  /^以下/,
+  /^这里/,
+  /^当然/,
+  /^首先/,
+  /^this is /i,
+  /^here('s| is) /i,
+  /^let me /i,
+  /^sure[,.]/i,
+  /^the (command|following)/i
+]
+
+/**
+ * 把模型输出收成一行短文本；判不出可用结果就返回 null（让调用方回退，
+ * 而不是存一段垃圾）。
+ *
+ * 三道处理，对应实测到的三种翻车形态：
+ * 1. markdown 标题/围栏/列表 —— 模型开始排版了，取第一行有效文字；
+ * 2. 开场白（"我来解析这个命令："）—— 整条判废；
+ * 3. 超长 —— 说明它根本没在遵守字数，判废而不是硬截（硬截出来的是半句话）。
+ */
+export function terseText(raw: string, maxChars: number): string | null {
+  // 围栏要按"块"跳过而不是按行过滤：只丢 ``` 那两行的话，代码内容会漏出来
+  // 当成结果（实测 "## 标题\n```\ncode\n```" 会返回 "code"）。
+  let inFence = false
+  let firstLine: string | undefined
+  for (const rawLine of raw.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (/^```/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence || !line) continue
+    // markdown 结构行：标题、表格、列表、引用
+    if (/^(#{1,6}\s|\||[-*+]\s|>\s)/.test(line)) continue
+    firstLine = line
+    break
+  }
+  if (!firstLine) return null
+
+  const text = firstLine
+    .replace(/^[*_`"'「『《]+|[*_`"'」』》。.\s]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!text) return null
+  if (ESSAY_OPENERS.some((re) => re.test(text))) return null
+  // 宽限一倍：略微超字数还能用，成倍超说明它在写文章。
+  if (text.length > maxChars * 2) return null
+  return text.slice(0, maxChars)
+}
+
+/**
+ * 短总结的标准调用：少样本 + 约束重复进 user 消息 + 输出侧 terseText。
+ *
+ * 单靠 system 里写"只输出结果"是**实测无效**的（见文件头）。少样本示例是
+ * 目前最可靠的格式约束手段，所以调用方必须给 examples。
+ */
+export async function cheapSummarize(opts: {
+  /** 任务说明，例如"说明这条命令在做什么"。 */
+  instruction: string
+  /** 少样本：[输入, 期望输出]。至少给两条，格式才压得住。 */
+  examples: Array<[string, string]>
+  input: string
+  maxChars: number
+}): Promise<string | null> {
+  const shots = opts.examples.map(([q, a]) => `输入：${q}\n输出：${a}`).join('\n')
+  const result = await cheapComplete({
+    system: `${opts.instruction}。只输出结果本身，不要解释、不要 markdown、不要标点结尾，不超过 ${opts.maxChars} 字。`,
+    // 约束在 user 里再说一遍：system 单独说服不了它。
+    user: `${shots}\n输入：${opts.input}\n输出：`,
+    // 给到 maxChars 的几倍空间：太小的话即使格式对了也会被截断，
+    // 而写文章的那种无论给多少都会超——由 terseText 判废。
+    maxTokens: Math.max(32, opts.maxChars * 3)
+  })
+  if (!result.ok) return null
+  return terseText(result.text, opts.maxChars)
 }
 
 export interface CheapModelProbe {
