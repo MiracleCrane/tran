@@ -3,9 +3,16 @@ import { useSessionStore } from '../store/sessionStore'
 import type { PlanEntry } from '../types'
 import Collapse from './Collapse'
 
-/** 超过这个时长没更新就显示陈旧提示（待办是纯推送，没有补拉，旧快照看起来
- *  和当前状态一模一样——见 kimi 的设计：后台任务完成只在「下一轮」才注入）。 */
+/** 超过这个时长没更新就显示陈旧提示。注意"陈旧"指的是**待办内容本身**没推进
+ *  （kimi 的设计：待办只在模型调 todo_list 时才变，后台任务完成只在下一轮注入），
+ *  不是 Tran 没去拉——真值补拉见下面的 refreshTodos。 */
 const PLAN_STALE_AFTER_MS = 90_000
+
+/** 待办真值补拉间隔。打的是本机 kimi server 的 REST，零 token；间隔取 10s 是
+ *  因为待办本来就只在模型跑 turn 时才会变，再密没有意义。 */
+const TODO_POLL_MS = 10_000
+/** turn 结束后延这么久再补拉一次：给服务端落盘留出时间，否则拉到的还是旧的。 */
+const AFTER_TURN_DELAY_MS = 1200
 
 function staleLabel(sinceMs: number): string {
   const min = Math.floor(sinceMs / 60000)
@@ -43,6 +50,27 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
     const timer = window.setInterval(() => setTick((v) => v + 1), 30_000)
     return () => window.clearInterval(timer)
   }, [hasUnfinished, running])
+
+  // --- 待办真值补拉 ---
+  // 这些 effect **必须声明在下面那句 `entries.length === 0` 早返回之前**：
+  // 待办为空正是最需要补拉的时候（切走再切回、重启之后面板就是空的），
+  // 放在早返回之后就永远不会执行——那样这个功能等于没做。
+  const refreshTodos = useSessionStore((s) => s.refreshTodos)
+  const sdkSessionId = useSessionStore((s) => s.meta?.sdkSessionId)
+
+  // turn 刚结束：模型这一轮很可能动过待办，这是最值得补一次的时刻。
+  useEffect(() => {
+    if (running || !sdkSessionId) return
+    const timer = window.setTimeout(() => void refreshTodos(), AFTER_TURN_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [running, sdkSessionId, refreshTodos])
+
+  // 会话开着就低频补拉：覆盖后台会话、以及 plan 帧丢失的情况。
+  useEffect(() => {
+    if (!sdkSessionId) return
+    const timer = window.setInterval(() => void refreshTodos(), TODO_POLL_MS)
+    return () => window.clearInterval(timer)
+  }, [sdkSessionId, refreshTodos])
 
   if (entries.length === 0) return null
 
