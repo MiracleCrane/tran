@@ -317,8 +317,10 @@ const UserMessage = memo(function UserMessage({
     openAttachmentPreview(attachment)
   }
   return (
-    <div className="group/msg relative flex justify-end">
-      <div className="max-w-[85%] rounded-[16px] rounded-tr-md border border-white/10 bg-gradient-to-br from-accent/[0.14] via-white/[0.06] to-white/[0.03] px-4 py-2.5 shadow-lg shadow-black/10">
+    // tran-user-msg / tran-user-bubble 是给外观主题用的稳定钩子：简约风把这里
+    // 从「右对齐气泡」改成「左对齐 + 左侧强调竖线」，Tailwind 的转义类名不好选中。
+    <div className="tran-user-msg group/msg relative flex justify-end">
+      <div className="tran-user-bubble max-w-[85%] rounded-[16px] rounded-tr-md border border-white/10 bg-gradient-to-br from-accent/[0.14] via-white/[0.06] to-white/[0.03] px-4 py-2.5 shadow-lg shadow-black/10">
         {(item.swarm || item.cutIn) && (
           <div className="mb-1 flex justify-end gap-1">
             {item.swarm && (

@@ -615,9 +615,37 @@ export default function SettingsPanel(): JSX.Element {
             </button>
           </div>
           <div className="space-y-4">
+            {/* 界面风格：即时生效（根元素 data-ui 切换），不需要重启。 */}
+            <div>
+              <div className="text-xs text-zinc-500">界面风格</div>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                简约：面板不再描边和投影，分区靠背景深浅；「新建对话」降为次要按钮；
+                你的发言从右侧气泡改为左对齐加一条竖线（贴日志贴代码时更好读）；
+                AI 回复仍是居中全宽，只在宽屏下封顶留白。
+              </p>
+              <div className="mt-2 flex gap-1.5">
+                {([
+                  { id: 'glass', label: '玻璃' },
+                  { id: 'flat', label: '简约' }
+                ] as const).map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => updateAppearance('uiStyle', option.id)}
+                    className={`rounded-lg px-3 py-1.5 text-xs transition ${
+                      appearance.uiStyle === option.id
+                        ? 'bg-accent/20 text-accent'
+                        : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <ToggleControl
               label="玻璃泛光"
-              description="控制玻璃组件的外发光、边缘高光和环境泛光。"
+              description="控制玻璃组件的外发光、边缘高光和环境泛光。简约风下不生效。"
               checked={appearance.glassGlow}
               onChange={(checked) => updateAppearance('glassGlow', checked)}
             />

@@ -1,9 +1,19 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 
+/**
+ * 界面风格。
+ * - glass：现有的玻璃拟态（面板带描边 + 渐变 + 内高光 + 投影 + 两层透镜伪元素）
+ * - flat：极简。容器让位给内容——分区靠背景台阶而不是描边，去投影，
+ *   统一一个发丝色和一个圆角，强调色只留给「进行中」状态和发送键。
+ * 两套都保留，因为这是审美取舍不是对错，切换成本也低。
+ */
+export type UiStyle = 'glass' | 'flat'
+
 export interface AppearanceSettings {
   motionSpeed: number
   glassGlow: boolean
+  uiStyle: UiStyle
 }
 
 export const MOTION_SPEED_MIN = 25
@@ -12,7 +22,9 @@ export const MOTION_SPEED_STEP = 5
 
 export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
   motionSpeed: 50,
-  glassGlow: false
+  glassGlow: false,
+  // 默认保持现状：换风格这种事应该由用户主动选，不该升级一次就变个样。
+  uiStyle: 'glass'
 }
 
 const LEGACY_STORAGE_KEY = 'forge.appearance.v1'
@@ -38,7 +50,8 @@ function normalizeMotionSpeed(value: unknown): number {
 function normalizeSettings(value: Partial<AppearanceSettings> | null | undefined): AppearanceSettings {
   return {
     motionSpeed: normalizeMotionSpeed(value?.motionSpeed),
-    glassGlow: value?.glassGlow ?? DEFAULT_APPEARANCE_SETTINGS.glassGlow
+    glassGlow: value?.glassGlow ?? DEFAULT_APPEARANCE_SETTINGS.glassGlow,
+    uiStyle: value?.uiStyle === 'flat' ? 'flat' : DEFAULT_APPEARANCE_SETTINGS.uiStyle
   }
 }
 
@@ -87,6 +100,9 @@ export function applyAppearanceSettings(settings: AppearanceSettings): void {
   const durationFactor = 50 / normalized.motionSpeed
 
   root.dataset.glassGlow = normalized.glassGlow ? 'on' : 'off'
+  // 扁平化规则必须写在 styles.css 的 @layer components 里才生效：级联层对
+  // !important 的优先级是反的（层内赢过层外），层外样式压不住既有的层内规则。
+  root.dataset.ui = normalized.uiStyle
 
   root.style.setProperty('--motion-collapse-open', `${Math.round(180 * durationFactor)}ms`)
   root.style.setProperty('--motion-collapse-close', `${Math.round(150 * durationFactor)}ms`)
@@ -146,5 +162,5 @@ export function useApplyAppearanceSettings(): void {
 
   useEffect(() => {
     applyAppearanceSettings(settings)
-  }, [settings.motionSpeed, settings.glassGlow])
+  }, [settings.motionSpeed, settings.glassGlow, settings.uiStyle])
 }

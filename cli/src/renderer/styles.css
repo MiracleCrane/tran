@@ -2896,3 +2896,121 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
     transition: none;
   }
 }
+
+/* ============================================================================
+   正文排版：AI 回复的字重
+   ----------------------------------------------------------------------------
+   <strong> 此前没有规则，吃浏览器默认的 700。而 font-family 只写了
+   Inter/system-ui，**没有中文字族**——中文回落到系统字体（Windows 上多为
+   微软雅黑），700 在深色底上会「发胖」，整段读起来就是糊的。
+   降到 600，并显式禁用合成粗体（回落字体缺 Bold 字面时浏览器会把字形描粗，
+   那种假粗最难看）。这跟外观主题无关，两套风格都该这样。
+   ========================================================================== */
+.prose-forge strong,
+.prose-forge b {
+  font-weight: 600;
+}
+.prose-forge {
+  font-synthesis-weight: none;
+}
+
+@layer components {
+  /* ==========================================================================
+     简约风（设置 → 外观 → 界面风格）。
+     规则**必须写在 @layer components 内**：级联层对 !important 的优先级是反的，
+     层内声明赢过层外，写在外面压不住既有的玻璃样式（实测踩过）。
+     三条原则：分区靠背景台阶不靠描边；投影全去；强调色只留给状态和主动作。
+     ========================================================================== */
+
+  /* 1. 拆掉玻璃：描边 / 投影 / 内高光 / 两层透镜伪元素 */
+  :root[data-ui='flat'] .main-surface,
+  :root[data-ui='flat'] .glass-panel,
+  :root[data-ui='flat'] .glass-panel-soft,
+  :root[data-ui='flat'] .glass-control,
+  :root[data-ui='flat'] .glass-sidebar {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+  }
+  :root[data-ui='flat'] .main-surface::before,
+  :root[data-ui='flat'] .main-surface::after,
+  :root[data-ui='flat'] .glass-panel::before,
+  :root[data-ui='flat'] .glass-panel::after,
+  :root[data-ui='flat'] .glass-panel-soft::before,
+  :root[data-ui='flat'] .glass-panel-soft::after,
+  :root[data-ui='flat'] .glass-control::before,
+  :root[data-ui='flat'] .glass-control::after,
+  :root[data-ui='flat'] .glass-sidebar::before,
+  :root[data-ui='flat'] .glass-sidebar::after {
+    display: none;
+  }
+
+  /* 2. 侧栏贴边，与主区之间只留一条发丝线 */
+  :root[data-ui='flat'] .glass-sidebar {
+    background: rgba(255, 255, 255, 0.016);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  :root[data-ui='flat'] .app-shell,
+  :root[data-ui='flat'] .workspace-shell {
+    padding: 0;
+    gap: 0;
+  }
+
+  /* 3. 卡片＝底色块。统一 10px 圆角，零描边；运行中才给强调底 */
+  :root[data-ui='flat'] .tool-call-card {
+    border: 0;
+    box-shadow: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.026);
+  }
+  :root[data-ui='flat'] .tool-call-card.is-running {
+    background: rgba(139, 92, 246, 0.07);
+  }
+  :root[data-ui='flat'] .thinking-block {
+    border: 0;
+    background: transparent;
+  }
+
+  /* 4. 主按钮降调：「新建对话」不该是全屏最响的东西 */
+  :root[data-ui='flat'] .accent-soft-button {
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 10px;
+    color: #d4d4d8;
+    font-weight: 500;
+    box-shadow: none;
+  }
+  :root[data-ui='flat'] .accent-soft-button:hover {
+    background: rgba(255, 255, 255, 0.075);
+  }
+
+  /* 5. 用户发言：从「右对齐气泡」改成「左对齐 + 左侧强调竖线」。
+        气泡是聊天软件的隐喻，而这里是工作台——贴日志/贴代码时窄气泡最难看。
+        区分说话人只需要一条竖线，不需要整块底色。 */
+  :root[data-ui='flat'] .tran-user-msg {
+    justify-content: flex-start;
+  }
+  :root[data-ui='flat'] .tran-user-bubble {
+    max-width: 100%;
+    border: 0;
+    border-left: 2px solid rgba(139, 92, 246, 0.55);
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    padding: 0.1em 0 0.1em 0.85em;
+    color: #a1a1aa;
+  }
+
+  /* 6. AI 回复保持全宽居中，但封顶：窄窗口铺满，宽屏留白。
+        不限到 76ch —— 回复里有代码块/表格/diff，窄栏会逼出横向滚动。 */
+  :root[data-ui='flat'] .prose-forge {
+    max-width: 62rem;
+  }
+
+  /* 7. 收敛描边色与圆角：一个发丝色、一个圆角 */
+  :root[data-ui='flat'] .glass-divider,
+  :root[data-ui='flat'] .tran-hairline {
+    border-color: rgba(255, 255, 255, 0.055);
+  }
+}
