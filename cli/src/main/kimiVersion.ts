@@ -5,10 +5,11 @@ import { spawn } from 'node:child_process'
 import type { KimiInstallMethod, KimiUpgradeResult } from '../shared/ipc'
 
 /**
- * Kimi Code CLI 的版本检查（与 updater.ts 的 Tran 自更新分开）。
+ * Kimi Code CLI 的版本检查与升级（与 updater.ts 的 Tran 自更新分开）。
  *
- * 只做「查 + 报」，不自动安装：升级要重装全局 npm 包并重启 ACP 连接，
- * 正在跑的 turn 会断——时机必须由用户定。
+ * 升级不自动触发，只由用户在设置页点按钮：安装会替换正在运行的可执行文件、
+ * 并让现存 ACP 连接指向旧文件，正在跑的 turn 必须先断——时机得由用户定。
+ * 调用方（ipc.ts）负责先 bridge.shutdown()。
  */
 
 const REGISTRY_LATEST_URL = 'https://registry.npmjs.org/@moonshot-ai/kimi-code/latest'
