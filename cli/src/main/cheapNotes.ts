@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { readJsonSafe, writeFileAtomic } from './atomicWrite'
 import { log } from './logger'
-import { cheapSummarize } from './cheapModel'
+import { cheapSummarize, cheapComplete } from './cheapModel'
+import { webSummarize } from './kimiWebChat'
 import { loadSettings } from './settings'
 
 /**
@@ -43,7 +44,10 @@ const MAX_COMMAND_CHARS = 400
 /** 缓存条数上限。超了按插入顺序丢最旧的——命令的重复是近期聚集的。 */
 const MAX_ENTRIES = 500
 
-type NoteKind = 'cmd' | 'think'
+type NoteKind = 'cmd' | 'think' | 'zh'
+
+/** 思考翻译的输入上限。整段翻译比摘要贵得多，但走的是免费通道，放宽到 4000。 */
+const MAX_TRANSLATE_CHARS = 4000
 
 let cache: Record<string, string> | null = null
 /** 读盘失败后本次运行不再写入：每条都是花额度换来的，空对象写回等于全烧掉。
@@ -157,6 +161,81 @@ export async function explainCommand(command: string): Promise<string | null> {
     maxChars: COMMAND_NOTE_CHARS,
     maxInput: MAX_COMMAND_CHARS
   })
+}
+
+/**
+ * 整段文本的「免费通道优先」调用：与 cheapSummarize 同一条路，但**不做
+ * terseText 清洗**——翻译要的是全文和分段，清洗会把它压成一行。
+ */
+async function webSummarizeRaw(prompt: string): Promise<string | null> {
+  const viaWeb = await webSummarize(prompt)
+  if (viaWeb) return viaWeb
+  // 网页通道限流时回落到 coding 端点（会计 Kimi Code 的额度）。
+  const result = await cheapComplete({
+    user: prompt,
+    maxTokens: 2048,
+    timeoutMs: 40000
+  })
+  return result.ok ? result.text : null
+}
+
+/**
+ * 把思考过程整段译成中文。
+ *
+ * 为什么需要：Kimi 的思考过程大量是英文（模型内部推理用什么语言不受 Tran 控制，
+ * 也不该靠提示词去掰——那会干扰它推理）。展开思考块看到一屏英文，等于没法看。
+ * 折叠态那行有中文摘要还好，展开之后就只能硬读。
+ *
+ * 与 summarizeThinking 的分工：
+ * - 折叠态 → 摘要（一句话，知道它在干嘛就行）
+ * - 展开后 → 全文翻译（真要读的时候）
+ * 两者都缓存，键不同。
+ *
+ * 走 cheapSummarize 那条链，所以**优先免费的网页通道**（实测扣费为 0），
+ * 限流才回落到 Kimi Code 端点。思考块可以很长，这里不做 terseText 清洗——
+ * 要的就是全文，不是一行。
+ */
+export async function translateThinking(text: string): Promise<string | null> {
+  if (!notesEnabled()) return null
+  const input = text.trim().slice(0, MAX_TRANSLATE_CHARS)
+  if (!input) return null
+
+  const key = cacheKey('zh', input)
+  const cached = load()[key]
+  if (cached !== undefined) return cached || null
+
+  const pending = inflight.get(key)
+  if (pending) return pending
+
+  const prompt = [
+    '把下面这段 AI 的思考过程翻译成中文。要求：',
+    '1. 只输出译文本身，不要任何前言、解释或"以下是译文"之类的话；',
+    '2. 保留原有的分段和换行；',
+    '3. 代码、命令、文件路径、变量名、报错原文一律保持不变，不要翻译；',
+    '4. 技术术语按中文技术圈的习惯译法，拿不准就保留英文。',
+    '',
+    '原文：',
+    input
+  ].join('\n')
+
+  const run = webSummarizeRaw(prompt)
+    .then((result) => {
+      const value = result?.trim() ?? ''
+      // 判废也存空串：同一段思考每次展开都重打一发不划算。
+      load()[key] = value
+      save()
+      return value || null
+    })
+    .catch((error) => {
+      log('cheap-notes', `思考翻译失败: ${error instanceof Error ? error.message : String(error)}`)
+      return null
+    })
+    .finally(() => {
+      inflight.delete(key)
+    })
+
+  inflight.set(key, run)
+  return run
 }
 
 /** 一段思考在做什么。折叠态用它替掉"正文前 60 字截断"。 */

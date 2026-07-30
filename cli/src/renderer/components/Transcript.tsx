@@ -38,6 +38,20 @@ const USER_NAV_SUMMARY_CHARS = 24
 const THINKING_SUMMARY_MIN_CHARS = 70
 // 模块级常量，保证 useCheapNote 的依赖项稳定（每次渲染新建函数会反复触发 effect）。
 const fetchThinkingNote = (text: string): Promise<string | null> => window.api.summarizeThinking(text)
+const fetchThinkingTranslation = (text: string): Promise<string | null> =>
+  window.api.translateThinking(text)
+
+/**
+ * 这段思考是不是以英文为主 —— 是才值得翻译。
+ *
+ * 判据用「CJK 字符占比」而不是「有没有英文」：技术类思考里夹英文术语是常态，
+ * 那种不该整段翻。CJK 少于 15% 才认为是英文段落。
+ */
+function looksEnglish(text: string): boolean {
+  const sample = text.slice(0, 400)
+  const cjk = (sample.match(/[一-鿿]/g) ?? []).length
+  return cjk / Math.max(1, sample.length) < 0.15
+}
 const USER_NAV_MAX_ENTRIES = 30
 // #48/#50 高亮判定：用户消息行顶距视口顶多少 px 内算"视口顶部附近"。
 const USER_NAV_TOP_SLACK_PX = 8
@@ -423,8 +437,15 @@ const ThinkingBlock = memo(function ThinkingBlock({
   const worthSummarizing = !streaming && text.length >= THINKING_SUMMARY_MIN_CHARS
   const note = useCheapNote(fetchThinkingNote, text, worthSummarizing)
 
+  // 展开之后才翻译：思考过程大量是英文（模型内部推理用什么语言不受 Tran 控制），
+  // 一屏英文等于没法读。按需触发——展开是个明确动作，不展开就不花这一次调用。
+  const [showOriginal, setShowOriginal] = useState(false)
+  const wantsTranslation = open && !streaming && looksEnglish(text)
+  const translated = useCheapNote(fetchThinkingTranslation, text, wantsTranslation)
+
   if (!text) return <></>
   const preview = note ?? text.replace(/\s+/g, ' ').trim().slice(0, 60)
+  const bodyText = translated && !showOriginal ? translated : text
   return (
     <div className="thinking-block glass-panel-soft my-1 rounded-xl px-3 py-2">
       <button
@@ -444,12 +465,30 @@ const ThinkingBlock = memo(function ThinkingBlock({
         )}
       </button>
       {open && (
-        <div
-          ref={bodyRef}
-          className="mt-1.5 max-h-[200px] overflow-auto whitespace-pre-wrap pl-1.5 text-xs leading-relaxed text-zinc-500"
-        >
-          {text}
-        </div>
+        <>
+          {/* 只在真的译出来了才给切换；没译出来（限流/失败）就安静地显示原文，
+              不留任何"出错了"的痕迹。 */}
+          {translated && (
+            <button
+              type="button"
+              onClick={() => setShowOriginal((v) => !v)}
+              className="mt-1 pl-1.5 text-[10px] text-zinc-600 transition hover:text-zinc-400"
+            >
+              {showOriginal ? '看译文' : '看原文'}
+            </button>
+          )}
+          {wantsTranslation && !translated && (
+            <div className="mt-1 pl-1.5 text-[10px] text-zinc-600">
+              <span className="tran-shimmer">翻译中…</span>
+            </div>
+          )}
+          <div
+            ref={bodyRef}
+            className="mt-1.5 max-h-[200px] overflow-auto whitespace-pre-wrap pl-1.5 text-xs leading-relaxed text-zinc-500"
+          >
+            {bodyText}
+          </div>
+        </>
       )}
     </div>
   )

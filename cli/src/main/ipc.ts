@@ -43,7 +43,7 @@ import {
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { checkKimiVersion, upgradeKimi } from './kimiVersion'
 import { probeCheapModels, diagnoseSummaryPrompt } from './cheapModel'
-import { explainCommand, summarizeThinking } from './cheapNotes'
+import { explainCommand, summarizeThinking, translateThinking } from './cheapNotes'
 import { fetchSessionTodos } from './kimiTodos'
 import { listKimiSessions } from './kimiHistory'
 import { getPlanUsageCached } from './usageService'
@@ -665,6 +665,11 @@ export function registerIpc(
     'forge:summarizeThinking',
     async (_e, text: unknown): Promise<string | null> =>
       summarizeThinking(requireString(text, 'text'))
+  )
+  ipcMain.handle(
+    'forge:translateThinking',
+    async (_e, text: unknown): Promise<string | null> =>
+      translateThinking(requireString(text, 'text'))
   )
   ipcMain.handle(
     'forge:probeSummaryModels',

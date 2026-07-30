@@ -87,6 +87,7 @@ const api: ForgeApi = {
   nudgeTodos: (sessionId) => ipcRenderer.invoke('forge:nudgeTodos', sessionId),
   explainCommand: (command) => ipcRenderer.invoke('forge:explainCommand', command),
   summarizeThinking: (text) => ipcRenderer.invoke('forge:summarizeThinking', text),
+  translateThinking: (text) => ipcRenderer.invoke('forge:translateThinking', text),
   exportSettings: (appearance) => ipcRenderer.invoke('forge:exportSettings', appearance),
   importSettings: (backup) => ipcRenderer.invoke('forge:importSettings', backup),
   listAgentBackends: () => ipcRenderer.invoke('forge:listAgentBackends'),

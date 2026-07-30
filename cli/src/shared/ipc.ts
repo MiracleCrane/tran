@@ -844,6 +844,8 @@ export interface ForgeApi {
   explainCommand(command: string): Promise<string | null>
   /** 一段思考在做什么（便宜模型 + 落盘缓存）。拿不到返回 null。 */
   summarizeThinking(text: string): Promise<string | null>
+  /** 把整段思考过程译成中文（优先免费的网页通道 + 落盘缓存）。拿不到返回 null。 */
+  translateThinking(text: string): Promise<string | null>
   exportSettings(appearance?: Record<string, unknown>): Promise<SettingsBackup>
   importSettings(backup: SettingsBackup): Promise<void>
 
