@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.49 - 2026-07-31
+
+### 中文
+
+- 恢复:**5 小时滚动窗口与每周额度的圆环回来了**,和上下文一起是三个环,悬停/点击浮出预览卡(各窗口百分比、已用/上限、重置倒计时,以及输入/输出/缓存命中的 token 明细)。上下文那条也从进度条改回圆环。
+- 说明清楚这次恢复的**不是** v1.0.46 删掉的那条:额度走 `GET api.kimi.com/coding/v1/usages`,Bearer 用 Kimi Code CLI 自己的 OAuth access_token(过期自动 refresh),是官方接口 + CLI 自己的凭证。**复用浏览器 Cookie 打网页 MembershipService RPC 的 `quotaService` / `kimiWebChat` 继续保持删除**,不再以任何形式回来。
+- 已知情况:Kimi 账号被封禁期间,该接口对新签发的 token 也返回 401,两个额度环会显示「—」,预览卡里会写明失败原因。上下文环不受影响(它来自本地 ACP 的 `/usage`)。解封后自动恢复,不需要改配置。
+- 优化:空态页面改回大标题形态,标题加**紫色流光**动画(4.5s 一轮,比"思考中"那条慢一倍,不抢注意力;开启「减少动态效果」时自动静止)。去掉那四个建议按钮 —— 它们看着像功能,实际只是把词填进输入框,占了一整行却没解决任何问题。
+
+### English
+
+- Restored: **the 5-hour rolling window and weekly quota rings are back**, alongside context — three rings, with a hover/pin preview card (per-window percentage, used/limit, reset countdown, plus the input/output/cache-read token breakdown). The context indicator went back to a ring instead of a bar.
+- To be explicit, this is **not** what v1.0.46 removed: quota comes from `GET api.kimi.com/coding/v1/usages` with the Kimi Code CLI's own OAuth access token (auto-refreshed). The browser-cookie MembershipService RPC path (`quotaService` / `kimiWebChat`) stays deleted and is not coming back in any form.
+- Known: while the Kimi account is suspended, that endpoint returns 401 even for a freshly issued token, so the two quota rings show "—" and the preview card states why. The context ring is unaffected (local ACP `/usage`). It recovers on its own once the account is restored.
+- Improved: the empty state is back to a headline, now with a **purple shimmer** animation (4.5s sweep, half the speed of the "thinking" shimmer so it doesn't compete; static under reduced-motion). The four suggestion buttons are gone — they looked like features but only prefilled the composer.
+
 ## v1.0.48 - 2026-07-31
 
 ### 中文

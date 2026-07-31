@@ -45,6 +45,7 @@ import { checkKimiVersion, upgradeKimi } from './kimiVersion'
 import { probeCheapModels, diagnoseSummaryPrompt } from './cheapModel'
 import { explainCommand, summarizeThinking, translateThinking } from './cheapNotes'
 import { fetchSessionTodos } from './kimiTodos'
+import { getPlanUsageCached } from './usageService'
 import { listKimiSessions } from './kimiHistory'
 import { deleteKimiSession } from './sessionDelete'
 import { removeSessionTitle, recordManualTitle } from './sessionTitles'
@@ -99,7 +100,8 @@ import type {
   KimiUpgradeResult,
   SummaryModelProbe,
   PromptDiagnosis,
-  SessionTodosResult
+  SessionTodosResult,
+  PlanUsageResult
 } from '../shared/ipc'
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
@@ -371,6 +373,8 @@ export function registerIpc(
   ipcMain.handle('forge:refreshSessionUsage', async (_e, sessionId: string): Promise<void> => {
     await bridge.requestUsageRefresh(sessionId)
   })
+  // 套餐额度：官方 API + CLI 自己的 OAuth 凭证，不碰浏览器 Cookie（见 usageService.ts）。
+  ipcMain.handle('forge:getPlanUsage', async (): Promise<PlanUsageResult> => getPlanUsageCached())
   ipcMain.handle('forge:nudgeTodos', async (_e, sessionId: unknown): Promise<boolean> => {
     // 开关在主进程再校验一次：渲染层已经判过，但这一轮**会真的花额度**，
     // 不能只靠调用方自觉。

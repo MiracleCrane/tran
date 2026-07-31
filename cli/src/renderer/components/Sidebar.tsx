@@ -8,6 +8,7 @@ import { AppLogo } from './AppLogo'
 import ProjectSwitcher from './ProjectSwitcher'
 import type { ClaudeExecutionBackend, SessionListItem, SessionPreview } from '../../shared/ipc'
 import { normalizeCwdForCompare } from '../../shared/paths'
+import { relTime } from '../utils/format'
 import { onForgeEvent } from '../events'
 
 type SessionGroupMode = 'time' | 'project'
@@ -23,17 +24,6 @@ type SessionListSnapshot = {
 }
 
 const PINNED_SESSIONS_KEY = 'forge.pinnedSessions.v1'
-
-function relTime(ts: number): string {
-  const diff = Date.now() - ts
-  const m = Math.floor(diff / 60000)
-  if (m < 1) return '刚刚'
-  if (m < 60) return `${m} 分钟前`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h} 小时前`
-  const d = Math.floor(h / 24)
-  return `${d} 天前`
-}
 
 const DAY = 86_400_000
 const GROUP_ORDER = ['今天', '昨天', '本周', '更早'] as const

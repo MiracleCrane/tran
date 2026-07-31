@@ -3030,16 +3030,29 @@ div:has(textarea:focus) .composer-shortcut-hint {
   opacity: 1;
 }
 
-/* 空态的四个建议。自带底色，不挂 .glass-*——那些类在简约风下被整体拆掉，
-   挂上去等于没有样式。底色压得很淡：静止时只要能看出是个可点的东西就够，
-   hover 才亮起来。 */
-.tran-empty-chip {
-  background: rgba(255, 255, 255, 0.028);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+/* 空态标题：紫色流光。复用下面 tran-shimmer 的 sweep 关键帧，但慢很多
+   （4.5s 对 2.1s）——那个是"正在进行中"的提示，要有紧迫感；这个只是让一块
+   静止的页面不至于死板，扫太快就成了干扰。 */
+.tran-empty-title {
+  background: linear-gradient(
+    100deg,
+    #7c5cf0 15%,
+    #c4b5fd 40%,
+    #ede9fe 50%,
+    #c4b5fd 60%,
+    #7c5cf0 85%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: tran-shimmer-sweep 4.5s linear infinite;
 }
-.tran-empty-chip:hover {
-  background: rgba(255, 255, 255, 0.065);
-  border-color: rgba(255, 255, 255, 0.09);
+@media (prefers-reduced-motion: reduce) {
+  .tran-empty-title {
+    animation: none;
+    color: #c4b5fd;
+  }
 }
 
 /* 流光文字：思考进行中的提示。取代原来那颗彗星/月亮——

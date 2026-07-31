@@ -540,6 +540,40 @@ export interface SessionUsageInfo {
   model?: string
 }
 
+/** --- 套餐额度（5 小时滚动窗口 / 每周） ---
+ *  数据源：`GET https://api.kimi.com/coding/v1/usages`，Bearer 用 Kimi Code
+ *  CLI 自己的 OAuth access_token（见 usageService.ts）。
+ *
+ *  ⚠️ 这跟 v1.0.46 删掉的那条**不是一回事**：被删的是复用浏览器 Cookie 打
+ *  网页内部 MembershipService RPC（quotaService / kimiWebChat），那条让 Tran
+ *  变成非官方网页客户端，删得对。这条走的是官方 API + CLI 自己的凭证，与 CLI
+ *  本身的行为一致，当时被一起删掉是切宽了，v1.0.49 只把这条加回来。 */
+export interface UsageLimitWindow {
+  /** 窗口标签，如 "每周" / "5 小时"。 */
+  label: string
+  limit?: number
+  used?: number
+  remaining?: number
+  /** 重置时间（epoch ms）。 */
+  resetAt?: number
+}
+
+export interface PlanUsageInfo {
+  /** 会员等级原始值（如 LEVEL_INTERMEDIATE），渲染层负责映射展示。 */
+  membershipLevel?: string
+  weekly?: UsageLimitWindow
+  rolling?: UsageLimitWindow
+  parallelLimit?: number
+  boosterWallet?: {
+    monthlyUsedCny?: number
+    monthlyLimitCny?: number
+  }
+}
+
+export type PlanUsageResult =
+  | { ok: true; data: PlanUsageInfo }
+  | { ok: false; error: string }
+
 /** kimi 本地 server 的任务条目（tasks API，子代理/后台 Bash）。 */
 export interface KimiTaskInfo {
   id: string
@@ -786,6 +820,8 @@ export interface ForgeApi {
   getSessionUsage(sessionId: string): Promise<SessionUsageInfo>
   /** 触发一次隐藏 /usage 轮刷新上下文用量（悬停上下文环时调用）。 */
   refreshSessionUsage(sessionId: string): Promise<void>
+  /** 套餐额度（5h 滚动窗口 / 每周）。主进程带缓存，失败返回 ok:false。 */
+  getPlanUsage(): Promise<PlanUsageResult>
   /** --- Git integration --- */
   isGitRepo(cwd: string): Promise<boolean>
   gitGetCurrentBranch(cwd: string): Promise<string | null>

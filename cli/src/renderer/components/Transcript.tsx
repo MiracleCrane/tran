@@ -11,6 +11,7 @@ import { initSentImageRecording, loadSentImages, matchHistoryImages } from '../u
 import ToolCallCard from './ToolCallCard'
 import ToolGroupCard from './ToolGroupCard'
 import CompactionDivider from './CompactionDivider'
+import EmptyState from './EmptyState'
 import QueryResultCard from './QueryResultCard'
 import UserMessageNav, { type UserNavEntry } from './UserMessageNav'
 import { useCheapNote } from '../hooks/useCheapNote'
@@ -104,25 +105,6 @@ interface TranscriptProps {
   onAtBottomChange?: (atBottom: boolean) => void
 }
 
-/** 空态的四个起手式。label 是按钮上的短词，prompt 是真正填进输入框的话。 */
-const EMPTY_SUGGESTIONS = [
-  { label: '列出文件', prompt: '列出这个项目的目录结构，说明每个顶层目录是做什么的' },
-  { label: '总结项目', prompt: '读一遍这个项目，告诉我它是做什么的、技术栈是什么、入口在哪' },
-  { label: '查找代码', prompt: '帮我找一下：' },
-  { label: '修复问题', prompt: '这里有个问题需要修：' }
-] as const
-
-const TerminalGlyph = (): JSX.Element => (
-  <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
-    <path
-      d="M7 8l4 4-4 4M13 16h4"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-)
 
 /** Group the flat `items` into a forest. Top level = items with no
  *  parentToolUseId; an assistant item's tool_use block (id X) owns every item
@@ -600,11 +582,6 @@ export default function Transcript({
   const attachmentKey = useSessionStore((s) => s.meta?.sdkSessionId ?? s.meta?.sessionId ?? '')
   const agentBackend = useSessionStore((s) => s.meta?.agentBackend)
   const starting = useSessionStore((s) => s.starting)
-  // 空态四个建议：点一下填进输入框（草稿分桶键与 Composer 保持一致）。
-  const setComposerDraft = useSessionStore((s) => s.setComposerDraft)
-  const applySuggestion = (prompt: string): void => {
-    if (attachmentKey) setComposerDraft(attachmentKey, prompt)
-  }
   // running / compacting 已下沉到 TranscriptFooter 自订阅：主组件不再因它们
   // 变化而重渲染（每个 turn 起止都会触发一次全列表重渲染）。
   const setTranscriptScrolling = useSessionStore((s) => s.setTranscriptScrolling)
@@ -1084,29 +1061,7 @@ export default function Transcript({
             </div>
           ) : (
             <>
-          {/* 空态：整块降调。
-              原先是「80px 圆角方块装一个终端图标 + 24px 紫色渐变大标题 +
-              四个方头方脑的按钮」——每个元素都在抢注意力，而这个页面本身
-              没有任何信息量，它唯一的作用是别让人对着一片黑发愣。
-              现在：图标去掉外框只留线条并压暗，标题去掉渐变、降到 19px，
-              建议改成小号淡底 chip。整体纵向也收紧一档。 */}
-          <span className="text-zinc-700">
-            <TerminalGlyph />
-          </span>
-          <h1 className="mt-5 text-[19px] font-medium text-zinc-300">发送消息开始对话</h1>
-          <p className="mt-1.5 text-[13px] text-zinc-600">我可以帮助你编写代码、分析问题、执行任务</p>
-          <div className="mt-6 flex flex-wrap justify-center gap-2">
-            {EMPTY_SUGGESTIONS.map((s) => (
-              <button
-                key={s.label}
-                type="button"
-                onClick={() => applySuggestion(s.prompt)}
-                className="tran-empty-chip rounded-lg px-3 py-1.5 text-[12px] text-zinc-500 transition hover:text-zinc-200"
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
+          <EmptyState />
             </>
           )}
         </div>

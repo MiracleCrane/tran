@@ -33,6 +33,7 @@ const api: ForgeApi = {
   goalControl: (sessionId, action) => ipcRenderer.invoke('forge:goalControl', sessionId, action),
   goalGet: (sessionId) => ipcRenderer.invoke('forge:goalGet', sessionId),
   refreshSessionUsage: (sessionId) => ipcRenderer.invoke('forge:refreshSessionUsage', sessionId),
+  getPlanUsage: () => ipcRenderer.invoke('forge:getPlanUsage'),
   closeSession: (sessionId) => ipcRenderer.invoke('forge:closeSession', sessionId),
   destroySession: (sessionId) => ipcRenderer.invoke('forge:destroySession', sessionId),
   listSessions: (cwd, opts) => ipcRenderer.invoke('forge:listSessions', cwd, opts),
