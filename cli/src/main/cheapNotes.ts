@@ -28,8 +28,9 @@ import { loadSettings } from './settings'
  * 3. **失败静默**。返回 null，调用方继续用原来的规则摘要/前 60 字截断——
  *    这两项都是锦上添花，任何一次失败都不该在界面上留下痕迹。
  *
- * 关掉方式：设置页「AI 自动命名」同一个开关（summaryNotesEnabled 未显式关闭
- * 时跟随它）——用户关掉 AI 命名的意思就是"别拿我的额度做这类事"。
+ * 关掉方式：设置页「AI 自动命名」那一个开关（aiNamingEnabled）——用户关掉
+ * AI 命名的意思就是"别拿我的额度做这类事"，命令说明、思考摘要、思考翻译
+ * 一并停掉。没有单独的开关。
  */
 
 const STORE_FILE = 'cheap-notes.json'
@@ -45,7 +46,17 @@ const MAX_ENTRIES = 500
 
 type NoteKind = 'cmd' | 'think' | 'zh'
 
-/** 思考翻译的输入上限。整段翻译比摘要贵得多，但走的是免费通道，放宽到 4000。 */
+/**
+ * 思考翻译的输入上限。
+ *
+ * 这个 4000 是当初按「走 kimi 网页免费通道」定的，那条通道已经在
+ * v1.0.46 随网页接口一起删掉了。现在它走用户自己配的 API，是全 app **最贵
+ * 的一次调用**：4000 字进、maxTokens 2048 出，每展开一个思考块一次。
+ *
+ * 仍然留在 4000 而不是砍小：翻译要的就是整段，砍一半等于给用户看半篇译文，
+ * 那比不翻还糟。控成本靠的是另外三条——按需触发（不展开不翻）、按内容哈希
+ * 落盘缓存、判废也缓存。真要省，关掉「AI 自动命名」一起停。
+ */
 const MAX_TRANSLATE_CHARS = 4000
 
 let cache: Record<string, string> | null = null
@@ -145,21 +156,69 @@ async function note(
 }
 
 /**
+ * 破坏性标志 → 说明里必须出现的词。
+ *
+ * 12 个字装不下一条命令的全部含义，模型会挑它认为重要的说——而它挑掉的
+ * 恰恰常是危险的那一半。2026-07-30 实测(见 DeepSeek 基准报告)：
+ *   `git reset --hard HEAD~1`            → 「撤销最近一次提交」
+ *   `git push --force-with-lease ...`    → 「安全推送认证分支」(Flash)
+ * 第一条 Flash 和 Pro **都是**这样，丢弃未提交改动这件事整个消失了。用户扫
+ * 一眼说明就点确认，丢的是没提交的活。换更强的型号解决不了——12 字的预算
+ * 摆在那里。
+ *
+ * 所以这里不靠模型自觉：命中破坏性标志、而说明里一个对应的词都没有，就把
+ * 这条说明判废。判废不是"没有说明"这么简单——界面上命令原文一直都在，说明
+ * 只是跟在后面的一句注解(见 ToolCallCard)，去掉它用户看到的就是原始命令，
+ * 那才是此时最诚实的展示。
+ */
+const RISK_RULES: Array<{ label: string; test: RegExp; keywords: string[] }> = [
+  { label: 'force', test: /--force\b|--force-with-lease\b|(?:^|\s)-f(?=\s|$)/, keywords: ['强制', '强推', '覆盖'] },
+  { label: 'hard-reset', test: /--hard\b/, keywords: ['丢弃', '硬', '重置', '强制'] },
+  { label: 'delete', test: /--delete\b|-delete\b|--prune\b|\bprune\b|(?:^|\s)rm\s|Remove-Item/i, keywords: ['删除', '清理', '移除'] },
+  { label: 'pipe-to-shell', test: /\|\s*(?:sudo\s+)?(?:ba|z|fi)?sh\b|\|\s*python\d?\b|Invoke-Expression|\biex\b/i, keywords: ['执行', '运行', '安装'] },
+  { label: 'recurse-force', test: /-Recurse\b[\s\S]*-Force\b|-Force\b[\s\S]*-Recurse\b|(?:^|\s)-rf\b|(?:^|\s)-fr\b/i, keywords: ['强制', '递归', '删除'] }
+]
+
+/** 命中的破坏性规则里，有哪一条的关键词在说明中一个都没出现。 */
+function droppedRisk(command: string, note: string): string | null {
+  for (const rule of RISK_RULES) {
+    if (!rule.test.test(command)) continue
+    if (!rule.keywords.some((word) => note.includes(word))) return rule.label
+  }
+  return null
+}
+
+/**
  * 一条 bash 命令在做什么。
  *
  * 调用前提：这条命令**没有 description**。有 description 时 Agent 已经给了意图，
  * 再问一遍是白花额度（见 ToolCallCard 的 summaryForTool）。
+ *
+ * 两道防护，缺一不可：
+ * 1. 少样本里放一条破坏性命令，把"危险语义要留住"示范给模型；
+ * 2. 出来之后再按 RISK_RULES 查一遍，漏了就判废。
+ * 光靠 1 压不住(报告里 Pro 也漏)，光靠 2 会误杀得太多。
  */
 export async function explainCommand(command: string): Promise<string | null> {
-  return note('cmd', command, {
-    instruction: '说明这条命令在做什么',
+  const result = await note('cmd', command, {
+    instruction: '说明这条命令在做什么。带破坏性的操作必须点明（强制、删除、丢弃、覆盖）',
     examples: [
       ['git status --porcelain', '查看改动'],
-      ['pytest tests/api -k login', '跑登录相关测试']
+      ['pytest tests/api -k login', '跑登录相关测试'],
+      ['git reset --hard HEAD~1', '硬回退并丢弃改动']
     ],
     maxChars: COMMAND_NOTE_CHARS,
     maxInput: MAX_COMMAND_CHARS
   })
+  if (!result) return null
+  // 这一步刻意放在缓存之后：判废不写回缓存，将来改了词表，同一条命令的旧
+  // 说明会被重新审一遍，不用等缓存过期，也不会因此多打一次请求。
+  const dropped = droppedRisk(command, result)
+  if (dropped) {
+    log('cheap-notes', `命令说明漏掉「${dropped}」语义，判废改显示原命令`)
+    return null
+  }
+  return result
 }
 
 /** 整段文本走用户配置的摘要 API，不做 terseText 清洗。 */

@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.47 - 未发布
+
+补 v1.0.46 与 DeepSeek 实测报告之间对不上的几处。
+
+### 中文
+
+- 修复:**破坏性命令的说明会把危险的那一半吃掉**。12 个字装不下一条命令的全部含义,模型挑重点说,而挑掉的常常正是危险的部分 —— 实测 `git reset --hard HEAD~1` 被概括成「撤销最近一次提交」(Flash 和 Pro 都一样),丢弃未提交改动这件事整个消失;`git push --force-with-lease` 被说成「安全推送认证分支」,"强制"没了。换更强的型号解决不了,12 字的预算摆在那里。现在两道防护:少样本里加一条破坏性命令做示范,出来之后再按标志位查一遍(`--force` / `--hard` / `--delete` / `prune` / `rm` / `Remove-Item` / 管道到 shell / `-Recurse -Force`),对应的危险词一个都没留住就把这条说明判废 —— 界面上命令原文一直都在,去掉注解看到的就是原始命令。用报告里 20 条真实输出回归:判废 3 条(正是报告点名的那 3 条),其余 17 条零误杀。
+- 修复:**摘要请求没传 temperature**,吃服务端默认的 1.0,而实测报告那 62 次调用全程是 `0.2` —— 跑的和测的不是一套。现在按实测传 0.2;若所配服务不接受(个别型号只允许固定值),自动去掉重打一次。
+- 文档:更正三处已经不成立的注释 —— 思考翻译"走免费通道"(那条通道 v1.0.46 已随网页接口删除,现在走用户自己的 key,是全 app 最贵的一次调用)、`temperature` 会被 400(那是 reasoner 系型号的限制,不适用于 flash/pro)、以及并不存在的 `summaryNotesEnabled` 开关。
+
+### English
+
+- Fixed: **command notes dropped the dangerous half of destructive commands.** Twelve characters cannot hold a command's full meaning, and what the model drops is often the risky part — `git reset --hard HEAD~1` became "undo the last commit" on both Flash and Pro, losing the discarded working tree entirely. A stronger model does not fix this; the budget does. Now guarded twice: a destructive command in the few-shot examples, and a post-check against destructive flags (`--force`, `--hard`, `--delete`, `prune`, `rm`, `Remove-Item`, pipe-to-shell, `-Recurse -Force`). If none of the matching risk words survived, the note is discarded — the raw command is always on screen, so dropping the annotation shows exactly that. Replayed against the 20 real outputs in the benchmark: 3 discarded (precisely the 3 the report flagged), 0 false positives on the rest.
+- Fixed: **summary requests sent no temperature**, taking the server default of 1.0, while all 62 benchmark calls ran at `0.2`. Now sends 0.2, with a single retry without it if the configured service rejects it.
+- Docs: corrected three comments that no longer hold — thinking translation "uses the free channel" (removed in v1.0.46; it now bills the user's own key and is the most expensive call in the app), `temperature` causing a 400 (a reasoner-family restriction, not flash/pro), and a `summaryNotesEnabled` toggle that does not exist.
+
 ## v1.0.46 - 2026-07-30
 
 ### 中文

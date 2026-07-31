@@ -56,6 +56,28 @@ export interface CheapCallOptions {
   timeoutMs?: number
 }
 
+/**
+ * 采样温度。
+ *
+ * 2026-07-30 的 DeepSeek 实测(62 次真实调用)全程是在 **temperature=0.2** 下
+ * 跑的——「12 字命令说明 10/10 通过清洗」「16 字思考摘要 6/6 通过」这些结论
+ * 都只对这个温度成立。此前代码一律不传，吃的是服务端默认 1.0：跑的和测的
+ * 不是一套，而这些任务(定长短摘要、保留代码字面量的翻译)恰恰是越确定越好。
+ *
+ * 注意别被 diagnoseSummaryPrompt 那段注释带偏：那里记的 400
+ * (`only 0.6 is allowed for this model`) 是**别的型号**(reasoner 系)的限制。
+ * flash 与 pro 各 18 次带 0.2 全部 200。
+ *
+ * 但用户可以把 baseUrl 指到任意 OpenAI 兼容服务，那边可能有同样的限制，
+ * 所以下面留了一条"因 temperature 被拒就去掉重打一次"的退路。
+ */
+const SUMMARY_TEMPERATURE = 0.2
+
+/** 400 的原文是否在抱怨 temperature（各家措辞不一，只认这个词）。 */
+function rejectedForTemperature(status: number | undefined, detail: string): boolean {
+  return status === 400 && /temperature/i.test(detail)
+}
+
 export type CheapCallResult =
   | { ok: true; text: string }
   | { ok: false; error: string; status?: number }
@@ -63,9 +85,24 @@ export type CheapCallResult =
 /**
  * 打一次小请求。thinking 关闭是关键——总结任务开思考纯烧额度还慢。
  *
- * 失败一律不重试：这些功能全是"有则更好"，重试只会在云端抖动时把额度翻倍。
+ * 失败一律不重试，只有一个例外：服务不接受 temperature（见 SUMMARY_TEMPERATURE）。
  */
 export async function cheapComplete(opts: CheapCallOptions): Promise<CheapCallResult> {
+  const first = await cheapCompleteOnce(opts, true)
+  // 只有"这个服务不接受 temperature"这一种情况值得重打：它是确定性的配置
+  // 冲突，不是云端抖动，去掉再打必然是同一个结果。其余失败一律不重试
+  // （这些功能全是"有则更好"，重试只会在抖动时把额度翻倍）。
+  if (!first.ok && rejectedForTemperature(first.status, first.error)) {
+    log('cheap-model', '服务不接受 temperature，去掉重试一次')
+    return cheapCompleteOnce(opts, false)
+  }
+  return first
+}
+
+async function cheapCompleteOnce(
+  opts: CheapCallOptions,
+  withTemperature: boolean
+): Promise<CheapCallResult> {
   const token = getApiKey()
   if (!token) return { ok: false, error: '未配置摘要 API Key（设置 → 系统）' }
 
@@ -87,6 +124,7 @@ export async function cheapComplete(opts: CheapCallOptions): Promise<CheapCallRe
       body: JSON.stringify({
         model,
         max_tokens: opts.maxTokens ?? 50,
+        ...(withTemperature ? { temperature: SUMMARY_TEMPERATURE } : {}),
         ...(isDeepSeek ? { thinking: { type: 'disabled' } } : {}),
         ...(opts.stop?.length ? { stop: opts.stop } : {}),
         messages
@@ -288,10 +326,13 @@ export async function cheapSummarize(opts: {
  * 四种形态是为了二分定位：stop 和多轮角色是两个独立变量，一次只动一个。
  *
  * 2026-07-30 直连实测结果：**四种形态全部 200**，多轮 + stop 输出
- * "构建并启动容器"，完全合格。那次 400 复现不出来——已知会 400 的只有
- * `temperature`（传 0 即 `only 0.6 is allowed for this model`），而这里从不传
- * temperature。按 stop/多轮被拒来设计是**没有依据的**，所以正式路径直接用
- * 形态 4。这个按钮保留作回归自检。
+ * "构建并启动容器"，完全合格。那次 400 复现不出来。按 stop/多轮被拒来设计是
+ * **没有依据的**，所以正式路径直接用形态 4。这个按钮保留作回归自检。
+ *
+ * 关于当时记下的 `temperature` 400（传 0 即 `only 0.6 is allowed for this
+ * model`）：那是 reasoner 系型号的限制，不适用于 flash/pro——同日 62 次
+ * 基准调用全程带 temperature=0.2，flash 与 pro 各 18 次全部 200。正式路径
+ * 现在按实测那样传 0.2，并对"因 temperature 被拒"留了一次去掉重打的退路。
  */
 export interface PromptDiagnosis {
   label: string
