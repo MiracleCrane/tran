@@ -113,7 +113,7 @@ const EMPTY_SUGGESTIONS = [
 ] as const
 
 const TerminalGlyph = (): JSX.Element => (
-  <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+  <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
     <path
       d="M7 8l4 4-4 4M13 16h4"
       stroke="currentColor"
@@ -1084,23 +1084,24 @@ export default function Transcript({
             </div>
           ) : (
             <>
-          {/* 空态。简约风把 .glass-panel / .glass-control 的底和描边都拆了，
-              这里原样式全落在那两个类上——于是图标框和四个建议都成了浮在
-              底色上的裸字，看着像没加载完。改成自带底色的方块，两套风格
-              下都成立。四个建议原本是 <span>，长得像按钮却点不动；改成真
-              按钮，点一下把词填进输入框。 */}
-          <div className="tran-empty-badge mb-7 flex h-20 w-20 items-center justify-center rounded-[20px] text-zinc-100">
+          {/* 空态：整块降调。
+              原先是「80px 圆角方块装一个终端图标 + 24px 紫色渐变大标题 +
+              四个方头方脑的按钮」——每个元素都在抢注意力，而这个页面本身
+              没有任何信息量，它唯一的作用是别让人对着一片黑发愣。
+              现在：图标去掉外框只留线条并压暗，标题去掉渐变、降到 19px，
+              建议改成小号淡底 chip。整体纵向也收紧一档。 */}
+          <span className="text-zinc-700">
             <TerminalGlyph />
-          </div>
-          <h1 className="text-brand-gradient text-2xl font-semibold">发送消息开始对话</h1>
-          <p className="mt-2 text-sm text-zinc-500">我可以帮助你编写代码、分析问题、执行任务</p>
-          <div className="mt-7 flex flex-wrap justify-center gap-2.5">
+          </span>
+          <h1 className="mt-5 text-[19px] font-medium text-zinc-300">发送消息开始对话</h1>
+          <p className="mt-1.5 text-[13px] text-zinc-600">我可以帮助你编写代码、分析问题、执行任务</p>
+          <div className="mt-6 flex flex-wrap justify-center gap-2">
             {EMPTY_SUGGESTIONS.map((s) => (
               <button
                 key={s.label}
                 type="button"
                 onClick={() => applySuggestion(s.prompt)}
-                className="tran-empty-chip rounded-xl px-3.5 py-2 text-[13px] text-zinc-400 transition hover:text-zinc-100"
+                className="tran-empty-chip rounded-lg px-3 py-1.5 text-[12px] text-zinc-500 transition hover:text-zinc-200"
               >
                 {s.label}
               </button>

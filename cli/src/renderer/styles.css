@@ -2993,18 +2993,19 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.075);
   }
 
-  /* 5. 用户发言：从「右对齐气泡」改成「与 AI 同列 + 左侧强调竖线」。
-        气泡是聊天软件的隐喻，而这里是工作台——贴日志/贴代码时窄气泡最难看。
-        区分说话人只需要一条竖线，不需要整块底色。
-        对齐（居中到与 AI 同一列）见下面修补块的第 3 条。 */
+  /* 5. 用户发言：右对齐的淡底块。
+        中间试过「与 AI 同列 + 左侧竖线」，实际用下来不行——两个人说话
+        左边界完全一样，扫一眼分不出谁是谁，竖线太细扛不住这个活。
+        回到右对齐：靠位置区分说话人是最省力的信号，一眼就知道哪句是自己的。
+        但不做玻璃气泡那套描边+渐变+投影，只要一块很淡的底。
+        右边界仍与 AI 正文列齐平，见下面修补块的第 3 条。 */
   :root[data-ui='flat'] .tran-user-bubble {
     border: 0;
-    border-left: 2px solid rgba(139, 92, 246, 0.55);
-    border-radius: 0;
-    background: none;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.055);
     box-shadow: none;
-    padding: 0.1em 0 0.1em 0.85em;
-    color: #a1a1aa;
+    padding: 0.5rem 0.85rem;
+    color: #d4d4d8;
   }
 
   /* 6. 收敛描边色与圆角：一个发丝色、一个圆角 */
@@ -3029,19 +3030,16 @@ div:has(textarea:focus) .composer-shortcut-hint {
   opacity: 1;
 }
 
-/* 空态（发送消息开始对话）的两块表面。自带底色，不挂 .glass-*——
-   那两个类在简约风下被整体拆掉，挂上去就等于什么都没有。 */
-.tran-empty-badge {
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.075);
-}
+/* 空态的四个建议。自带底色，不挂 .glass-*——那些类在简约风下被整体拆掉，
+   挂上去等于没有样式。底色压得很淡：静止时只要能看出是个可点的东西就够，
+   hover 才亮起来。 */
 .tran-empty-chip {
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.065);
+  background: rgba(255, 255, 255, 0.028);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 .tran-empty-chip:hover {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.065);
+  border-color: rgba(255, 255, 255, 0.09);
 }
 
 /* 流光文字：思考进行中的提示。取代原来那颗彗星/月亮——
@@ -3103,15 +3101,27 @@ div:has(textarea:focus) .composer-shortcut-hint {
         原先这里写 max-width:62rem 想让两边右边界齐平，但 62rem(992px) 比
         92% 的实际宽度还大，永远不生效——用户那条照样铺满整行，比 AI 宽、
         且贴到最左边。改成同一个 92% 就不会再对不齐了。 */
-  :root[data-ui='flat'] .tran-ai-col {
+  /* 正文列用**固定宽度**，不用百分比。
+     百分比在这里对不齐：待办条/目标条挂在滚动容器**外面**，消息行在里面，
+     两者的父容器差着一条滚动条的宽度（实测 1007 vs 977）。同样写 92%，
+     算出来就是 882 vs 855，差 14px —— 正是"待办条比回复宽一截"的来源。
+     好在三者的父容器**中心是重合的**，所以只要宽度一致，边界就一致。
+     56rem ≈ 原先 92% 在满宽下的结果，观感不变。 */
+  :root[data-ui='flat'] .tran-ai-col,
+  :root[data-ui='flat'] .tran-user-msg {
+    width: 100%;
+    max-width: 56rem;
     margin-inline: auto;
   }
+  /* 用户发言靠右：右边界即这条列的右边界，也就是 AI 正文的右边界。
+     宽度按内容走、封顶 76%：短句自然收窄，长段（贴日志、贴报错）仍然
+     铺得开，不会挤成一条细缝。 */
   :root[data-ui='flat'] .tran-user-msg {
-    justify-content: center;
+    justify-content: flex-end;
   }
   :root[data-ui='flat'] .tran-user-bubble {
-    width: 100%;
-    max-width: 92%;
+    width: auto;
+    max-width: 76%;
   }
 
   /* 3b. 输入框得有个框。第 1 条把 .glass-panel 的底和描边一起清了，输入框
@@ -3135,14 +3145,16 @@ div:has(textarea:focus) .composer-shortcut-hint {
     display: none;
   }
 
-  /* 4. 连续几条用户发言之间要有呼吸。气泡拆掉之后就只剩竖线，
-        挨在一起会糊成一整块，分不出是几条。 */
+  /* 4. 连续几条用户发言之间要有呼吸。
+        必须用 margin-block 而不是 `margin: 0.85rem 0`——后者的简写会把左右
+        外边距一起写成 0，把上面那条居中用的 margin-inline:auto 冲掉（它在
+        前面，同优先级后来者胜），结果就是用户那条整体左移一格、右边界对不上
+        AI 正文。 */
   :root[data-ui='flat'] .tran-user-msg {
-    margin: 0.85rem 0;
+    margin-block: 0.85rem;
   }
 
-  /* 5. 悬停时间戳改用右侧留白。原来用户那条是右对齐气泡，时间放左边空白处；
-        现在用户也左对齐了，left:0 正好压在正文上（表现为「时间不见了」）。 */
+  /* 5. 悬停时间戳挂在右侧留白里，与 AI 那条同侧，不压正文。 */
   :root[data-ui='flat'] .tran-msg-time-gutter-left {
     left: auto;
     right: -0.5rem;

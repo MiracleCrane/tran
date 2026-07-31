@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.48 - 2026-07-31
+
+### 中文
+
+- 变更:**你的发言改回右对齐**。中间那版试过「与 AI 同列 + 左侧竖线」,实际用下来不行 —— 两个人说话左边界完全一样,扫一眼分不出谁是谁,一条细竖线扛不住这个活。现在靠位置区分说话人,但不做玻璃气泡那套描边+渐变+投影,只要一块很淡的底;右边界仍与 AI 正文列齐平,宽度按内容走、封顶 76%,贴日志贴报错照样铺得开。
+- 修复:**待办条比 AI 回复宽一截**(14px)。两边都写 92%,但待办条挂在滚动容器**外面**、消息行在里面,父容器差着一条滚动条的宽度(实测 1007 vs 977),同样的百分比算出来就不一样。改成固定 56rem —— 三者的父容器中心本来就重合,宽度一致边界就一致,任何窗口尺寸下都对齐。
+- 修复:用户发言的居中被一条 `margin: 0.85rem 0` 简写冲掉(它把左右外边距一起写成 0),表现是整条左移一格、右边界对不上。改用 `margin-block`。
+- 优化:**空态页面整块降调**。原先是「80px 圆角方块装一个终端图标 + 24px 紫色渐变大标题 + 四个方头方脑的按钮」,每个元素都在抢注意力,而这个页面本身没有信息量。现在图标去掉外框只留线条并压暗,标题去掉渐变降到 19px,四个建议改成小号淡底 chip,纵向也收紧一档。
+
+### English
+
+- Changed: **your messages are right-aligned again.** The interim "same column as the AI, with a left accent rule" did not hold up — both speakers shared a left edge, so a glance could not tell them apart, and a hairline rule is not enough signal. Position now distinguishes the speaker, but without the glass bubble's border, gradient and shadow — just a faint fill. The right edge still lines up with the AI column; width follows content, capped at 76%, so pasted logs still spread out.
+- Fixed: **the todo bar was 14px wider than AI replies.** Both said 92%, but the todo bar sits outside the scroll container while message rows sit inside, so their parents differ by a scrollbar's width (1007 vs 977) and the same percentage resolves differently. Now a fixed 56rem — the parents already share a center, so equal widths mean equal edges at any window size.
+- Fixed: the user row's centering was being clobbered by a `margin: 0.85rem 0` shorthand, which also zeroed the horizontal auto-margins. Uses `margin-block` now.
+- Improved: **the empty state is much quieter** — the boxed icon, the 24px gradient headline and the chunky buttons all competed for attention on a page that carries no information. Now an unboxed dimmed glyph, a plain 19px title, and small low-contrast suggestion chips.
+
 ## v1.0.47 - 2026-07-31
 
 补 v1.0.46 与 DeepSeek 实测报告之间对不上的几处。
