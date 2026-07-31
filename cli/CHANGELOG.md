@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.50 - 2026-07-31
+
+### 中文
+
+- 优化:**托盘图标换成无边界的衬线 T**。原先是「紫色圆角方块 + 顶部高光渐变 + 一圈内白边 + 白色 T」,在托盘里就是一个紫色小方块,跟旁边一排系统图标的语言完全不一样。现在只有紫色的字形本身,背景透明,和系统托盘那些单色图标是一套。字形也从几何体换成衬线体(横笔两端略加厚 + 底部衬线脚),并放大到 62% 宽 —— 去掉底板之后,字形要自己承担整个图标的视觉重量。
+- 备注:斜体带弯钩和加起笔的花体都试过,72px 下确实好看,但托盘实际渲染到 16px 会把钩和起笔全糊掉,只剩一个歪着的 T。衬线脚是唯一在 16px 下还留得住的装饰。任务栏/开始菜单/安装程序用的图标是另一套资源文件(`build/icon.ico`),这一版没动。
+
+### English
+
+- Improved: **the tray icon is now a borderless serif "T"**. It used to be a purple rounded square with a gradient, an inner white rim and a white T — which read as a purple blob next to the monochrome system tray icons. Now it is just the glyph in accent purple on transparency. The letterform also moved from geometric to serif (slightly flared bar ends plus a slab foot) and grew to 62% width, since without the plate the glyph has to carry the icon on its own.
+- Note: italic-with-hook and full calligraphic variants were tried; they look good at 72px but the tray renders at 16px, where the flourishes dissolve into a lopsided T. The slab foot is the only ornament that survives at that size. The taskbar/installer icons are separate asset files (`build/icon.ico`) and were not touched.
+
 ## v1.0.49 - 2026-07-31
 
 ### 中文

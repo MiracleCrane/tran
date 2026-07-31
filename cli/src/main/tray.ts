@@ -67,52 +67,75 @@ function over(sample: PaintSample, r: number, g: number, b: number, a: number): 
   sample.a = alpha + sample.a * inverse
 }
 
+/**
+ * "T" 字形：衬线体。
+ *
+ * 三笔：两端略加厚的横笔（衬线的味道来源）、竖笔、底部衬线脚。
+ *
+ * 比例是按「去掉底板之后」重新定的：原来的 T 只占 28.7% 宽，因为外面还有一个
+ * 紫色圆角方块托着它；托盘图标在 Windows 上实际渲染到 16px，没有底板还用那个
+ * 尺寸就只剩几根细线。现在放大到 62% 宽，让字形本身承担整个图标的视觉重量。
+ *
+ * 试过斜体带弯钩和加起笔的花体：72px 下确实好看，但托盘那 16px 会把钩和起笔
+ * 全糊掉，只剩一个歪着的 T。衬线脚是唯一在 16px 下还能留住的装饰。
+ */
+const GLYPH_BAR_TOP = 0.25
+const GLYPH_BAR_THICKNESS = 0.118
+const GLYPH_BAR_HALF_WIDTH = 0.31
+/** 横笔端点相对中间加厚多少（0 = 等宽）。再大就成蝴蝶结了。 */
+const GLYPH_BAR_END_BOOST = 0.3
+const GLYPH_STEM_HALF_WIDTH = 0.072
+const GLYPH_STEM_BOTTOM = 0.755
+const GLYPH_FOOT_HALF_WIDTH = 0.2
+const GLYPH_FOOT_BOTTOM = 0.85
+
+/** 楔形横笔：离中心越远越厚，厚度沿中线两侧对称展开。 */
+function inTaperedBar(x: number, y: number, size: number): boolean {
+  const halfPx = GLYPH_BAR_HALF_WIDTH * size
+  const dx = Math.abs(x - 0.5 * size)
+  if (dx > halfPx) return false
+  const t = dx / halfPx
+  const base = GLYPH_BAR_THICKNESS * size
+  const thickness = base * (1 + GLYPH_BAR_END_BOOST * t * t)
+  const top = GLYPH_BAR_TOP * size - (thickness - base) / 2
+  return y >= top && y <= top + thickness
+}
+
 function inTranGlyph(x: number, y: number, size: number): boolean {
-  // "T"：居中的竖笔 + 顶部横笔。
   const stem = inRoundedRect(
     x,
     y,
-    (0.5 - 0.091 / 2) * size,
-    (0.518 - 0.418 / 2) * size,
-    (0.5 + 0.091 / 2) * size,
-    (0.518 + 0.418 / 2) * size,
-    0.023 * size
+    (0.5 - GLYPH_STEM_HALF_WIDTH) * size,
+    GLYPH_BAR_TOP * size,
+    (0.5 + GLYPH_STEM_HALF_WIDTH) * size,
+    GLYPH_STEM_BOTTOM * size,
+    0.018 * size
   )
-  const top = inRoundedRect(
+  const foot = inRoundedRect(
     x,
     y,
-    (0.5 - 0.287 / 2) * size,
-    (0.331 - 0.087 / 2) * size,
-    (0.5 + 0.287 / 2) * size,
-    (0.331 + 0.087 / 2) * size,
-    0.023 * size
+    (0.5 - GLYPH_FOOT_HALF_WIDTH) * size,
+    GLYPH_STEM_BOTTOM * size,
+    (0.5 + GLYPH_FOOT_HALF_WIDTH) * size,
+    GLYPH_FOOT_BOTTOM * size,
+    0.04 * size
   )
-  return stem || top
+  return inTaperedBar(x, y, size) || stem || foot
 }
 
+/**
+ * 只画字形，不画底板。
+ *
+ * 原先是「紫色圆角方块 + 顶部高光渐变 + 一圈内白边 + 白色 T」——那套在
+ * 应用图标（大尺寸、有留白）上成立，但托盘里它就是一个紫色小方块，跟旁边
+ * 一排系统图标的语言完全不一样，边界感很重。现在只留紫色的 T，背景透明，
+ * 跟系统托盘里那些单色图标是一套。
+ */
 function paintIconSample(x: number, y: number, size: number): PaintSample {
   const sample: PaintSample = { r: 0, g: 0, b: 0, a: 0 }
-  const left = (0.5 - 0.86 / 2) * size
-  const top = (0.5 - 0.86 / 2) * size
-  const right = (0.5 + 0.86 / 2) * size
-  const bottom = (0.5 + 0.86 / 2) * size
-  const radius = 0.235 * size
-  const distance = roundedRectSdf(x, y, left, top, right, bottom, radius)
-  if (distance > 0) return sample
-
-  over(sample, ACCENT_R / 255, ACCENT_G / 255, ACCENT_B / 255, 0.96)
-
-  const verticalPosition = clamp((y - top) / (bottom - top), 0, 1)
-  over(sample, 1, 1, 1, 0.08 * (1 - verticalPosition))
-
-  if (distance > -0.036 * size) {
-    over(sample, 1, 1, 1, 0.16)
-  }
-
   if (inTranGlyph(x, y, size)) {
-    over(sample, 1, 1, 1, 1)
+    over(sample, ACCENT_R / 255, ACCENT_G / 255, ACCENT_B / 255, 1)
   }
-
   return sample
 }
 
