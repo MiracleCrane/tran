@@ -33,11 +33,12 @@ const PERMISSION_MODE_OPTIONS: {
   description: string
   accentClass?: string
 }[] = [
-  { value: 'default', label: '逐条确认 (default)', description: '每个工具操作都需要手动确认' },
+  { value: 'default', label: '逐条确认', description: '每个工具操作都需要手动确认' },
   // 映射依据 kimi 语义：yolo=自动批准全部工具操作但仍会与用户交互（自动通过）；
   // auto=完全无人值守、审批与提问全自己拍板（完全自主）。此前两值曾映射反。
-  { value: 'yolo', label: '自动通过 (yolo)', description: '自动批准全部工具操作，但关键问题仍会询问', accentClass: 'text-amber-300' },
-  { value: 'auto', label: '完全自主 (auto)', description: '完全自主运行、不再询问（慎用）', accentClass: 'text-red-300' }
+  // label 不带英文模式名：底部工具栏宽度有限，带 "(yolo)" 这类后缀会被 truncate 成省略号。
+  { value: 'yolo', label: '自动通过', description: '自动批准全部工具操作，但关键问题仍会询问', accentClass: 'text-amber-300' },
+  { value: 'auto', label: '完全自主', description: '完全自主运行、不再询问（慎用）', accentClass: 'text-red-300' }
 ]
 
 type PromptTemplate = { command: string; label: string; text: string }

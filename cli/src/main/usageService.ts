@@ -8,7 +8,7 @@ import type { PlanUsageInfo, PlanUsageResult, UsageLimitWindow } from '../shared
 /**
  * 套餐额度（Kimi 云端 API）。与 Kimi CLI 同款数据源：
  * GET https://api.kimi.com/coding/v1/usages，Bearer 为 CLI 的 OAuth access_token
- * （~/.kimi-code/credentials/kimi-code.json）。主进程用 Node fetch 直连（不走
+ * （$KIMI_CODE_HOME/credentials/kimi-code.json，未设时回退 ~/.kimi-code）。主进程用 Node fetch 直连（不走
  * 系统代理，与 CLI 行为一致）。access_token 绝不写日志、绝不进渲染层——
  * 返回给渲染层的只有算好的展示数据（PlanUsageInfo）。
  *
@@ -37,7 +37,10 @@ interface OAuthCredentials {
 }
 
 function credentialsPath(): string {
-  return join(homedir(), '.kimi-code', 'credentials', 'kimi-code.json')
+  // CLI 的 home 可能被 KIMI_CODE_HOME 指到别处（如 C:\LegacyD\Programs\kimi-code）；
+  // 写死 ~/.kimi-code 会读到轮换前的旧 refresh_token，刷新必然 400。
+  const home = process.env.KIMI_CODE_HOME?.trim()
+  return join(home || join(homedir(), '.kimi-code'), 'credentials', 'kimi-code.json')
 }
 
 function readCredentials(): OAuthCredentials | null {
