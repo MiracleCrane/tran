@@ -104,7 +104,11 @@ export function applyAppearanceSettings(settings: AppearanceSettings): void {
   const normalized = normalizeSettings(settings)
   const durationFactor = 50 / normalized.motionSpeed
 
-  root.dataset.glassGlow = normalized.glassGlow ? 'on' : 'off'
+  // 简约模式下泛光一律按 off 生效（设置里的开关值保留，切回玻璃风时恢复）。
+  // 否则 .accent-soft-button / .glass-active 这类不在简约覆盖清单里的元素
+  // 仍会随开关变化——简约风下切「玻璃泛光」能看出区别就是这么来的。
+  const effectiveGlow = normalized.uiStyle === 'flat' ? false : normalized.glassGlow
+  root.dataset.glassGlow = effectiveGlow ? 'on' : 'off'
   // 扁平化规则必须写在 styles.css 的 @layer components 里才生效：级联层对
   // !important 的优先级是反的（层内赢过层外），层外样式压不住既有的层内规则。
   root.dataset.ui = normalized.uiStyle
@@ -132,7 +136,8 @@ export function applyAppearanceSettings(settings: AppearanceSettings): void {
   root.style.setProperty('--glass-lens-soft', cssNumber(0.948))
   root.style.setProperty('--glass-lens-control', cssNumber(0.91))
   root.style.setProperty('--glass-window-blur', '0px')
-  root.style.setProperty('--glass-ambient-opacity', normalized.glassGlow ? '0.48' : '0.18')
+  // 环境泛光层（.app-shell::before）同样跟随生效值，而不是原始开关值。
+  root.style.setProperty('--glass-ambient-opacity', effectiveGlow ? '0.48' : '0.18')
 }
 
 interface AppearanceStore {

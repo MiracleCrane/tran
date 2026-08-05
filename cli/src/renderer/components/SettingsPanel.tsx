@@ -85,24 +85,27 @@ function ToggleControl({
   label,
   description,
   checked,
+  disabled,
   onChange
 }: {
   label: string
   description?: string
   checked: boolean
+  disabled?: boolean
   onChange: (checked: boolean) => void
 }): JSX.Element {
   return (
-    <div className="flex items-start justify-between gap-3">
+    <div className={`flex items-start justify-between gap-3 ${disabled ? 'opacity-45' : ''}`}>
       <div>
         <div className="text-xs text-zinc-500">{label}</div>
         {description && <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">{description}</p>}
       </div>
       <button
         type="button"
+        disabled={disabled}
         onClick={() => onChange(!checked)}
         aria-pressed={checked}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition ${checked ? 'bg-accent' : 'bg-zinc-700'}`}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition ${checked ? 'bg-accent' : 'bg-zinc-700'} ${disabled ? 'cursor-not-allowed' : ''}`}
       >
         <span
           className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform duration-150 ease-out ${
@@ -722,6 +725,7 @@ export default function SettingsPanel(): JSX.Element {
               label="玻璃泛光"
               description="控制玻璃组件的外发光、边缘高光和环境泛光。简约风下不生效。"
               checked={appearance.glassGlow}
+              disabled={appearance.uiStyle === 'flat'}
               onChange={(checked) => updateAppearance('glassGlow', checked)}
             />
             <RangeControl
