@@ -46,10 +46,10 @@ function sameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
 
-/** #43 常显用的短格式：HH:mm 小字（live 消息几乎都是当天，日期放悬停里）。 */
+/** #43 悬停浮出用的短格式：HH:mm:ss 小字（live 消息几乎都是当天，日期放 title 里）。 */
 export function formatTimeShort(at: number): string {
   const d = new Date(at)
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
 }
 
 /** #43 悬停用的完整时间：绝对年月日 + 时分秒，不做相对化。 */

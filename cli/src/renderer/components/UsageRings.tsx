@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useUiStore } from '../store/uiStore'
 import { useSessionStore } from '../store/sessionStore'
 import { fmtK } from '../utils/format'
-import type { PlanUsageInfo, UsageLimitWindow } from '../../shared/ipc'
+import type { DeepseekBalanceInfo, PlanUsageInfo, UsageLimitWindow } from '../../shared/ipc'
 
 /**
  * 状态栏用量：三个小圆环 —— 5h 滚动窗口 / 每周 / 上下文，悬停浮出预览卡，点击钉住。
@@ -138,6 +138,7 @@ export default function UsageRings(): JSX.Element {
   const [hover, setHover] = useState(false)
   const [plan, setPlan] = useState<PlanUsageInfo | null>(null)
   const [planError, setPlanError] = useState<string | null>(null)
+  const [deepseek, setDeepseek] = useState<DeepseekBalanceInfo | null>(null)
   const planFetchedAtRef = useRef(0)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const cardRef = useRef<HTMLDivElement | null>(null)
@@ -159,6 +160,11 @@ export default function UsageRings(): JSX.Element {
       .catch((error: unknown) => {
         setPlanError(error instanceof Error ? error.message : String(error))
       })
+    // DeepSeek 余额：任何失败（含未配置 key）都安静地不显示这一行。
+    void window.api
+      .getDeepseekBalance()
+      .then((result) => setDeepseek(result.ok ? result.data : null))
+      .catch(() => setDeepseek(null))
   }, [])
 
   // 挂载即拉一次：环上要有数字，不能等到用户悬停才开始转。
@@ -254,6 +260,17 @@ export default function UsageRings(): JSX.Element {
           <div className="space-y-3">
             <QuotaRow title={`${rollingLabel} 额度`} {...(plan?.rolling ? { window: plan.rolling } : {})} />
             <QuotaRow title="每周额度" {...(plan?.weekly ? { window: plan.weekly } : {})} />
+
+            {deepseek && (
+              <div className="flex items-baseline justify-between gap-2 text-xs">
+                <span className="text-zinc-400">DeepSeek 余额</span>
+                <span className="whitespace-nowrap text-zinc-500">
+                  {deepseek.currency === 'USD' ? '$' : '¥'}
+                  {deepseek.totalBalance}
+                  <span className="text-zinc-600">{` · 充值 ${deepseek.toppedUpBalance} / 赠金 ${deepseek.grantedBalance}`}</span>
+                </span>
+              </div>
+            )}
 
             <div>
               <div className="mb-1 flex items-baseline justify-between text-xs">

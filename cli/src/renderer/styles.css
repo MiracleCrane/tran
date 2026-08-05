@@ -2545,13 +2545,8 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   animation: tran-glow-breathe 2.8s ease-in-out infinite;
 }
 
-/* 思考块：左侧 2px 紫色竖条 + 底色微差（用 border 而非 ::before，
- *  避免与 glass-panel-soft 的玻璃镜头伪元素冲突）。 */
-.thinking-block {
-  position: relative;
-  background: rgba(139, 92, 246, 0.045);
-  border-left: 2px solid rgba(139, 92, 246, 0.55);
-}
+/* 思考块：完全裸排版（Codex 风），无框无竖条无底。类名本身保留——
+ *  TRANSCRIPT_BAR_SELECTOR 用它做滚动定位。动态信号只有流式标题的 flow-text。 */
 
 /* 状态短语流光文字（取代 #37 的 .thinking-moon 渐变球）：状态文字本身扫光，
  *  不同状态挂不同配色修饰类；与 .chip-flow-text 同一 background-clip:text 机制。
@@ -2561,22 +2556,12 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: flow-text-sweep 2s linear infinite;
+  animation: flow-text-sweep 1.6s linear infinite;
 }
 
-/* AI 输出中（Composer 忙碌行）：紫黄，延续 accent 配色语言。 */
+/* AI 输出中（Composer 忙碌行）、思考过程流式标题：紫黄，延续 accent 配色语言。 */
 .flow-text-violet {
-  background-image: linear-gradient(90deg, #8b5cf6 0%, #facc15 50%, #8b5cf6 100%);
-}
-
-/* Tran 正在处理（Transcript 底栏）：青蓝。 */
-.flow-text-sky {
-  background-image: linear-gradient(90deg, #38bdf8 0%, #a5f3fc 50%, #38bdf8 100%);
-}
-
-/* 输出中（消息流式游标行）：翠绿。 */
-.flow-text-emerald {
-  background-image: linear-gradient(90deg, #34d399 0%, #a7f3d0 50%, #34d399 100%);
+  background-image: linear-gradient(90deg, #a78bfa 0%, #fde047 50%, #a78bfa 100%);
 }
 
 @keyframes flow-text-sweep {
@@ -2828,7 +2813,7 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
    - AI 容器宽 92%，右侧剩 8%（≈80px）；
    - 用户气泡最宽 85% 且靠右，左侧至少剩 15%（≈150px）。
    写成"AI 靠左、用户靠右"反而会压在正文上，因为那正是气泡所在的一侧。 */
-/* #43 常显 HH:mm 小字（低透明度不抢正文），悬停该条消息时提亮；
+/* #43 时间戳默认隐藏，悬停该条消息才浮出（常显时每条一个 13:35，整列都是噪声）；
  *  完整时间放在元素 title 里，所以 pointer-events 要开着让 tooltip 能触发。 */
 .tran-msg-time {
   position: absolute;
@@ -2838,7 +2823,7 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   line-height: 1;
   white-space: nowrap;
   color: rgb(113 113 122 / 0.9);
-  opacity: 0.55;
+  opacity: 0;
   transition: opacity 140ms ease;
 }
 /* AI：右侧留白，与正文首行对齐。 */
@@ -2939,10 +2924,6 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   :root[data-ui='flat'] .tool-call-card.is-running {
     background: rgba(139, 92, 246, 0.07);
   }
-  :root[data-ui='flat'] .thinking-block {
-    border: 0;
-    background: transparent;
-  }
 
   /* 4. 主按钮降调：「新建对话」不该是全屏最响的东西 */
   :root[data-ui='flat'] .accent-soft-button {
@@ -3024,9 +3005,9 @@ div:has(textarea:focus) .composer-shortcut-hint {
 .tran-shimmer {
   background: linear-gradient(
     100deg,
-    rgba(161, 161, 170, 0.75) 20%,
-    rgba(226, 232, 240, 1) 45%,
-    rgba(161, 161, 170, 0.75) 70%
+    rgba(190, 190, 200, 0.85) 20%,
+    rgba(255, 255, 255, 1) 45%,
+    rgba(190, 190, 200, 0.85) 70%
   );
   background-size: 220% 100%;
   -webkit-background-clip: text;
@@ -3137,5 +3118,56 @@ div:has(textarea:focus) .composer-shortcut-hint {
     right: -0.5rem;
     transform: translateX(100%);
     top: 0.2rem;
+  }
+}
+
+/* ============================================================================
+   主题底色（设置 → 外观 → 主题底色）：:root[data-theme] 切换，即时生效。
+   onyx = 深黑（默认，一直以来的底色）；charcoal = Codex 风炭灰，整体抬亮一档。
+   accent 紫色系不动——换的只是"底"，不是"强调"。
+   追加一个同名 @layer components 块：要压的 ::before !important 规则在层内，
+   同名层等于续写，靠更高的选择器优先级赢；层外普通声明反而压不住它们。
+   ========================================================================== */
+@layer components {
+  /* 基座渐变：html/body/#root 的原始规则在层外（普通声明压层内），只能上
+     !important。保留两团若有若无的紫/青光晕，只把深黑台阶抬成炭灰。 */
+  :root[data-theme='charcoal'],
+  :root[data-theme='charcoal'] body,
+  :root[data-theme='charcoal'] #root {
+    background:
+      radial-gradient(46rem circle at 14% -12%, rgba(167, 139, 250, 0.05), transparent 58%),
+      radial-gradient(42rem circle at 94% -8%, rgba(124, 211, 252, 0.04), transparent 62%),
+      linear-gradient(145deg, #1e2025 0%, #1a1c20 46%, #1d1f24 100%) !important;
+  }
+
+  /* 简约风的壳与浮层跟着抬一档（rgba 淡底类表面不用动，它们叠在新壳色上
+     自动变亮）。 */
+  :root[data-theme='charcoal'][data-ui='flat'] .app-shell {
+    background: #1b1d21;
+  }
+  :root[data-theme='charcoal'][data-ui='flat'] .glass-panel:where(.fixed, .absolute),
+  :root[data-theme='charcoal'][data-ui='flat'] .glass-panel-soft:where(.fixed, .absolute),
+  :root[data-theme='charcoal'][data-ui='flat'] .glass-control:where(.fixed, .absolute) {
+    background: #23262b;
+  }
+
+  /* 项目切换器 / 下拉面板的实底（含 ::before 的 !important 填充）。 */
+  :root[data-theme='charcoal'] .project-switcher-panel,
+  :root[data-theme='charcoal'] .disclosure-select-panel {
+    --glass-frost-fill: #23262b;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.012)),
+      #23262b;
+  }
+  :root[data-theme='charcoal'] .project-switcher-panel::before,
+  :root[data-theme='charcoal'] .disclosure-select-panel::before {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.024), rgba(255, 255, 255, 0.006)),
+      #23262b !important;
+  }
+
+  /* 原生下拉选项的实底。 */
+  :root[data-theme='charcoal'] select option {
+    background: #23262b;
   }
 }

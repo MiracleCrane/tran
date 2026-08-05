@@ -134,6 +134,9 @@ export default function SettingsPanel(): JSX.Element {
   // API Key 不再回显明文：输入框只承载「本次新输入」，已配置状态用主进程回的掩码提示。
   const [summaryApiKey, setSummaryApiKey] = useState('')
   const [summaryKeyMasked, setSummaryKeyMasked] = useState<string | null>(null)
+  // DeepSeek 余额（用量卡里那行）的 key，掩码回显模式同摘要 Key。
+  const [deepseekApiKey, setDeepseekApiKey] = useState('')
+  const [deepseekKeyMasked, setDeepseekKeyMasked] = useState<string | null>(null)
   const [summaryModel, setSummaryModel] = useState('')
   const [autoTodoNudge, setAutoTodoNudge] = useState(false)
   const [cloudUsage, setCloudUsage] = useState(true)
@@ -202,6 +205,12 @@ export default function SettingsPanel(): JSX.Element {
         setAutoTodoNudge(p.autoTodoNudge === true)
         setCloudUsage(p.cloudUsageEnabled !== false)
         setAskOnClose(!p.closePromptDismissed)
+        // DeepSeek key 状态独立拉（同样是只回掩码），不进上面的 Promise.all
+        // 是怕它失败拖垮整个初始化——这一个字段不值得。
+        void window.api
+          .getDeepseekApiKeyStatus()
+          .then((info) => setDeepseekKeyMasked(info.masked))
+          .catch(() => {})
       })
       .catch((e: unknown) => {
         setLoadError(e instanceof Error ? e.message : String(e))
@@ -309,6 +318,32 @@ export default function SettingsPanel(): JSX.Element {
       await window.api.setApiKey('')
       setSummaryKeyMasked(null)
       setSummaryApiKey('')
+      flashSaved()
+    } catch {
+      /* 清除失败保持原状 */
+    }
+  }
+
+  /** DeepSeek 余额 key：保存逻辑与摘要 Key 同款——空输入忽略，清除走按钮，
+   *  保存成功清空输入框并刷新掩码。主进程侧保存后会让余额缓存作废。 */
+  const saveDeepseekKey = async (next: string): Promise<void> => {
+    const trimmed = next.trim()
+    if (!trimmed) return
+    try {
+      const info = await window.api.saveDeepseekApiKey(trimmed)
+      setDeepseekKeyMasked(info.masked)
+      setDeepseekApiKey('')
+      flashSaved()
+    } catch {
+      /* 保留输入，方便用户修正后重试 */
+    }
+  }
+
+  const clearDeepseekKey = async (): Promise<void> => {
+    try {
+      await window.api.saveDeepseekApiKey('')
+      setDeepseekKeyMasked(null)
+      setDeepseekApiKey('')
       flashSaved()
     } catch {
       /* 清除失败保持原状 */
@@ -721,6 +756,34 @@ export default function SettingsPanel(): JSX.Element {
                 ))}
               </div>
             </div>
+            {/* 主题底色：即时生效（根元素 data-theme 切换），只换底色台阶，
+                accent 紫色系不动。 */}
+            <div>
+              <div className="text-xs text-zinc-500">主题底色</div>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                深黑（默认）：一直以来的近黑底色；炭灰：Codex 风，整体抬亮一档，
+                壳 #1b1d21、面板 #23262b。
+              </p>
+              <div className="mt-2 flex gap-1.5">
+                {([
+                  { id: 'onyx', label: '深黑' },
+                  { id: 'charcoal', label: '炭灰' }
+                ] as const).map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => updateAppearance('theme', option.id)}
+                    className={`rounded-lg px-3 py-1.5 text-xs transition ${
+                      appearance.theme === option.id
+                        ? 'bg-accent/20 text-accent'
+                        : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <ToggleControl
               label="玻璃泛光"
               description="控制玻璃组件的外发光、边缘高光和环境泛光。简约风下不生效。"
@@ -1061,6 +1124,39 @@ export default function SettingsPanel(): JSX.Element {
                   </div>
                 </div>
               )}
+            </div>
+            {/* DeepSeek 余额：官方 GET /user/balance，用量卡里展示一行。
+                与上面的摘要 API 相互独立——那边可以是任何 OpenAI 兼容服务。 */}
+            <div className="space-y-2">
+              <div>
+                <div className="text-xs font-medium text-zinc-300">DeepSeek 余额</div>
+                <div className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
+                  用量卡里显示 DeepSeek 账户余额（总 / 充值 / 赠金），走官方公开的
+                  /user/balance 接口。填你的 DeepSeek API Key 即可；官方只暴露余额，
+                  没有 token 用量明细。Key 使用系统安全存储。
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="password"
+                  value={deepseekApiKey}
+                  spellCheck={false}
+                  autoComplete="off"
+                  placeholder={deepseekKeyMasked ? `已配置 ${deepseekKeyMasked} · 输入新 Key 覆盖` : 'sk-...'}
+                  onChange={(e) => setDeepseekApiKey(e.target.value)}
+                  onBlur={(e) => void saveDeepseekKey(e.target.value)}
+                  className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-elev/60 px-2.5 py-1.5 font-mono text-[11px] text-zinc-200 outline-none focus:border-accent/50"
+                />
+                {deepseekKeyMasked && (
+                  <button
+                    type="button"
+                    onClick={() => void clearDeepseekKey()}
+                    className="shrink-0 rounded-lg border border-border-subtle px-2.5 py-1.5 text-[11px] text-zinc-400 transition hover:bg-red-950/40 hover:text-red-300"
+                  >
+                    清除
+                  </button>
+                )}
+              </div>
             </div>
             <ToggleControl
               label="最小化到系统托盘"

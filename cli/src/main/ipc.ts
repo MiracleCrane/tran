@@ -5,7 +5,7 @@ import { basename, extname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AgentBridge } from './agent/AgentBridge'
 import { AGENT_BACKENDS } from '../shared/agentBackends'
-import { getApiKey, setApiKey, loadSettings, saveSettings } from './settings'
+import { getApiKey, setApiKey, getDeepseekApiKey, setDeepseekApiKey, loadSettings, saveSettings } from './settings'
 import { saveMcpServer, deleteMcpServer } from './mcpConfig'
 import {
   listProviders,
@@ -46,6 +46,7 @@ import { probeCheapModels, diagnoseSummaryPrompt } from './cheapModel'
 import { explainCommand, summarizeThinking, translateThinking } from './cheapNotes'
 import { fetchSessionTodos } from './kimiTodos'
 import { getPlanUsageCached } from './usageService'
+import { getDeepseekBalanceCached, invalidateDeepseekBalanceCache } from './deepseekService'
 import { listKimiSessions } from './kimiHistory'
 import { deleteKimiSession } from './sessionDelete'
 import { removeSessionTitle, recordManualTitle } from './sessionTitles'
@@ -101,8 +102,17 @@ import type {
   SummaryModelProbe,
   PromptDiagnosis,
   SessionTodosResult,
-  PlanUsageResult
+  PlanUsageResult,
+  DeepseekBalanceResult
 } from '../shared/ipc'
+
+/** DeepSeek key 状态回传：完整明文不出主进程，只给掩码（对齐 forge:getApiKey）。 */
+function deepseekKeyStatus(): { configured: boolean; masked: string | null } {
+  const key = getDeepseekApiKey()
+  if (!key) return { configured: false, masked: null }
+  const masked = key.length >= 12 ? `${key.slice(0, 4)}***${key.slice(-4)}` : '***'
+  return { configured: true, masked }
+}
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
 const TEXT_EXTS = new Set([
@@ -401,6 +411,24 @@ export function registerIpc(
   })
   // 套餐额度：官方 API + CLI 自己的 OAuth 凭证，不碰浏览器 Cookie（见 usageService.ts）。
   ipcMain.handle('forge:getPlanUsage', async (): Promise<PlanUsageResult> => getPlanUsageCached())
+  // DeepSeek 余额：官方公开接口 + 设置页保存的 API key（见 deepseekService.ts）。
+  ipcMain.handle('forge:getDeepseekBalance', async (): Promise<DeepseekBalanceResult> =>
+    getDeepseekBalanceCached()
+  )
+  ipcMain.handle(
+    'forge:getDeepseekApiKeyStatus',
+    async (): Promise<{ configured: boolean; masked: string | null }> => deepseekKeyStatus()
+  )
+  ipcMain.handle(
+    'forge:saveDeepseekApiKey',
+    async (_e, key: string): Promise<{ configured: boolean; masked: string | null }> => {
+      const trimmed = typeof key === 'string' ? key.trim() : ''
+      setDeepseekApiKey(trimmed || null)
+      // key 变了余额必须立即重拉，不能拿旧 key 的 60s 缓存顶事。
+      invalidateDeepseekBalanceCache()
+      return deepseekKeyStatus()
+    }
+  )
   ipcMain.handle('forge:nudgeTodos', async (_e, sessionId: unknown): Promise<boolean> => {
     // 开关在主进程再校验一次：渲染层已经判过，但这一轮**会真的花额度**，
     // 不能只靠调用方自觉。

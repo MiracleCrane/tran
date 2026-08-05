@@ -10,10 +10,19 @@ import { create } from 'zustand'
  */
 export type UiStyle = 'glass' | 'flat'
 
+/**
+ * 主题底色。
+ * - onyx：一直以来的深黑（壳底近 #05060A）
+ * - charcoal：Codex 风炭灰，整体抬亮一档（壳 #1b1d21、面板 #23262b）。
+ *   只换"底"，accent 紫色系不动。
+ */
+export type ThemeName = 'onyx' | 'charcoal'
+
 export interface AppearanceSettings {
   motionSpeed: number
   glassGlow: boolean
   uiStyle: UiStyle
+  theme: ThemeName
 }
 
 export const MOTION_SPEED_MIN = 25
@@ -24,7 +33,8 @@ export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
   motionSpeed: 50,
   glassGlow: false,
   // 默认简约。玻璃那套仍然保留在设置里，只是不再是新装机看到的第一眼。
-  uiStyle: 'flat'
+  uiStyle: 'flat',
+  theme: 'onyx'
 }
 
 const LEGACY_STORAGE_KEY = 'forge.appearance.v1'
@@ -56,7 +66,11 @@ function normalizeSettings(value: Partial<AppearanceSettings> | null | undefined
     uiStyle:
       value?.uiStyle === 'flat' || value?.uiStyle === 'glass'
         ? value.uiStyle
-        : DEFAULT_APPEARANCE_SETTINGS.uiStyle
+        : DEFAULT_APPEARANCE_SETTINGS.uiStyle,
+    theme:
+      value?.theme === 'onyx' || value?.theme === 'charcoal'
+        ? value.theme
+        : DEFAULT_APPEARANCE_SETTINGS.theme
   }
 }
 
@@ -112,6 +126,7 @@ export function applyAppearanceSettings(settings: AppearanceSettings): void {
   // 扁平化规则必须写在 styles.css 的 @layer components 里才生效：级联层对
   // !important 的优先级是反的（层内赢过层外），层外样式压不住既有的层内规则。
   root.dataset.ui = normalized.uiStyle
+  root.dataset.theme = normalized.theme
 
   root.style.setProperty('--motion-collapse-open', `${Math.round(180 * durationFactor)}ms`)
   root.style.setProperty('--motion-collapse-close', `${Math.round(150 * durationFactor)}ms`)
@@ -172,5 +187,5 @@ export function useApplyAppearanceSettings(): void {
 
   useEffect(() => {
     applyAppearanceSettings(settings)
-  }, [settings.motionSpeed, settings.glassGlow, settings.uiStyle])
+  }, [settings.motionSpeed, settings.glassGlow, settings.uiStyle, settings.theme])
 }

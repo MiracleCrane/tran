@@ -581,6 +581,20 @@ export type PlanUsageResult =
   | { ok: true; data: PlanUsageInfo }
   | { ok: false; error: string }
 
+/** DeepSeek 账户余额（官方 GET /user/balance；金额是接口原样返回的字符串）。 */
+export interface DeepseekBalanceInfo {
+  isAvailable: boolean
+  /** 货币：CNY 或 USD。 */
+  currency: string
+  totalBalance: string
+  grantedBalance: string
+  toppedUpBalance: string
+}
+
+export type DeepseekBalanceResult =
+  | { ok: true; data: DeepseekBalanceInfo }
+  | { ok: false; error: string }
+
 /** kimi 本地 server 的任务条目（tasks API，子代理/后台 Bash）。 */
 export interface KimiTaskInfo {
   id: string
@@ -849,6 +863,12 @@ export interface ForgeApi {
   refreshSessionUsage(sessionId: string): Promise<void>
   /** 套餐额度（5h 滚动窗口 / 每周）。主进程带缓存，失败返回 ok:false。 */
   getPlanUsage(): Promise<PlanUsageResult>
+  /** DeepSeek 账户余额（官方 /user/balance）。主进程带 60s 缓存，失败返回 ok:false。 */
+  getDeepseekBalance(): Promise<DeepseekBalanceResult>
+  /** DeepSeek API key 状态：只回掩码（前 4 后 4），完整明文不出主进程。 */
+  getDeepseekApiKeyStatus(): Promise<{ configured: boolean; masked: string | null }>
+  /** 保存/清空 DeepSeek API key（空字符串 = 清空）；保存后余额缓存作废立即重拉。 */
+  saveDeepseekApiKey(key: string): Promise<{ configured: boolean; masked: string | null }>
   /** --- Git integration --- */
   isGitRepo(cwd: string): Promise<boolean>
   gitGetCurrentBranch(cwd: string): Promise<string | null>

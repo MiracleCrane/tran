@@ -96,6 +96,10 @@ interface PersistedSettings {
   baiduSecretEnc?: string
   /** plaintext fallback when safeStorage is unavailable. */
   baiduSecretPlain?: string
+  /** base64 of safeStorage-encrypted DeepSeek API key（用量卡查余额用）。 */
+  deepseekApiKeyEnc?: string
+  /** plaintext fallback when safeStorage is unavailable. */
+  deepseekApiKeyPlain?: string
 }
 
 let cache: PersistedSettings | null = null
@@ -229,6 +233,8 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.baiduAppId = optionalString(source.baiduAppId)
   settings.baiduSecretEnc = optionalString(source.baiduSecretEnc)
   settings.baiduSecretPlain = optionalString(source.baiduSecretPlain)
+  settings.deepseekApiKeyEnc = optionalString(source.deepseekApiKeyEnc)
+  settings.deepseekApiKeyPlain = optionalString(source.deepseekApiKeyPlain)
   settings.lastProjectPath = optionalString(source.lastProjectPath)
 
   settings.providers = normalizeProviders(source.providers)
@@ -423,6 +429,36 @@ export function setBaiduSecret(key: string | null): void {
   } else {
     delete s.baiduSecretEnc
     delete s.baiduSecretPlain
+  }
+  save(s)
+}
+
+/** Read the saved DeepSeek API key (decrypted). Mirrors getApiKey. */
+export function getDeepseekApiKey(): string | null {
+  const s = load()
+  if (s.deepseekApiKeyEnc && safeStorage.isEncryptionAvailable()) {
+    try {
+      return safeStorage.decryptString(Buffer.from(s.deepseekApiKeyEnc, 'base64'))
+    } catch {
+      return null
+    }
+  }
+  return s.deepseekApiKeyPlain ?? null
+}
+
+/** Persist the DeepSeek API key (encrypted when safeStorage is up).
+ *  Pass null/empty to clear. Mirrors setApiKey. */
+export function setDeepseekApiKey(key: string | null): void {
+  const s = load()
+  if (key && safeStorage.isEncryptionAvailable()) {
+    s.deepseekApiKeyEnc = safeStorage.encryptString(key).toString('base64')
+    delete s.deepseekApiKeyPlain
+  } else if (key) {
+    s.deepseekApiKeyPlain = key
+    delete s.deepseekApiKeyEnc
+  } else {
+    delete s.deepseekApiKeyEnc
+    delete s.deepseekApiKeyPlain
   }
   save(s)
 }

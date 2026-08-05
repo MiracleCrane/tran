@@ -63,15 +63,19 @@ const USER_NAV_SMOOTH_MAX_ROWS = 40
 const EMPTY_HISTORY_ATTACHMENTS: ReadonlyMap<string, UserAttachment[]> = new Map()
 
 /**
- * 底部状态区（"正在处理…"流光文字）。
+ * 底部状态区（只剩"正在压缩上下文…"提示和 bottomReserve 占位）。
  *
  * 必须是模块级组件：此前它是写在 Virtuoso `components={{ Footer: () => ... }}`
  * 里的内联箭头函数，每次 Transcript 重渲染都会产生一个新的组件类型，React
  * 据此卸载旧节点、挂载新节点——CSS 动画随之从头播放。流式输出期间
  * Transcript 每帧都重渲染，于是转圈不停被打断（用户可见为"转到一半跳回起点"）。
  *
- * running/compacting 自己从 store 订阅，bottomReserve 走 Virtuoso 的 context，
+ * compacting 自己从 store 订阅，bottomReserve 走 Virtuoso 的 context，
  * 两者都是 props/state 变化而非类型变化，不会触发 remount。
+ *
+ * 注：这里原来还有一行"Tran 正在处理…"运行指示，已删——它与输入框上方的
+ * "AI 正在输出中"（带计时+排队数）和消息内的"输出中…"三处同屏重复，留信息
+ * 最全的两处即可。
  */
 const TranscriptFooter = memo(function TranscriptFooter({
   context
@@ -79,16 +83,10 @@ const TranscriptFooter = memo(function TranscriptFooter({
   context?: { bottomReserve: number }
 }): JSX.Element {
   const compacting = useSessionStore((s) => s.status.compacting)
-  const running = useSessionStore((s) => s.status.running)
   const bottomReserve = context?.bottomReserve ?? 0
   return (
     <div className="mx-auto w-full max-w-5xl px-6 py-2">
       {compacting && <div className="text-center text-xs text-zinc-500">正在压缩上下文…</div>}
-      {running && (
-        <div className="text-xs text-zinc-500">
-          <span className="flow-text flow-text-sky">Tran 正在处理…</span>
-        </div>
-      )}
       {bottomReserve > 0 && <div aria-hidden="true" style={{ height: bottomReserve }} />}
     </div>
   )
@@ -405,7 +403,7 @@ const UserMessage = memo(function UserMessage({
           </div>
         )}
       </div>
-      {/* #43 时间戳：常显 HH:mm 小字（低透明度），悬停 title 给完整年月日时分秒；
+      {/* #43 时间戳：默认隐藏、悬停该条消息才浮出 HH:mm:ss，title 给完整年月日时分秒；
           绝对定位落在气泡左侧的留白里（见 styles.css 的 .tran-msg-time 注释）。
           挂在外层 flex 容器上而不是气泡里——气泡是靠右的，留白在它外面。 */}
       {at !== undefined && (
@@ -455,7 +453,9 @@ const ThinkingBlock = memo(function ThinkingBlock({
   const preview = note ?? text.replace(/\s+/g, ' ').trim().slice(0, 60)
   const bodyText = translated && !showOriginal ? translated : text
   return (
-    <div className="thinking-block glass-panel-soft my-1 rounded-xl px-3 py-2">
+    // 完全裸排版（Codex 风）：无框无竖条无底，唯一的动态信号是流式时
+    // 标题的紫黄流光（flow-text）。.thinking-block 类名保留给 TRANSCRIPT_BAR_SELECTOR。
+    <div className="thinking-block my-1 py-1">
       <button
         type="button"
         aria-expanded={open}
@@ -463,9 +463,9 @@ const ThinkingBlock = memo(function ThinkingBlock({
         className="flex w-full cursor-pointer select-none items-center gap-1.5 text-left text-xs font-medium text-zinc-500 hover:text-zinc-400"
       >
         <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
-        {/* 进行中用流光扫过文字本身，不再在前面挂一颗转圈的月亮：
+        {/* 进行中用紫黄流光扫过文字本身，不再在前面挂一颗转圈的月亮：
             动效落在正在变化的东西上，比额外加一个装饰件干净。 */}
-        <span className={`shrink-0 ${streaming ? 'tran-shimmer' : ''}`}>
+        <span className={`shrink-0 ${streaming ? 'flow-text flow-text-violet' : ''}`}>
           思考过程 · {text.length} 字
         </span>
         {!open && (
@@ -505,6 +505,70 @@ const ThinkingBlock = memo(function ThinkingBlock({
 /** Takes `item` (not the wrapping forest node) precisely so React.memo's shallow
  *  compare can short-circuit: the forest node is rebuilt every frame, but the
  *  underlying item keeps its reference when unchanged. */
+/** 完成轮活动摘要里工具名 → 中文动作（纯规则统计，不调 API）。 */
+const TOOL_ACTIVITY_LABEL: Record<string, string> = {
+  Bash: '运行了命令',
+  Edit: '编辑了文件',
+  Write: '创建了文件',
+  Read: '读取了文件',
+  Glob: '查找了文件',
+  Grep: '搜索了内容',
+  Agent: '派发了子代理',
+  AgentSwarm: '派发了子代理',
+  WebSearch: '搜索了网页',
+  FetchURL: '抓取了网页',
+  TodoList: '更新了待办'
+}
+
+interface ActivityEntry {
+  block: AssistantBlock
+  index: number
+}
+
+/** 一段连续「思考 + 工具调用」的规则摘要："思考 2 段 · 运行了命令 ×5 · 编辑了文件"。 */
+function summarizeActivity(entries: ActivityEntry[]): string {
+  let thinking = 0
+  const tools = new Map<string, number>()
+  for (const { block } of entries) {
+    if (block.kind === 'thinking') thinking += 1
+    else if (block.kind === 'tool') tools.set(block.name, (tools.get(block.name) ?? 0) + 1)
+  }
+  const parts: string[] = []
+  if (thinking > 0) parts.push(thinking > 1 ? `思考 ${thinking} 段` : '思考')
+  for (const [name, count] of tools) {
+    const label = TOOL_ACTIVITY_LABEL[name] ?? `使用了 ${name}`
+    parts.push(count > 1 ? `${label} ×${count}` : label)
+  }
+  return parts.join(' · ')
+}
+
+/** 完成轮的一段折叠活动（Codex 风）：默认一行规则摘要，点开还原成
+ *  ThinkingBlock / ToolCallCard 的完整渲染——数据不动，纯视图折叠。
+ *  必须是模块级组件：open 状态随组件实例走，内联定义会被父级重渲染重建。 */
+const ActivityGroupRow = memo(function ActivityGroupRow({
+  entries,
+  renderBlock
+}: {
+  entries: ActivityEntry[]
+  renderBlock: (entry: ActivityEntry) => JSX.Element
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="my-1">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex cursor-pointer select-none items-center gap-1.5 text-left text-xs text-zinc-500 transition hover:text-zinc-400"
+      >
+        <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
+        <span>{summarizeActivity(entries)}</span>
+      </button>
+      {open && entries.map(renderBlock)}
+    </div>
+  )
+})
+
 const AssistantMessage = memo(function AssistantMessage({
   item,
   depth,
@@ -538,11 +602,17 @@ const AssistantMessage = memo(function AssistantMessage({
           卸载重建，代价是每轮结束都：思考块的用户折叠/展开状态被丢弃（最新块
           会自己弹回展开）、正文 markdown 整棵树重建 + highlight.js 重跑（正好
           卡在用户开始读答案的那一刻）。而 Profiler 的 onRender 在生产构建里
-          本就不回调（要 react-dom/profiling 才生效），纯负收益，故移除。 */}
-      {item.blocks
-        .map((block, index) => ({ block, index }))
-        .filter((entry): entry is { block: AssistantBlock; index: number } => !!entry.block)
-        .map(({ block, index: i }) => {
+          本就不回调（要 react-dom/profiling 才生效），纯负收益，故移除。
+
+          完成轮的活动折叠（Codex 风）：!isStreaming 时，连续 ≥2 个非正文块
+          （思考 + 工具调用）收进一行规则摘要（ActivityGroupRow），点开还原完整
+          渲染。正文块的 key/组件路径不变，不会被这次折叠波及重建。 */}
+      {(() => {
+        const entries: ActivityEntry[] = item.blocks
+          .map((block, index) => ({ block, index }))
+          .filter((entry): entry is ActivityEntry => !!entry.block)
+
+        const renderBlock = ({ block, index: i }: ActivityEntry): JSX.Element => {
           if (block.kind === 'text') {
             const highlight = !isStreaming && !deferHighlight
             return (
@@ -570,13 +640,36 @@ const AssistantMessage = memo(function AssistantMessage({
               forceExpanded={expandedBlockKey === block.toolUseId}
             />
           )
-        })}
-      {isStreaming && (
-        <div className="mt-1 text-xs text-zinc-500">
-          <span className="flow-text flow-text-emerald">输出中…</span>
-        </div>
-      )}
-      {/* #43 时间戳：常显 HH:mm 小字（低透明度），悬停 title 给完整年月日时分秒；
+        }
+
+        if (isStreaming) return entries.map(renderBlock)
+
+        const rows: JSX.Element[] = []
+        let run: ActivityEntry[] = []
+        const flush = (): void => {
+          // 单个块不值得多包一层：ThinkingBlock 自己就是一行摘要，ToolCallCard
+          // 本身已是紧凑卡片。
+          if (run.length >= 2) {
+            rows.push(<ActivityGroupRow key={run[0].index} entries={run} renderBlock={renderBlock} />)
+          } else {
+            rows.push(...run.map(renderBlock))
+          }
+          run = []
+        }
+        for (const entry of entries) {
+          if (entry.block.kind === 'text') {
+            flush()
+            rows.push(renderBlock(entry))
+          } else {
+            run.push(entry)
+          }
+        }
+        flush()
+        return rows
+      })()}
+      {/* 流式不再单独挂"输出中…"指示——思考标题的紫黄流光 + 正文滚动本身
+          就是信号；全局状态（计时/排队）由输入框上方那条承担。 */}
+      {/* #43 时间戳：默认隐藏、悬停该条消息才浮出 HH:mm:ss，title 给完整年月日时分秒；
           绝对定位落在容器右侧的留白里（见 styles.css 的 .tran-msg-time 注释）。
           只在 depth 0 显示：嵌套的子代理消息没有那条 92% 宽度限制，右侧没有
           留白可用，标上去只会压在字上——顶层那条时间已经够定位了。 */}

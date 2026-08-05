@@ -1306,7 +1306,7 @@ export default function Sidebar(): JSX.Element {
             void newChat()
             setView('chat')
           }}
-          className="accent-soft-button flex h-9 w-full items-center justify-center gap-2 rounded-[12px] px-3 text-[13px] font-medium text-white transition hover:brightness-110"
+          className="glass-control flex h-9 w-full items-center justify-center gap-2 rounded-[12px] px-3 text-[13px] font-medium text-zinc-300 transition hover:bg-white/[0.09]"
         >
           + 新建对话
         </button>
