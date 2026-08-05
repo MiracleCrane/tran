@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.53 - 2026-08-05
+
+### 中文
+
+- 修复:**任务栏/开始菜单图标在小尺寸下偏"一块纯黑方块"**。设计没有任何改动,问题出在亚像素量化:白 T 的横笔在 32px 上算出来是 2.87 像素,被舍成 2 像素,一下丢掉 30% 的墨量(256px 白色占比 11.6%,32px 只有 6.2%)。现在 ≤48px 的档位把笔画宽度向上取整重绘,白色占比回到 8% 上下。**底板、圆角、底部颗粒质感和紫点一个像素都没动**,只有 T 变厚实了。
+- 清理:`scripts/generate-icon.cjs` 原本是早已废弃的橙底白 F(老 Forge 图标)生成器,与在用的图标毫无关系,留着只会误导。现改写为上述小尺寸字形加粗工具,可重复执行且幂等。
+
+### English
+
+- Fixed: **the taskbar / Start-menu icon read as a near-black tile at small sizes**. The design is unchanged; the cause was sub-pixel quantization — the white T's bar computes to 2.87px at 32px and got floored to 2px, losing 30% of its ink (white coverage: 11.6% at 256px vs 6.2% at 32px). Sizes ≤48px now redraw the glyph with stroke widths rounded up, bringing coverage back to ~8%. The tile, corners, bottom grain texture and purple dot are untouched — only the T got its weight back.
+- Cleanup: `scripts/generate-icon.cjs` was a long-dead generator for the orange-and-white "F" (legacy Forge icon) with no relation to the icon actually shipping. It is now the small-size glyph-weight tool described above, and is idempotent across runs.
+
 ## v1.0.52 - 2026-08-05
 
 ### 中文
