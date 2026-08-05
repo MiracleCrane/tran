@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.55 - 2026-08-05
+
+### 中文
+
+- 新增:**diff 的代码带语法高亮了**(Codex 风格)。此前只有加/删的红绿底色,代码本身是纯文本;现在按文件扩展名推断语言着色,统一视图与并排视图都有。
+- 做法上有个必须的细节:把 diff 还原成"旧文件"和"新文件"两份完整文本各高亮一次再按行切回来 —— 逐行单独高亮会丢掉跨行语境,块注释和模板字符串里的每一行都会被当成独立代码,颜色全错。
+- 成对改动的行保留原有的**词级**着色、不叠语法高亮:词级分段是按字符切的,会把语法 token 拦腰截断,两套着色叠在一起更难读;而在一对改动行上,"改了哪几个词"比"这是个关键字"更重要。
+- 顺带:「AI 正在输出中」那行改成紫色流光文字。
+
+### English
+
+- New: **syntax highlighting inside diffs** (Codex-style). Previously only the added/removed tint was there and the code itself was plain text; the language is now inferred from the file extension, in both unified and side-by-side views.
+- One detail that matters: the diff is reconstructed into complete "old file" and "new file" texts, highlighted once each, then split back per line — highlighting line by line loses cross-line context, so every line inside a block comment or template literal would be treated as standalone code and colored wrong.
+- Paired changed lines keep their existing **word-level** tint instead of stacking syntax highlighting on top: word segments are cut by character offset and would slice syntax tokens in half; on a changed pair, "which words changed" matters more than "this is a keyword".
+- Also: the "AI is responding" line is now violet flowing text.
+
 ## v1.0.54 - 2026-08-05
 
 ### 中文
