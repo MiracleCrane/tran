@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.57 - 2026-08-05
+
+### 中文
+
+- 修复:**删除会话删不掉**。Tran 把 kimi 的数据目录写死成 `~/.kimi-code`,无视 `KIMI_CODE_HOME`。用户把 home 指到别处时,那个旧目录往往还在、格式还对得上 —— 删除于是在一份**搬家前的过期副本**上重写索引、删目录,然后返回成功,而 `session/list` 走的是真 home,条目原样返回。表现就是点删除毫无反应,点几次都没用。
+- 同一个写死路径还让另外四处静默失效:AI 会话命名读不到历史消息(退化成兜底标题)、kimi server 的 token 与实例发现找错目录、后台任务的磁盘数据源读空、`session/load` 缺失 plan 文件的补写因白名单不匹配而从不触发。现在 home 解析统一收敛到 `kimiHome.ts` 一处。
+- 修复:删除会话时**什么都没删掉却报成功**。索引里没有、目录也找不到时,现在如实报错并说明当前数据目录,不再假装成功 —— 这正是上面那个 bug 需要点三次才让人察觉不对的原因。
+- 注意:定位 kimi **可执行文件**的路径仍是 `~/.kimi-code/bin`,不随 `KIMI_CODE_HOME` 走(kimi 自己上报的登录命令就是该路径)。
+
+### English
+
+- Fix: **deleting a session did nothing**. Tran hardcoded kimi's data directory to `~/.kimi-code`, ignoring `KIMI_CODE_HOME`. When the home is redirected elsewhere, that stale directory usually still exists with a matching layout — so the delete rewrote the index and removed directories in a **pre-move copy**, then reported success, while `session/list` reads the real home and returned the entry unchanged. The visible symptom: clicking delete does nothing, no matter how many times you click.
+- The same hardcoded path silently broke four other things: AI session naming could not read past messages (falling back to a generic title), the kimi server token and instance discovery looked in the wrong place, the on-disk source for background tasks read empty, and the missing-plan-file recovery after `session/load` never fired because the path failed its whitelist. Home resolution is now centralized in `kimiHome.ts`.
+- Fix: deleting a session **reported success while deleting nothing**. When the session is in neither the index nor on disk, it now reports a real error naming the current data directory instead of pretending to succeed — which is exactly why the bug above took three clicks to notice.
+- Note: locating the kimi **executable** still uses `~/.kimi-code/bin` and deliberately does not follow `KIMI_CODE_HOME` (that is the path kimi itself reports for its own login command).
+
 ## v1.0.56 - 2026-08-05
 
 ### 中文

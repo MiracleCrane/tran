@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { homedir } from 'node:os'
+import { kimiSessionsRoot } from '../kimiHome'
 import type {
   ComposerModel,
   MarketplacePlugin,
@@ -255,8 +255,9 @@ function isAnotherTurnError(error: unknown): boolean {
 }
 
 /** 从 session/load 的错误文本中解析缺失的 plan 文件绝对路径。严格白名单校验
- *  （必须位于 ~/.kimi-code/sessions 下、属于该会话、在 plans 目录、.md 结尾），
- *  防止异常文本诱导写出任意路径。 */
+ *  （必须位于 $KIMI_CODE_HOME/sessions 下、属于该会话、在 plans 目录、.md 结尾），
+ *  防止异常文本诱导写出任意路径。根目录写死 ~/.kimi-code 的话，home 被重定向时
+ *  真实 plan 路径一律不匹配白名单，补写兜底静默失效。 */
 function missingPlanFileFromError(error: unknown, acpSessionId: string): string | null {
   const haystack = errorHaystack(error)
   if (!haystack.includes('ENOENT') || !haystack.includes('readTextFile')) return null
@@ -264,7 +265,7 @@ function missingPlanFileFromError(error: unknown, acpSessionId: string): string 
   if (!match) return null
   const p = match[1].trim()
   const norm = (s: string): string => s.replace(/\//g, '\\').toLowerCase()
-  const sessionsRoot = join(homedir(), '.kimi-code', 'sessions')
+  const sessionsRoot = kimiSessionsRoot()
   if (!norm(p).startsWith(norm(sessionsRoot))) return null
   if (!norm(p).includes(norm(acpSessionId)) || !norm(p).includes('\\plans\\')) return null
   return p

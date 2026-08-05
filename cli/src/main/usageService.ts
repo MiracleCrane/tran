@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { kimiHome } from './kimiHome'
 import { writeJsonAtomic } from './atomicWrite'
 import { log } from './logger'
 import { loadSettings } from './settings'
@@ -38,10 +38,8 @@ interface OAuthCredentials {
 }
 
 function credentialsPath(): string {
-  // CLI 的 home 可能被 KIMI_CODE_HOME 指到别处（如 C:\LegacyD\Programs\kimi-code）；
-  // 写死 ~/.kimi-code 会读到轮换前的旧 refresh_token，刷新必然 400。
-  const home = process.env.KIMI_CODE_HOME?.trim()
-  return join(home || join(homedir(), '.kimi-code'), 'credentials', 'kimi-code.json')
+  // 写死 ~/.kimi-code 会读到轮换前的旧 refresh_token，刷新必然 400（见 kimiHome.ts）。
+  return join(kimiHome(), 'credentials', 'kimi-code.json')
 }
 
 function readCredentials(): OAuthCredentials | null {

@@ -1,18 +1,22 @@
 import { existsSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { basename, join, resolve, sep } from 'node:path'
 import { log } from './logger'
+import { kimiSessionIndexPath, kimiSessionsRoot } from './kimiHome'
 
 /** 会话永久删除（真删除、不留备份）。
  *
  *  kimi 会话存储结构（实测）：
- *  - ~/.kimi-code/sessions/wd_<项目>_<hash>/session_<uuid>/  —— 每会话一个目录
+ *  - $KIMI_CODE_HOME/sessions/wd_<项目>_<hash>/session_<uuid>/ —— 每会话一个目录
  *    （内含 agents/、state.json 等）
- *  - ~/.kimi-code/session_index.jsonl —— 索引，每行 {sessionId, sessionDir, workDir}
+ *  - $KIMI_CODE_HOME/session_index.jsonl —— 索引，每行 {sessionId, sessionDir, workDir}
+ *
+ *  路径一律走 kimiHome()：写死 ~/.kimi-code 会在 home 被 KIMI_CODE_HOME 重定向
+ *  时操作到一份过期副本——全程不报错，却对 kimi 正在用的数据毫无影响，表现就是
+ *  「删除会话删不掉」（见 kimiHome.ts）。
  *
  *  删除 = 移除索引对应行（整文件重写）+ 删除 sessionDir。
- *  安全约束：sessionDir 必须 resolve 在 ~/.kimi-code/sessions/ 内（防路径穿越），
- *  且目录 basename 必须等于 sessionId；索引里查不到时按目录名约定兜底扫描。 */
+ *  安全约束：sessionDir 必须 resolve 在 sessions 根内（防路径穿越），且目录
+ *  basename 必须等于 sessionId；索引里查不到时按目录名约定兜底扫描。 */
 
 interface DeleteResult {
   ok: boolean
@@ -20,11 +24,11 @@ interface DeleteResult {
 }
 
 function sessionsRoot(): string {
-  return resolve(join(homedir(), '.kimi-code', 'sessions'))
+  return resolve(kimiSessionsRoot())
 }
 
 function indexPath(): string {
-  return join(homedir(), '.kimi-code', 'session_index.jsonl')
+  return kimiSessionIndexPath()
 }
 
 /** 校验目标目录解析后确实在 sessions 根目录内，返回 resolved 路径或 null。 */
@@ -59,6 +63,7 @@ export function deleteKimiSession(sessionId: string): DeleteResult {
 
   // 1) 索引：移除对应行并拿到 sessionDir（整文件重写，先写临时文件再 rename）。
   let sessionDir: string | null = null
+  let removedIndexLine = false
   try {
     const lines = readFileSync(indexPath(), 'utf8').split(/\r?\n/)
     const kept: string[] = []
@@ -73,6 +78,7 @@ export function deleteKimiSession(sessionId: string): DeleteResult {
       }
       if (entry?.sessionId === sessionId) {
         if (typeof entry.sessionDir === 'string') sessionDir = entry.sessionDir
+        removedIndexLine = true
         continue // 移除该行
       }
       kept.push(trimmed)
@@ -101,9 +107,19 @@ export function deleteKimiSession(sessionId: string): DeleteResult {
   }
 
   // 3) 删目录（严格路径校验）；索引行已移除，目录不存在也视为成功。
+  let removedDir = false
   if (sessionDir && existsSync(sessionDir)) {
     const error = deleteDir(sessionId, sessionDir)
     if (error) return { ok: false, error: `删除会话目录失败：${error}` }
+    removedDir = true
+  }
+
+  // 索引里没有、目录也找不到 = 这个 home 下压根没有这个会话，什么都没删掉。
+  // 以前这里照样返回成功，UI 提示"已删除"而列表纹丝不动（session/list 走的是
+  // 真 home），用户只能反复点删除——必须如实报错，别再假装成功。
+  if (!removedIndexLine && !removedDir) {
+    log('session-delete', `not found in ${sessionsRoot()}: ${sessionId}`)
+    return { ok: false, error: `会话不在当前 kimi 数据目录中，未删除任何内容（${sessionsRoot()}）` }
   }
   log('session-delete', `deleted ${sessionId}`)
   return { ok: true }

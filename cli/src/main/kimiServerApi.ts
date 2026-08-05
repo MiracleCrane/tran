@@ -1,10 +1,10 @@
 import { readFileSync, readdirSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { app } from 'electron'
 import { log } from './logger'
 import { resolveWindowsKimiCommand } from './windowsKimi'
+import { kimiHome, kimiSessionsRoot } from './kimiHome'
 
 /**
  * kimi 本地 server（REST + WebSocket + web UI 后端）连接管理。
@@ -13,8 +13,8 @@ import { resolveWindowsKimiCommand } from './windowsKimi'
  * - 启动方式：`kimi web --no-open`（前台进程，约 2s 就绪；旧的 `kimi server
  *   run` 已移除，执行后打印 deprecated 提示立即退出）。Tran 持有 child 句柄，
  *   app quit 时终止整棵进程树。默认端口 58627。
- * - token 机制不变：~/.kimi-code/server.token，Bearer 认证。
- * - 发现机制：~/.kimi-code/server/instances/<server_id>.json 是 JSON {pid,
+ * - token 机制不变：$KIMI_CODE_HOME/server.token，Bearer 认证。
+ * - 发现机制：$KIMI_CODE_HOME/server/instances/<server_id>.json 是 JSON {pid,
  *   host, port, started_at, heartbeat_at, host_version}（不再有 server/lock）。
  *   文件可能残留（pid 死了文件还在），发现时校验 pid 存活或 heartbeat 新鲜。
  * - tasks API：GET /api/v1/sessions/<sessionId>/tasks → {data:{items:[{id,
@@ -53,7 +53,7 @@ interface ServerHandle {
 }
 
 function tokenPath(): string {
-  return join(homedir(), '.kimi-code', 'server.token')
+  return join(kimiHome(), 'server.token')
 }
 
 function readToken(): string | null {
@@ -66,7 +66,7 @@ function readToken(): string | null {
 }
 
 function instancesDir(): string {
-  return join(homedir(), '.kimi-code', 'server', 'instances')
+  return join(kimiHome(), 'server', 'instances')
 }
 
 function pidAlive(pid: number): boolean {
@@ -284,7 +284,7 @@ function asString(value: unknown): string | undefined {
 }
 
 /** #34 磁盘数据源：ACP 主代理把后台任务记录实时写在
- *  ~/.kimi-code/sessions/<workspace>/<sessionId>/agents/main/tasks/<taskId>.json
+ *  $KIMI_CODE_HOME/sessions/<workspace>/<sessionId>/agents/main/tasks/<taskId>.json
  *  形态 {taskId, kind: "agent"|"process", status: running|completed|failed|
  *  killed|lost, description, command?, startedAt, endedAt(epoch ms, 未完为 null)}。
  *  taskId 与 launch ack 文本里的 task_id 同空间（实证一致）。REST 查不到这些
@@ -292,7 +292,7 @@ function asString(value: unknown): string | undefined {
 function readDiskTasks(sessionId: string): KimiTaskInfo[] {
   // sessionId 拼路径，先挡目录穿越。
   if (!/^[\w-]+$/.test(sessionId)) return []
-  const base = join(homedir(), '.kimi-code', 'sessions')
+  const base = kimiSessionsRoot()
   let workspaces: string[]
   try {
     workspaces = readdirSync(base)

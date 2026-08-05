@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { kimiHome } from './kimiHome'
 import { readJsonSafe, writeJsonAtomic } from './atomicWrite'
 import { log } from './logger'
 import type { McpScope, McpServerConfigInput } from '../shared/ipc'
@@ -23,11 +23,9 @@ import type { McpScope, McpServerConfigInput } from '../shared/ipc'
  * 每次操作都是读-改-写，只动目标 `mcpServers` 子树，文件里其余键原样保留。
  */
 
-/** Kimi Code 的用户级 MCP 配置文件。CLI 的 home 可能被 KIMI_CODE_HOME 指到
- *  别处（如 C:\LegacyD\Programs\kimi-code），写死 ~/.kimi-code 会写错地方。 */
+/** Kimi Code 的用户级 MCP 配置文件（home 解析见 kimiHome.ts）。 */
 function userConfigPath(): string {
-  const home = process.env.KIMI_CODE_HOME?.trim()
-  return join(home || join(homedir(), '.kimi-code'), 'mcp.json')
+  return join(kimiHome(), 'mcp.json')
 }
 
 function projectConfigPath(cwd: string): string {

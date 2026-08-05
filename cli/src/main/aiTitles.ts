@@ -1,9 +1,9 @@
 import { app } from 'electron'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { readJsonSafe, writeFileAtomic } from './atomicWrite'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { log } from './logger'
+import { kimiSessionsRoot } from './kimiHome'
 import { cheapSummarize } from './cheapModel'
 import { loadSettings } from './settings'
 import { manualSessionTitle } from './sessionTitles'
@@ -114,11 +114,13 @@ export async function generateAiTitle(
   return title
 }
 
-/** 从磁盘读会话的首条/最近用户消息（~/.kimi-code/sessions/wd_*​/sessionId/
- *  state.json 的 lastPrompt，实测存在）。读不到返回 null。 */
+/** 从磁盘读会话的首条/最近用户消息（$KIMI_CODE_HOME/sessions/wd_*​/sessionId/
+ *  state.json 的 lastPrompt，实测存在）。读不到返回 null。
+ *  路径走 kimiHome()：写死 ~/.kimi-code 在 home 被重定向时只会读到过期副本，
+ *  新会话一律读空、AI 命名静默退化成兜底标题。 */
 export function readSessionPromptFromDisk(sessionId: string): string | null {
   try {
-    const root = join(homedir(), '.kimi-code', 'sessions')
+    const root = kimiSessionsRoot()
     for (const wd of readdirSync(root, { withFileTypes: true })) {
       if (!wd.isDirectory()) continue
       const stateFile = join(root, wd.name, sessionId, 'state.json')
