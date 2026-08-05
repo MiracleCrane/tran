@@ -15,10 +15,13 @@ const STATUS_DOT: Record<McpServerStatusKind, string> = {
 }
 
 function serverLabel(server: McpServerEntry): string {
-  const parts = [server.name, server.status]
+  // 降噪（2026-08）：connected 由状态点表达、stdio 是默认类型，都不写进文案；
+  // 只有异常状态（pending/failed/needs-auth）和远程类型（sse/http）才值得占字。
+  const parts = [server.name]
+  if (server.status !== 'connected') parts.push(server.status)
   if (server.toolCount !== undefined) parts.push(`${server.toolCount} tools`)
   else if (server.tools) parts.push(`${server.tools.length} tools`)
-  if (server.config?.type) parts.push(`(${server.config.type})`)
+  if (server.config?.type && server.config.type !== 'stdio') parts.push(`(${server.config.type})`)
   return parts.join(' · ')
 }
 
@@ -57,13 +60,14 @@ export default function McpStatusBar(): JSX.Element | null {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl shrink-0 items-center gap-2 px-6 pb-1.5 text-[11px] text-zinc-500">
-      <span className="shrink-0 font-medium uppercase tracking-wide text-zinc-600">MCP</span>
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-0.5">
+    // 2026-08 重样式：服务器收成小胶囊 + 底部发丝分割线。之前是裸文本行直接
+    // 压在对话内容上，和待办卡提示、消息正文三段糊在一起，边界感为零。
+    <div className="mx-auto flex w-full max-w-5xl shrink-0 items-center gap-2 border-b border-white/[0.06] px-6 pb-2 pt-0.5 text-[11px] text-zinc-500">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {servers.map((server) => (
           <span
             key={server.name}
-            className="flex min-w-0 items-center gap-1.5"
+            className="flex min-w-0 items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.03] px-2 py-0.5"
             title={server.error ?? serverLabel(server)}
           >
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[server.status]}`} />
@@ -75,7 +79,7 @@ export default function McpStatusBar(): JSX.Element | null {
         type="button"
         onClick={refresh}
         title="重新查询 MCP 状态"
-        className="shrink-0 rounded-md p-1 text-zinc-600 transition hover:bg-white/[0.06] hover:text-zinc-300"
+        className="shrink-0 rounded-full p-1 text-zinc-600 transition hover:bg-white/[0.06] hover:text-zinc-300"
       >
         <RefreshIcon spinning={refreshing} />
       </button>

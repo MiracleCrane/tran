@@ -27,6 +27,25 @@ module.exports = {
       // JetBrains Mono 是 0.6em，1 个汉字 ≠ 2 个西文字符（差 0.2em，每 3 个汉字
       // 少一个西文字符宽）。要对齐得换 CJK 等宽字体（更纱黑体那类，5–15MB），
       // Codex 自己也没做。
+      // 圆角标度对齐 Codex 桌面版实测的 --radius-* token（app.asar 里读的）：
+      //   sm .375rem(6) / md .5rem(8) / lg .625rem(10) / 2xl 1rem(16)
+      //   3xl 1.25rem(20) / 4xl 1.5rem(24) / 2xs .125rem(2)
+      // Tailwind 默认是 sm 2 / md 6 / lg 8 / 3xl 24——整体比 Codex 硬。覆盖标度
+      // 而不是逐处改类名：全 app 几百处 rounded-* 一次生效，也不会漏。
+      // xl 保持 12px（Codex 没有对应档，介于 lg 10 与 2xl 16 之间，原值正好）。
+      borderRadius: {
+        '2xs': '0.125rem',
+        xs: '0.25rem',
+        sm: '0.375rem',
+        DEFAULT: '0.375rem',
+        md: '0.5rem',
+        lg: '0.625rem',
+        xl: '0.75rem',
+        '2xl': '1rem',
+        '3xl': '1.25rem',
+        '4xl': '1.5rem',
+        full: '9999px'
+      },
       fontFamily: {
         sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', '"Microsoft YaHei"', '"PingFang SC"', 'sans-serif'],
         mono: [

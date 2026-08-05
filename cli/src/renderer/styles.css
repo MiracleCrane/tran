@@ -88,6 +88,14 @@ html.scrollbars-active {
   margin-inline: auto;
 }
 
+/* 侧栏展开态的宽度由 SidebarShell 经 --sidebar-w 下发（可拖拽调节）。
+ * Sidebar 内部写的是 Tailwind 的 w-64；工具类在 @layer utilities 里，而
+ * **无层声明胜过任何 @layer**，所以这条不带 @layer 的规则能盖住它。
+ * 收起态（.sidebar-collapse）是固定宽度的图标条，不受这里影响。 */
+.sidebar-dock .sidebar-expand {
+  width: var(--sidebar-w, 16rem);
+}
+
 body {
   margin: 0;
   overflow: hidden;
@@ -404,11 +412,56 @@ textarea:focus-visible {
     margin-left: 1rem;
   }
 
-  /* ---- 侧栏「完全隐藏」（SidebarShell）---- */
+  /* ---- 侧栏与标题栏合体（Codex 式）----
+     标题栏已挪进主列内部（见 App.tsx），这里把剩下的"框感"抹掉：
+     外圈留白、侧栏外缘圆角与边框、标题栏那条紫色分隔线。 */
 
-  /* 拖拽把手：贴在侧栏右缘的一条窄带，平时不可见，hover 才显出一条竖线。
+  .app-shell-merged .workspace-shell {
+    padding: 0;
+  }
+
+  /* 主列自己留出呼吸位；原先靠 workspace-shell 的 p-4 统一给，现在侧栏要贴边，
+     只能由主列单独承担。左侧不留——那正是与侧栏相接的一侧，留了就又出现缝。 */
+  .app-shell-merged .workspace-shell > .main-surface {
+    margin-left: 0;
+    border-radius: 0;
+  }
+
+  /* 侧栏贴满左侧与顶部：去掉圆角和外边框，只保留与主区相接的那条分隔线。 */
+  .app-shell-merged .glass-sidebar {
+    border-radius: 0;
+    border-top: none;
+    border-left: none;
+    border-bottom: none;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  /* 合体后标题栏只盖在主区上方，底部那条紫色渐变线是"两块拼接"的最后痕迹，去掉。 */
+  .app-shell-merged .window-titlebar {
+    background-image: none;
+  }
+
+  /* 窗口拖拽区拆成两半：标题栏本身 + 侧栏顶部品牌行。
+     不做的话，合体后侧栏占据了窗口左上角，那一片按住拖不动窗口——
+     而左上角恰恰是大多数人下意识去拖的位置。
+     里面的按钮必须显式 no-drag，否则落在拖拽区内的按钮点不动。 */
+  .app-shell-merged .sidebar-expand > :first-child,
+  .app-shell-merged .sidebar-collapse {
+    -webkit-app-region: drag;
+  }
+
+  .app-shell-merged .sidebar-expand > :first-child button,
+  .app-shell-merged .sidebar-collapse button,
+  .app-shell-merged .sidebar-expand > :first-child a,
+  .app-shell-merged .sidebar-collapse a {
+    -webkit-app-region: no-drag;
+  }
+
+  /* ---- 侧栏宽度调节（SidebarShell）---- */
+
+  /* 调节边：贴在侧栏右缘的窄带，平时不可见，hover / 拖拽时显出一条竖线。
      宽 6px 是权衡——再窄不好抓，再宽会盖住侧栏内容的点击。 */
-  .sidebar-drag-handle {
+  .sidebar-resize-handle {
     position: absolute;
     top: 0;
     bottom: 0;
@@ -419,7 +472,7 @@ textarea:focus-visible {
     touch-action: none;
   }
 
-  .sidebar-drag-handle::after {
+  .sidebar-resize-handle::after {
     content: '';
     position: absolute;
     top: 12px;
@@ -431,48 +484,9 @@ textarea:focus-visible {
     transition: background 140ms ease;
   }
 
-  .sidebar-drag-handle:hover::after,
-  .sidebar-drag-handle.is-dragging::after {
+  .sidebar-resize-handle:hover::after,
+  .sidebar-resize-handle.is-dragging::after {
     background: rgba(255, 255, 255, 0.16);
-  }
-
-  /* 隐藏态：容器零宽，只作为绝对定位的锚点，不占网格宽度。 */
-  .sidebar-dock.is-hidden {
-    width: 0;
-  }
-
-  /* 左边缘热区。给得比把手宽（12px）——隐藏之后没有任何视觉提示，
-     全靠肌肉记忆往左甩鼠标，太窄会够不着。 */
-  .sidebar-hotzone {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: -1rem; /* 抵消 workspace-shell 的 p-4，真正贴到窗口左边缘 */
-    width: 12px;
-    z-index: 45;
-  }
-
-  /* 浮层侧栏：盖在内容之上，不推开布局。 */
-  .sidebar-peek {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 60;
-    display: flex;
-    animation: sidebar-peek-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
-    filter: drop-shadow(0 18px 48px rgba(0, 0, 0, 0.55));
-  }
-
-  @keyframes sidebar-peek-in {
-    from {
-      opacity: 0;
-      transform: translateX(-8px);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(0);
-    }
   }
 
   .workspace-preview-slot {

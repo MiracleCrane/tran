@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.59 - 2026-08-05
+
+### 中文
+
+- 工具行图标：不同操作配不同小图标（命令 ›_、搜索网页 🌐、读文件 📖、写/编辑 ✏️、内容搜索 🔍、列目录 📁、子代理 👥）——图标为 Codex 桌面版 app.asar 里实测提取的原版 SVG，不是自己发挥。
+- MCP 状态行重样式：服务器收成小胶囊（状态点 + 名称 + 工具数），底部加发丝分割线与对话区分开；文案降噪（connected 由状态点表达、stdio 是默认类型，都不再写出来）。
+- 侧栏宽度可拖拽调节（180px 起，持久化保存）；侧栏收起/展开快捷键 Alt+Q（同时保留 Ctrl+B）；移除拖边缘自动隐藏机制（与收起机制重复，语义统一为 collapsed 一种）。
+
+### English
+
+- Per-tool activity icons: distinct glyphs for commands, web search, file reads, edits, content search, directory listing and sub-agents — the actual SVGs extracted from Codex desktop's app.asar, not approximations.
+- MCP status bar restyled: compact pills (status dot + name + tool count) with a hairline divider separating it from the conversation; noisier defaults (connected, stdio) no longer spelled out.
+- Sidebar width is now draggable (min 180px, persisted); Alt+Q toggles the sidebar (Ctrl+B kept); the drag-to-auto-hide mechanism was removed in favor of the single collapsed state.
+
 ## v1.0.58 - 2026-08-05
 
 ### 中文

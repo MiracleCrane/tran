@@ -6,6 +6,7 @@ import CodeBlock, { langForTool } from './CodeBlock'
 import DiffView from './DiffView'
 import SwarmCard from './SwarmCard'
 import { useCheapNote } from '../hooks/useCheapNote'
+import { ToolGlyph } from './toolIcons'
 
 function normalizeResult(result: unknown): string {
   if (result == null) return ''
@@ -202,6 +203,37 @@ const STATUS_META: Record<
   stopped: { label: '手动停止', dot: 'bg-zinc-500', text: 'text-zinc-400' }
 }
 
+/** 工具名 → Codex 风图标种类（toolIcons.tsx）。未收录的工具返回空串（不渲染图标）。 */
+function toolGlyphKind(name: string): string {
+  switch (name) {
+    case 'Bash':
+    case 'terminal':
+      return 'bash'
+    case 'Read':
+    case 'read_file':
+      return 'read'
+    case 'Write':
+    case 'Edit':
+    case 'patch':
+      return 'edit'
+    case 'Glob':
+      return 'glob'
+    case 'Grep':
+    case 'search':
+      return 'grep'
+    case 'WebSearch':
+    case 'WebFetch':
+    case 'FetchURL':
+      return 'web'
+    case 'Agent':
+    case 'AgentSwarm':
+    case 'Task':
+      return 'agent'
+    default:
+      return ''
+  }
+}
+
 const ToolCallCard = memo(function ToolCallCard({
   block,
   forceExpanded = false
@@ -250,6 +282,11 @@ const ToolCallCard = memo(function ToolCallCard({
         className="flex w-full items-center gap-2 bg-[#14151b] px-3 py-2 text-left transition-colors hover:bg-[#1b1c23]"
       >
         <span className={`h-2 w-2 shrink-0 rounded-full ${isSubagent ? 'bg-accent' : meta.dot} ${streaming ? 'animate-pulse' : ''}`} />
+        {/* Codex 风工具图标（2026-08）：不同操作不同小图标，SVG 为 Codex 桌面版
+            实测提取的原版（见 toolIcons.tsx）。子代理行同样给图标，在徽章前。 */}
+        <span className="shrink-0 text-zinc-500">
+          <ToolGlyph kind={toolGlyphKind(block.name)} />
+        </span>
         {isSubagent ? (
           <>
             <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent">

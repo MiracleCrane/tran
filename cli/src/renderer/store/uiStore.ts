@@ -25,15 +25,12 @@ interface UiStore {
   sidebarCollapsed: boolean
   toggleSidebar: () => void
   /**
-   * 侧栏「完全隐藏」——与 sidebarCollapsed 是**两套独立机制**：
-   * - collapsed：收成 w-14 图标条，还占位，手动点箭头切换
-   * - autoHidden：宽度归零、彻底不见，靠拖拽侧栏右边缘往左拉触发，
-   *   之后鼠标移到窗口左边缘才浮层滑出
-   * 默认关闭；不主动拖就永远是原来的样子。持久化到 localStorage——它是用户
-   * 明确拖出来的状态，重启后弹回去会显得像 bug。
+   * 展开态侧栏的宽度（px）。拖右边缘可调，持久化到 localStorage——用户手动
+   * 调过的尺寸，重启后弹回默认值会显得像 bug。收起态是固定的图标条宽度，
+   * 不受这个值影响。
    */
-  sidebarAutoHidden: boolean
-  setSidebarAutoHidden: (hidden: boolean) => void
+  sidebarWidth: number
+  setSidebarWidth: (width: number) => void
   /** Footer tool nav (skills/mcp/providers/translate/settings) collapsed. */
   navCollapsed: boolean
   toggleNav: () => void
@@ -52,13 +49,23 @@ function overlayId(): string {
   return crypto.randomUUID()
 }
 
-const AUTO_HIDE_KEY = 'tran.sidebarAutoHidden'
+const SIDEBAR_WIDTH_KEY = 'tran.sidebarWidth'
+/** 默认 256px = 原先写死的 Tailwind w-64，改成可调后保持同一个初值。 */
+export const SIDEBAR_WIDTH_DEFAULT = 256
+export const SIDEBAR_WIDTH_MIN = 180
+export const SIDEBAR_WIDTH_MAX = 480
 
-function readAutoHidden(): boolean {
+export function clampSidebarWidth(width: number): number {
+  return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Math.round(width)))
+}
+
+function readSidebarWidth(): number {
   try {
-    return localStorage.getItem(AUTO_HIDE_KEY) === '1'
+    const raw = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY))
+    // 存过的值也要过一遍 clamp：改过 MIN/MAX 之后，旧值可能已经越界。
+    return Number.isFinite(raw) && raw > 0 ? clampSidebarWidth(raw) : SIDEBAR_WIDTH_DEFAULT
   } catch {
-    return false
+    return SIDEBAR_WIDTH_DEFAULT
   }
 }
 
@@ -67,14 +74,15 @@ export const useUiStore = create<UiStore>((set) => ({
   setView: (view) => set({ view }),
   sidebarCollapsed: false,
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
-  sidebarAutoHidden: readAutoHidden(),
-  setSidebarAutoHidden: (hidden) => {
+  sidebarWidth: readSidebarWidth(),
+  setSidebarWidth: (width) => {
+    const next = clampSidebarWidth(width)
     try {
-      localStorage.setItem(AUTO_HIDE_KEY, hidden ? '1' : '0')
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(next))
     } catch {
       /* 隐私模式/存储满：不持久化也要让本次生效 */
     }
-    set({ sidebarAutoHidden: hidden })
+    set({ sidebarWidth: next })
   },
   navCollapsed: false,
   toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),

@@ -700,15 +700,22 @@ export default function App(): JSX.Element {
 
   return (
     <ErrorBoundary>
-      <div className="app-shell flex h-screen flex-col overflow-hidden text-zinc-200">
-        <WindowTitlebar />
+      {/* 侧栏与标题栏合体（Codex 式）：标题栏从"横贯整窗"挪进**主列内部**，
+          于是侧栏自然顶到窗口最上沿，两者之间不再有横条隔开。
+          刻意不把侧栏移出 workspace-shell：它是
+          `grid-template-columns: auto minmax(0,1fr) 0rem` 的三列网格
+          （侧栏 | 主区 | 附件预览），拆网格会连带预览面板的展开动画一起坏掉。
+          窗口拖拽区因此分成两半——标题栏自己一半，侧栏顶部一半（见 CSS 的
+          .sidebar-dock 规则），否则按住侧栏顶部就拖不动窗口了。 */}
+      <div className="app-shell app-shell-merged flex h-screen flex-col overflow-hidden text-zinc-200">
         <div
-          className={`workspace-shell min-h-0 flex-1 p-4 ${
+          className={`workspace-shell min-h-0 flex-1 ${
             previewOpen ? 'has-preview' : ''
           } ${previewClosing ? 'is-preview-closing' : ''}`}
         >
           <SidebarShell />
           <div className="main-surface flex min-w-0 flex-1 flex-col overflow-hidden">
+            <WindowTitlebar />
             <div
               key={displayView}
               className={`main-view-transition flex min-h-0 flex-1 flex-col ${
