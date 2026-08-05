@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.56 - 2026-08-05
+
+### 中文
+
+- 视觉收敛(Codex 风):状态指示从三处收成一处 —— 删掉对话底部的「Tran 正在处理…」和消息内的「输出中…」,只留输入框上方的「AI 正在输出中」(计时 + 排队语义最全的那条)。思考块改为完全裸排版:无框无竖条无底,唯一的动态信号是流式时标题的紫黄流光。
+- 新增:**完成轮活动折叠**。一整轮回答结束后,连续的思考/工具调用收进一行规则摘要(如「思考 2 段 · 运行了命令 ×5 · 编辑了文件」),点开即还原成完整渲染 —— 纯规则统计,不调总结 API;单个块不多包一层。
+- 新增:**主题底色切换**(设置 → 个性化)。深黑(现状)/ 炭灰(Codex 风)两档,即时生效;只换底色台阶,accent 紫色系不动。
+- 新增:**DeepSeek 余额**(设置 → 系统)。填 DeepSeek API Key 后,用量卡多一行「余额 · 充值 / 赠金」,走官方公开的 /user/balance 接口;Key 用系统安全存储、界面只回显掩码。官方只暴露余额,没有 token 用量明细。
+- 消息时间戳改为默认隐藏、悬停该条才浮出,格式带秒;「新建对话」从紫色主按钮降为中性次要按钮。
+
+### English
+
+- Visual consolidation (Codex-style): three activity indicators collapsed into one — the transcript-foot "Tran is working…" and the in-message "streaming…" lines are gone, leaving only the composer status line (the one with elapsed time and queue semantics). Thinking blocks are now completely unadorned: no frame, no bar, no tint; the only motion is the violet shimmer on the header while streaming.
+- New: **finished-turn activity folding**. Once a turn completes, consecutive thinking/tool-call blocks collapse into a single rule-based summary line (e.g. "2 thinking segments · ran 5 commands · edited files"); click to expand back to the full rendering — pure rule counting, no summary API; single blocks are left untouched.
+- New: **theme background switch** (Settings → Personalization). Onyx (current) / Charcoal (Codex-like), applied instantly; only the base surfaces change, the violet accent system stays.
+- New: **DeepSeek balance** (Settings → System). With a DeepSeek API key saved, the usage card shows a balance row (total / topped-up / granted) via the official public /user/balance endpoint; the key is stored with OS secure storage and only shown masked. The official API exposes balance only, no token usage detail.
+- Message timestamps are now hidden until the message is hovered and include seconds; "New chat" is demoted from a violet primary button to a neutral secondary one.
+
 ## v1.0.55 - 2026-08-05
 
 ### 中文
