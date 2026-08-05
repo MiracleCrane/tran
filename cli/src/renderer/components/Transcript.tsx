@@ -63,7 +63,7 @@ const USER_NAV_SMOOTH_MAX_ROWS = 40
 const EMPTY_HISTORY_ATTACHMENTS: ReadonlyMap<string, UserAttachment[]> = new Map()
 
 /**
- * 底部状态区（"正在处理…"转圈）。
+ * 底部状态区（"正在处理…"流光文字）。
  *
  * 必须是模块级组件：此前它是写在 Virtuoso `components={{ Footer: () => ... }}`
  * 里的内联箭头函数，每次 Transcript 重渲染都会产生一个新的组件类型，React
@@ -85,9 +85,8 @@ const TranscriptFooter = memo(function TranscriptFooter({
     <div className="mx-auto w-full max-w-5xl px-6 py-2">
       {compacting && <div className="text-center text-xs text-zinc-500">正在压缩上下文…</div>}
       {running && (
-        <div className="flex items-center gap-2 text-xs text-zinc-500">
-          <span className="thinking-moon" aria-hidden />
-          Tran 正在处理…
+        <div className="text-xs text-zinc-500">
+          <span className="flow-text flow-text-sky">Tran 正在处理…</span>
         </div>
       )}
       {bottomReserve > 0 && <div aria-hidden="true" style={{ height: bottomReserve }} />}
@@ -573,9 +572,8 @@ const AssistantMessage = memo(function AssistantMessage({
           )
         })}
       {isStreaming && (
-        <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
-          <span className="thinking-moon" aria-hidden />
-          输出中…
+        <div className="mt-1 text-xs text-zinc-500">
+          <span className="flow-text flow-text-emerald">输出中…</span>
         </div>
       )}
       {/* #43 时间戳：常显 HH:mm 小字（低透明度），悬停 title 给完整年月日时分秒；

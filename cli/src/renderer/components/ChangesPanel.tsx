@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GitFileChange, GitWorkingChanges } from '../../shared/ipc'
 import DiffView from './DiffView'
 import ConfirmDialog from './ConfirmDialog'
+import { langForPath } from './CodeBlock'
 
 /**
  * 会话级"改动"面板（Codex 风格）：工作区相对 HEAD 的全部改动聚合视图。
@@ -207,7 +208,7 @@ export default function ChangesPanel({ cwd, refreshKey, onClose }: ChangesPanelP
                     {diff === null || diff === undefined ? (
                       <div className="px-3 py-4 text-center text-[11px] text-zinc-500 animate-pulse">加载 diff…</div>
                     ) : (
-                      <DiffView text={diff} />
+                      <DiffView text={diff} {...(langForPath(file.path) ? { lang: langForPath(file.path) } : {})} />
                     )}
                   </div>
                 )}

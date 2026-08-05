@@ -2426,7 +2426,7 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   }
 }
 
-/** Streaming cursor — #11 起由 .thinking-moon（紫黄旋转月亮）取代原呼吸点。 */
+/** Streaming cursor — #11 起由状态流光文字（.flow-text，紫黄月亮球之后的形态）取代原呼吸点。 */
 
 /** Vertical bar cursor variant for code blocks — subtle typing indicator. */
 .stream-cursor-bar {

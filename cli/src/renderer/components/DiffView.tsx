@@ -1,5 +1,5 @@
 import { Fragment, memo, useMemo, useState } from 'react'
-import CodeBlock from './CodeBlock'
+import CodeBlock, { highlightLines } from './CodeBlock'
 
 type Mode = 'unified' | 'split'
 
@@ -219,21 +219,47 @@ function toRows(lines: string[]): Row[] {
   return rows
 }
 
-function SegText({ segs, text, tone }: { segs?: Seg[]; text: string; tone: 'del' | 'add' }): JSX.Element {
-  if (!segs) return <>{text || ' '}</>
-  return (
-    <>
-      {segs.map((seg, i) =>
-        seg.changed ? (
-          <span key={i} className={tone === 'del' ? 'rounded-sm bg-red-500/25' : 'rounded-sm bg-green-500/25'}>
-            {seg.text}
-          </span>
-        ) : (
-          <Fragment key={i}>{seg.text}</Fragment>
-        )
-      )}
-    </>
-  )
+/**
+ * 一行的正文渲染。三种形态，优先级从高到低：
+ *
+ * 1. **有词级分段**（成对改动的行）→ 按分段渲染，改动片段加深底色。这时
+ *    **不上语法高亮**：分段是按字符切的，会把语法 token 拦腰截断，两套着色
+ *    叠在一起只会更难读；而在一对改动行上，"改了哪几个词"比"这是个关键字"
+ *    重要得多。
+ * 2. **有语法高亮 HTML**（上下文行、纯增/纯删行）→ 用高亮结果。
+ * 3. 都没有 → 纯文本。
+ *
+ * html 来自 hljs（自带转义）+ highlightLines 的标签配平，不含用户输入的原始
+ * 尖括号，dangerouslySetInnerHTML 在这里是安全的（与 CodeBlock 同源）。
+ */
+function LineText({
+  segs,
+  text,
+  tone,
+  html
+}: {
+  segs?: Seg[]
+  text: string
+  tone: 'del' | 'add' | 'ctx'
+  html?: string
+}): JSX.Element {
+  if (segs && tone !== 'ctx') {
+    return (
+      <>
+        {segs.map((seg, i) =>
+          seg.changed ? (
+            <span key={i} className={tone === 'del' ? 'rounded-sm bg-red-500/25' : 'rounded-sm bg-green-500/25'}>
+              {seg.text}
+            </span>
+          ) : (
+            <Fragment key={i}>{seg.text}</Fragment>
+          )
+        )}
+      </>
+    )
+  }
+  if (html !== undefined) return <span dangerouslySetInnerHTML={{ __html: html || '&nbsp;' }} />
+  return <>{text || ' '}</>
 }
 
 const NO_COL = 'select-none pr-2 text-right text-[10px] text-zinc-600 tabular-nums'
@@ -246,6 +272,43 @@ const DiffView = memo(function DiffView({ text, lang }: { text: string; lang?: s
   )
   const [mode, setMode] = useState<Mode>('unified')
   const rows = useMemo(() => (looksLikeDiff ? toRows(lines) : []), [lines, looksLikeDiff])
+
+  /**
+   * 语法高亮：把 diff 还原成"旧文件"和"新文件"两份完整文本各高亮一次，再按行
+   * 切回来。**必须整份高亮**——逐行单独高亮会丢掉跨行语境（块注释、模板字符串
+   * 里的每一行都会被当成独立代码，着色全错）。
+   * 语言认不出（lang 为空/未注册）或文本过大时返回 null，渲染层退回纯文本。
+   */
+  const highlighted = useMemo(() => {
+    if (!looksLikeDiff || !lang) return null
+    const oldText: string[] = []
+    const newText: string[] = []
+    for (const r of rows) {
+      if (r.hunk) continue
+      if (r.left !== null) oldText.push(r.left)
+      if (r.right !== null) newText.push(r.right)
+    }
+    const left = highlightLines(oldText.join('\n'), lang)
+    const right = highlightLines(newText.join('\n'), lang)
+    if (!left && !right) return null
+    // 行号是 1 起的连续序列，直接按顺序回填：第 n 个非 hunk 的左侧行取 left[n]。
+    const leftByRow = new Map<number, string>()
+    const rightByRow = new Map<number, string>()
+    let li = 0
+    let ri = 0
+    rows.forEach((r, idx) => {
+      if (r.hunk) return
+      if (r.left !== null) {
+        if (left && li < left.length) leftByRow.set(idx, left[li])
+        li++
+      }
+      if (r.right !== null) {
+        if (right && ri < right.length) rightByRow.set(idx, right[ri])
+        ri++
+      }
+    })
+    return { leftByRow, rightByRow }
+  }, [rows, lang, looksLikeDiff])
 
   if (!looksLikeDiff) {
     // 非 diff 输出：按推断语言高亮（识别不了走纯文本，>50KB 跳过高亮）。
@@ -308,7 +371,12 @@ const DiffView = memo(function DiffView({ text, lang }: { text: string; lang?: s
                   <span className="w-10 shrink-0" />
                   <span className="shrink-0 select-none px-1 text-red-400">-</span>
                   <span className="min-w-0 flex-1 whitespace-pre-wrap break-all pr-2 text-red-200">
-                    <SegText segs={r.leftSegs} text={r.left} tone="del" />
+                    <LineText
+                      segs={r.leftSegs}
+                      text={r.left}
+                      tone="del"
+                      {...(highlighted?.leftByRow.has(i) ? { html: highlighted.leftByRow.get(i) } : {})}
+                    />
                   </span>
                 </div>
               )
@@ -320,7 +388,12 @@ const DiffView = memo(function DiffView({ text, lang }: { text: string; lang?: s
                   <span className={`${NO_COL} w-10 shrink-0`}>{r.rightNo ?? ''}</span>
                   <span className="shrink-0 select-none px-1 text-green-400">+</span>
                   <span className="min-w-0 flex-1 whitespace-pre-wrap break-all pr-2 text-green-200">
-                    <SegText segs={r.rightSegs} text={r.right} tone="add" />
+                    <LineText
+                      segs={r.rightSegs}
+                      text={r.right}
+                      tone="add"
+                      {...(highlighted?.rightByRow.has(i) ? { html: highlighted.rightByRow.get(i) } : {})}
+                    />
                   </span>
                 </div>
               )
@@ -332,7 +405,11 @@ const DiffView = memo(function DiffView({ text, lang }: { text: string; lang?: s
                   <span className={`${NO_COL} w-10 shrink-0`}>{r.rightNo ?? ''}</span>
                   <span className="shrink-0 select-none px-1 text-zinc-700"> </span>
                   <span className="min-w-0 flex-1 whitespace-pre-wrap break-all pr-2 text-zinc-400">
-                    {r.left || ' '}
+                    <LineText
+                      text={r.left}
+                      tone="ctx"
+                      {...(highlighted?.leftByRow.has(i) ? { html: highlighted.leftByRow.get(i) } : {})}
+                    />
                   </span>
                 </div>
               )
@@ -364,7 +441,16 @@ const DiffView = memo(function DiffView({ text, lang }: { text: string; lang?: s
                       r.left === null ? '' : r.left === r.right ? 'text-zinc-500' : 'text-red-200'
                     }`}
                   >
-                    {r.left === null ? '' : <SegText segs={r.leftSegs} text={r.left} tone="del" />}
+                    {r.left === null ? (
+                      ''
+                    ) : (
+                      <LineText
+                        segs={r.leftSegs}
+                        text={r.left}
+                        tone={r.left === r.right ? 'ctx' : 'del'}
+                        {...(highlighted?.leftByRow.has(i) ? { html: highlighted.leftByRow.get(i) } : {})}
+                      />
+                    )}
                   </span>
                 </div>
                 <div
@@ -382,7 +468,16 @@ const DiffView = memo(function DiffView({ text, lang }: { text: string; lang?: s
                       r.right === null ? '' : r.left === r.right ? 'text-zinc-500' : 'text-green-200'
                     }`}
                   >
-                    {r.right === null ? '' : <SegText segs={r.rightSegs} text={r.right} tone="add" />}
+                    {r.right === null ? (
+                      ''
+                    ) : (
+                      <LineText
+                        segs={r.rightSegs}
+                        text={r.right}
+                        tone={r.left === r.right ? 'ctx' : 'add'}
+                        {...(highlighted?.rightByRow.has(i) ? { html: highlighted.rightByRow.get(i) } : {})}
+                      />
+                    )}
                   </span>
                 </div>
               </Fragment>

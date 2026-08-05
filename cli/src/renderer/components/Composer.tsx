@@ -965,12 +965,13 @@ export default function Composer(): JSX.Element {
           <div className="mb-1.5 flex items-center gap-3 px-1 text-[11px] text-zinc-500">
             {running ? (
               <span className="flex min-w-0 items-center gap-1.5 text-accent/90">
-                <span className="thinking-moon" aria-hidden />
-                {pendingPermissionCount > 0
-                  ? '正在等待权限确认'
-                  : elicitationCount > 0
-                    ? '正在等待你回答上方问题'
-                    : 'AI 正在输出中'}
+                <span className="flow-text flow-text-violet">
+                  {pendingPermissionCount > 0
+                    ? '正在等待权限确认'
+                    : elicitationCount > 0
+                      ? '正在等待你回答上方问题'
+                      : 'AI 正在输出中'}
+                </span>
                 {turnStartedAt ? <TurnElapsed startedAt={turnStartedAt} /> : null}
                 {pending.length > 0 ? `，已排队 ${pending.length} 条` : '，新消息将排队发送'}
               </span>
