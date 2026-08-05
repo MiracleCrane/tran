@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.0.58 - 2026-08-05
+
+### 中文
+
+- 排版:随包分发 JetBrains Mono(官方完整 webfonts,400/500 两个字重,OFL-1.1 许可),代码、diff、终端输出不再依赖系统里有没有好等宽字体;界面字体刻意跟随系统(对齐 Codex 桌面版实测行为——它在 Windows 上就是 Segoe UI + 系统中文字体)。
+- 主题:炭灰底色对齐 Codex 实测色值。之前是偏蓝的板岩灰(#1e2025/#23262b),Codex 是纯中性灰——主背景 #181818、浮层 #212121,已全部换成实测值。
+- 用量卡:移除会员等级(Advanced)标签;DeepSeek 余额行复用"设置 → 系统"里已存的摘要 API key(此前只认专用栏,没填就永远不显示);重置倒计时统一中文单位并显示具体到期时刻——同日只显示"今天 21:34",跨天显示"8月11日 周二 21:34"。
+- 思考块全文翻译:默认切到**百度机翻**(认证后 100 万字符/月免费),设置里可切回 DeepSeek(质量更好、按量计费)。百度长文按行切块翻译,保留换行与 markdown 结构。通道没配 key 或接口失败时显示原文并给一句轻提示,不再永远转"翻译中…"。
+- Read 工具结果详情:行号拆成独立行号槽 + 分割竖线,剥离行号后再做语法高亮(此前行号混在代码里,既突兀又搞坏高亮);diff 视图的行号槽同步加分隔线。
+- 状态行「AI 正在输出中」整行统一流光(此前只有标签闪,计时和排队提示是灰的,看着像断了)。
+- 「新建对话」按钮、设置页头部控件(返回对话、版本号)改全圆角。
+
+### English
+
+- Typography: JetBrains Mono is now bundled (official full webfonts, 400/500, OFL-1.1) for code, diffs and terminal output; the UI font deliberately follows the system (matching the measured Codex desktop behavior — Segoe UI + system CJK font on Windows).
+- Theme: the charcoal palette now matches Codex's measured values — neutral grays (#181818 base, #212121 elevated) instead of the previous blue-tinted slate.
+- Usage card: removed the membership-level (Advanced) label; the DeepSeek balance row reuses the summary API key already stored in Settings → System (previously it only read a dedicated key slot and stayed hidden); reset countdowns use consistent Chinese units and show the concrete reset moment ("今天 21:34" same-day, date + weekday + time when crossing days).
+- Thinking-block full translation now defaults to **Baidu MT** (1M chars/month free after verification), switchable back to DeepSeek in Settings. Long text is translated in line-based chunks so newlines and markdown structure survive. When no channel is available the original text is shown with a one-line hint instead of spinning "translating…" forever.
+- Read tool results: line numbers get their own gutter with a divider, stripped before syntax highlighting; the diff view gutter gets the same divider.
+- The "AI is responding" status line now shimmers as one unit (label + elapsed time + queue hint).
+- The "new chat" button and settings header controls are fully rounded.
+
 ## v1.0.57 - 2026-08-05
 
 ### 中文

@@ -1,6 +1,6 @@
 {
   "name": "@tran/cli",
-  "version": "1.0.57",
+  "version": "1.0.58",
   "private": true,
   "productName": "Tran",
   "description": "Tran — a Windows desktop GUI for local CLI agents (currently Kimi Code CLI)",
@@ -15,7 +15,6 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web"
   },
-  "dependencies": {},
   "devDependencies": {
     "@types/node": "^25.9.3",
     "@types/react": "^18.3.31",

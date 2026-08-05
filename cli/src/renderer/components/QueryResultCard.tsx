@@ -19,7 +19,7 @@ const QueryResultCard = memo(function QueryResultCard({
   const title = QUERY_TITLE[item.command] ?? '查询结果'
 
   return (
-    <div className="my-1 max-w-[92%] rounded-xl border border-white/[0.06] bg-white/[0.02]">
+    <div className="my-1 tran-ai-col rounded-xl border border-white/[0.06] bg-white/[0.02]">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

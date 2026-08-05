@@ -263,6 +263,31 @@ function LineText({
 }
 
 const NO_COL = 'select-none pr-2 text-right text-[10px] text-zinc-600 tabular-nums'
+/** 行号槽与代码之间的分界：行号紧贴代码没有分隔线看着突兀（2026-08 用户反馈）。
+ *  加在最靠右的那个行号格上——统一视图是第二列（第一列是旧行号/占位），
+ *  分栏视图是每栏唯一的那列。 */
+const GUTTER_END = 'border-r border-white/[0.08] mr-1'
+
+/** kimi Read 工具的行前缀：`行号\t内容`。 */
+const NUMBERED_LINE_RE = /^(\d+)\t(.*)$/
+
+interface NumberedLine {
+  no: number | null
+  text: string
+}
+
+/** 识别「带行号的文件内容」（Read 工具结果）：非空行里 ≥70% 带 `数字\t` 前缀
+ *  才算——阈值防误伤（普通文本恰好一两行以数字+制表符开头不至于被拆）。 */
+function toNumberedLines(lines: string[]): NumberedLine[] | null {
+  const nonEmpty = lines.filter((l) => l.trim())
+  if (nonEmpty.length < 3) return null
+  const matched = nonEmpty.filter((l) => NUMBERED_LINE_RE.test(l)).length
+  if (matched / nonEmpty.length < 0.7) return null
+  return lines.map((l) => {
+    const m = NUMBERED_LINE_RE.exec(l)
+    return m ? { no: Number(m[1]), text: m[2] } : { no: null, text: l }
+  })
+}
 
 const DiffView = memo(function DiffView({ text, lang }: { text: string; lang?: string }): JSX.Element {
   const lines = useMemo(() => text.split('\n'), [text])
@@ -311,6 +336,30 @@ const DiffView = memo(function DiffView({ text, lang }: { text: string; lang?: s
   }, [rows, lang, looksLikeDiff])
 
   if (!looksLikeDiff) {
+    // Read 工具的文件内容：每行自带「行号\t」前缀（kimi Read 的原始格式）。
+    // 直接当普通文本渲染时行号和代码糊在一起、没有分界，看着很突兀
+    // （2026-08 用户反馈）。识别出来拆成「行号槽 + 分割线 + 高亮代码」。
+    const numbered = toNumberedLines(lines)
+    if (numbered) {
+      const content = numbered.map((n) => n.text).join('\n')
+      const highlightedLines = lang ? highlightLines(content, lang) : null
+      return (
+        <div className="overflow-auto rounded bg-[#0b0c10] p-2.5 font-mono text-xs leading-relaxed text-zinc-300">
+          {numbered.map((n, i) => (
+            <div key={i} className="flex">
+              <span className={`${NO_COL} ${GUTTER_END} w-10 shrink-0`}>{n.no ?? ''}</span>
+              <span className="min-w-0 flex-1 whitespace-pre-wrap break-all pl-1 pr-2">
+                {highlightedLines && i < highlightedLines.length ? (
+                  <span dangerouslySetInnerHTML={{ __html: highlightedLines[i] || '&nbsp;' }} />
+                ) : (
+                  n.text || ' '
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )
+    }
     // 非 diff 输出：按推断语言高亮（识别不了走纯文本，>50KB 跳过高亮）。
     return (
       <CodeBlock
@@ -368,7 +417,7 @@ const DiffView = memo(function DiffView({ text, lang }: { text: string; lang?: s
               out.push(
                 <div key={`${i}-l`} className="flex bg-red-950/25">
                   <span className={`${NO_COL} w-10 shrink-0`}>{r.leftNo ?? ''}</span>
-                  <span className="w-10 shrink-0" />
+                  <span className={`${GUTTER_END} w-10 shrink-0`} />
                   <span className="shrink-0 select-none px-1 text-red-400">-</span>
                   <span className="min-w-0 flex-1 whitespace-pre-wrap break-all pr-2 text-red-200">
                     <LineText
@@ -385,7 +434,7 @@ const DiffView = memo(function DiffView({ text, lang }: { text: string; lang?: s
               out.push(
                 <div key={`${i}-r`} className="flex bg-green-950/25">
                   <span className="w-10 shrink-0" />
-                  <span className={`${NO_COL} w-10 shrink-0`}>{r.rightNo ?? ''}</span>
+                  <span className={`${NO_COL} ${GUTTER_END} w-10 shrink-0`}>{r.rightNo ?? ''}</span>
                   <span className="shrink-0 select-none px-1 text-green-400">+</span>
                   <span className="min-w-0 flex-1 whitespace-pre-wrap break-all pr-2 text-green-200">
                     <LineText

@@ -36,7 +36,7 @@ const GoalCard = memo(function GoalCard(): JSX.Element | null {
   return (
     <div className="mx-auto w-full max-w-5xl px-6 pt-3">
       {/* 与待办条、工具 bar、AI 正文同一条列（简约风下居中）。 */}
-      <div className="tool-call-card tran-ai-col max-w-[92%] overflow-hidden rounded-lg border border-accent/30 bg-[#101116]">
+      <div className="tool-call-card tran-ai-col overflow-hidden rounded-lg border border-accent/30 bg-[#101116]">
         <div className="flex items-center gap-2 px-3 py-2">
           <span className="shrink-0 text-accent">
             <GoalIcon />

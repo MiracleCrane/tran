@@ -214,10 +214,10 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
 
   return (
     <div className="mx-auto w-full max-w-5xl px-6 pt-3">
-      {/* #44 与工具 bar 同宽（#9 统一 max-w-[92%] 时漏了待办条）。
+      {/* #44 与工具 bar 同宽（宽度统一由 .tran-ai-col 给，见 styles.css）。
           tran-ai-col：简约风把正文列居中，待办条要跟着走，否则它左对齐、
           底下的回复居中，两条边界对不上。 */}
-      <div className="tool-call-card tran-ai-col max-w-[92%] overflow-hidden rounded-lg border border-accent/30 bg-[#101116]">
+      <div className="tool-call-card tran-ai-col overflow-hidden rounded-lg border border-accent/30 bg-[#101116]">
         <button
           type="button"
           aria-expanded={!collapsed}

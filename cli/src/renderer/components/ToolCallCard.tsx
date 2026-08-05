@@ -231,7 +231,7 @@ const ToolCallCard = memo(function ToolCallCard({
   // 流式拼接（见 #30），拿到的是半条命令。
   const bashInfo = bashCommandFor(block)
   const wantsNote = bashInfo.isBash && !bashInfo.hasDescription && block.status !== 'pending'
-  const commandNote = useCheapNote(fetchCommandNote, bashInfo.command, wantsNote)
+  const commandNote = useCheapNote(fetchCommandNote, bashInfo.command, wantsNote).value
 
   // AgentSwarm（kimi 并行子代理）：专门的可视化卡片（进度条 + 子代理行）。
   // 分支在 hooks 之后，同实例块名变化不违反 hooks 规则。

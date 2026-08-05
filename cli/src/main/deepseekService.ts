@@ -1,4 +1,4 @@
-import { getDeepseekApiKey } from './settings'
+import { getApiKey, getDeepseekApiKey } from './settings'
 import { log } from './logger'
 import type { DeepseekBalanceInfo, DeepseekBalanceResult } from '../shared/ipc'
 
@@ -14,7 +14,7 @@ const BALANCE_URL = 'https://api.deepseek.com/user/balance'
 const REQUEST_TIMEOUT_MS = 15000
 const CACHE_MS = 60_000
 
-const NO_KEY_MESSAGE = '未配置 DeepSeek API key（设置 → DeepSeek 余额）'
+const NO_KEY_MESSAGE = '未配置 API key（设置 → 系统 的摘要 Key，或设置 → DeepSeek 余额）'
 const NETWORK_ERROR_MESSAGE = '网络错误，无法连接 DeepSeek 接口'
 
 interface BalancePayload {
@@ -31,7 +31,10 @@ let cache: { at: number; result: DeepseekBalanceResult } | null = null
 let inflight: Promise<DeepseekBalanceResult> | null = null
 
 async function fetchBalance(): Promise<DeepseekBalanceResult> {
-  const key = getDeepseekApiKey()
+  // 优先用「设置 → DeepSeek 余额」的专用 key；没配就复用摘要旁路那把
+  // （设置 → 系统 的 API Key）——用户本来就只存了一把 DeepSeek key，
+  // 专用栏空着导致余额行永远不显示（2026-08 用户反馈）。
+  const key = getDeepseekApiKey() ?? getApiKey()
   if (!key) return { ok: false, error: NO_KEY_MESSAGE }
 
   const controller = new AbortController()

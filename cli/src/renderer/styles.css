@@ -67,9 +67,34 @@ html.scrollbars-active {
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
+/* 正文列：两种外观风格共用一个固定宽度，居中。
+ *
+ * 对齐 Codex 的阅读列（它的 --thread-content-max-width 是 48rem）。这里取 56rem
+ * 而非 48rem：Tran 的 diff 走独立的全宽改动面板，正文列不必为并排 diff 让路，
+ * 但 48rem 对中英混排的技术对话偏窄；56rem 是简约风一直在用、观感验证过的值，
+ * 比原默认风格的 92%（满宽下约 942px）窄约 46px。
+ *
+ * **必须是固定宽度，不能用百分比**（原默认风格写的是 max-w-[92%]）：待办条/
+ * 目标条挂在滚动容器**外面**、消息行在**里面**，两者父容器差着一条滚动条的宽度
+ * （实测 1007 vs 977），同样写 92% 算出来差 14px —— 这正是"待办条比回复宽一截"
+ * 的来源。三者父容器中心重合，所以只要宽度一致，边界就一致。
+ *
+ * 写成不带 @layer 的普通规则：Tailwind 的 utilities 层排在 components 之后，
+ * 放进 @layer components 会被组件上的 max-w-* 工具类盖掉。组件那边已同步移除。 */
+.tran-ai-col,
+.tran-user-msg {
+  width: 100%;
+  max-width: 56rem;
+  margin-inline: auto;
+}
+
 body {
   margin: 0;
   overflow: hidden;
+  /* 与 Codex 桌面版实测的 --font-sans-default 一致（见 renderer/main.tsx 注释）。
+     显式写在这里而不只靠 Tailwind preflight：本文件的自定义 body 规则会盖过
+     preflight，留空的话全局字体就不确定了。 */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
   background:
     radial-gradient(46rem circle at 14% -12%, rgba(167, 139, 250, 0.055), transparent 58%),
     radial-gradient(42rem circle at 94% -8%, rgba(124, 211, 252, 0.046), transparent 62%),
@@ -377,6 +402,77 @@ textarea:focus-visible {
 
   .workspace-shell > .main-surface {
     margin-left: 1rem;
+  }
+
+  /* ---- 侧栏「完全隐藏」（SidebarShell）---- */
+
+  /* 拖拽把手：贴在侧栏右缘的一条窄带，平时不可见，hover 才显出一条竖线。
+     宽 6px 是权衡——再窄不好抓，再宽会盖住侧栏内容的点击。 */
+  .sidebar-drag-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: -3px;
+    width: 6px;
+    cursor: col-resize;
+    z-index: 40;
+    touch-action: none;
+  }
+
+  .sidebar-drag-handle::after {
+    content: '';
+    position: absolute;
+    top: 12px;
+    bottom: 12px;
+    left: 2px;
+    width: 2px;
+    border-radius: 999px;
+    background: transparent;
+    transition: background 140ms ease;
+  }
+
+  .sidebar-drag-handle:hover::after,
+  .sidebar-drag-handle.is-dragging::after {
+    background: rgba(255, 255, 255, 0.16);
+  }
+
+  /* 隐藏态：容器零宽，只作为绝对定位的锚点，不占网格宽度。 */
+  .sidebar-dock.is-hidden {
+    width: 0;
+  }
+
+  /* 左边缘热区。给得比把手宽（12px）——隐藏之后没有任何视觉提示，
+     全靠肌肉记忆往左甩鼠标，太窄会够不着。 */
+  .sidebar-hotzone {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -1rem; /* 抵消 workspace-shell 的 p-4，真正贴到窗口左边缘 */
+    width: 12px;
+    z-index: 45;
+  }
+
+  /* 浮层侧栏：盖在内容之上，不推开布局。 */
+  .sidebar-peek {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    display: flex;
+    animation: sidebar-peek-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    filter: drop-shadow(0 18px 48px rgba(0, 0, 0, 0.55));
+  }
+
+  @keyframes sidebar-peek-in {
+    from {
+      opacity: 0;
+      transform: translateX(-8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 
   .workspace-preview-slot {
@@ -2315,10 +2411,10 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   background: transparent;
   padding: 0;
   font-size: 12.5px;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, 'Microsoft YaHei', 'PingFang SC', monospace;
 }
 .prose-forge code {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, 'Microsoft YaHei', 'PingFang SC', monospace;
   font-size: 0.88em;
   background: rgba(250, 248, 255, 0.08);
   padding: 1px 5px;
@@ -3059,18 +3155,9 @@ div:has(textarea:focus) .composer-shortcut-hint {
         原先这里写 max-width:62rem 想让两边右边界齐平，但 62rem(992px) 比
         92% 的实际宽度还大，永远不生效——用户那条照样铺满整行，比 AI 宽、
         且贴到最左边。改成同一个 92% 就不会再对不齐了。 */
-  /* 正文列用**固定宽度**，不用百分比。
-     百分比在这里对不齐：待办条/目标条挂在滚动容器**外面**，消息行在里面，
-     两者的父容器差着一条滚动条的宽度（实测 1007 vs 977）。同样写 92%，
-     算出来就是 882 vs 855，差 14px —— 正是"待办条比回复宽一截"的来源。
-     好在三者的父容器**中心是重合的**，所以只要宽度一致，边界就一致。
-     56rem ≈ 原先 92% 在满宽下的结果，观感不变。 */
-  :root[data-ui='flat'] .tran-ai-col,
-  :root[data-ui='flat'] .tran-user-msg {
-    width: 100%;
-    max-width: 56rem;
-    margin-inline: auto;
-  }
+  /* 正文列宽已上收为两种风格共用的基础规则（见文件开头 .tran-ai-col），
+     简约风不再单独定义——原先只有这里是 56rem、默认风格是 max-w-[92%]，
+     两套风格宽度不一致本身就是要消掉的问题。 */
   /* 用户发言靠右：右边界即这条列的右边界，也就是 AI 正文的右边界。
      宽度按内容走、封顶 76%：短句自然收窄，长段（贴日志、贴报错）仍然
      铺得开，不会挤成一条细缝。 */
@@ -3123,51 +3210,58 @@ div:has(textarea:focus) .composer-shortcut-hint {
 
 /* ============================================================================
    主题底色（设置 → 外观 → 主题底色）：:root[data-theme] 切换，即时生效。
-   onyx = 深黑（默认，一直以来的底色）；charcoal = Codex 风炭灰，整体抬亮一档。
+   onyx = 深黑（默认，一直以来的底色）；charcoal = Codex 风炭灰。
+
+   charcoal 色值 2026-08-05 实测自 Codex 桌面版（MSIX OpenAI.Codex 26.730，
+   app.asar → webview/assets/app-*.css 的 --gray 色阶）：Codex 深色是
+   **纯中性灰**（R=G=B），主表面 gray-900 #181818、浮层 gray-800 #212121。
+   此前 Tran 用的是 #1e2025 / #23262b 这类偏蓝的板岩灰，肉眼一看就是
+   "不像 Codex"（2026-08 用户反馈）。下面全部换成中性灰，层级保留
+   Tran 自己的"比 Codex 主色略抬"节奏。
    accent 紫色系不动——换的只是"底"，不是"强调"。
    追加一个同名 @layer components 块：要压的 ::before !important 规则在层内，
    同名层等于续写，靠更高的选择器优先级赢；层外普通声明反而压不住它们。
    ========================================================================== */
 @layer components {
   /* 基座渐变：html/body/#root 的原始规则在层外（普通声明压层内），只能上
-     !important。保留两团若有若无的紫/青光晕，只把深黑台阶抬成炭灰。 */
+     !important。保留两团若有若无的紫/青光晕，底色取 Codex gray-900 系。 */
   :root[data-theme='charcoal'],
   :root[data-theme='charcoal'] body,
   :root[data-theme='charcoal'] #root {
     background:
       radial-gradient(46rem circle at 14% -12%, rgba(167, 139, 250, 0.05), transparent 58%),
       radial-gradient(42rem circle at 94% -8%, rgba(124, 211, 252, 0.04), transparent 62%),
-      linear-gradient(145deg, #1e2025 0%, #1a1c20 46%, #1d1f24 100%) !important;
+      linear-gradient(145deg, #1b1b1b 0%, #181818 46%, #1a1a1a 100%) !important;
   }
 
   /* 简约风的壳与浮层跟着抬一档（rgba 淡底类表面不用动，它们叠在新壳色上
-     自动变亮）。 */
+     自动变亮）。浮层 = Codex gray-800 #212121。 */
   :root[data-theme='charcoal'][data-ui='flat'] .app-shell {
-    background: #1b1d21;
+    background: #191919;
   }
   :root[data-theme='charcoal'][data-ui='flat'] .glass-panel:where(.fixed, .absolute),
   :root[data-theme='charcoal'][data-ui='flat'] .glass-panel-soft:where(.fixed, .absolute),
   :root[data-theme='charcoal'][data-ui='flat'] .glass-control:where(.fixed, .absolute) {
-    background: #23262b;
+    background: #212121;
   }
 
   /* 项目切换器 / 下拉面板的实底（含 ::before 的 !important 填充）。 */
   :root[data-theme='charcoal'] .project-switcher-panel,
   :root[data-theme='charcoal'] .disclosure-select-panel {
-    --glass-frost-fill: #23262b;
+    --glass-frost-fill: #212121;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.012)),
-      #23262b;
+      #212121;
   }
   :root[data-theme='charcoal'] .project-switcher-panel::before,
   :root[data-theme='charcoal'] .disclosure-select-panel::before {
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.024), rgba(255, 255, 255, 0.006)),
-      #23262b !important;
+      #212121 !important;
   }
 
   /* 原生下拉选项的实底。 */
   :root[data-theme='charcoal'] select option {
-    background: #23262b;
+    background: #212121;
   }
 }

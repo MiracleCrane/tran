@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useSessionStore, foldBackgroundSwarmTasks, takeAttachedSwarmTasks } from './store/sessionStore'
 import { useUiStore, type View } from './store/uiStore'
+import { installShortcuts } from './shortcuts'
 import Onboarding from './components/Onboarding'
-import Sidebar from './components/Sidebar'
+import SidebarShell from './components/SidebarShell'
 import Transcript from './components/Transcript'
 import Composer from './components/Composer'
 import ElicitationCard from './components/ElicitationCard'
@@ -397,6 +398,10 @@ export default function App(): JSX.Element {
     }
   }, [])
 
+  // 全局快捷键（键位对齐 Codex，见 shortcuts.ts）。只挂一次：动作全部经
+  // store 的 getState() 取，不吃闭包里的旧值，所以不需要跟着任何状态重挂。
+  useEffect(() => installShortcuts(), [])
+
   useEffect(() => {
     const cwd = meta?.cwd
     if (!cwd || gitTopbarAutoExpandedCwdRef.current === cwd) return
@@ -502,6 +507,7 @@ export default function App(): JSX.Element {
     const revealForScrollKey = (event: KeyboardEvent): void => {
       if (SCROLL_REVEAL_KEYS.has(event.key)) revealScrollbars()
     }
+
 
     document.addEventListener('scroll', revealScrollbars, true)
     document.addEventListener('wheel', revealIfScrollable, passiveCapture)
@@ -701,7 +707,7 @@ export default function App(): JSX.Element {
             previewOpen ? 'has-preview' : ''
           } ${previewClosing ? 'is-preview-closing' : ''}`}
         >
-          <Sidebar />
+          <SidebarShell />
           <div className="main-surface flex min-w-0 flex-1 flex-col overflow-hidden">
             <div
               key={displayView}

@@ -1,0 +1,32 @@
+/**
+ * JetBrains Mono —— 用 JetBrains 官方发布的完整 webfont，**不要**换回
+ * `@fontsource/jetbrains-mono`。
+ *
+ * fontsource 分发的是 Google Fonts 式子集，实测 latin 子集只有 **229 个码点**，
+ * 制表符（─ │ ├ └）、方块（█ ░）、箭头（→）、对勾（✓）全都没有。终端输出里
+ * 这些字符极常见（tree、表格、进度条），缺字形就会逐个回退到别的等宽字体，
+ * 而 JetBrains Mono 的字宽是 600/1000 em、Consolas 是 550/1000 —— 混在一行里
+ * 列宽对不齐，表格和树形输出直接错位。
+ *
+ * 官方完整版覆盖 1363 个码点，上述字符全有，woff2 每字重也才 ~92KB。
+ *
+ * 只要两档：400 对应 font-normal，500 对应 font-medium。粗体让浏览器合成
+ * （等宽字体的合成加粗在代码场景里够用，再多打包两档不划算）。
+ *
+ * SIL Open Font License 1.1，许可原文见同目录 OFL.txt。
+ */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./JetBrainsMono-Regular.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./JetBrainsMono-Medium.woff2') format('woff2');
+}

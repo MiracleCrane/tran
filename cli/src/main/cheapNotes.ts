@@ -5,6 +5,8 @@ import { readJsonSafe, writeFileAtomic } from './atomicWrite'
 import { log } from './logger'
 import { cheapSummarize, cheapComplete } from './cheapModel'
 import { loadSettings } from './settings'
+import { getBaiduCreds } from './translateConfig'
+import { translateLongTextViaBaidu } from './baidu'
 
 /**
  * 总结类杂活的第二、第三项：**命令一句话说明**与**思考块摘要**。
@@ -243,8 +245,12 @@ async function summarizeRaw(prompt: string): Promise<string | null> {
  * - 展开后 → 全文翻译（真要读的时候）
  * 两者都缓存，键不同。
  *
- * 使用用户配置的摘要 API。思考块可以很长，这里不做 terseText 清洗——
- * 要的就是全文，不是一行。
+ * 通道由设置决定（thinkingTranslateEngine，2026-08 用户拍的板）：
+ * - baidu（默认）：百度机翻，认证后 100 万字符/月免费，质量"能看懂"级；
+ *   走 translateLongTextViaBaidu 按行切块保格式。没配百度密钥 → null。
+ * - llm：摘要旁路那把 key 的 DeepSeek，质量更好、按量计费（实测一个月十几块）。
+ * 两边都不可用就是 null——没有也不该有"拿主 agent 额度兜底"这一层（2026-08
+ * 用户明确要求：翻不了就显示原文，界面给一句轻提示）。
  */
 export async function translateThinking(text: string): Promise<string | null> {
   if (!notesEnabled()) return null
@@ -258,7 +264,34 @@ export async function translateThinking(text: string): Promise<string | null> {
   const pending = inflight.get(key)
   if (pending) return pending
 
-  const prompt = [
+  const engine = loadSettings().thinkingTranslateEngine ?? 'baidu'
+  const run = (
+    engine === 'baidu'
+      ? translateViaBaiduEngine(input)
+      : summarizeRaw(buildTranslatePrompt(input))
+  )
+    .then((result) => {
+      const value = result?.trim() ?? ''
+      // 判废也存空串：同一段思考每次展开都重打一发不划算。
+      load()[key] = value
+      save()
+      return value || null
+    })
+    .catch((error) => {
+      log('cheap-notes', `思考翻译失败(${engine}): ${error instanceof Error ? error.message : String(error)}`)
+      return null
+    })
+    .finally(() => {
+      inflight.delete(key)
+    })
+
+  inflight.set(key, run)
+  return run
+}
+
+/** LLM 通道的翻译提示词（原文较长，抽出让 translateThinking 读起来顺）。 */
+function buildTranslatePrompt(input: string): string {
+  return [
     '把下面这段 AI 的思考过程翻译成中文。要求：',
     '1. 只输出译文本身，不要任何前言、解释或"以下是译文"之类的话；',
     '2. 保留原有的分段和换行；',
@@ -268,25 +301,16 @@ export async function translateThinking(text: string): Promise<string | null> {
     '原文：',
     input
   ].join('\n')
+}
 
-  const run = summarizeRaw(prompt)
-    .then((result) => {
-      const value = result?.trim() ?? ''
-      // 判废也存空串：同一段思考每次展开都重打一发不划算。
-      load()[key] = value
-      save()
-      return value || null
-    })
-    .catch((error) => {
-      log('cheap-notes', `思考翻译失败: ${error instanceof Error ? error.message : String(error)}`)
-      return null
-    })
-    .finally(() => {
-      inflight.delete(key)
-    })
-
-  inflight.set(key, run)
-  return run
+/** 百度机翻通道：没配密钥就回 null（调用方显示原文 + 轻提示）。 */
+async function translateViaBaiduEngine(input: string): Promise<string | null> {
+  const creds = getBaiduCreds()
+  if (!creds) {
+    log('cheap-notes', '思考翻译走百度但未配置百度密钥（设置 → 翻译），显示原文')
+    return null
+  }
+  return translateLongTextViaBaidu(input, creds.appId, creds.secretKey)
 }
 
 /** 一段思考在做什么。折叠态用它替掉"正文前 60 字截断"。 */

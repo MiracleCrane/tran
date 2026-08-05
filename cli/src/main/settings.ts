@@ -90,6 +90,9 @@ interface PersistedSettings {
   /** --- Translate engine config (Translate panel) --- */
   /** Which engine translateTexts() routes to. */
   translateEngine?: TranslateEngine
+  /** 思考块全文翻译走哪个通道：baidu = 百度机翻（认证后 100 万字符/月免费），
+   *  llm = 摘要旁路配置的 DeepSeek（质量更好，按量计费）。缺省走 baidu。 */
+  thinkingTranslateEngine?: TranslateEngine
   /** Baidu app id (non-secret). */
   baiduAppId?: string
   /** base64 of safeStorage-encrypted Baidu secret key. */
@@ -257,6 +260,9 @@ function normalizeSettings(raw: unknown): PersistedSettings {
     : undefined
   settings.translateEngine = TRANSLATE_ENGINES.has(source.translateEngine as TranslateEngine)
     ? source.translateEngine as TranslateEngine
+    : undefined
+  settings.thinkingTranslateEngine = TRANSLATE_ENGINES.has(source.thinkingTranslateEngine as TranslateEngine)
+    ? source.thinkingTranslateEngine as TranslateEngine
     : undefined
 
   settings.wslSupportEnabled = optionalBoolean(source.wslSupportEnabled)

@@ -26,14 +26,41 @@ const CARD_GAP_PX = 8
 /** 额度数据的新鲜度阈值：超过这个岁数才在展开时补拉一次。 */
 const PLAN_STALE_MS = 60_000
 
+const WEEKDAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'] as const
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n)
+}
+
+/** 重置倒计时 + 具体到期时刻，单位一律中文（2026-08 用户要求统一）：
+ *  同一天到期 →「3 小时 8 分钟后重置 · 今天 21:34」（不跨天不标星期几）；
+ *  跨天 →「5 天 2 小时后重置 · 8月11日 周二 21:34」。 */
 function resetLabel(resetAt?: number): string | null {
   if (!resetAt) return null
   const ms = resetAt - Date.now()
   if (ms <= 0) return '即将重置'
   const hours = Math.floor(ms / 3_600_000)
   const minutes = Math.floor((ms % 3_600_000) / 60_000)
-  if (hours >= 24) return `${Math.floor(hours / 24)} 天 ${hours % 24} 小时后重置`
-  return `${hours}h ${minutes}m 后重置`
+  const countdown =
+    hours >= 24
+      ? `${Math.floor(hours / 24)} 天 ${hours % 24} 小时后重置`
+      : `${hours} 小时 ${minutes} 分钟后重置`
+  const at = new Date(resetAt)
+  const time = `${pad2(at.getHours())}:${pad2(at.getMinutes())}`
+  const now = new Date()
+  const sameDay =
+    at.getFullYear() === now.getFullYear() &&
+    at.getMonth() === now.getMonth() &&
+    at.getDate() === now.getDate()
+  const moment = sameDay
+    ? `今天 ${time}`
+    : `${at.getMonth() + 1}月${at.getDate()}日 周${WEEKDAY_NAMES[at.getDay()]} ${time}`
+  return `${countdown} · ${moment}`
+}
+
+/** API 给的窗口标签可能是英文缩写（"5h"），卡里统一成中文。 */
+function zhWindowLabel(label: string): string {
+  return label.replace(/^(\d+)\s*h$/i, '$1 小时')
 }
 
 /** used/limit → 0–1 比例；任一缺失或 limit 为 0 时返回 undefined（显示"—"）。 */
@@ -44,13 +71,6 @@ function windowRatio(w?: UsageLimitWindow): number | undefined {
 
 function pct2(ratio: number | undefined): string | null {
   return ratio === undefined ? null : `${(ratio * 100).toFixed(2)}%`
-}
-
-/** 接口原始枚举（LEVEL_ADVANCED）→ 展示文案（Advanced）；未识别的值原样透出。 */
-function formatMembershipLevel(raw: string): string {
-  const stripped = raw.replace(/^LEVEL_/i, '')
-  if (!/^[A-Z][A-Z0-9_]*$/.test(stripped)) return stripped
-  return stripped.charAt(0) + stripped.slice(1).toLowerCase()
 }
 
 /** 单个小圆环：pct 为 null 时置灰显示"—"（无数据）。 */
@@ -250,15 +270,10 @@ export default function UsageRings(): JSX.Element {
           <div className="mb-3 flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-accent" />
             <span className="flex-1 text-xs font-semibold text-zinc-100">用量</span>
-            {plan?.membershipLevel && (
-              <span className="text-[10px] text-zinc-600" title="Kimi 会员等级">
-                {formatMembershipLevel(plan.membershipLevel)}
-              </span>
-            )}
           </div>
 
           <div className="space-y-3">
-            <QuotaRow title={`${rollingLabel} 额度`} {...(plan?.rolling ? { window: plan.rolling } : {})} />
+            <QuotaRow title={`${zhWindowLabel(rollingLabel)} 额度`} {...(plan?.rolling ? { window: plan.rolling } : {})} />
             <QuotaRow title="每周额度" {...(plan?.weekly ? { window: plan.weekly } : {})} />
 
             {deepseek && (

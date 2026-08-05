@@ -54,6 +54,10 @@ function looksEnglish(text: string): boolean {
   return cjk / Math.max(1, sample.length) < 0.15
 }
 const USER_NAV_MAX_ENTRIES = 30
+/** Virtuoso firstItemIndex 的起始基数：头部每插入 N 条就减 N，够减很久。 */
+const FIRST_ITEM_INDEX_BASE = 1_000_000
+/** 思考框内距底多少像素以内算"还贴着底"（继续跟随流式输出）。 */
+const THINKING_FOLLOW_BOTTOM_THRESHOLD_PX = 24
 // #48/#50 高亮判定：用户消息行顶距视口顶多少 px 内算"视口顶部附近"。
 const USER_NAV_TOP_SLACK_PX = 8
 // #50 长距跳转（行数差超过该值）用 auto 一次到位——动态高度列表里 smooth
@@ -146,6 +150,8 @@ function buildForest(items: TranscriptItem[]): ItemNode[] {
 type DisplayRow =
   | { kind: 'item'; node: ItemNode }
   | { kind: 'toolGroup'; id: string; blocks: ToolBlock[] }
+  /** B 方案：跨消息的「思考 + 工具」活动组（含思考时才用，纯工具仍走 toolGroup）。 */
+  | { kind: 'activityGroup'; id: string; blocks: AssistantBlock[] }
   | { kind: 'envelopeGroup'; id: string; entries: Array<{ id: string; text: string }> }
 
 /** 该节点是否"整条消息只有工具调用块"（可聚合）。 */
@@ -156,24 +162,61 @@ function toolBlocksOf(node: ItemNode): ToolBlock[] | null {
   return item.blocks as ToolBlock[]
 }
 
-/** 该节点是否系统信封（后台任务通知/cron/系统提醒等注入的 user 消息）。 */
+/**
+ * B 方案：该节点是否"整条消息只有活动块（思考 / 工具），没有正文"。
+ *
+ * 为什么必须跨消息聚合：AssistantMessage 内部的折叠只在**一条消息内**生效，而
+ * KimiBackend 重放历史时每个 tool_call 都 push 一条**独立的** assistant 消息、
+ * 思考封在另一条——于是每条都只有 1 个块，谁也够不着"≥2 才折"的门槛。结果就是
+ * 点开老会话，思考和工具全是散开的。原有的 toolGroup 只认纯工具消息，中间夹一条
+ * 思考消息就断开，同样盖不住。
+ *
+ * 流式中的消息一律不参与聚合：正在跑的活动必须实时可见。
+ */
+function activityBlocksOf(node: ItemNode): AssistantBlock[] | null {
+  const item = node.item
+  if (item.kind !== 'assistant' || item.error || item.streaming) return null
+  const blocks = item.blocks.filter((b): b is AssistantBlock => !!b)
+  if (blocks.length === 0) return null
+  if (!blocks.every((b) => b.kind === 'tool' || b.kind === 'thinking')) return null
+  return blocks
+}
+
+/** 该节点是否**要显示**的系统信封（后台任务通知/cron）。 */
 function envelopeTextOf(node: ItemNode): string | null {
   const item = node.item
   if (item.kind !== 'user' || !item.text) return null
-  return ENVELOPE_RE.test(item.text.trimStart()) ? item.text : null
+  return VISIBLE_ENVELOPE_RE.test(item.text.trimStart()) ? item.text : null
+}
+
+/** 该节点是否要整条丢弃的噪音信封（system-reminder / 技能注入）。 */
+function isHiddenEnvelope(node: ItemNode): boolean {
+  const item = node.item
+  return item.kind === 'user' && !!item.text && HIDDEN_ENVELOPE_RE.test(item.text.trimStart())
+}
+
+/** 行的稳定 key（与 Virtuoso 的 computeItemKey 同一套，务必保持一致）。 */
+function rowKeyOf(row: DisplayRow): string {
+  return row.kind === 'item' ? row.node.item.id : row.id
 }
 
 function buildDisplayRows(roots: ItemNode[]): DisplayRow[] {
   const rows: DisplayRow[] = []
-  let toolRun: { node: ItemNode; blocks: ToolBlock[] }[] = []
+  let toolRun: { node: ItemNode; blocks: AssistantBlock[] }[] = []
   let envelopeRun: ItemNode[] = []
   const flushTools = (): void => {
-    if (toolRun.length >= 2) {
-      rows.push({
-        kind: 'toolGroup',
-        id: `tool-group-${toolRun[0].blocks[0].toolUseId}`,
-        blocks: toolRun.flatMap((r) => r.blocks)
-      })
+    const all = toolRun.flatMap((r) => r.blocks)
+    // 聚合门槛按**块数**而不是消息数：重放历史里一条消息常常只有 1 个块，
+    // 按消息数算永远够不着 2。
+    if (all.length >= 2) {
+      const pureTools = all.every((b): b is ToolBlock => b.kind === 'tool')
+      if (pureTools) {
+        // 纯工具组维持原有的 ToolGroupCard（带运行/错误态），不回归现有设计。
+        rows.push({ kind: 'toolGroup', id: `tool-group-${all[0].toolUseId}`, blocks: all })
+      } else {
+        // 含思考的混合组：走一行规则摘要，点开还原完整渲染。
+        rows.push({ kind: 'activityGroup', id: `activity-group-${toolRun[0].node.item.id}`, blocks: all })
+      }
     } else {
       for (const r of toolRun) rows.push({ kind: 'item', node: r.node })
     }
@@ -194,7 +237,11 @@ function buildDisplayRows(roots: ItemNode[]): DisplayRow[] {
     envelopeRun = []
   }
   for (const node of roots) {
-    const blocks = toolBlocksOf(node)
+    // 噪音信封：整条丢弃，且**不打断**前后的聚合 run——它在视觉上根本不存在，
+    // 不该让一条看不见的消息把两组工具调用劈成两块。
+    if (isHiddenEnvelope(node)) continue
+    // B 方案：思考消息也进 run（原先只有 toolBlocksOf，中间夹一条思考就断开）。
+    const blocks = activityBlocksOf(node)
     if (blocks) {
       flushEnvelopes()
       toolRun.push({ node, blocks })
@@ -221,9 +268,34 @@ function buildDisplayRows(roots: ItemNode[]): DisplayRow[] {
  *  that used to be here was removed — it stacked a backdrop-filter surface per
  *  message (cost grew with message count) for a barely-visible effect over the
  *  already-frosted shell. */
-/** kimi CLI 注入会话历史的系统信封（后台任务通知/cron/系统提醒等），
- *  重放时按原文会糊出一坨 XML——解析成克制的系统卡片。 */
-const ENVELOPE_RE = /^<(notification|cron-fire|system-reminder|kimi-skill-loaded)[\s>]/
+/**
+ * kimi CLI 往会话历史里注入的系统信封，按"该不该看"分成两类。
+ *
+ * 实测本机 110 个会话的全部历史：真人消息 237 条，注入的信封 304 条——比真人
+ * 说的话还多。其中 system-reminder（196 条，待办提醒之类）和技能注入（6 条，
+ * 整篇技能 markdown）对读历史的人毫无价值；即便收成灰卡片，也是每 1 条真话夹
+ * 1.25 张卡。点进一个老会话该看到的是当时的对话本身，不是一屏机器自言自语。
+ * 这两类直接不渲染。
+ *
+ * 后台任务结果（notification，100 条）与 cron 触发（2 条）是另一回事：那是真
+ * 发生过、用户会想知道的事，继续按克制的系统卡片呈现。
+ *
+ * 技能注入有两种形态，锚在 `^<` 的正则只盖得住第一种：
+ *   `<kimi-skill-loaded name=...>`                          —— 标签开头
+ *   `Skill tool loaded instructions for this request...`     —— 前面还有一句白话
+ * 第二种此前整条漏网，被当成**用户说的话**把整篇技能文档渲染出来（实测 6 条）。
+ */
+const HIDDEN_ENVELOPE_RE =
+  /^(?:<(?:system-reminder|kimi-skill-loaded)[\s>]|User activated the skill\b|Skill tool loaded instructions\b)/
+
+/** 值得保留的信封：后台任务通知与 cron 触发，渲染成系统卡片。 */
+const VISIBLE_ENVELOPE_RE = /^<(notification|cron-fire)[\s>]/
+
+/** 是不是信封（两类都算）——"别把它当成用户发言"的判断用（如自动滚动）。 */
+function isEnvelopeText(text: string): boolean {
+  const head = text.trimStart()
+  return HIDDEN_ENVELOPE_RE.test(head) || VISIBLE_ENVELOPE_RE.test(head)
+}
 
 type EnvelopeStatus = 'completed' | 'failed' | 'lost'
 
@@ -324,8 +396,11 @@ const UserMessage = memo(function UserMessage({
   const at = messageTime(item.id)
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
   const openAttachmentPreview = useUiStore((s) => s.openAttachmentPreview)
-  // kimi CLI 系统信封（后台任务通知等）：渲染成系统卡片而不是原始 XML 气泡
-  if (item.text && ENVELOPE_RE.test(item.text.trimStart())) {
+  // kimi CLI 系统信封（后台任务通知等）：渲染成系统卡片而不是原始 XML 气泡。
+  // 噪音信封正常情况下已被 buildDisplayRows 滤掉，这里是兜底——万一有别的
+  // 入口直接渲染 UserMessage，也绝不能把系统提醒/整篇技能文档当成用户发言。
+  if (item.text && isHiddenEnvelope({ item } as ItemNode)) return <></>
+  if (item.text && VISIBLE_ENVELOPE_RE.test(item.text.trimStart())) {
     return <SystemEnvelope text={item.text} />
   }
   const handleAttachmentClick = (
@@ -430,24 +505,48 @@ const ThinkingBlock = memo(function ThinkingBlock({
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const open = userToggled ?? (forceExpanded || streaming)
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  /** 是否还跟随底部。用户在框内往上滚就置 false，滚回底部自动恢复。 */
+  const followBodyRef = useRef(true)
 
-  // 流式期间内容自动滚到底部（跟随最新思考）。
+  /**
+   * 流式期间内容跟随底部——但**只在用户没有主动往上翻时**。
+   *
+   * 原先是无条件 `scrollTop = scrollHeight`：思考还在写，你想回头看前面几行，
+   * 每来一个 chunk 就被硬拽回最底部，等于根本没法读。现在按"贴底才跟随"处理，
+   * 和转录区外层那套跟随/解除是同一个约定。
+   *
+   * 注意这里的 scrollTop 赋值会触发下面的 onScroll，届时算出的距底距离≈0，
+   * 跟随状态保持 true，不会自己把自己关掉。
+   */
   useEffect(() => {
     const body = bodyRef.current
-    if (open && streaming && body) body.scrollTop = body.scrollHeight
+    if (open && streaming && body && followBodyRef.current) body.scrollTop = body.scrollHeight
   }, [text, open, streaming])
+
+  // 重新展开（或换到新的一段思考）时恢复跟随：上一次的"我在往回看"不该粘住。
+  useEffect(() => {
+    if (open) followBodyRef.current = true
+  }, [open])
+
+  const handleBodyScroll = (): void => {
+    const body = bodyRef.current
+    if (!body) return
+    const distanceFromBottom = body.scrollHeight - body.scrollTop - body.clientHeight
+    followBodyRef.current = distanceFromBottom <= THINKING_FOLLOW_BOTTOM_THRESHOLD_PX
+  }
 
   // 折叠态摘要：优先便宜模型给的一句话概括，拿不到就退回正文前 ~60 字截断。
   // 只在块收尾后才请求（流式期间输入还不完整，而且不该跟主链路抢带宽）；
   // 太短的思考块不值得花一次调用——60 字截断本来就把它显示全了。
   const worthSummarizing = !streaming && text.length >= THINKING_SUMMARY_MIN_CHARS
-  const note = useCheapNote(fetchThinkingNote, text, worthSummarizing)
+  const note = useCheapNote(fetchThinkingNote, text, worthSummarizing).value
 
   // 展开之后才翻译：思考过程大量是英文（模型内部推理用什么语言不受 Tran 控制），
   // 一屏英文等于没法读。按需触发——展开是个明确动作，不展开就不花这一次调用。
   const [showOriginal, setShowOriginal] = useState(false)
   const wantsTranslation = open && !streaming && looksEnglish(text)
-  const translated = useCheapNote(fetchThinkingTranslation, text, wantsTranslation)
+  const translationState = useCheapNote(fetchThinkingTranslation, text, wantsTranslation)
+  const translated = translationState.value
 
   if (!text) return <></>
   const preview = note ?? text.replace(/\s+/g, ' ').trim().slice(0, 60)
@@ -485,14 +584,24 @@ const ThinkingBlock = memo(function ThinkingBlock({
               {showOriginal ? '看译文' : '看原文'}
             </button>
           )}
-          {wantsTranslation && !translated && (
+          {wantsTranslation && !translated && !translationState.settled && (
             <div className="mt-1 pl-1.5 text-[10px] text-zinc-600">
               <span className="tran-shimmer">翻译中…</span>
             </div>
           )}
+          {/* 翻译落地但没译出来（通道没配 key / 接口失败）：别永远转"翻译中"，
+              给一句轻提示然后显示原文（2026-08 用户要求）。 */}
+          {wantsTranslation && !translated && translationState.settled && (
+            <div className="mt-1 pl-1.5 text-[10px] text-zinc-700">
+              翻译不可用（未配置或接口失败），已显示原文
+            </div>
+          )}
           <div
             ref={bodyRef}
-            className="mt-1.5 max-h-[200px] overflow-auto whitespace-pre-wrap pl-1.5 text-xs leading-relaxed text-zinc-500"
+            onScroll={handleBodyScroll}
+            // overscroll-contain：在思考框内滚到顶/底时不再把滚动"甩"给外层转录区。
+            // 没有它的话，你在框里往回翻、一碰到边界就连带整个对话一起滚走。
+            className="mt-1.5 max-h-[200px] overflow-auto overscroll-contain whitespace-pre-wrap pl-1.5 text-xs leading-relaxed text-zinc-500"
           >
             {bodyText}
           </div>
@@ -526,10 +635,10 @@ interface ActivityEntry {
 }
 
 /** 一段连续「思考 + 工具调用」的规则摘要："思考 2 段 · 运行了命令 ×5 · 编辑了文件"。 */
-function summarizeActivity(entries: ActivityEntry[]): string {
+function summarizeActivity(blocks: AssistantBlock[]): string {
   let thinking = 0
   const tools = new Map<string, number>()
-  for (const { block } of entries) {
+  for (const block of blocks) {
     if (block.kind === 'thinking') thinking += 1
     else if (block.kind === 'tool') tools.set(block.name, (tools.get(block.name) ?? 0) + 1)
   }
@@ -562,9 +671,50 @@ const ActivityGroupRow = memo(function ActivityGroupRow({
         className="flex cursor-pointer select-none items-center gap-1.5 text-left text-xs text-zinc-500 transition hover:text-zinc-400"
       >
         <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
-        <span>{summarizeActivity(entries)}</span>
+        <span>{summarizeActivity(entries.map((e) => e.block))}</span>
       </button>
       {open && entries.map(renderBlock)}
+    </div>
+  )
+})
+
+/**
+ * B 方案的跨消息活动组：连续若干条「只有思考/工具」的消息收成一行规则摘要，
+ * 点开还原成 ThinkingBlock / ToolCallCard 的完整渲染（数据不动，纯视图折叠）。
+ *
+ * 与消息内的 ActivityGroupRow 是两套：那个只能看到单条消息的 blocks，这个跨消息。
+ * 组内含"最新块"时默认展开，用户手动点过之后以其选择为准。
+ */
+const ActivityGroupCard = memo(function ActivityGroupCard({
+  blocks,
+  forceOpen = false,
+  expandedBlockKey = null
+}: {
+  blocks: AssistantBlock[]
+  forceOpen?: boolean
+  expandedBlockKey?: string | null
+}): JSX.Element {
+  const [userToggled, setUserToggled] = useState<boolean | null>(null)
+  const open = userToggled ?? forceOpen
+  return (
+    <div className="my-1">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setUserToggled(!open)}
+        className="flex cursor-pointer select-none items-center gap-1.5 text-left text-xs text-zinc-500 transition hover:text-zinc-400"
+      >
+        <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
+        <span>{summarizeActivity(blocks)}</span>
+      </button>
+      {open &&
+        blocks.map((block, i) =>
+          block.kind === 'thinking' ? (
+            <ThinkingBlock key={i} text={block.text} streaming={false} />
+          ) : block.kind === 'tool' ? (
+            <ToolCallCard key={i} block={block} forceExpanded={expandedBlockKey === block.toolUseId} />
+          ) : null
+        )}
     </div>
   )
 })
@@ -585,7 +735,7 @@ const AssistantMessage = memo(function AssistantMessage({
   const at = messageTime(item.id)
 
   return (
-    <div className={`group/msg relative ${depth === 0 ? 'tran-ai-col max-w-[92%]' : ''}`}>
+    <div className={`group/msg relative ${depth === 0 ? 'tran-ai-col' : ''}`}>
       {item.error && (
         <div className="mb-2 rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-1.5 text-xs text-red-300">
           {item.error}
@@ -690,6 +840,10 @@ export default function Transcript({
 }: TranscriptProps): JSX.Element {
   const items = useSessionStore((s) => s.items)
   const sessionKey = useSessionStore((s) => s.meta?.sessionId ?? '')
+  // Virtuoso 头部插入补偿（见下面 displayRows 的注释）。基数取大数，只减不加。
+  const firstItemIndexRef = useRef(FIRST_ITEM_INDEX_BASE)
+  const prevFirstRowKeyRef = useRef<string | null>(null)
+  const prevSessionKeyRef = useRef(sessionKey)
   /** #45 附件持久化分桶键：sdkSessionId 重启 resume 后稳定（bridge id 每次都变）。 */
   const attachmentKey = useSessionStore((s) => s.meta?.sdkSessionId ?? s.meta?.sessionId ?? '')
   const agentBackend = useSessionStore((s) => s.meta?.agentBackend)
@@ -768,7 +922,35 @@ export default function Transcript({
   }, [attachmentKey, historyUserIds])
 
   const roots = useMemo(() => buildForest(items), [items])
-  const displayRows = useMemo(() => buildDisplayRows(roots), [roots])
+  /**
+   * 历史渐进注水会往 items **头部**插入旧消息（每次 50 条）。虚拟列表默认按
+   * 下标定位，头部多出 N 条 = 当前可视内容整体往下推 N 条的高度——表现就是
+   * 「往上滚、一停住、内容自己往下跳一大截」。触发链路：滚动时注水暂停，
+   * `setTranscriptScrolling(false)` 一到就立刻续上并 set 一批到最前面。
+   *
+   * Virtuoso 对这个场景的正解是 `firstItemIndex`：取一个大基数，每次头部插入
+   * 就把它减去插入条数，Virtuoso 据此把视觉位置钉住不动。这里用「上一帧的首行
+   * key 在新数组里的下标」反推插入了多少——比让 store 额外上报计数更难出错，
+   * 分组（toolGroup/envelopeGroup）导致的行数变化也一并算对。
+   */
+  const { displayRows, firstItemIndex } = useMemo(() => {
+    const rows = buildDisplayRows(roots)
+    // 换会话：整表重来，基数复位，别把上个会话的偏移带过来。
+    if (prevSessionKeyRef.current !== sessionKey) {
+      prevSessionKeyRef.current = sessionKey
+      firstItemIndexRef.current = FIRST_ITEM_INDEX_BASE
+      prevFirstRowKeyRef.current = null
+    }
+    const firstKey = rows.length ? rowKeyOf(rows[0]) : null
+    const prevKey = prevFirstRowKeyRef.current
+    if (prevKey !== null && firstKey !== prevKey) {
+      const insertedAbove = rows.findIndex((row) => rowKeyOf(row) === prevKey)
+      // >0 才是"头部插入"；-1 是旧首行已不在（换会话/清空），不动基数。
+      if (insertedAbove > 0) firstItemIndexRef.current -= insertedAbove
+    }
+    prevFirstRowKeyRef.current = firstKey
+    return { displayRows: rows, firstItemIndex: firstItemIndexRef.current }
+  }, [roots, sessionKey])
   // #48 导航条目：顶层用户消息（排除系统信封；子代理转发的本就不在顶层行），
   // 按行号顺序排列，最新在下；条数封顶只留最近若干条。
   const userNavEntries = useMemo(() => {
@@ -856,9 +1038,14 @@ export default function Transcript({
     lockFollowOutput()
     markScrollIntent()
     setPinnedAtBottom(false)
-    const distance = Math.abs(rowIndex - lastRenderedRangeRef.current.startIndex)
+    // 传了 firstItemIndex 之后，Virtuoso 对外的下标空间是**绝对**的
+    // （rangeChanged 上报的、scrollToIndex 接收的都含基数偏移），而
+    // userNavEntries.rowIndex 是 displayRows 里的相对下标——必须先加基数，
+    // 否则跳转会偏到十万八千里。
+    const absoluteIndex = firstItemIndexRef.current + rowIndex
+    const distance = Math.abs(absoluteIndex - lastRenderedRangeRef.current.startIndex)
     virtuosoRef.current?.scrollToIndex({
-      index: rowIndex,
+      index: absoluteIndex,
       align: 'start',
       behavior: distance > USER_NAV_SMOOTH_MAX_ROWS ? 'auto' : 'smooth'
     })
@@ -1138,7 +1325,7 @@ export default function Transcript({
     const last = items[items.length - 1]
     if (!last || last.kind !== 'user') return
     if (last.isHistory || last.parentToolUseId) return
-    if (ENVELOPE_RE.test(last.text.trimStart())) return
+    if (isEnvelopeText(last.text)) return
     if (lastSendScrollItemIdRef.current === last.id) return
     lastSendScrollItemIdRef.current = last.id
     pinToBottom('auto')
@@ -1183,14 +1370,27 @@ export default function Transcript({
 
   const renderRow = (row: DisplayRow): JSX.Element => {
     if (row.kind === 'toolGroup') {
-      // 与 AssistantMessage 的 depth-0 容器同宽（max-w-[92%]），保证工具
+      // 与 AssistantMessage 的 depth-0 容器同宽（.tran-ai-col，56rem），保证工具
       // 分组 bar 与思考/文本/单个工具 bar 等宽（#9）。tran-ai-col 是给外观
       // 主题用的稳定钩子：简约风把这一列居中，用户发言再对齐到同一列。
       return (
-        <div className="tran-ai-col max-w-[92%]">
+        <div className="tran-ai-col">
           <ToolGroupCard
             blocks={row.blocks}
             forceOpen={row.blocks.some((b) => b.toolUseId === lastExpandableKey)}
+            expandedBlockKey={lastExpandableKey}
+          />
+        </div>
+      )
+    }
+    if (row.kind === 'activityGroup') {
+      return (
+        <div className="tran-ai-col">
+          <ActivityGroupCard
+            blocks={row.blocks}
+            forceOpen={row.blocks.some(
+              (b) => b.kind === 'tool' && b.toolUseId === lastExpandableKey
+            )}
             expandedBlockKey={lastExpandableKey}
           />
         </div>
@@ -1256,8 +1456,9 @@ export default function Transcript({
       <Virtuoso
         ref={virtuosoRef}
         data={displayRows}
+        firstItemIndex={firstItemIndex}
         initialTopMostItemIndex={{ index: Math.max(displayRows.length - 1, 0), align: 'end' }}
-        computeItemKey={(_, row) => (row.kind === 'item' ? row.node.item.id : row.id)}
+        computeItemKey={(_, row) => rowKeyOf(row)}
         increaseViewportBy={scrollTuning.increaseViewportBy}
         overscan={scrollTuning.overscan}
         scrollerRef={(element) => {
@@ -1271,11 +1472,14 @@ export default function Transcript({
           // container provided; py-1.5 keeps the block rhythm tight (#9, Kimi Web feel).
           // 入场动画只给"新到"的消息（seenItemIdsRef 去重，滚动复用不重播）；
           // 批量历史同帧挂载时 stagger 封顶 300ms。
-          const rowKey = row.kind === 'item' ? row.node.item.id : row.id
+          const rowKey = rowKeyOf(row)
           const isNew = !seenItemIdsRef.current.has(rowKey)
           if (isNew) seenItemIdsRef.current.add(rowKey)
           // 历史/实况分界：上一行是重放历史、当前行不是 → 加分隔小字。
-          const prevRow = index > 0 ? displayRows[index - 1] : null
+          // ⚠ 传了 firstItemIndex 后这里的 index 是**绝对**下标（含百万级基数），
+          // 直接拿去索引 displayRows 一律 undefined——分隔线会静默消失。
+          const relIndex = index - firstItemIndex
+          const prevRow = relIndex > 0 ? displayRows[relIndex - 1] : null
           const prevItem = prevRow && prevRow.kind === 'item' ? prevRow.node.item : null
           const curItem = row.kind === 'item' ? row.node.item : null
           const showHistoryDivider = !!prevItem?.isHistory && !!curItem && !curItem.isHistory
@@ -1288,7 +1492,7 @@ export default function Transcript({
             <div
               data-user-msg-id={userMsgId}
               className={`mx-auto w-full max-w-5xl px-6 py-1.5 ${isNew ? 'tran-msg-enter' : ''}`}
-              style={isNew ? { animationDelay: `${Math.min(index * 24, 280)}ms` } : undefined}
+              style={isNew ? { animationDelay: `${Math.min(relIndex * 24, 280)}ms` } : undefined}
             >
               {showHistoryDivider && (
                 <div className="mb-2 flex items-center gap-2 text-[10px] text-zinc-600">
@@ -1309,13 +1513,22 @@ export default function Transcript({
         context={footerContext}
       />
       <UserMessageNav entries={userNavEntries} activeId={activeUserNavId} onJump={jumpToUserMessage} />
+      {/* 回到最新：挪到右下角并收成圆形图标。原先是 `bottom-4 left-1/2` 的
+          胶囊按钮——正悬在阅读列的正下方，一往上滚就挡住最后一两行正文，而这
+          恰恰是你往回翻时想看的内容。右下角既在导航条（right-2 top-1/2，
+          max-h-50vh，够不到底部）之外，也不压正文。hover 才展开"最新"二字。 */}
       {!layoutTransitioning && !atBottom && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+        <div className="group/latest absolute bottom-4 right-4">
           <button
             onClick={() => pinToBottom('smooth')}
-            className="glass-control rounded-full px-3 py-1.5 text-xs text-zinc-300 shadow-lg hover:bg-white/[0.075]"
+            title="回到最新"
+            aria-label="回到最新"
+            className="glass-control flex h-8 items-center gap-1 rounded-full px-2.5 text-xs text-zinc-400 transition hover:text-zinc-200"
           >
-            ↓ 最新
+            <span aria-hidden className="leading-none">↓</span>
+            <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-150 group-hover/latest:max-w-[2.5rem] group-hover/latest:opacity-100">
+              最新
+            </span>
           </button>
         </div>
       )}
