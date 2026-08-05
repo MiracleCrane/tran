@@ -16,6 +16,22 @@ export type { GoalControlAction, GoalInfo, GoalStartOptions, GoalStatus }
 
 const DEFAULT_MAX_TURNS = 20
 
+const GOAL_STATUSES = new Set<GoalStatus>(['active', 'paused', 'blocked', 'complete'])
+
+/** 逐项形状校验：文件被手改/损坏时（如 {"x":null}）不能进 cache，
+ *  否则后续遍历 goal.status 直接抛 TypeError，且绕过 loadFailed 保护。 */
+function isGoalInfo(value: unknown): value is GoalInfo {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const goal = value as Record<string, unknown>
+  return (
+    typeof goal.objective === 'string' &&
+    GOAL_STATUSES.has(goal.status as GoalStatus) &&
+    typeof goal.turnCount === 'number' &&
+    typeof goal.maxTurns === 'number' &&
+    typeof goal.createdAt === 'number'
+  )
+}
+
 let cache: Record<string, GoalInfo> | null = null
 /** 读盘失败（区别于"文件不存在"）后本次运行不再写入：目标是用户设的长期任务，
  *  空对象写回去会把所有目标（含进度 turnCount）永久删掉。 */
@@ -41,7 +57,14 @@ function load(): Record<string, GoalInfo> {
     loadFailed = true
     return cache
   }
-  cache = (raw as Record<string, GoalInfo> | null) ?? {}
+  // 逐项过滤非法条目（只收合法的，不整体判死：合法目标应尽量保留）。
+  cache = {}
+  let dropped = 0
+  for (const [sessionId, value] of Object.entries((raw as Record<string, unknown> | null) ?? {})) {
+    if (isGoalInfo(value)) cache[sessionId] = value
+    else dropped += 1
+  }
+  if (dropped) log('goal', `goal-store.json 含 ${dropped} 条非法条目，已忽略`)
   // 进程重启时循环已中断：active 一律降为 paused（需用户手动继续）。
   let migrated = false
   for (const goal of Object.values(cache)) {

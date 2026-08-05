@@ -131,6 +131,12 @@ interface PendingPermission {
   elicitation?: boolean
   /** #41 发起等待的桥接会话 id：用户作答后复位其 waitingOnUser。 */
   sessionId?: string
+  /** M3 重投递用：请求所属的 ACP 会话 id（渲染层重载后会话重挂时按此匹配）。 */
+  acpSessionId?: string
+  /** M3 重投递用：原始权限事件载荷（原样再 emit 一次）。 */
+  permissionPayload?: PermissionRequestPayload
+  /** M3 重投递用：原始 elicitation 载荷（原样再走 system/elicitation）。 */
+  elicitationPayload?: Record<string, unknown>
 }
 
 interface TokenUsage {
@@ -193,6 +199,21 @@ const TURN_STALL_WARN_MS = 15 * 60_000
 const TURN_STALL_ABORT_MS = 2 * 60 * 60_000
 const TURN_STALL_CHECK_MS = 60_000
 
+/** M3 权限/elicitation 等待的硬上限：等用户不算 agent 卡死，但渲染层重载后
+ *  弹窗可能永久丢失（有重投递兜底，仍防万一）——超过此上限视同僵尸，走
+ *  自动 cancel 路径，避免会话永久忙碌。 */
+const WAITING_ON_USER_ABORT_MS = 24 * 60 * 60_000
+
+/** M2 pendingNotifications 淘汰参数：正常注册竞争窗口只有一两个微任务的长度，
+ *  缓冲到达上限只可能是"会话已死、通知永远等不到注册"的泄漏形态。 */
+const PENDING_NOTIFICATIONS_PER_SESSION = 500
+const PENDING_NOTIFICATIONS_TOTAL = 5000
+/** M2 tombstone 集合自身的上限（FIFO 淘汰，防长时间运行无界增长）。 */
+const DEAD_ACP_SESSIONS_MAX = 200
+
+/** GitHub #3：ACP 子进程意外退出后的自动恢复重试（有限次数 + 退避）。 */
+const CLIENT_RECOVERY_BACKOFF_MS = [1000, 3000, 8000]
+
 /** Map ACP/JSON-RPC failures to user-facing text. authRequired (-32000) means
  *  the Kimi CLI has no usable token — the fix is a terminal `kimi login`. */
 function userFacingError(error: unknown): string {
@@ -250,8 +271,17 @@ export class KimiBackend {
   /** 注册竞争窗口里到达的 session/update 通知（按 acpSessionId 分组），
    *  在 acpToSession 注册后按序 flush —— 不丢、不重、顺序保持。 */
   private pendingNotifications = new Map<string, AcpRpcMessage[]>()
+  /** M2：已关闭会话的 acpSessionId 墓碑——close 后迟到的通知直接丢弃，
+   *  不再永久缓冲（resume 同一会话时摘掉墓碑）。插入序即时间序，FIFO 淘汰。 */
+  private deadAcpSessions = new Set<string>()
+  /** M2：缓冲淘汰计数（日志节流用）。 */
+  private droppedNotifications = 0
   private clientPromise: Promise<AcpClient> | null = null
   private client: AcpClient | null = null
+  /** L4：dispose 后置位——在途 ensureClient 返回的 client 直接关掉，防泄漏。 */
+  private disposed = false
+  /** #3：自动恢复进行中（防重入；意外断开只会触发一轮恢复）。 */
+  private recovering = false
   /** Model choices discovered from session/new configOptions (ACP-side source
    *  of truth), merged over DEFAULT_KIMI_MODELS in listModels(). */
   private discoveredModels: ComposerModel[] = []
@@ -308,6 +338,12 @@ export class KimiBackend {
       log('kimi', `prepare failed session=${sessionId}: ${message}`)
       this.h.onEnded(sessionId, message)
       this.sessions.delete(sessionId)
+      // L1：resume 路径在 session/load 请求前就注册了 acpToSession——失败时把
+      // 映射与缓冲一并清掉，防止悬挂映射把后续迟到通知路由到已拆掉的会话。
+      if (session.acpSessionId && this.acpToSession.get(session.acpSessionId) === sessionId) {
+        this.acpToSession.delete(session.acpSessionId)
+        this.pendingNotifications.delete(session.acpSessionId)
+      }
     })
     return sessionId
   }
@@ -371,10 +407,17 @@ export class KimiBackend {
     if (session.acpSessionId) {
       // 空壳治理：Tran 新建但没发过消息的会话，离开时直接从磁盘删掉。
       this.discardEmptyShell(session)
-      this.acpToSession.delete(session.acpSessionId)
-      this.pendingNotifications.delete(session.acpSessionId)
-      // Kimi ACP 未实现 session/close —— 只取消当前 turn 并丢弃本地映射。
-      this.client?.notify('session/cancel', { sessionId: session.acpSessionId })
+      // 同一 acpSessionId 可能已被新会话接管（渲染层重载先 resume 后销毁旧
+      // 会话）：映射还指向自己才清理/立墓碑/取消 turn，否则会误伤接管者。
+      if (this.acpToSession.get(session.acpSessionId) === session.id) {
+        this.acpToSession.delete(session.acpSessionId)
+        this.pendingNotifications.delete(session.acpSessionId)
+        // M2：立墓碑——close 后迟到的 session/update（在途 turn 的尾巴）不再
+        // 进缓冲，否则永久滞留且下次 resume 会被当历史回放出幻影消息。
+        this.markAcpSessionDead(session.acpSessionId)
+        // Kimi ACP 未实现 session/close —— 只取消当前 turn 并丢弃本地映射。
+        this.client?.notify('session/cancel', { sessionId: session.acpSessionId })
+      }
     }
     this.sessions.delete(sessionId)
   }
@@ -490,8 +533,6 @@ export class KimiBackend {
 
   private checkTurnStall(session: ActiveKimiSession): void {
     if (!session.running || !session.turnStartedAt || session.closed) return
-    // 权限/elicitation 等待期间不算无响应——是在等用户，不是 agent 卡死。
-    if (session.waitingOnUser) return
     // 会话已被取代/清空（close/handleClientClose 后旧定时器的残火）：直接自拆。
     if (this.sessions.get(session.id) !== session) {
       this.disarmStallWatch(session)
@@ -499,6 +540,10 @@ export class KimiBackend {
     }
     const now = Date.now()
     const silentMs = now - session.lastEventAt
+    // 权限/elicitation 等待期间不算无响应——是在等用户，不是 agent 卡死。
+    // M3：但不再无限豁免——渲染层重载丢弹窗等异常下给一个宽松硬上限（24h），
+    // 超过后落到下面的自动 cancel 兜底，防会话永久忙碌。
+    if (session.waitingOnUser && silentMs < WAITING_ON_USER_ABORT_MS) return
     if (silentMs >= TURN_STALL_ABORT_MS) {
       const silentMin = Math.round(silentMs / 60000)
       log('kimi', `turn stalled ${silentMin}min session=${session.id} — auto cancel (zombie fallback)`)
@@ -624,10 +669,15 @@ export class KimiBackend {
     const pending = this.pendingPermissions.get(resp.toolUseID)
     if (!pending) return false
     this.pendingPermissions.delete(resp.toolUseID)
-    // #41 用户已作答：复位"等用户"状态，静默监督恢复。
+    // #41 用户已作答：复位"等用户"状态，静默监督恢复。M3：作答本身算一次
+    // 活动（touch 重置静默计时）——否则等待很久后刚作答，下一个 tick 里
+    // silentMs 仍是整段等待时长，会被误判僵尸直接 cancel。
     if (pending.sessionId) {
       const session = this.sessions.get(pending.sessionId)
-      if (session) session.waitingOnUser = false
+      if (session) {
+        session.waitingOnUser = false
+        this.touchTurnActivity(session)
+      }
     }
     if (pending.elicitation) {
       // elicitation：原样返回用户点选的 optionId（不做 allow/deny 模糊匹配）。
@@ -677,6 +727,11 @@ export class KimiBackend {
         userMsgId: null
       }
       session.acpSessionId = opts.resume
+      // M2：resume 的可能是此前关闭过的会话（墓碑在册）——摘掉墓碑，并把旧纪元
+      // 残留的迟到缓冲清掉（属于已关闭会话的 turn 尾巴，flush 出去就是幻影消息）。
+      if (this.deadAcpSessions.delete(opts.resume)) {
+        this.pendingNotifications.delete(opts.resume)
+      }
       this.acpToSession.set(opts.resume, session.id)
       // resume 路径注册在请求之前，理论上不会有缓冲；防御性 flush（通常空转）。
       this.flushPendingNotifications(opts.resume)
@@ -701,8 +756,10 @@ export class KimiBackend {
       if (session.closed) {
         this.discardEmptyShell(session)
         // 缓冲区里可能已经堆了这个 acpSessionId 的通知（kimi 在 session/new
-        // 响应后立刻推）。这里不注册映射也不 flush，不清就永久留在 Map 里。
+        // 响应后立刻推）。这里不注册映射也不 flush，不清就永久留在 Map 里；
+        // M2：同时立墓碑，之后再迟到的通知直接丢。
         this.pendingNotifications.delete(acpSessionId)
+        this.markAcpSessionDead(acpSessionId)
         return
       }
       this.acpToSession.set(acpSessionId, session.id)
@@ -717,9 +774,13 @@ export class KimiBackend {
     // ——会话已被取代，渲染层不再等它的 init。
     if (session.closed) {
       const lateAcpSessionId = session.acpSessionId
-      if (lateAcpSessionId) {
+      // 同一 acpSessionId 可能已被新会话重新注册（快速两次 resume）：映射还
+      // 指向自己才清理/立墓碑，否则会误伤接管者。
+      if (lateAcpSessionId && this.acpToSession.get(lateAcpSessionId) === session.id) {
         this.acpToSession.delete(lateAcpSessionId)
         this.pendingNotifications.delete(lateAcpSessionId)
+        // M2：同上——已关闭会话的迟到通知直接丢。
+        this.markAcpSessionDead(lateAcpSessionId)
       }
       return
     }
@@ -746,6 +807,10 @@ export class KimiBackend {
       await this.setPermissionMode(session.id, session.permissionMode)
     }
     this.emitInit(session, session.acpSessionId ?? opts.resume ?? session.id, session.model ?? model)
+    // M3：渲染层重载后重挂会话（resume 同一 acpSessionId）：未应答的权限/
+    // elicitation 请求按原事件形态重投——原弹窗随旧渲染层丢失，不重投的话
+    // kimi 侧一直等应答，会话看起来永久忙碌。
+    this.redeliverPendingPermissions(session)
     void this.drain(session)
     // 会话打开即刷新上下文用量 + MCP server 状态（串行隐藏轮；有轮在跑则
     // turn 末的 afterTurn 会补 /usage，这里只在空转时触发，保持串行）。
@@ -835,10 +900,16 @@ export class KimiBackend {
       await this.runTurn(session, next)
     } catch (error) {
       session.lastTurnFailed = true
-      this.emitResult(session, {
-        subtype: 'error',
-        error: userFacingError(error)
-      })
+      // M4：会话已关闭（close 竞态）不再向渲染层投递；L2：出错也先把正在
+      // 流式的消息封口（补 content_block_stop + 定稿），已输出内容保留，
+      // 渲染层不会停在"流式中"。
+      if (!session.closed) {
+        this.sealStreamMessage(session)
+        this.emitResult(session, {
+          subtype: 'error',
+          error: userFacingError(error)
+        })
+      }
     } finally {
       session.running = false
       session.turnStartedAt = 0
@@ -1159,6 +1230,9 @@ export class KimiBackend {
       session.stallAbort = undefined
       this.disarmStallWatch(session)
     }
+    // M4：close 竞态——prompt 在途期间会话被关闭：后半段不再向渲染层投递
+    // 任何消息（query/compaction/seal/result 全部跳过；会话状态已随 close 丢弃）。
+    if (session.closed) return
     // goal 循环终止判定用：封停前捕获本轮最终正文。
     session.lastTurnText = session.streamedText
     // 查询轮：输出经 system/query_result 状态卡推渲染层（原文不进对话流）。
@@ -1226,9 +1300,14 @@ export class KimiBackend {
   }
 
   private async ensureClient(): Promise<AcpClient> {
+    // L4：dispose 后不再拉起新进程（在途请求会以此错误收场）。
+    if (this.disposed) throw new Error('Kimi backend disposed.')
     if (this.client) return this.client
     if (!this.clientPromise) {
-      this.clientPromise = (async () => {
+      // 代际校验（参考 kimiHistory.ensureClient）：dispose 与在途建连竞态时，
+      // 建成的 client 不落到 this.client 上，而是当场关掉防进程泄漏。
+      let promise!: Promise<AcpClient>
+      promise = (async () => {
         const resolved = await resolveWindowsKimiCommand()
         return AcpClient.start({
           command: resolved.command,
@@ -1247,12 +1326,18 @@ export class KimiBackend {
           onClose: (error) => this.handleClientClose(error)
         })
       })().then((client) => {
+        // L4：dispose（或被取代）后才建成的在途 client：直接关掉，不接管。
+        if (this.disposed || this.clientPromise !== promise) {
+          client.close()
+          throw new Error('Kimi backend disposed during ACP startup.')
+        }
         this.client = client
         return client
       }).catch((error) => {
-        this.clientPromise = null
+        if (this.clientPromise === promise) this.clientPromise = null
         throw error
       })
+      this.clientPromise = promise
     }
     return this.clientPromise
   }
@@ -1267,9 +1352,22 @@ export class KimiBackend {
       // 等通知，stdout 在同一同步块里先 resolve request、再处理通知，而
       // acpToSession 注册要等微任务。查不到 session 时先缓冲，注册后按序回放。
       if (acpSessionId) {
+        // M2：已关闭会话的迟到通知（在途 turn 的尾巴）直接丢弃——这类通知
+        // 永远等不到注册，缓冲只会泄漏，还会在下次 resume 时回放出幻影消息。
+        if (this.deadAcpSessions.has(acpSessionId)) return
         const pending = this.pendingNotifications.get(acpSessionId) ?? []
         pending.push(msg)
+        // M2：单会话上限——正常竞争窗口只有一两个微任务长，触顶必是泄漏形态，
+        // 丢最旧保最新（注册真的到来时至少 flush 出接近现场的内容）。
+        if (pending.length > PENDING_NOTIFICATIONS_PER_SESSION) {
+          pending.shift()
+          this.droppedNotifications += 1
+          if (this.droppedNotifications % 100 === 1) {
+            log('kimi', `pending notifications overflow acp=${acpSessionId} (dropped total=${this.droppedNotifications})`)
+          }
+        }
         this.pendingNotifications.set(acpSessionId, pending)
+        this.prunePendingNotifications()
       }
       return
     }
@@ -1406,6 +1504,65 @@ export class KimiBackend {
     for (const msg of pending) this.handleNotification(msg)
   }
 
+  /** M2：给已关闭会话立墓碑（重复关闭刷新插入序）；集合自身 FIFO 淘汰防无界。 */
+  private markAcpSessionDead(acpSessionId: string): void {
+    this.deadAcpSessions.delete(acpSessionId)
+    this.deadAcpSessions.add(acpSessionId)
+    while (this.deadAcpSessions.size > DEAD_ACP_SESSIONS_MAX) {
+      const oldest = this.deadAcpSessions.values().next().value
+      if (oldest === undefined) break
+      this.deadAcpSessions.delete(oldest)
+    }
+  }
+
+  /** M2：缓冲总量上限——超限时按插入序整段丢最旧的 acpSessionId 缓冲。 */
+  private prunePendingNotifications(): void {
+    let total = 0
+    for (const list of this.pendingNotifications.values()) total += list.length
+    while (total > PENDING_NOTIFICATIONS_TOTAL) {
+      const oldestKey = this.pendingNotifications.keys().next().value
+      if (oldestKey === undefined) break
+      const removed = this.pendingNotifications.get(oldestKey)?.length ?? 0
+      this.pendingNotifications.delete(oldestKey)
+      total -= removed
+      log('kimi', `pending notifications global overflow: dropped ${removed} buffered for acp=${oldestKey}`)
+    }
+  }
+
+  /** M3(b)：会话重新挂载时把未应答的权限/elicitation 请求按原事件形态重投给
+   *  渲染层（弹窗随旧渲染层丢失，kimi 侧还在等应答）。只重投当前存活 client
+   *  的请求——死进程的请求不可应答，重投只会误导用户。 */
+  private redeliverPendingPermissions(session: ActiveKimiSession): void {
+    if (!session.acpSessionId) return
+    for (const pending of this.pendingPermissions.values()) {
+      if (pending.acpSessionId !== session.acpSessionId) continue
+      if (pending.client !== this.client) continue
+      // 请求改挂到新的桥接会话上（作答时按它复位 waitingOnUser）。
+      pending.sessionId = session.id
+      if (pending.elicitation) {
+        if (pending.elicitationPayload) {
+          this.h.onMessage(session.id, {
+            type: 'system',
+            subtype: 'elicitation',
+            elicitation: pending.elicitationPayload
+          } as unknown as SDKMessage)
+        }
+      } else if (pending.permissionPayload) {
+        this.h.onPermissionRequest(pending.permissionPayload)
+      }
+    }
+  }
+
+  /** #3：连接状态通告——复用 system/query_result 状态卡形态（不动共享 IPC
+   *  类型，渲染层已有渲染路径），在对话流里落一张可见的状态卡。 */
+  private emitConnectionNotice(session: ActiveKimiSession, text: string): void {
+    this.h.onMessage(session.id, {
+      type: 'system',
+      subtype: 'query_result',
+      query: { command: '/status', text, at: Date.now() }
+    } as unknown as SDKMessage)
+  }
+
   private handleSessionUpdate(session: ActiveKimiSession, update: Record<string, unknown>): void {
     const type = asString(update.sessionUpdate)
     this.touchTurnActivity(session)
@@ -1438,7 +1595,10 @@ export class KimiBackend {
       }
       // 压缩轮（/compact 标记；或自动压缩：chunk 文本出现压缩标记即检出并置位，
       // 后续 chunk 一并吞掉）：累积不转发，turn 结束经 system/compaction 推送。
-      if (session.compactTurn || isCompactionText(session.compactText + text)) {
+      // L3：标记可能被 chunk 边界拦腰截断（"Compacting conver|sation context"），
+      // 检测串带上已流式正文的尾部拼接——置位前放行的半截前缀随 seal 定稿，
+      // 属可接受残留（渲染层压缩卡逻辑同款正则会滤掉残句所在的流式条目）。
+      if (session.compactTurn || isCompactionText(session.streamedText.slice(-64) + session.compactText + text)) {
         session.compactTurn = true
         session.compactText += text
         return
@@ -1572,18 +1732,18 @@ export class KimiBackend {
       ? params.options.filter((option): option is Record<string, unknown> => !!asRecord(option))
       : []
     // #41 转入"等用户"状态：权限/elicitation 等待期间静默监督暂停（作答后复位）。
-    const session = this.sessionForAcp(asString(params.sessionId))
+    const acpSessionId = asString(params.sessionId)
+    const session = this.sessionForAcp(acpSessionId)
     if (session) session.waitingOnUser = true
     // AskUserQuestion：走 elicitation 通道（区别于工具审批）——问题+选项原样
     // 经 system/elicitation 推渲染层，回答时原样返回 optionId。
     if (asString(toolCall.title) === 'AskUserQuestion') {
-      this.pendingPermissions.set(toolUseID, {
-        client,
-        requestId,
-        options,
-        elicitation: true,
-        ...(session ? { sessionId: session.id } : {})
-      })
+      // M3：查不到会话（映射已删/从未注册）就没有任何 UI 能收到这个问题，
+      // 存进 map 只会让 kimi 侧永远等不到应答——如实回 cancelled。
+      if (!session) {
+        client.respond(requestId, { outcome: { outcome: 'cancelled' } })
+        return
+      }
       const choices = options
         .map((option) => {
           const optionId = asString(option.optionId)
@@ -1595,33 +1755,52 @@ export class KimiBackend {
           }
         })
         .filter((option): option is NonNullable<typeof option> => !!option)
-      if (session) {
-        this.h.onMessage(session.id, {
-          type: 'system',
-          subtype: 'elicitation',
-          elicitation: {
-            toolUseID,
-            question: elicitationQuestion(toolCall),
-            options: choices,
-            // multiSelect 尽量从 toolCall 解析（content/input 里的布尔标记），
-            // 解析不到按单选（渲染层 radio 式）。
-            ...(elicitationMultiSelect(toolCall) ? { multiSelect: true } : {})
-          }
-        } as unknown as SDKMessage)
+      const elicitationPayload: Record<string, unknown> = {
+        toolUseID,
+        question: elicitationQuestion(toolCall),
+        options: choices,
+        // multiSelect 尽量从 toolCall 解析（content/input 里的布尔标记），
+        // 解析不到按单选（渲染层 radio 式）。
+        ...(elicitationMultiSelect(toolCall) ? { multiSelect: true } : {})
       }
+      this.pendingPermissions.set(toolUseID, {
+        client,
+        requestId,
+        options,
+        elicitation: true,
+        sessionId: session.id,
+        // M3 重投递用：所属 ACP 会话 + 原始载荷（渲染层重载后按原形态重投）。
+        ...(acpSessionId ? { acpSessionId } : {}),
+        elicitationPayload
+      })
+      this.h.onMessage(session.id, {
+        type: 'system',
+        subtype: 'elicitation',
+        elicitation: elicitationPayload
+      } as unknown as SDKMessage)
       return
     }
-    this.pendingPermissions.set(toolUseID, { client, requestId, options, ...(session ? { sessionId: session.id } : {}) })
-    this.h.onPermissionRequest({
+    const permissionPayload: PermissionRequestPayload = {
       toolUseID,
       toolName: toolName(toolCall),
       input: toolInput(toolCall),
       decisionReason: asString(toolCall.title) ?? undefined
-    } satisfies PermissionRequestPayload)
+    }
+    this.pendingPermissions.set(toolUseID, {
+      client,
+      requestId,
+      options,
+      ...(session ? { sessionId: session.id } : {}),
+      ...(acpSessionId ? { acpSessionId } : {}),
+      permissionPayload
+    })
+    this.h.onPermissionRequest(permissionPayload)
   }
 
   /** 退出前释放后端级资源：kill ACP 子进程并停掉所有定时器。 */
   dispose(): void {
+    // L4：先置位——在途 ensureClient 建成的 client 会在代际校验处当场关掉。
+    this.disposed = true
     for (const session of this.sessions.values()) {
       this.disarmStallWatch(session)
     }
@@ -1637,21 +1816,114 @@ export class KimiBackend {
     this.acpToSession.clear()
     this.pendingPermissions.clear()
     this.pendingNotifications.clear()
+    this.deadAcpSessions.clear()
   }
 
+  /**
+   * GitHub #3：ACP 子进程意外退出（非 dispose/close 主动关闭）不再立刻把错误
+   * 抛给所有会话并拆掉——改为保守自动恢复：
+   * (a) 保留 transcript：不清会话，正在流式的消息就地封口（已输出内容定稿）；
+   * (b) 给受影响会话发一条 system 状态卡说明"连接已断开，正在自动恢复"；
+   * (c) 有限重试重建 client（退避见 CLIENT_RECOVERY_BACKOFF_MS），对有
+   *     acpSessionId 的会话走既有 session/load 路径复活映射；
+   * (d) 成功发"已恢复"，失败才落到原来的 onEnded 报错路径。
+   * ⚠️ 保守约束：不自动重发用户 prompt（避免重复执行副作用），恢复后由用户
+   * 继续；死进程的权限等待不可应答，直接清掉（不误导用户去点一个回不去的框）。
+   */
   private handleClientClose(error?: string): void {
     this.client = null
     this.clientPromise = null
-    for (const session of this.sessions.values()) {
-      // 先停掉本会话的 stall 定时器：只清 sessions 的话，定时器要等下一次
-      // 60s tick 自检才会自拆，这段时间里是空转的残火。
-      this.disarmStallWatch(session)
-      this.h.onEnded(session.id, error)
+    // 死进程的权限/elicitation 等待已不可应答：复位对应会话的"等用户"标记后清掉。
+    for (const pending of this.pendingPermissions.values()) {
+      const s = pending.sessionId ? this.sessions.get(pending.sessionId) : undefined
+      if (s) s.waitingOnUser = false
     }
-    this.sessions.clear()
-    this.acpToSession.clear()
     this.pendingPermissions.clear()
     this.pendingNotifications.clear()
+    for (const session of this.sessions.values()) {
+      // 先停掉 stall 定时器：不停的话要等下一次 60s tick 自检才自拆，
+      // 这段时间里是空转的残火。
+      this.disarmStallWatch(session)
+    }
+    // 没建立 acpSessionId 的会话（prepareSession 在途）走原路径：其 ready
+    // 已被 rejectAll 拒绝，start() 的 ready.catch 负责 onEnded + 清理。
+    // recovering 防重入：恢复期间重建 client 失败会再次触发 onClose（spawn
+    // 'error'），不重复发通告、不再起一轮恢复（重试循环自己在跑）。
+    const affected = [...this.sessions.values()].filter((s) => !s.closed && s.acpSessionId)
+    if (!affected.length || this.disposed || this.recovering) return
+    for (const session of affected) {
+      // (a) 正在流式的消息封口（保留已输出内容，渲染层不再停在"流式中"）。
+      this.sealStreamMessage(session)
+      // (b) 断线通告。
+      this.emitConnectionNotice(
+        session,
+        `Kimi ACP 连接已断开（${error?.trim() || '进程意外退出'}），正在自动恢复……`
+      )
+    }
+    void this.recoverSessions(affected, error)
+  }
+
+  /** #3：重建 client 并逐会话 session/load 复活映射（回放事件吞掉后丢弃——
+   *  渲染层 transcript 未清，重放出去就是重复历史）。 */
+  private async recoverSessions(affected: ActiveKimiSession[], closeError?: string): Promise<void> {
+    if (this.recovering) return
+    this.recovering = true
+    try {
+      let client: AcpClient | null = null
+      for (let attempt = 0; attempt < CLIENT_RECOVERY_BACKOFF_MS.length; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, CLIENT_RECOVERY_BACKOFF_MS[attempt]))
+        if (this.disposed) return
+        try {
+          client = await this.ensureClient()
+          break
+        } catch (e) {
+          log('kimi', `ACP auto-recovery attempt ${attempt + 1} failed: ${userFacingError(e)}`)
+        }
+      }
+      for (const session of affected) {
+        // 恢复窗口内会话可能又被关闭/取代（ready.catch、close、二次断连）。
+        if (this.sessions.get(session.id) !== session || session.closed || !session.acpSessionId) continue
+        if (!client) {
+          this.failSession(session, closeError?.trim() || 'ACP 连接已断开，自动恢复失败。')
+          continue
+        }
+        try {
+          // session/load 会重放历史：套 replay 累积器吞掉、完成后直接丢弃。
+          session.replaying = true
+          session.replay = {
+            sessionId: session.acpSessionId,
+            messages: [],
+            pendingToolResults: new Map(),
+            terminalToolCalls: new Set(),
+            thinkingText: '',
+            text: '',
+            userMsgId: null
+          }
+          await this.loadSessionWithRecovery(client, session, session.acpSessionId)
+          // (d) 恢复成功。⚠️ 不自动重发被打断轮的 prompt，由用户继续。
+          this.emitConnectionNotice(session, 'Kimi ACP 连接已恢复。被打断那一轮的请求不会自动重发，请继续对话。')
+          log('kimi', `ACP auto-recovery ok session=${session.id}`)
+        } catch (e) {
+          this.failSession(session, userFacingError(e))
+        } finally {
+          session.replaying = false
+          session.replay = undefined
+        }
+      }
+    } finally {
+      this.recovering = false
+    }
+  }
+
+  /** #3：单会话恢复失败——落到原来的报错/拆除路径并清理映射与缓冲。 */
+  private failSession(session: ActiveKimiSession, error: string): void {
+    if (this.sessions.get(session.id) !== session) return
+    this.sessions.delete(session.id)
+    if (session.acpSessionId && this.acpToSession.get(session.acpSessionId) === session.id) {
+      this.acpToSession.delete(session.acpSessionId)
+      this.pendingNotifications.delete(session.acpSessionId)
+    }
+    this.h.onEnded(session.id, error)
   }
 
   private emitInit(session: ActiveKimiSession, acpSessionId: string, model: string): void {

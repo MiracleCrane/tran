@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { writeJsonAtomic } from './atomicWrite'
 import { log } from './logger'
+import { loadSettings } from './settings'
 import type { PlanUsageInfo, PlanUsageResult, UsageLimitWindow } from '../shared/ipc'
 
 /**
@@ -228,6 +229,11 @@ function parsePlanUsage(payload: unknown): PlanUsageInfo {
 }
 
 export async function fetchPlanUsage(): Promise<PlanUsageResult> {
+  // 显式开关（默认开）：这条链路直连 Kimi 云端私有接口并复用 CLI 的 OAuth
+  // 凭证（含 refresh_token 轮换写回）。用户关掉后不发任何请求、不碰凭证文件。
+  if (loadSettings().cloudUsageEnabled === false) {
+    return { ok: false, error: '云端额度查询已在设置中关闭' }
+  }
   let token = await getValidAccessToken()
   if (!token) return { ok: false, error: AUTH_EXPIRED_MESSAGE }
 

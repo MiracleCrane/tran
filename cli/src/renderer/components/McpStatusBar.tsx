@@ -1,5 +1,5 @@
-import { useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
+import { useTransientFlag } from '../hooks/useTransientFlag'
 import type { McpServerEntry, McpServerStatusKind } from '../../shared/ipc'
 
 /** MCP server 状态区（#15）：会话初始化时隐藏 /mcp 轮解析出的连接状态，
@@ -43,17 +43,17 @@ const RefreshIcon = ({ spinning }: { spinning: boolean }): JSX.Element => (
 export default function McpStatusBar(): JSX.Element | null {
   const servers = useSessionStore((s) => s.mcpServers)
   const sessionId = useSessionStore((s) => s.meta?.sessionId)
-  const [refreshing, setRefreshing] = useState(false)
+  // 转圈 1.5s 自动停；useTransientFlag 内部管理定时器清理。
+  const [refreshing, flashRefreshing] = useTransientFlag(1500)
 
   if (!servers || servers.length === 0) return null
 
   const refresh = (): void => {
     if (!sessionId || refreshing) return
-    setRefreshing(true)
+    flashRefreshing()
     // 重查走主进程隐藏 /mcp 轮，结果经 system/mcp_servers 异步推送回来；
     // 转圈只给最短视觉反馈。
     void window.api.refreshMcpServers(sessionId).catch(() => {})
-    window.setTimeout(() => setRefreshing(false), 1500)
   }
 
   return (

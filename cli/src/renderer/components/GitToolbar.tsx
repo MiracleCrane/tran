@@ -4,6 +4,7 @@ import type { GitBranchInfo, GitCommit, GitStatus } from '../../shared/ipc'
 import DiffView from './DiffView'
 import Collapse from './Collapse'
 import ConfirmDialog from './ConfirmDialog'
+import ChangesPanel from './ChangesPanel'
 
 /* --- icons --- */
 const BranchIcon = (): JSX.Element => (
@@ -39,6 +40,13 @@ const CommitIcon = (): JSX.Element => (
 const StashIcon = (): JSX.Element => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
     <path d="M4 7h16v2H4zM4 11h16v2H4zM4 15h16v2H4z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+  </svg>
+)
+const DiffIcon = (): JSX.Element => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+    <path d="M9 5v14M5 9h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+    <path d="M11 17h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+    <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="1.4" opacity="0.5"/>
   </svg>
 )
 const LogIcon = (): JSX.Element => (
@@ -86,7 +94,7 @@ function formatTime(ts: number): string {
   return `${d}天前`
 }
 
-type Drawer = 'branches' | 'commit' | 'log' | 'stash' | 'output' | null
+type Drawer = 'branches' | 'commit' | 'log' | 'stash' | 'output' | 'changes' | null
 type OpenDrawer = Exclude<Drawer, null>
 type FileKind = 'staged' | 'unstaged' | 'untracked' | 'conflict'
 const DRAWER_CLOSE_CLEAR_MS = 220
@@ -278,6 +286,10 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   const drawerHeightRafRef = useRef<number | null>(null)
   const drawerLoadSeqRef = useRef<Partial<Record<OpenDrawer, number>>>({})
   const mountedRef = useRef(true)
+  // refresh 的取消守卫：序号 + 最新 cwd 快照（见 refresh 内注释）。
+  const refreshSeqRef = useRef(0)
+  const cwdRef = useRef(cwd)
+  cwdRef.current = cwd
   const [drawerHeight, setDrawerHeight] = useState<number | null>(null)
   const [drawerLoading, setDrawerLoading] = useState<Partial<Record<OpenDrawer, boolean>>>({})
   const [commitMsg, setCommitMsg] = useState('')
@@ -434,23 +446,32 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
       setGitChecked(true)
       return
     }
+    // 取消守卫：快照本次刷新的 cwd 与递增序号，await 回来后二者任一失效
+    // （切了项目 / 又发起了更新的刷新 / 组件已卸载）就丢弃结果，
+    // 避免旧仓库的状态覆盖新仓库的显示。
+    const target = cwd
+    const seq = ++refreshSeqRef.current
+    const stale = (): boolean =>
+      !mountedRef.current || seq !== refreshSeqRef.current || target !== cwdRef.current
     try {
       const [b, s, bl] = await Promise.all([
-        window.api.gitGetCurrentBranch(cwd),
-        window.api.gitStatus(cwd),
-        window.api.gitListBranches(cwd)
+        window.api.gitGetCurrentBranch(target),
+        window.api.gitStatus(target),
+        window.api.gitListBranches(target)
       ])
+      setCachedGitToolbar(target, b, s, bl)
+      if (stale()) return
       setBranch(b)
       setStatus(s)
       setBranches(bl)
-      setCachedGitToolbar(cwd, b, s, bl)
     } catch {
+      setCachedGitToolbar(target, null, emptyGitStatus(), [])
+      if (stale()) return
       setBranch(null)
       setStatus(emptyGitStatus())
       setBranches([])
-      setCachedGitToolbar(cwd, null, emptyGitStatus(), [])
     } finally {
-      setGitChecked(true)
+      if (!stale()) setGitChecked(true)
     }
   }
 
@@ -665,6 +686,16 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
         </button>
 
         <span className="h-3 w-px shrink-0 bg-white/[0.08]" />
+
+        {/* Changes → opens aggregated working-tree diff drawer (Codex 风格) */}
+        <button
+          onClick={() => toggleDrawer('changes')}
+          className={`${btnCls} ${activeBtn('changes')}`}
+          title="查看工作区全部改动"
+        >
+          <DiffIcon /> 改动
+          {totalChanges > 0 && <span className="rounded bg-accent/20 px-1 text-[9px] text-accent">{totalChanges}</span>}
+        </button>
 
         {/* Commit → opens commit drawer */}
         <button
@@ -910,6 +941,15 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                 </button>
               </div>
             </div>
+          )}
+
+          {/* Changes drawer：工作区改动聚合视图 */}
+          {renderedDrawer === 'changes' && (
+            <ChangesPanel
+              cwd={cwd}
+              refreshKey={`${status.staged.length}:${status.unstaged.length}:${status.untracked.length}:${status.conflicts.length}`}
+              onClose={() => setDrawer(null)}
+            />
           )}
 
           {/* Log drawer */}

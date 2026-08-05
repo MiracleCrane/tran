@@ -6,7 +6,7 @@ import { probeCommit } from '../utils/streamProbe'
 import type { AssistantBlock, AssistantItem, UserAttachment, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
 import MessageText from './MessageText'
 import { showImageContextMenu } from './ImageContextMenu'
-import { formatMessageTime, messageTime } from '../utils/messageTimes'
+import { formatTimeFull, formatTimeShort, messageTime } from '../utils/messageTimes'
 import { initSentImageRecording, loadSentImages, matchHistoryImages } from '../utils/sentImages'
 import ToolCallCard from './ToolCallCard'
 import ToolGroupCard from './ToolGroupCard'
@@ -228,10 +228,26 @@ function buildDisplayRows(roots: ItemNode[]): DisplayRow[] {
  *  重放时按原文会糊出一坨 XML——解析成克制的系统卡片。 */
 const ENVELOPE_RE = /^<(notification|cron-fire|system-reminder|kimi-skill-loaded)[\s>]/
 
+type EnvelopeStatus = 'completed' | 'failed' | 'lost'
+
+/** 信封状态只认结构化字段：kimi CLI 的通知信封是
+ *  `<notification … type="task.completed|task.failed|task.killed|task.lost" …>`
+ *  （实测自 kimi.exe 内嵌模板），正文另有 `status: "completed"` 一类字段。
+ *  此前对信封全文裸搜 /(completed|failed|lost)/，标题或正文里随便出现一个
+ *  "failed" 单词（比如路径、任务描述）就会把整条信封误标成失败。 */
+function envelopeStatusOf(text: string): EnvelopeStatus | null {
+  const match =
+    /\btype="task\.(completed|failed|killed|lost)"/.exec(text)?.[1] ??
+    /\bstatus\s*[:=]\s*"?(completed|failed|killed|lost)\b/.exec(text)?.[1]
+  if (!match) return null
+  // killed 与 failed 同样按「未正常完成」呈现。
+  return match === 'killed' ? 'failed' : (match as EnvelopeStatus)
+}
+
 function SystemEnvelope({ text }: { text: string }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const title = /title="([^"]*)"/.exec(text)?.[1]
-  const kind = /(completed|failed|lost)/.exec(text)?.[1]
+  const kind = envelopeStatusOf(text)
   const label = title ?? (text.startsWith('<cron-fire') ? '定时任务触发' : '系统消息')
   return (
     <div className="flex justify-center">
@@ -267,7 +283,8 @@ function EnvelopeGroupRow({ entries }: { entries: Array<{ id: string; text: stri
   let completed = 0
   let failed = 0
   for (const entry of entries) {
-    const kind = /(completed|failed|lost)/.exec(entry.text)?.[1]
+    // 与 SystemEnvelope 同一套结构化状态判定，不做全文裸搜。
+    const kind = envelopeStatusOf(entry.text)
     if (kind === 'completed') completed++
     else if (kind === 'failed' || kind === 'lost') failed++
   }
@@ -389,11 +406,13 @@ const UserMessage = memo(function UserMessage({
           </div>
         )}
       </div>
-      {/* #43 时间戳：绝对定位 + 悬停延迟显示，落在气泡左侧的留白里
-          （见 styles.css 的 .tran-msg-time 注释）。挂在外层 flex 容器上而不是
-          气泡里——气泡是靠右的，留白在它外面。 */}
+      {/* #43 时间戳：常显 HH:mm 小字（低透明度），悬停 title 给完整年月日时分秒；
+          绝对定位落在气泡左侧的留白里（见 styles.css 的 .tran-msg-time 注释）。
+          挂在外层 flex 容器上而不是气泡里——气泡是靠右的，留白在它外面。 */}
       {at !== undefined && (
-        <div className="tran-msg-time tran-msg-time-gutter-left">{formatMessageTime(at)}</div>
+        <div className="tran-msg-time tran-msg-time-gutter-left" title={formatTimeFull(at)}>
+          {formatTimeShort(at)}
+        </div>
       )}
     </div>
   )
@@ -559,12 +578,14 @@ const AssistantMessage = memo(function AssistantMessage({
           输出中…
         </div>
       )}
-      {/* #43 时间戳：绝对定位 + 悬停延迟显示，落在容器右侧的留白里
-          （见 styles.css 的 .tran-msg-time 注释）。
+      {/* #43 时间戳：常显 HH:mm 小字（低透明度），悬停 title 给完整年月日时分秒；
+          绝对定位落在容器右侧的留白里（见 styles.css 的 .tran-msg-time 注释）。
           只在 depth 0 显示：嵌套的子代理消息没有那条 92% 宽度限制，右侧没有
           留白可用，标上去只会压在字上——顶层那条时间已经够定位了。 */}
       {!isStreaming && at !== undefined && depth === 0 && (
-        <div className="tran-msg-time tran-msg-time-gutter-right">{formatMessageTime(at)}</div>
+        <div className="tran-msg-time tran-msg-time-gutter-right" title={formatTimeFull(at)}>
+          {formatTimeShort(at)}
+        </div>
       )}
     </div>
   )

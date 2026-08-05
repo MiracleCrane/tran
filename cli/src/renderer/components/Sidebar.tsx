@@ -286,6 +286,8 @@ const NAV_ITEMS: { view: View; label: string; icon: () => JSX.Element }[] = [
 export default function Sidebar(): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
   const sessions = useSessionStore((s) => s.sessions)
+  // #5b 运行中会话标识：并行契约新增字段，包含当前正在跑 turn 的 sdkSessionId。
+  const runningSdkSessionIds = useSessionStore((s) => s.runningSdkSessionIds)
   const loading = useSessionStore((s) => s.sessionsLoading)
   const sessionsHasMore = useSessionStore((s) => s.sessionsHasMore)
   const refresh = useSessionStore((s) => s.refreshSessions)
@@ -1105,6 +1107,14 @@ export default function Sidebar(): JSX.Element {
     }
   }, [collapsed, meta?.cwd, sessionGroups, prefetchSessionHistory])
 
+  // TODO(providers): 运营商面板绑定旧 Claude 后端，kimi-only 阶段固定隐藏。
+  const showProviderNav = false
+
+  // 注意：该 effect 必须放在所有条件 return 之前，否则 hooks 顺序会随 meta 变化而漂移（React #310）。
+  useEffect(() => {
+    if (!showProviderNav && view === 'providers') setView('settings')
+  }, [setView, showProviderNav, view])
+
   if (!meta) return <></>
 
   const wslNavRevealClass =
@@ -1117,12 +1127,6 @@ export default function Sidebar(): JSX.Element {
           : ''
   const wslNavInteractive =
     wslSupportEnabled && (wslNavRevealPhase === 'opening' || wslNavRevealPhase === 'visible')
-  // TODO(providers): 运营商面板绑定旧 Claude 后端，kimi-only 阶段固定隐藏。
-  const showProviderNav = false
-
-  useEffect(() => {
-    if (!showProviderNav && view === 'providers') setView('settings')
-  }, [setView, showProviderNav, view])
 
   /* ---------- collapsed: icon rail ---------- */
   if (collapsed) {
@@ -1551,7 +1555,11 @@ export default function Sidebar(): JSX.Element {
                         <span className="min-w-0 flex-1">
                           <div className="truncate text-xs">{s.summary || '(未命名)'}</div>
                           <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-zinc-600">
-                            {s.running && <span className="session-running-dot" title="运行中" />}
+                            {/* #5b：列表条目自带的 running 之外，还叠加 store 实时上报的
+                                runningSdkSessionIds（当前正在跑 turn 的会话）。 */}
+                            {(s.running || runningSdkSessionIds.includes(s.sessionId)) && (
+                              <span className="session-running-dot" title="运行中" />
+                            )}
                             <span>{relTime(s.lastModified)}</span>
                             <span className={`session-runtime-badge ${wslSupportEnabled ? 'is-visible' : ''}`}>
                               {backendLabel(s.runtimeBackend)}

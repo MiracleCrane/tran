@@ -250,11 +250,20 @@ function safeAssetName(assetUrl: string, fallback = 'Tran-update-setup.exe'): st
   }
 }
 
+/** 只允许从本仓库的 GitHub releases 下载：assetUrl 来自渲染层（IPC 载荷不可信），
+ *  下载完成后会 shell.openPath 执行——不设白名单等于给渲染层留了任意代码执行通道。 */
+function isAllowedAssetUrl(url: string): boolean {
+  return url.startsWith(`${RELEASES_DOWNLOAD_BASE_URL}/`)
+}
+
 export async function downloadAndInstallUpdate(
   options?: RuntimeUpdateDownloadOptions | string
 ): Promise<UpdateInstallResult> {
   try {
     const normalized = typeof options === 'string' ? { assetUrl: options } : (options ?? {})
+    if (normalized.assetUrl && !isAllowedAssetUrl(normalized.assetUrl)) {
+      throw new Error('Refused to download update from an untrusted URL.')
+    }
     const update = normalized.assetUrl ? undefined : await checkForUpdates()
     const url = normalized.assetUrl ?? update?.asset?.browserDownloadUrl
     if (!url) throw new Error('No update installer asset found.')

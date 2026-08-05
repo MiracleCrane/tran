@@ -129,7 +129,13 @@ export function sweepOrphanSessionDirs(maxAgeMs = 60 * 60 * 1000): void {
           if (typeof entry.sessionId === 'string') indexed.add(entry.sessionId)
         } catch { /* 跳过坏行 */ }
       }
-    } catch { /* 索引不可读时按空集合处理，仍靠路径+时间窗约束 */ }
+    } catch (error) {
+      // 索引读不到（Windows 上杀软/备份占用导致 EBUSY/EPERM 很常见）绝不能
+      // 当成"空索引"：那会把所有超过时间窗的正常会话目录都当孤儿真删。
+      // 与 settings.ts 同一防线：读失败禁止任何破坏性写/删，放弃本次清扫。
+      log('session-delete', `sweep skipped, index unreadable: ${error instanceof Error ? error.message : String(error)}`)
+      return
+    }
 
     const cutoff = Date.now() - maxAgeMs
     let swept = 0

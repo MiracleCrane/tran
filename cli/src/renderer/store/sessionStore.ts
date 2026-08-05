@@ -163,6 +163,11 @@ interface SessionStore {
   goal: GoalInfo | null
   /** AskUserQuestion 队列（system/elicitation；逐条处理，多问题顺序到达）。 */
   elicitationQueue: ElicitationRequest[]
+  /** #5（对外契约，字段名不可改）正在跑 turn 的会话 sdkSessionId 去重数组：
+   *  任何会话（前台/后台）turn 开始加入、结束（result/error/close）移除，
+   *  sdkSessionId 未知（init 未到）的会话忽略。侧栏用
+   *  useSessionStore((s) => s.runningSdkSessionIds) 显示运行中标识。 */
+  runningSdkSessionIds: string[]
   /** #31 Composer 未发送草稿（按会话；键见 COMPOSER_DRAFTS_STORAGE_KEY 注释），
    *  切视图/切会话/重启不丢，发送成功后清空。 */
   composerDrafts: Record<string, string>
@@ -295,6 +300,22 @@ function isOwnMessageEcho(last: TranscriptItem | undefined, echoText: string): b
   if (last.text === echoText) return true
   return !!last.swarm && echoText === SWARM_PROMPT_PREFIX + last.text
 }
+
+/** #9 回显匹配窗口：乐观用户消息之后、回显到达之前可能已插入 query_result
+ *  卡、compaction 分界线甚至流式回复的首个 assistant 条目——只比对末项会漏配
+ *  → 同一条消息双份。改为向后扫最近几条，跳过非用户条目，与最近一条用户
+ *  消息比对。 */
+const OWN_ECHO_SCAN_LIMIT = 6
+
+function hasRecentOwnMessageEcho(items: TranscriptItem[], echoText: string): boolean {
+  const from = items.length - 1
+  for (let i = from; i >= 0 && i > from - OWN_ECHO_SCAN_LIMIT; i--) {
+    const it = items[i]
+    // 最近一条用户消息定胜负；query/compaction/assistant 等一律跳过继续向后找。
+    if (it?.kind === 'user') return isOwnMessageEcho(it, echoText)
+  }
+  return false
+}
 const SESSION_PAGE_SIZE = 24
 /** 「全部」视图一次拉取的上限（跨项目不做分页）。 */
 const ALL_SESSIONS_LIMIT = 200
@@ -306,6 +327,19 @@ let startupBootstrapPromise: Promise<void> | null = null
 let sessionNavigationSeq = 0
 let sessionListRequestSeq = 0
 let loadMoreSessionsRequestSeq = 0
+
+/** #1 会话导航前同步冲刷 streamBatcher 的待释放 delta 队列（前台 pending +
+ *  后台聚合队列）。不冲的话：旧会话结构性事件折入后台缓冲后，积压里迟到的
+ *  delta 会以 fallbackId 新建一个永远"打字中"的幽灵气泡；旧积压还会继续占用
+ *  前台每帧字符预算，拖慢新前台会话的首字。直接 import streamBatcher 会成环
+ *  （它已 import 本模块），改由 streamBatcher 模块加载时注册回调。 */
+let navigationStreamFlush: (() => void) | null = null
+export function registerNavigationStreamFlush(fn: () => void): void {
+  navigationStreamFlush = fn
+}
+function flushPendingStreamDeltas(): void {
+  navigationStreamFlush?.()
+}
 
 interface SessionHistoryCacheEntry {
   items?: TranscriptItem[]
@@ -336,12 +370,33 @@ function evictSessionHistoryCache(): void {
   }
 }
 
-/** #29 直达发送（非排队）后尚未被 agent 确认收到的用户消息：turn 以错误收尾
- *  （典型：僵尸 turn "another turn is active"）时回收到 pendingQueue，走 #20 的
- *  重发/清空出路，避免消息只剩一个气泡却被吞。agent 回显（user echo）或成功
- *  result 时清除；用户主动停止的 suppressed result 不清（该 turn 的消息可能
- *  根本没被处理，留着等后续 result 定论）。 */
-let unackedDirectMessage: (Omit<PendingMessage, 'id'> & { sessionId: string }) | null = null
+/** #29/#5 直达发送（非排队）后尚未被 agent 确认收到的用户消息台账（按发送
+ *  顺序）。原先只有一个槽位：连发多条直达消息（如后台子代理待命时 busy=false）
+ *  会互相覆盖，错误回收只救得回最后一条。改成数组台账，各占一席：turn 以
+ *  错误收尾（典型：僵尸 turn "another turn is active"）时该会话的条目**全部**
+ *  回收进 pendingQueue，走 #20 的重发/清空出路。agent 回显（user echo）逐条
+ *  出账、成功 result 整会话出账；用户主动停止的 suppressed result 不动账
+ *  （该 turn 的消息可能根本没被处理，留着等后续 result 定论）。 */
+type UnackedDirectMessage = Omit<PendingMessage, 'id'> & { sessionId: string }
+let unackedDirectMessages: UnackedDirectMessage[] = []
+
+/** 取出（并移除）该会话的全部未确认直达消息（保持发送顺序）。 */
+function takeUnackedDirectMessages(sessionId: string): UnackedDirectMessage[] {
+  const taken = unackedDirectMessages.filter((m) => m.sessionId === sessionId)
+  if (taken.length) unackedDirectMessages = unackedDirectMessages.filter((m) => m.sessionId !== sessionId)
+  return taken
+}
+
+/** 回显确认：按内容匹配出账该会话最早的一条（FIFO；Swarm 注入后回显的是
+ *  带前缀文本，剥前缀再比，与 isOwnMessageEcho 同一语义）。 */
+function ackUnackedDirectMessage(sessionId: string, echoText: string): void {
+  const idx = unackedDirectMessages.findIndex(
+    (m) =>
+      m.sessionId === sessionId &&
+      (m.text === echoText || (!!m.swarm && echoText === SWARM_PROMPT_PREFIX + m.text))
+  )
+  if (idx >= 0) unackedDirectMessages = unackedDirectMessages.filter((_, i) => i !== idx)
+}
 
 interface SessionHistoryHydrationTask {
   bridgeSessionId: string
@@ -505,16 +560,12 @@ function scheduleHistoryHydrationStep(
     const chunk = cloneTranscriptItems(task.sourceItems.slice(nextFrom, task.loadedFrom))
     task.loadedFrom = nextFrom
     if (chunk.length > 0) {
-      set((s) => (
-        s.meta?.sessionId === task.bridgeSessionId
-          ? {
-              items: [
-                ...chunk.filter((item) => !s.items.some((existing) => existing.id === item.id)),
-                ...s.items
-              ]
-            }
-          : {}
-      ))
+      set((s) => {
+        if (s.meta?.sessionId !== task.bridgeSessionId) return {}
+        // #7 去重用 Set：原先 chunk × items 双重扫描，长会话渐进注水是 O(n²)。
+        const existing = new Set(s.items.map((item) => item.id))
+        return { items: [...chunk.filter((item) => !existing.has(item.id)), ...s.items] }
+      })
     }
 
     if (task.loadedFrom > 0) {
@@ -527,6 +578,29 @@ function scheduleHistoryHydrationStep(
   } else {
     task.timeoutId = setTimeout(run, 48)
   }
+}
+
+/** #2 历史合并去重的内容指纹：live 乐观条目的 id 是随机 uid()，磁盘历史是
+ *  JSONL uuid，按 id 永远对不上（restartSession/switchProvider 后同一条消息
+ *  在历史 tail 之后再排一遍 → 对话重复）。退化到 kind + 内容前缀做指纹：
+ *  user 用文本；assistant 用各块文本/toolUseId（tool id 在流式与磁盘间稳定）。
+ *  user/assistant 之外的本地条目（query/compaction 等）不参与（返回 null，
+ *  一律保留）。 */
+function transcriptFingerprint(item: TranscriptItem): string | null {
+  if (item.kind === 'user') return `user\n${item.text.slice(0, 200)}`
+  if (item.kind === 'assistant') {
+    const text = item.blocks
+      .map((b) =>
+        b && (b.kind === 'text' || b.kind === 'thinking')
+          ? b.text
+          : b && b.kind === 'tool'
+            ? b.toolUseId
+            : ''
+      )
+      .join('\n')
+    return text ? `assistant\n${text.slice(0, 200)}` : null
+  }
+  return null
 }
 
 function startProgressiveSessionHistory(
@@ -555,7 +629,26 @@ function startProgressiveSessionHistory(
           items: (() => {
             const visible = cloneTranscriptItems(sourceItems.slice(loadedFrom))
             const sourceIds = new Set(sourceItems.map((item) => item.id))
-            const liveItems = s.items.filter((item) => !sourceIds.has(item.id))
+            // #2 以磁盘历史为准：id 或内容指纹（多重集，带出现次数，保持相对
+            // 顺序消耗）命中即视为已落盘，只保留真正未落盘的 live 条目，
+            // 顺序维持在历史之后（它们必然是最新的）。
+            const sourceFingerprints = new Map<string, number>()
+            for (const item of sourceItems) {
+              const fp = transcriptFingerprint(item)
+              if (fp) sourceFingerprints.set(fp, (sourceFingerprints.get(fp) ?? 0) + 1)
+            }
+            const liveItems = s.items.filter((item) => {
+              if (sourceIds.has(item.id)) return false
+              const fp = transcriptFingerprint(item)
+              if (fp) {
+                const remaining = sourceFingerprints.get(fp) ?? 0
+                if (remaining > 0) {
+                  sourceFingerprints.set(fp, remaining - 1)
+                  return false
+                }
+              }
+              return true
+            })
             return [...visible, ...liveItems]
           })()
         }
@@ -781,6 +874,8 @@ function applyStreamEvent(
  *  each tool_use with its tool_result by id. */
 export function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
   const items: TranscriptItem[] = []
+  // #7 tool_use → 块索引：tool_result 配对从全量双重扫描 O(n²) 降为 Map 查找。
+  const toolBlocksById = new Map<string, ToolBlock>()
   for (const m of messages) {
     if (m.type === 'assistant') {
       const beta = m.message as { content?: Array<Record<string, unknown>> }
@@ -788,14 +883,20 @@ export function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
       for (const c of beta.content ?? []) {
         if (c.type === 'text') blocks.push({ kind: 'text', text: String(c.text ?? '') })
         else if (c.type === 'thinking') blocks.push({ kind: 'thinking', text: String(c.thinking ?? '') })
-        else if (c.type === 'tool_use')
-          blocks.push({
+        else if (c.type === 'tool_use') {
+          const block: ToolBlock = {
             kind: 'tool',
             toolUseId: String(c.id ?? ''),
             name: String(c.name ?? 'tool'),
             input: c.input,
             status: 'pending'
-          })
+          }
+          blocks.push(block)
+          // tool id 唯一；防御性地只记首个，与原"仅配 pending 块"语义一致。
+          if (block.toolUseId && !toolBlocksById.has(block.toolUseId)) {
+            toolBlocksById.set(block.toolUseId, block)
+          }
+        }
       }
       items.push({ id: m.uuid, kind: 'assistant', blocks, parentToolUseId: m.parent_tool_use_id })
     } else {
@@ -810,15 +911,11 @@ export function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
         if (toolResults.length) {
           for (const tr of toolResults) {
             const tid = (tr as { tool_use_id?: string }).tool_use_id
-            for (const it of items) {
-              if (it.kind !== 'assistant') continue
-              for (const b of it.blocks) {
-                if (b.kind === 'tool' && b.toolUseId === tid && b.status === 'pending') {
-                  b.status = (tr as { is_error?: boolean }).is_error ? 'error' : 'done'
-                  b.result = (tr as { content?: unknown }).content
-                  b.resultIsError = !!(tr as { is_error?: boolean }).is_error
-                }
-              }
+            const b = tid ? toolBlocksById.get(tid) : undefined
+            if (b && b.status === 'pending') {
+              b.status = (tr as { is_error?: boolean }).is_error ? 'error' : 'done'
+              b.result = (tr as { content?: unknown }).content
+              b.resultIsError = !!(tr as { is_error?: boolean }).is_error
             }
           }
         } else {
@@ -868,6 +965,13 @@ interface BackgroundSessionState {
   error?: string
   tasks: SubagentTask[]
   planEntries: PlanEntry[]
+  /** #23 待办最后更新时刻：不随快照走的话，切回后 plan 卡的陈旧度显示全错
+   *  （旧快照看起来永远像刚更新）。 */
+  planUpdatedAt: number | null
+  /** #23 待授权弹窗队列：payload 不带会话 id（后台期间**新**到达的请求无法
+   *  路由，仍会落在当时的前台会话），但切走时已在队里的必须随快照走、切回
+   *  恢复——丢了的话那一轮 turn 永远等不到用户回应。 */
+  pendingPermissions: PermissionRequestPayload[]
   goal: GoalInfo | null
   slashCommands: SkillInfo[]
   contextUsage: ContextUsage | null
@@ -891,6 +995,9 @@ const BACKGROUND_SESSION_CAP = 12
 /** 导航离开当前会话前调用：把当前会话状态快照进后台缓冲，配合主进程的
  *  后台化语义，事件流由 foldBackgroundAgentEvent 继续往里累积。 */
 function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
+  // #1 快照前同步冲刷 streamBatcher 积压：pending 里的 delta 属于当前（即将
+  // 后台化的）会话，必须先折进 items 再拍快照，否则内容进不了缓冲。
+  flushPendingStreamDeltas()
   const s = get()
   const meta = s.meta
   // bridgeEnded 的后端会话已死，缓冲无意义（历史在磁盘上，走原重放路径）。
@@ -914,6 +1021,8 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
     ...(s.status.error ? { error: s.status.error } : {}),
     tasks: s.tasks,
     planEntries: s.planEntries,
+    planUpdatedAt: s.planUpdatedAt,
+    pendingPermissions: s.pendingPermissions,
     goal: s.goal,
     slashCommands: s.slashCommands,
     contextUsage: s.contextUsage,
@@ -934,6 +1043,8 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
     if (!victim) break
     backgroundSessions.delete(victim.bridgeSessionId)
     void window.api.destroySession(victim.bridgeSessionId).catch(() => {})
+    // #5 连后端一起销毁的会话不再运行。
+    markSdkSessionRunning(victim.sdkSessionId, false)
   }
 }
 
@@ -988,6 +1099,65 @@ export function takeAttachedSwarmTasks(sdkSessionId: string): KimiTaskInfo[] | n
   return handoff && handoff.sdkSessionId === sdkSessionId ? handoff.tasks : undefined
 }
 
+/** #5（对外契约）维护 runningSdkSessionIds：任何会话（前台/后台）turn 开始
+ *  加入、结束（result/error/close）移除；sdkSessionId 未知（init 未到）的
+ *  会话忽略。去重数组，未变化时不触发 set。 */
+function markSdkSessionRunning(sdkSessionId: string | undefined, running: boolean): void {
+  if (!sdkSessionId) return
+  useSessionStore.setState((s) => {
+    const has = s.runningSdkSessionIds.includes(sdkSessionId)
+    if (running === has) return {}
+    return {
+      runningSdkSessionIds: running
+        ? [...s.runningSdkSessionIds, sdkSessionId]
+        : s.runningSdkSessionIds.filter((id) => id !== sdkSessionId)
+    }
+  })
+}
+
+/** #6（性能）后台缓冲是 store 外的普通对象（无渲染订阅；attach 时整体克隆进
+ *  store，见 openSession），流式 delta 直接**原地**折叠，避免逐 token 全量拷贝
+ *  items。语义与 applyStreamEvent 的 content_block_delta 分支一致（含目标条目
+ *  缺失时的兜底新建）；streamBatcher 只把 content_block_delta 路由到这里，
+ *  结构性 stream 事件仍走 foldBackgroundAgentEvent 的不可变路径。 */
+function foldBackgroundDeltaInPlace(bg: BackgroundSessionState, b: StreamDeltaBatch): void {
+  const msgId = bg.currentStreamingMsgId ?? b.fallbackId
+  bg.currentStreamingMsgId = msgId
+  // 流式目标几乎总在末位：先看末项，未命中再向前扫（防御）。
+  let item: TranscriptItem | undefined = bg.items[bg.items.length - 1]
+  if (!item || item.id !== msgId) {
+    item = undefined
+    for (let i = bg.items.length - 2; i >= 0; i--) {
+      if (bg.items[i].id === msgId) {
+        item = bg.items[i]
+        break
+      }
+    }
+  }
+  if (!item) {
+    const created: TranscriptItem = {
+      id: msgId,
+      kind: 'assistant',
+      blocks: [],
+      parentToolUseId: b.parent,
+      streaming: true
+    }
+    bg.items = [...bg.items, created]
+    item = created
+  }
+  if (item.kind !== 'assistant') return
+  const index = b.event.index as number
+  const delta = b.event.delta as
+    | { type?: string; text?: string; thinking?: string; partial_json?: string }
+    | undefined
+  const blk = item.blocks[index]
+  if (!delta || !blk) return
+  if (delta.type === 'text_delta' && blk.kind === 'text') blk.text += delta.text ?? ''
+  else if (delta.type === 'thinking_delta' && blk.kind === 'thinking') blk.text += delta.thinking ?? ''
+  else if (delta.type === 'input_json_delta' && blk.kind === 'tool')
+    blk.inputRaw = (blk.inputRaw ?? '') + (delta.partial_json ?? '')
+}
+
 /** 后台会话的事件折叠：与 ingestAgentEvent 主会话分支同构，直接改缓冲对象。 */
 function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void {
   const bg = backgroundSessions.get(e.sessionId)
@@ -998,6 +1168,8 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
     delete bg.startedAt
     delete bg.stall
     bg.error = isUserStopDiagnostic(e.error) ? bg.error : (e.error ?? bg.error)
+    // #5 会话关闭：移出运行中列表。
+    markSdkSessionRunning(bg.sdkSessionId, false)
     invalidateBackgroundHistoryCache(bg)
     scheduleSessionsRefresh(get)
     return
@@ -1027,6 +1199,8 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
       } else if (subtype === 'plan') {
         const entries = (msg as unknown as { entries?: PlanEntry[] }).entries
         bg.planEntries = Array.isArray(entries) ? entries : []
+        // #23 陈旧度时钟随缓冲走，attach 后 plan 卡才知道这份快照有多新。
+        bg.planUpdatedAt = Date.now()
       } else if (subtype === 'goal') {
         const g = (msg as unknown as { goal?: GoalInfo | null }).goal
         bg.goal = g ?? null
@@ -1204,11 +1378,15 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
       const content = (msg as unknown as { message: { content: unknown } }).message.content
       if (typeof content === 'string') {
         if (isModelSwitchControlOutput(content)) break
-        const last = bg.items[bg.items.length - 1]
-        if (!isOwnMessageEcho(last, content)) {
+        // #9 向后扫描窗口内最近一条用户消息（跳过 query/compaction 等条目）。
+        if (hasRecentOwnMessageEcho(bg.items, content)) {
+          // #29 回显 = agent 已收到该条直达消息，出台账。
+          ackUnackedDirectMessage(bg.bridgeSessionId, content)
+        } else {
           bg.items = [...bg.items, { id: uid(), kind: 'user', text: content, parentToolUseId: parent }]
         }
         bg.running = true
+        markSdkSessionRunning(bg.sdkSessionId, true)
       } else if (Array.isArray(content)) {
         const toolResults = content.filter(
           (c): c is { type: 'tool_result'; tool_use_id: string; content: unknown; is_error?: boolean; partial?: boolean } =>
@@ -1238,8 +1416,10 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
             .join('')
           if (isModelSwitchControlOutput(text)) break
           if (text) {
-            const last = bg.items[bg.items.length - 1]
-            if (!isOwnMessageEcho(last, text)) {
+            // #9 同上：窗口内找最近一条用户消息比对，而不是只看末项。
+            if (hasRecentOwnMessageEcho(bg.items, text)) {
+              ackUnackedDirectMessage(bg.bridgeSessionId, text)
+            } else {
               bg.items = [...bg.items, { id: uid(), kind: 'user', text, parentToolUseId: parent }]
             }
           }
@@ -1302,6 +1482,7 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
             )
           : [...bg.items, { id: finalId, kind: 'assistant' as const, blocks, parentToolUseId: parent, error: m.error }]
       bg.running = true
+      markSdkSessionRunning(bg.sdkSessionId, true)
       bg.currentStreamingMsgId = null
       invalidateBackgroundHistoryCache(bg)
       break
@@ -1320,6 +1501,9 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
       // turn 结束：清流式标记。后台缓冲没有 pendingQueue（切走时队列已清空，
       // 后续消息靠后端回显进入 items），running 以后端推送/下一个事件为准。
       bg.running = false
+      markSdkSessionRunning(bg.sdkSessionId, false)
+      // #29 后台会话成功收尾：该会话的未确认直达消息出台账（防台账滞留）。
+      if (r.subtype === 'success') takeUnackedDirectMessages(bg.bridgeSessionId)
       delete bg.startedAt
       delete bg.stall
       bg.items = sealHungToolBlocks(
@@ -1394,6 +1578,10 @@ function takePendingSessionStart(sessionId: string): (() => Promise<void>) | nul
 }
 
 function nextSessionNavigationSeq(): number {
+  // #1 任何会话导航入口（openSession/newChat/switchProject/restartSession/
+  // openSessionCrossProject…）都经过这里：先同步冲刷 streamBatcher 积压，
+  // 再推进导航序号。此刻 meta 还指向旧会话，冲出的 delta 落进正确的一侧。
+  flushPendingStreamDeltas()
   sessionNavigationSeq += 1
   pendingSessionStart = null
   return sessionNavigationSeq
@@ -1459,12 +1647,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   modePanel: defaultModePanel(),
   goal: null,
   elicitationQueue: [],
+  runningSdkSessionIds: [],
   composerDrafts: readStoredComposerDrafts(),
 
   async refreshTodos() {
     const sdkSessionId = get().meta?.sdkSessionId
     if (!sdkSessionId) return
     const result = await window.api.getSessionTodos(sdkSessionId).catch(() => null)
+    // #3 await 期间可能已切会话：A 的待办不能写进 B 的面板，身份不符直接丢弃。
+    if (get().meta?.sdkSessionId !== sdkSessionId) return
     // null = 拉不到（server 没起/网络错）。**不能当成"待办为空"**——那会把
     // 界面上刚推来的待办清掉。
     if (!result) return
@@ -1535,6 +1726,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         modePanel: defaultModePanel(),
         goal: null,
         elicitationQueue: [],
+        // #23 上一会话残留的授权弹窗不属于新会话。
+        pendingPermissions: [],
         status: { running: false },
         currentStreamingMsgId: null
       })
@@ -1568,6 +1761,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const shouldResume = !!oldMeta.sdkSessionId && !refreshingModel
       if (!shouldResume) delete nextMeta.sdkSessionId
 
+      // #1 桥接 id 即将更换：先冲掉 streamBatcher 里挂在旧 id 上的积压 delta，
+      // 否则换 id 后它们会被当成后台会话路由、落进不存在的缓冲而丢失。
+      flushPendingStreamDeltas()
       set({
         meta: nextMeta,
         currentStreamingMsgId: null,
@@ -1651,15 +1847,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       (t) => t.isBackgrounded && t.status === 'running'
     )
     const busy = get().status.running && !hasBackgroundSubagent
+    // #29：直达消息入未确认台账（数组：连发多条各占一席，互不覆盖）——turn
+    // 错误收尾时靠它全部回收（见 result 分支）；本条 IPC 失败只回收本条。
+    let unackedEntry: UnackedDirectMessage | null = null
     if (busy) {
       set((s) => ({ pendingQueue: [...s.pendingQueue, { id: uid(), text: value, ...attProps, ...swarmProps, ...cutInProps }] }))
     } else {
-      // #29：直达消息先入未确认台账——turn 错误收尾时靠它回收（见 result 分支）。
-      unackedDirectMessage = { sessionId: meta.sessionId, text: value, ...attProps, ...swarmProps, ...cutInProps }
+      unackedEntry = { sessionId: meta.sessionId, text: value, ...attProps, ...swarmProps, ...cutInProps }
+      unackedDirectMessages = [...unackedDirectMessages, unackedEntry]
       set((s) => ({
         items: [...s.items, { id: uid(), kind: 'user', text: value, parentToolUseId: null, ...attProps, ...swarmProps, ...cutInProps }],
         status: { ...s.status, running: true, error: undefined }
       }))
+      // #5 turn 开始：加入运行中列表（sdkSessionId 未知则忽略）。
+      markSdkSessionRunning(meta.sdkSessionId, true)
     }
     try {
       // 懒起的会话在这里才真正落地：「+ 新建对话」只切了界面，后端要等到
@@ -1673,8 +1874,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       if (get().meta?.sessionId !== meta.sessionId) return
       // #29：直达发送在 IPC 层就失败（消息没到后端）：立即回收到 pendingQueue
       // 队首，与 turn 错误收尾的回收同一条出路。busy 路径本就在队列里，不重收。
-      const unacked = !busy && unackedDirectMessage?.sessionId === meta.sessionId ? unackedDirectMessage : null
-      if (unacked) unackedDirectMessage = null
+      // 只回收**本条**——台账里更早的直达消息可能已经送达。
+      const unacked = unackedEntry && unackedDirectMessages.includes(unackedEntry) ? unackedEntry : null
+      if (unacked) unackedDirectMessages = unackedDirectMessages.filter((m) => m !== unacked)
+      markSdkSessionRunning(get().meta?.sdkSessionId, false)
       set((s) => ({
         pendingQueue: unacked
           ? [
@@ -1718,6 +1921,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       ),
       status: { ...s.status, running: false, stall: undefined }
     }))
+    // #5 乐观移出运行中列表（真实定论仍由 result/running-changed 推送校正）。
+    markSdkSessionRunning(meta.sdkSessionId, false)
     await window.api.interrupt(meta.sessionId)
   },
 
@@ -1772,8 +1977,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   reset() {
     cancelActiveHistoryHydration(0)
-    unackedDirectMessage = null
-    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], planUpdatedAt: null, contextUsage: null, mcpServers: null, modePanel: defaultModePanel(), goal: null, elicitationQueue: [] })
+    // #1 丢会话前冲掉 streamBatcher 积压，别让迟到 delta 在清空后的 store 里复活。
+    flushPendingStreamDeltas()
+    unackedDirectMessages = []
+    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], planUpdatedAt: null, contextUsage: null, mcpServers: null, modePanel: defaultModePanel(), goal: null, elicitationQueue: [], runningSdkSessionIds: [] })
   },
 
   async bootstrap() {
@@ -1827,6 +2034,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       modePanel: defaultModePanel(),
       goal: null,
       elicitationQueue: [],
+      // #23 授权弹窗随旧会话进了后台缓冲快照，前台清空防串会话。
+      pendingPermissions: [],
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -1956,6 +2165,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         }
       }))
     }
+    // #5 主进程推送是最权威的 turn 起止信号：同步运行中列表（前台/后台通吃）。
+    markSdkSessionRunning(p.acpSessionId, p.running)
     // 侧栏列表项的 running 标记（按 acpSessionId 匹配）。
     if (!p.acpSessionId) return
     set((s) => {
@@ -1975,6 +2186,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   async answerElicitation(toolUseID, optionId) {
     // elicitation：原样回传用户点选的 optionId（answers 通道），从队列移除。
+    const sessionIdAtSend = get().meta?.sessionId
     const removed = get().elicitationQueue.filter((q) => q.toolUseID === toolUseID)
     set((s) => ({ elicitationQueue: s.elicitationQueue.filter((q) => q.toolUseID !== toolUseID) }))
     try {
@@ -1986,7 +2198,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     } catch (error) {
       // IPC 失败（桥接忙/已关闭）时把卡片放回去：先移除是为了界面即时反馈，
       // 但不回滚的话卡片消失、agent 那一轮还在等一个用户再也给不了的回复。
-      if (removed.length) {
+      // #10 await 期间可能已切会话：A 的卡片不能回滚进 B 的队列，身份不符丢弃。
+      if (removed.length && get().meta?.sessionId === sessionIdAtSend) {
         set((s) => ({ elicitationQueue: [...removed, ...s.elicitationQueue] }))
       }
       throw error
@@ -1997,6 +2210,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const meta = get().meta
     if (!meta) return
     const requestSeq = ++sessionListRequestSeq
+    // #8 作废在途的 loadMore：整表即将替换，旧偏移的分页结果再并进来只会
+    // 产生错位/重复行（两个序号原先互不知晓）。
+    loadMoreSessionsRequestSeq += 1
     const cwd = meta.cwd
     const scope = get().sessionScope
     set({ sessionsLoading: true })
@@ -2108,15 +2324,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const newId = uid()
     const requestSeq = nextSessionNavigationSeq()
     const isLatestRequest = (): boolean => isCurrentSessionNavigation(get, requestSeq, newId)
-    // #6 切走=后台化：快照当前会话进事件缓冲（turn 继续跑，切回可 attach）。
-    snapshotActiveSessionIntoBackground(get)
     // 根因修复：此前 newChat 沿用旧会话的 permissionMode 做乐观值、且不传给
     // 后端（opts 里根本没有 permissionMode），ACP 侧停留在 CLI default，init
     // 事件随后把 chip 覆盖回 default —— 设置里的默认权限模式就此丢失。
     // 全新会话应用设置里的默认档；resume 历史会话仍走原模式（见 openSession）。
+    //
+    // #4 取偏好的 await 必须在快照**之前**：快照与下面清空 items 的 set 若隔着
+    // await，窗口期到达的流式内容既不在快照里、又被清空——永久丢失（对齐
+    // switchProject 的写法：快照紧贴同步 set）。
     const prefs = await window.api.getPreferences().catch(() => null)
     const permissionMode = prefs?.defaultPermissionMode ?? 'default'
-    if (!isLatestRequest()) return
+    // 此刻 meta 还指向旧会话，只能校验导航序号（isLatestRequest 要等下面的
+    // set 把新 meta 放好才有意义——原先在这儿调它必假，newChat 恒空转）。
+    if (sessionNavigationSeq !== requestSeq) return
+    // #6 切走=后台化：快照当前会话进事件缓冲（turn 继续跑，切回可 attach）。
+    // 快照与清空 set 之间保持同步（无 await）。
+    snapshotActiveSessionIntoBackground(get)
     // 界面立刻切到空会话；后端不起（见 pendingSessionStart）。
     // starting 保持 false：没有任何东西在启动，不该显示"正在进入会话"骨架。
     // slashCommands / mcpServers 故意不清空：它们是 agent 级的、跟具体会话
@@ -2135,6 +2358,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       modePanel: defaultModePanel(),
       goal: null,
       elicitationQueue: [],
+      // #23 授权弹窗随旧会话进了后台缓冲快照，前台清空防串会话。
+      pendingPermissions: [],
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -2206,8 +2431,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // （重放会重复，且空壳已被磁盘删除时 load 直接失败）。
     const bg = findLiveBackgroundSession(sdkSessionId)
     if (bg && normalizeCwdForCompare(bg.cwd) === normalizeCwdForCompare(cwd)) {
-      backgroundSessions.delete(bg.bridgeSessionId)
+      // #1/#6 先冲刷（nextSessionNavigationSeq 内部会冲 streamBatcher 的前台
+      // pending 与后台聚合队列），**再**把目标缓冲摘出 Map：顺序反了的话，
+      // 该会话仍在聚合队列里的 delta 会因缓冲已摘除而路由落空、内容丢失。
       nextSessionNavigationSeq()
+      backgroundSessions.delete(bg.bridgeSessionId)
       snapshotActiveSessionIntoBackground(get)
       void window.api.closeSession(oldSessionId).catch(() => {})
       // 桥接早已就绪：sendMessage 的启动门闩直接放行。
@@ -2216,13 +2444,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       attachedSwarmTasks = { sdkSessionId, tasks: bg.swarmTasks }
       set({
         starting: false,
-        items: bg.items,
+        // #6 后台期间 delta 是原地折叠的（条目/块对象被 mutate，数组引用可能
+        // 没变）：整体克隆一份再入 store，保证 memo 化的行组件拿到新引用。
+        items: cloneTranscriptItems(bg.items),
         tasks: bg.tasks,
         pendingQueue: [],
         sessionConfigDirty: false,
         sessionModelDirty: false,
         bridgeEnded: false,
         planEntries: bg.planEntries,
+        // #23 待办陈旧度时钟与待授权弹窗一并恢复（快照链路见
+        // snapshotActiveSessionIntoBackground）。
+        planUpdatedAt: bg.planUpdatedAt,
+        pendingPermissions: bg.pendingPermissions,
         contextUsage: bg.contextUsage,
         mcpServers: bg.mcpServers,
         modePanel: bg.modePanel,
@@ -2277,6 +2511,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       modePanel: defaultModePanel(),
       goal: null,
       elicitationQueue: [],
+      // #23 授权弹窗随旧会话进了后台缓冲快照，前台清空防串会话。
+      pendingPermissions: [],
       status: { running: false },
       currentStreamingMsgId: null,
       meta: {
@@ -2372,8 +2608,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const e = startResult.error
       startGate.reject(e)
       if (!isLatestRequest()) return
+      // #47 resume 未命中（attach 失败/session-load 失败等）**不新建空壳**：
+      // 显示错误、停留在已加载的历史只读视图。标记 bridgeEnded，让下一次
+      // sendMessage 走重建路径带 resume 重试，而不是把消息发进不存在的桥接。
       set((s) => ({
         starting: false,
+        bridgeEnded: true,
         status: {
           ...s.status,
           running: false,
@@ -2418,6 +2658,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       // 桥接已销毁：标记 bridgeEnded，避免随后的 newChat 把死会话快照进后台缓冲。
       set({ bridgeEnded: true })
     }
+    // #5 会话销毁：移出运行中列表。
+    markSdkSessionRunning(sessionId, false)
     try {
       const result = await window.api.deleteSession(sessionId, meta.cwd, backend)
       // 主进程校验失败（路径穿越防护等）：不删列表项，提示错误。
@@ -2455,6 +2697,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         // 桥接已销毁：标记 bridgeEnded，避免随后的 newChat 把死会话快照进后台缓冲。
         set({ bridgeEnded: true })
       }
+      // #5 会话销毁：移出运行中列表。
+      markSdkSessionRunning(target.sessionId, false)
       try {
         const result = await window.api.deleteSession(target.sessionId, meta.cwd, target.backend)
         if (result && result.ok === false) {
@@ -2518,6 +2762,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       items: sdkSessionId ? get().items : [],
       tasks: [],
       pendingQueue: [],
+      // 旧桥接即将销毁：它挂着的授权弹窗/提问卡的 toolUseID 已死，回应无处
+      // 可去，留着只会永远等不到结果。
+      pendingPermissions: [],
+      elicitationQueue: [],
       sessionConfigDirty: false,
       sessionModelDirty: false,
       bridgeEnded: false,
@@ -2619,6 +2867,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     if (e.type === 'agent:ended') {
       const endedError = isUserStopDiagnostic(e.error) ? undefined : e.error
+      // #5 会话关闭：移出运行中列表。
+      markSdkSessionRunning(get().meta?.sdkSessionId, false)
       set((s) => ({
         bridgeEnded: true,
         status: { ...s.status, running: false, startedAt: undefined, stall: undefined, error: endedError ?? s.status.error }
@@ -2902,11 +3152,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           }
           // De-dupe: sendMessage already renders the user's text optimistically, so
           // if the SDK echoes our own message back, don't add it a second time.
+          // #9 回显与乐观条目之间可能插了 query_result/流式回复等：向后扫窗口
+          // 内最近一条用户消息比对，而不是只看末项。
           set((s) => {
-            const last = s.items[s.items.length - 1]
-            if (isOwnMessageEcho(last, content)) {
-              // #29：agent 回显 = 已收到本条，直达消息出台账。
-              unackedDirectMessage = null
+            if (hasRecentOwnMessageEcho(s.items, content)) {
+              // #29：agent 回显 = 已收到本条，按内容出台账（FIFO）。
+              ackUnackedDirectMessage(e.sessionId, content)
               return { status: { ...s.status, running: true } }
             }
             return {
@@ -2917,6 +3168,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               status: { ...s.status, running: true }
             }
           })
+          // #5 turn 进行中（无论回显还是他端注入的用户消息）。
+          markSdkSessionRunning(get().meta?.sdkSessionId, true)
         } else if (Array.isArray(content)) {
           const toolResults = content.filter(
             (c): c is { type: 'tool_result'; tool_use_id: string; content: unknown; is_error?: boolean; partial?: boolean } =>
@@ -2960,10 +3213,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               set((s) => {
                 // De-dupe: sendMessage already rendered this optimistically
                 // (incl. attachments), so don't add the text-only echo again.
-                const last = s.items[s.items.length - 1]
-                if (isOwnMessageEcho(last, text)) {
-                  // #29：agent 回显 = 已收到本条，直达消息出台账。
-                  unackedDirectMessage = null
+                // #9 同上：窗口内找最近一条用户消息比对。
+                if (hasRecentOwnMessageEcho(s.items, text)) {
+                  // #29：agent 回显 = 已收到本条，按内容出台账（FIFO）。
+                  ackUnackedDirectMessage(e.sessionId, text)
                   return { status: { ...s.status, running: true } }
                 }
                 return {
@@ -3054,6 +3307,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                 ]
           return { items, status: { ...s.status, running: true }, currentStreamingMsgId: null }
         })
+        // #5 turn 进行中。
+        markSdkSessionRunning(get().meta?.sdkSessionId, true)
         break
       }
       case 'tool_progress': {
@@ -3084,14 +3339,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         // 队列未空说明后端仍在按自身队列续跑，塞回去会打乱 renderer↔backend 的
         // 队列镜像。成功 result = 已处理，出台账；用户主动停止（suppressed）不
         // 动台账（该 turn 的消息可能没被处理，留给后续 result 定论）。
-        let swallowed: typeof unackedDirectMessage = null
+        // #29 台账结算（数组：连发的直达消息全部在册）：错误收尾把本会话的
+        // 未确认消息**全部**取出回收；成功收尾整会话出账；用户主动停止不动账。
+        let swallowed: UnackedDirectMessage[] = []
         if (!shouldSuppressError) {
-          if (unackedDirectMessage && unackedDirectMessage.sessionId === get().meta?.sessionId) {
-            swallowed = unackedDirectMessage
-          }
-          unackedDirectMessage = null
+          swallowed = takeUnackedDirectMessages(e.sessionId)
         } else if (r.subtype === 'success') {
-          unackedDirectMessage = null
+          takeUnackedDirectMessages(e.sessionId)
         }
         set((s) => ({
           status: {
@@ -3133,19 +3387,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             ]
           })(),
           pendingQueue:
-            swallowed && s.pendingQueue.length === 0
-              ? [
-                  {
-                    id: uid(),
-                    text: swallowed.text,
-                    ...(swallowed.attachments ? { attachments: swallowed.attachments } : {}),
-                    ...(swallowed.swarm ? { swarm: true } : {}),
-                    ...(swallowed.cutIn ? { cutIn: true } : {})
-                  }
-                ]
+            swallowed.length > 0 && s.pendingQueue.length === 0
+              ? swallowed.map((m) => ({
+                  id: uid(),
+                  text: m.text,
+                  ...(m.attachments ? { attachments: m.attachments } : {}),
+                  ...(m.swarm ? { swarm: true } : {}),
+                  ...(m.cutIn ? { cutIn: true } : {})
+                }))
               : s.pendingQueue.slice(1),
           currentStreamingMsgId: null
         }))
+        // #5 turn 收尾：镜像 status.running（队列还有续跑消息时保持在册，
+        // 真正空闲才移除，避免侧栏标识闪烁）。
+        markSdkSessionRunning(get().meta?.sdkSessionId, get().status.running)
         // turn 完成：kimi 此时已持久化会话，刷新侧栏"最近会话"（防抖）。
         scheduleSessionsRefresh(get)
         break
@@ -3167,16 +3422,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         continue
       }
       const bg = backgroundSessions.get(b.sessionId)
-      if (bg) {
-        const res = applyStreamEvent(
-          { items: bg.items, currentStreamingMsgId: bg.currentStreamingMsgId },
-          b.fallbackId,
-          b.parent,
-          b.event
-        )
-        bg.items = res.items
-        bg.currentStreamingMsgId = res.currentStreamingMsgId
-      }
+      // #6 后台缓冲无渲染订阅：delta 原地折叠，免去逐条的 items 全量拷贝
+      // （attach 时 cloneTranscriptItems 统一恢复引用新鲜度）。
+      if (bg) foldBackgroundDeltaInPlace(bg, b)
     }
     if (activeBatch.length === 0) return
     // One set() per frame: fold every buffered delta through applyStreamEvent
@@ -3211,6 +3459,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       ...(message ? { message } : {}),
       ...(answers ? { answers } : {})
     }
+    const sessionIdAtSend = get().meta?.sessionId
     const removed = get().pendingPermissions.filter((p) => p.toolUseID === toolUseID)
     set((s) => ({
       pendingPermissions: s.pendingPermissions.filter((p) => p.toolUseID !== toolUseID)
@@ -3219,7 +3468,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       await window.api.respondPermission(resp)
     } catch (error) {
       // 同 answerElicitation：回滚，否则授权弹窗消失而 turn 永远等不到回复。
-      if (removed.length) {
+      // #10 await 期间可能已切会话：不把 A 的弹窗回滚进 B，身份不符丢弃。
+      if (removed.length && get().meta?.sessionId === sessionIdAtSend) {
         set((s) => ({ pendingPermissions: [...removed, ...s.pendingPermissions] }))
       }
       throw error

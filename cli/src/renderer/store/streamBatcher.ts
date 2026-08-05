@@ -1,5 +1,5 @@
 import type { AgentEvent } from '../../shared/ipc'
-import { useSessionStore, type StreamDeltaBatch } from './sessionStore'
+import { useSessionStore, registerNavigationStreamFlush, type StreamDeltaBatch } from './sessionStore'
 import { probeArrival, probeFlush } from '../utils/streamProbe'
 
 /**
@@ -48,6 +48,35 @@ import { probeArrival, probeFlush } from '../utils/streamProbe'
  */
 let pending: StreamDeltaBatch[] = []
 let rafId: number | null = null
+
+/** #6（性能）后台会话的 delta 不再逐 token 立即折叠（每条都是一次 O(n) 的
+ *  items 拷贝），改为按 sessionId 聚合、每 BG_FLUSH_MS 合并折叠一次
+ *  （applyStreamBatch 的后台路由是原地 mutate，见 sessionStore）。用
+ *  setTimeout 而非 rAF：窗口被遮挡时 rAF 停摆，后台内容仍需照常累积。 */
+const bgPending = new Map<string, StreamDeltaBatch[]>()
+let bgFlushTimer: ReturnType<typeof setTimeout> | null = null
+const BG_FLUSH_MS = 80
+
+/** 单个后台会话的结构性事件到达前先冲它自己的 delta 积压，保证按会话有序。 */
+function flushBackgroundSession(sessionId: string): void {
+  const batch = bgPending.get(sessionId)
+  if (!batch || batch.length === 0) return
+  bgPending.delete(sessionId)
+  useSessionStore.getState().applyStreamBatch(batch)
+}
+
+/** 全量冲刷后台聚合队列（定时器到点 / 导航 / teardown）。 */
+function flushBackgroundAll(): void {
+  if (bgFlushTimer !== null) {
+    clearTimeout(bgFlushTimer)
+    bgFlushTimer = null
+  }
+  if (bgPending.size === 0) return
+  const all: StreamDeltaBatch[] = []
+  for (const batch of bgPending.values()) all.push(...batch)
+  bgPending.clear()
+  useSessionStore.getState().applyStreamBatch(all)
+}
 
 /** Default (thinking / tool-input) base rate (~1.8 chars/frame at 60fps).
  *  Time-based, so the cadence is identical on 120Hz+ displays — a per-frame
@@ -214,9 +243,17 @@ export function pushAgentEvent(e: AgentEvent): void {
       event: msg.event
     }
     if (!isForeground) {
-      // 后台：立即折进该会话的缓冲（applyStreamBatch 按 sessionId 路由），
-      // 不排队、不计入预算、不触发 rAF。
-      useSessionStore.getState().applyStreamBatch([batch])
+      // 后台：不排队、不计入前台预算、不触发 rAF；按会话聚合，定时合并折叠
+      // （applyStreamBatch 按 sessionId 路由进各自的后台缓冲）。
+      const queue = bgPending.get(e.sessionId)
+      if (queue) queue.push(batch)
+      else bgPending.set(e.sessionId, [batch])
+      if (bgFlushTimer === null) {
+        bgFlushTimer = setTimeout(() => {
+          bgFlushTimer = null
+          flushBackgroundAll()
+        }, BG_FLUSH_MS)
+      }
       return
     }
     pending.push(batch)
@@ -229,7 +266,9 @@ export function pushAgentEvent(e: AgentEvent): void {
   }
   // Structural / non-delta event: flush any buffered deltas first (in order),
   // then apply the event immediately so it sees the up-to-date state.
+  // 后台会话同理：只冲它自己的聚合队列（会话间顺序互相独立）。
   if (isForeground) flushAll()
+  else flushBackgroundSession(e.sessionId)
   useSessionStore.getState().ingestAgentEvent(e)
 }
 
@@ -237,4 +276,15 @@ export function pushAgentEvent(e: AgentEvent): void {
  *  is lost if rAF is ever paused (e.g. an occluded window). */
 export function flushAgentEvents(): void {
   flushAll()
+  flushBackgroundAll()
 }
+
+// #1 会话导航（openSession/newChat/switchProject/restartSession 等）时由
+// sessionStore 回调触发的同步全量冲刷：先前台（pending 里的 delta 属于导航前
+// 的会话，必须在快照/清空 items 之前折进去，否则迟到 delta 会以 fallbackId 在
+// 后台缓冲里新建永远"打字中"的幽灵气泡，且旧积压继续挤占前台每帧字符预算），
+// 后后台聚合队列。直接被 sessionStore import 会成环，故用注册回调。
+registerNavigationStreamFlush(() => {
+  flushAll()
+  flushBackgroundAll()
+})

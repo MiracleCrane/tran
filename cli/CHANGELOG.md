@@ -1,5 +1,37 @@
 # Changelog
 
+## v1.0.51 - 2026-08-05
+
+### 中文
+
+- 新增:**「改动」面板(Codex 风格)**。Git 顶栏新增「改动」入口,聚合展示工作区相对 HEAD 的全部改动:文件列表带状态标记与 +N/−N 行数统计,点击文件懒加载完整 diff(复用行内高亮的 DiffView),支持单文件还原(跟踪文件还原到 HEAD、未跟踪文件删除,均有确认弹窗)。未跟踪文件合成"全新增"diff 展示。
+- 新增:**ACP 连接断开自动恢复**(#3)。kimi 进程意外退出时不再直接报错拆会话:保留已输出内容、就地封口流式消息,退避重建连接(1s/3s/8s),有会话 id 的自动 resume 复活,恢复成功/失败都有明确的状态卡提示。不会自动重发你的消息。
+- 新增:**运行状态可视化**(#5)。侧栏会话列表给正在运行的会话加呼吸点标识;输入区忙碌时显示原因(等待权限确认/等待回答问题/AI 正在输出/子任务后台运行中)。
+- 新增:设置页「云端套餐额度显示」开关。额度环的数据来自 Kimi 云端私有接口(复用 CLI 登录凭证),现在可以明确关闭,关闭后不发任何相关请求、不碰凭证文件。
+- 修复:**MCP 配置写错文件**(#62)。此前写入旧 Claude 后端的 `~/.claude.json`,Kimi 根本不读;现在写 `~/.kimi-code/mcp.json`(跟随 KIMI_CODE_HOME),添加的 MCP server 终于能生效了。
+- 修复:**跨目录切换会话不再产生空会话壳**(#47),resume 失败时如实报错并可重试,不再静默新建。
+- 修复:**切换会话后子代理面板状态不再错乱**(#23),运行计数/计时/权限请求纳入后台快照,切回后如实恢复。
+- 修复:**中文用户名下找不到 kimi**。`where.exe` 输出是 GBK 编码,此前按 UTF-8 解码导致路径乱码、后端起不来;现在正确解码并加了 PowerShell 探测兜底。
+- 修复:**Windows 进程回收**。关闭/退出时用 taskkill 整树终止 kimi 子进程(npm 安装的 cmd 包装此前杀不干净,历史查询每空闲一轮泄漏一个约 300MB 的进程);升级/探测子进程超时也会被终止。
+- 修复:**切换会话时流式输出的两类错乱**:旧会话残留的流式片段不再产生"永远打字中"的幽灵气泡;新会话的首字不再被旧会话积压阻塞数秒。
+- 修复:**重启会话(改 MCP/切运营商)后对话不再重复**,历史合并改用内容指纹去重。
+- 修复:一批数据安全防线——会话索引读取失败时不再误删历史会话目录;更新下载只接受本项目 GitHub Releases 的 URL;设置页 API Key 不再明文回传渲染层(改掩码回显);图片附件加 20MB 上限。
+- 修复:权限弹窗因界面重载丢失后,会话不再永久卡"忙碌"(重新挂载时重投权限请求 + 24 小时硬上限兜底)。
+- 优化:日志目录迁移到 userData(打包版此前可能落在只读目录导致日志丢失);大 diff 渲染加配对上限不再冻结界面;长会话流式期间的多处全量扫描改为增量/缓存;历史加载的 O(n²) 配对改建索引。
+- 界面:设置/技能等子页面返回按钮吸顶(#35);发送消息后视图跳到底部并恢复跟随(#36);思考月亮改纯渐变球(#37);"AI 正在思考"指示不再挤动 chip 行(#39);消息旁常显 HH:mm 时间戳、悬停看完整时间(#43)。
+
+### English
+
+- New: **Changes panel (Codex-style)**. A "Changes" entry in the Git toolbar aggregates the whole working tree vs HEAD: file list with status letters and +N/−N counts, lazy-loaded per-file diffs (reusing the inline-highlight DiffView), and per-file revert (tracked → HEAD, untracked → delete, both behind confirm dialogs). Untracked files render as synthesized all-added diffs.
+- New: **automatic recovery from ACP disconnects** (#3). When the kimi process dies unexpectedly, Tran no longer errors out and tears the session down: streamed output is preserved and sealed, the connection is rebuilt with backoff (1s/3s/8s), sessions with ids auto-resume, and clear status cards mark both outcomes. Your prompt is never auto-resent.
+- New: **run-state visibility** (#5). Sidebar sessions show a breathing dot while running; the composer explains why it is busy (waiting for permission / waiting for your answer / AI responding / subtasks running in background).
+- New: a settings toggle for **cloud plan-usage display**. The quota rings hit a private Kimi cloud endpoint reusing the CLI's OAuth credentials; you can now switch that off entirely — no requests, no credential file access.
+- Fixed: **MCP config written to the wrong file** (#62) — it went to the legacy `~/.claude.json`, which Kimi never reads; it now goes to `~/.kimi-code/mcp.json` (honoring KIMI_CODE_HOME), so added servers actually take effect.
+- Fixed: cross-project session switching no longer silently creates empty session shells (#47); subagent panel state survives session switches (#23); GBK decoding of `where.exe` output (Chinese usernames could not find kimi at all); Windows process-tree cleanup via taskkill (npm-installed kimi leaked ~300MB orphans); ghost "typing" bubbles and first-token starvation when switching sessions mid-stream; duplicated transcripts after session restarts.
+- Fixed: a batch of data-safety guards — orphan sweep aborts when the session index is unreadable (previously could wipe session history), update downloads only accept this repo's GitHub Releases URLs, the summary API key is masked instead of returned in plaintext, image attachments capped at 20MB, and permission prompts lost to a renderer reload are re-delivered instead of leaving the session busy forever.
+- Improved: logs moved to userData (packaged builds could land in read-only dirs); large diffs no longer freeze the UI (pairing cap); several per-token full-array scans replaced with incremental/cached paths; O(n²) history pairing now indexed.
+- UI: sticky back buttons on sub-pages (#35), send-jumps-to-bottom (#36), pure-gradient thinking moon (#37), stable chip row (#39), always-on HH:mm message timestamps with full time on hover (#43).
+
 ## v1.0.50 - 2026-07-31
 
 ### 中文

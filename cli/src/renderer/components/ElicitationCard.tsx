@@ -16,8 +16,13 @@ const ElicitationCard = memo(function ElicitationCard(): JSX.Element | null {
   const [answered, setAnswered] = useState<string | null>(null)
   const dismissTimerRef = useRef<number | null>(null)
 
-  // 切换到下一条问题时重置选择/已答态。
+  // 切换到下一条问题时重置选择/已答态，并清掉上一条的延迟应答定时器——
+  // 问题被外部撤换后再让旧定时器去应答旧 toolUseID 没有意义。
   useEffect(() => {
+    if (dismissTimerRef.current !== null) {
+      window.clearTimeout(dismissTimerRef.current)
+      dismissTimerRef.current = null
+    }
     setSelected(new Set())
     setAnswered(null)
   }, [req?.toolUseID])

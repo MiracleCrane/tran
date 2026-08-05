@@ -1,3 +1,4 @@
+import { app } from 'electron'
 import { AcpClient } from './agent/AcpClient'
 import { resolveWindowsKimiCommand } from './windowsKimi'
 import { localSessionTitle, manualSessionTitle } from './sessionTitles'
@@ -45,6 +46,27 @@ function armIdleReaper(): void {
   }, HISTORY_CLIENT_IDLE_TTL_MS)
   idleTimer.unref?.()
 }
+
+/** M1：应用退出时回收历史查询的独立 ACP 进程——它不属于 AgentBridge 的任何
+ *  会话，空闲回收（armIdleReaper）覆盖不到"退出时恰好还活着"的窗口，不显式
+ *  关的话 kimi 进程会泄漏到应用退出之后（Windows 上不随父进程退出）。 */
+export function disposeKimiHistoryClient(): void {
+  if (idleTimer) {
+    clearTimeout(idleTimer)
+    idleTimer = null
+  }
+  const pending = clientPromise
+  client?.close()
+  client = null
+  clientPromise = null
+  // 在途建连：等它建成后立刻关掉（尽力而为，不阻塞退出）。
+  if (pending) {
+    void pending.then((started) => started.close()).catch(() => {})
+  }
+}
+
+// 参考 kimiServerApi.ts 的 before-quit 接线：kimiHistory 自持退出钩子最简单。
+app.once('before-quit', disposeKimiHistoryClient)
 
 function ensureClient(): Promise<AcpClient> {
   if (client) {

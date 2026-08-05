@@ -135,6 +135,51 @@ function mergeModels(agentBackend: AgentBackendId | undefined, ...groups: Compos
   return merged
 }
 
+/** #性能：状态 chips 相关的 5 个选择器此前每次 store 更新都各自全量扫 items
+ *  （流式期间每帧一次 × 5）。合并为一次计算并按 items 引用做模块级 WeakMap
+ *  缓存：items 引用未变直接复用上次结果；runningBash/runningAgents 还依赖
+ *  swarmTasks 与 turn running，两者一并纳入缓存失效条件。组件里的选择器仍
+ *  逐字段取原始值（数字/布尔），值没变就不触发重渲染，行为与原先一致。 */
+type SessionSnapshot = ReturnType<typeof useSessionStore.getState>
+
+interface ToolChipStats {
+  bashTotal: number
+  runningBash: number
+  agentTotal: number
+  runningAgents: number
+  /** ACP 侧是否有 running/pending 的 AgentSwarm 工具调用（Swarm 徽章兜底）。 */
+  swarmToolActive: boolean
+}
+
+const toolChipStatsCache = new WeakMap<
+  SessionSnapshot['items'],
+  { swarmTasks: SessionSnapshot['swarmTasks']; running: boolean; stats: ToolChipStats }
+>()
+
+function getToolChipStats(s: SessionSnapshot): ToolChipStats {
+  const running = s.status.running
+  const cached = toolChipStatsCache.get(s.items)
+  if (cached && cached.swarmTasks === s.swarmTasks && cached.running === running) {
+    return cached.stats
+  }
+  const stats: ToolChipStats = {
+    bashTotal: countTotalTools(s.items, BASH_TOOL_NAMES),
+    runningBash: countRunningTools(s.items, BASH_TOOL_NAMES, s.swarmTasks, running),
+    agentTotal: countTotalTools(s.items, AGENT_TOOL_NAMES),
+    runningAgents: countRunningTools(s.items, AGENT_TOOL_NAMES, s.swarmTasks, running),
+    swarmToolActive: s.items.some(
+      (item) =>
+        item.kind === 'assistant' &&
+        item.blocks.some(
+          (b) =>
+            b && b.kind === 'tool' && b.name === 'AgentSwarm' && (b.status === 'running' || b.status === 'pending')
+        )
+    )
+  }
+  toolChipStatsCache.set(s.items, { swarmTasks: s.swarmTasks, running, stats })
+  return stats
+}
+
 /** 1s 心跳：让忙碌态计时/无响应时长随时间递增。 */
 function useSecondTick(): void {
   const [, forceTick] = useState(0)
@@ -206,13 +251,16 @@ export default function Composer(): JSX.Element {
   const setEffort = useSessionStore((s) => s.setEffort)
   const pending = useSessionStore((s) => s.pendingQueue)
   // 状态 chips（常驻行）：计数=会话累计（含历史重放），运行中数用于高亮和 (r/N) 显示。
-  const bashTotal = useSessionStore((s) => countTotalTools(s.items, BASH_TOOL_NAMES))
-  const runningBash = useSessionStore((s) =>
-    countRunningTools(s.items, BASH_TOOL_NAMES, s.swarmTasks, s.status.running)
-  )
-  const agentTotal = useSessionStore((s) => countTotalTools(s.items, AGENT_TOOL_NAMES))
-  const runningAgents = useSessionStore((s) =>
-    countRunningTools(s.items, AGENT_TOOL_NAMES, s.swarmTasks, s.status.running)
+  // 计算走 getToolChipStats 的引用缓存，5 个选择器共享同一次 items 扫描。
+  const bashTotal = useSessionStore((s) => getToolChipStats(s).bashTotal)
+  const runningBash = useSessionStore((s) => getToolChipStats(s).runningBash)
+  const agentTotal = useSessionStore((s) => getToolChipStats(s).agentTotal)
+  const runningAgents = useSessionStore((s) => getToolChipStats(s).runningAgents)
+  // #5c 忙碌原因（输入区提示文案用）：权限确认 / 提问等待 / 后台子任务。
+  const pendingPermissionCount = useSessionStore((s) => s.pendingPermissions.length)
+  const elicitationCount = useSessionStore((s) => s.elicitationQueue.length)
+  const hasBackgroundSubagent = useSessionStore((s) =>
+    s.tasks.some((t) => t.isBackgrounded && t.status === 'running')
   )
   // chips 独立浮层：openChip=哪个 chip 的浮层开着 + 锚点（portal fixed 定位）。
   const [openChip, setOpenChip] = useState<ChipKind | null>(null)
@@ -289,13 +337,7 @@ export default function Composer(): JSX.Element {
   // AgentSwarm 工具调用（server 不可用时的兜底检测）。
   const swarmRunning = useSessionStore((s) =>
     (s.swarmTasks?.some((t) => t.kind === 'subagent' && t.status === 'running') ?? false) ||
-    s.items.some(
-      (item) =>
-        item.kind === 'assistant' &&
-        item.blocks.some(
-          (b) => b && b.kind === 'tool' && b.name === 'AgentSwarm' && (b.status === 'running' || b.status === 'pending')
-        )
-    )
+    getToolChipStats(s).swarmToolActive
   )
 
   // 兜底：订阅仍为空时通过 listSkills IPC 主动拉一次（后端 listSkills 返回
@@ -897,23 +939,40 @@ export default function Composer(): JSX.Element {
           </button>
           {/* 这里原本还有一个「待办 (n/m)」chip。删掉了：正文顶部已经常驻一张
               待办卡片，同一份数据在一屏里出现两次，底下这个只是噪声。 */}
-          {/* #5 忙碌态：明确提示输出中 + 排队语义，不再静默。#11 换 Kimi Web 同款旋转月亮。 */}
-          {running && (
-            <span className="flex shrink-0 items-center gap-1.5 text-accent/90">
-              <span className="thinking-moon" aria-hidden />
-              AI 正在输出中{turnStartedAt ? <TurnElapsed startedAt={turnStartedAt} /> : null}
-              {pending.length > 0 ? `，已排队 ${pending.length} 条` : '，新消息将排队发送'}
-            </span>
-          )}
-          {running && turnStall && (
-            <TurnStallNotice
-              stall={turnStall}
-              onDismiss={dismissTurnStall}
-              onInterrupt={() => void interrupt()}
-            />
-          )}
           <UsageRings />
         </div>
+        {/* #39 思考/忙碌指示独立成层（chip 行下方、紧贴输入框）：之前挤在 chip
+            行里，出现或变宽（计时、排队数）时会把两个 chip 和 UsageRings 挤得
+            来回跳。#5 忙碌态明确提示 + 排队语义；#5c 有更具体的等待原因
+            （权限确认/回答问题）时替换泛泛的"正在输出中"。 */}
+        {(running || hasBackgroundSubagent) && (
+          <div className="mb-1.5 flex items-center gap-3 px-1 text-[11px] text-zinc-500">
+            {running ? (
+              <span className="flex min-w-0 items-center gap-1.5 text-accent/90">
+                <span className="thinking-moon" aria-hidden />
+                {pendingPermissionCount > 0
+                  ? '正在等待权限确认'
+                  : elicitationCount > 0
+                    ? '正在等待你回答上方问题'
+                    : 'AI 正在输出中'}
+                {turnStartedAt ? <TurnElapsed startedAt={turnStartedAt} /> : null}
+                {pending.length > 0 ? `，已排队 ${pending.length} 条` : '，新消息将排队发送'}
+              </span>
+            ) : (
+              <span className="flex min-w-0 items-center gap-1.5 text-zinc-500">
+                <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent/70" aria-hidden />
+                子任务后台运行中，可正常发送新消息
+              </span>
+            )}
+            {running && turnStall && (
+              <TurnStallNotice
+                stall={turnStall}
+                onDismiss={dismissTurnStall}
+                onInterrupt={() => void interrupt()}
+              />
+            )}
+          </div>
+        )}
         {openChip && chipAnchor && (
           <ChipPopover kind={openChip} anchor={chipAnchor} onClose={() => setOpenChip(null)} />
         )}

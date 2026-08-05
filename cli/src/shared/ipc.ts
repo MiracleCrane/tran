@@ -274,6 +274,9 @@ export interface Preferences {
   aiNamingEnabled?: boolean
   /** 后台任务收尾后自动催模型更新待办（**默认关**；一次完整 turn，约 88k token）。 */
   autoTodoNudge?: boolean
+  /** 云端套餐额度查询（默认开）。直连 api.kimi.com 私有接口并复用 Kimi CLI 的
+   *  OAuth 凭证——非官方公开接口，可能随服务端策略失效；关闭后不发任何相关请求。 */
+  cloudUsageEnabled?: boolean
   /** 总结类杂活（命名、命令说明、思考摘要…）共用的 OpenAI 兼容模型。 */
   summaryModel?: string
   /** 总结类请求使用的 OpenAI 兼容 API 根地址。 */
@@ -632,6 +635,24 @@ export interface GitStatus {
   behind: number | null
 }
 
+/** Changes 面板：工作区单个文件的改动摘要（相对 HEAD，暂存+未暂存合并视角）。 */
+export interface GitFileChange {
+  path: string
+  /** 重命名前的旧路径。 */
+  oldPath?: string
+  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'conflicted'
+  /** 新增/删除行数；二进制或未统计时为 null。 */
+  additions: number | null
+  deletions: number | null
+  binary: boolean
+}
+
+export interface GitWorkingChanges {
+  files: GitFileChange[]
+  totalAdditions: number
+  totalDeletions: number
+}
+
 /** Surface exposed on window.api via the preload contextBridge. */
 export interface ForgeApi {
   startSession(opts: StartSessionOptions): Promise<StartSessionResult>
@@ -810,7 +831,9 @@ export interface ForgeApi {
   onProvidersChanged(cb: () => void): () => void
 
   pickDirectory(options?: PickDirectoryOptions): Promise<string | null>
-  getApiKey(): Promise<string | null>
+  /** 摘要 API Key 只回传掩码形态（前 4 后 4 + ***），完整明文不出主进程；
+   *  configured 用于设置页判断「是否已配置」。 */
+  getApiKey(): Promise<{ configured: boolean; masked: string | null }>
   setApiKey(key: string): Promise<void>
 
   respondPermission(resp: PermissionResponsePayload): Promise<void>
@@ -845,6 +868,12 @@ export interface ForgeApi {
   gitReset(cwd: string, paths?: string[]): Promise<void>
   /** Push current branch and set upstream (git push -u origin HEAD). */
   gitPushUpstream(cwd: string): Promise<{ stdout: string; stderr: string }>
+  /** Changes 面板：工作区全部改动聚合（相对 HEAD）。 */
+  gitWorkingChanges(cwd: string): Promise<GitWorkingChanges>
+  /** Changes 面板：单文件完整 diff；untracked=true 时合成"全新增"diff。 */
+  gitFileDiff(cwd: string, path: string, opts?: { untracked?: boolean }): Promise<string>
+  /** Changes 面板：还原单文件（跟踪→HEAD；未跟踪→删除）。渲染层先弹确认。 */
+  gitRevertFile(cwd: string, path: string, untracked: boolean): Promise<void>
 
   onAgentEvent(cb: (e: AgentEvent) => void): () => void
   onPermissionRequest(cb: (r: PermissionRequestPayload) => void): () => void

@@ -4,6 +4,7 @@ import { useUiStore } from '../store/uiStore'
 import McpServerFormModal from './McpServerFormModal'
 import type { McpServerEntry, McpServerStatusKind, McpScope } from '../../shared/ipc'
 import { RefreshIcon, ToolPanelAlert, ToolPanelButton } from './ToolPanelChrome'
+import { useTransientFlag } from '../hooks/useTransientFlag'
 
 const STATUS_META: Record<McpServerStatusKind, { label: string; dot: string; text: string }> = {
   connected: { label: '已连接', dot: 'bg-emerald-500', text: 'text-emerald-400' },
@@ -52,7 +53,8 @@ export default function McpPanel(): JSX.Element {
   const [editing, setEditing] = useState<McpServerEntry | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<McpServerEntry | null>(null)
   const [viewing, setViewing] = useState<McpServerEntry | null>(null)
-  const [copied, setCopied] = useState(false)
+  // 「已复制」提示：1.5s 自动复位，重复点击/卸载都由 hook 清理定时器。
+  const [copied, flashCopied] = useTransientFlag(1500)
   const mcpAddCommand = 'kimi mcp add'
 
   const fetchServers = useCallback(async (): Promise<void> => {
@@ -149,8 +151,7 @@ export default function McpPanel(): JSX.Element {
     if (!viewing) return
     try {
       await navigator.clipboard.writeText(JSON.stringify(viewing.config ?? {}, null, 2))
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+      flashCopied()
     } catch {
       /* clipboard unavailable — ignore */
     }
@@ -160,7 +161,7 @@ export default function McpPanel(): JSX.Element {
     <div className="h-full overflow-y-auto bg-bg-base">
       <div className="mx-auto max-w-3xl px-6 py-6">
         {/* #35 吸顶返回栏：本面板此前完全没有返回入口，只能从侧栏离开。 */}
-        <div className="sticky top-0 z-10 -mx-6 mb-4 flex items-center gap-2 bg-bg-base/95 px-6 py-3">
+        <div className="sticky top-0 z-10 -mx-6 mb-4 flex items-center gap-2 bg-bg-base/85 px-6 py-3 backdrop-blur-md">
           <button
             type="button"
             onClick={() => useUiStore.getState().setView('chat')}

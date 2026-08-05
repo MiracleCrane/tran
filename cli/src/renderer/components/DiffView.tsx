@@ -78,16 +78,19 @@ function inlineDiff(left: string, right: string): { left: Seg[]; right: Seg[] } 
   return { left: leftSegs, right: rightSegs }
 }
 
-/** 两行的相似度（0~1），用于决定删除行与新增行是否该配成一对。 */
-function similarity(a: string, b: string): number {
+/** 两行的相似度（0~1），用于决定删除行与新增行是否该配成一对。
+ *  接收预先 tokenize 好的结果，避免在 O(dels×adds) 的配对循环里反复分词。 */
+function similarityTok(a: string, ta: string[], b: string, tb: string[]): number {
   if (a === b) return 1
   if (!a.trim() || !b.trim()) return 0
-  const ta = tokenize(a)
-  const tb = tokenize(b)
   if (ta.length > MAX_INLINE_TOKENS || tb.length > MAX_INLINE_TOKENS) return 0
   const common = lcsTable(ta, tb)[0][0]
   return (2 * common) / (ta.length + tb.length)
 }
+
+/** 贪心配对的规模上限：删除块×新增块超过它（整文件重写级别的 diff）时，
+ *  逐对算 LCS 会把主线程冻住，退化为按下标硬配对。 */
+const MAX_PAIRING_CELLS = 2500
 
 /** 低于此相似度就不配对——宁可分别显示为「纯删除」「纯新增」，也不要把两行
  *  毫不相干的代码摆在一起假装是「改动前后」。 */
@@ -140,23 +143,36 @@ function toRows(lines: string[]): Row[] {
         adds.push(lines[i].slice(1))
         i++
       }
-      // 贪心配对：每个删除行找剩余新增行里最像的一个，够相似才配。
       const usedAdds = new Set<number>()
       const pairFor = new Map<number, number>()
-      for (let d = 0; d < dels.length; d++) {
-        let best = -1
-        let bestScore = PAIR_THRESHOLD
-        for (let k = 0; k < adds.length; k++) {
-          if (usedAdds.has(k)) continue
-          const score = similarity(dels[d], adds[k])
-          if (score > bestScore) {
-            bestScore = score
-            best = k
-          }
+      const oversized = dels.length * adds.length > MAX_PAIRING_CELLS
+      if (oversized) {
+        // 超大改动块：贪心配对每对都要建 LCS 表，代价不可接受，按下标硬配对。
+        const n = Math.min(dels.length, adds.length)
+        for (let d = 0; d < n; d++) {
+          usedAdds.add(d)
+          pairFor.set(d, d)
         }
-        if (best >= 0) {
-          usedAdds.add(best)
-          pairFor.set(d, best)
+      } else {
+        // 贪心配对：每个删除行找剩余新增行里最像的一个，够相似才配。
+        // tokenize 结果在循环外缓存，避免同一行被反复分词。
+        const delToks = dels.map(tokenize)
+        const addToks = adds.map(tokenize)
+        for (let d = 0; d < dels.length; d++) {
+          let best = -1
+          let bestScore = PAIR_THRESHOLD
+          for (let k = 0; k < adds.length; k++) {
+            if (usedAdds.has(k)) continue
+            const score = similarityTok(dels[d], delToks[d], adds[k], addToks[k])
+            if (score > bestScore) {
+              bestScore = score
+              best = k
+            }
+          }
+          if (best >= 0) {
+            usedAdds.add(best)
+            pairFor.set(d, best)
+          }
         }
       }
       const emittedAdds = new Set<number>()
@@ -173,7 +189,8 @@ function toRows(lines: string[]): Row[] {
             emittedAdds.add(p)
           }
         }
-        const inline = inlineDiff(dels[d], adds[k])
+        // 退化模式下也跳过行内 diff：逐对 LCS 同样是冻结主线程的来源。
+        const inline = oversized ? null : inlineDiff(dels[d], adds[k])
         rows.push({
           left: dels[d],
           right: adds[k],

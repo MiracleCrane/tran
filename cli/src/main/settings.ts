@@ -72,6 +72,9 @@ interface PersistedSettings {
   closePromptDismissed?: boolean
   /** AI 自动命名（会话短标题，云端生成；默认开，关闭后任何路径不调 API）。 */
   aiNamingEnabled?: boolean
+  /** 云端套餐额度查询（默认开）。走 api.kimi.com 私有接口 + CLI OAuth 凭证，
+   *  关闭后 usageService 不再发任何云端请求（含 token 刷新）。 */
+  cloudUsageEnabled?: boolean
   /** 后台任务收尾后自动催模型更新待办（**默认关**）。这会发一次完整的 turn，
    *  要把整个会话上下文重新过一遍——实测约 88k token，是命名那类小请求的七百倍。
    *  而且下一条真实消息本来就会让 AI 收到完成通知，所以它买到的只是「提前」。 */
@@ -256,6 +259,7 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.startMaximized = optionalBoolean(source.startMaximized)
   settings.closePromptDismissed = optionalBoolean(source.closePromptDismissed)
   settings.aiNamingEnabled = optionalBoolean(source.aiNamingEnabled)
+  settings.cloudUsageEnabled = optionalBoolean(source.cloudUsageEnabled)
   settings.autoTodoNudge = optionalBoolean(source.autoTodoNudge)
   settings.summaryModel = optionalString(source.summaryModel)
   settings.summaryApiBaseUrl = optionalString(source.summaryApiBaseUrl)

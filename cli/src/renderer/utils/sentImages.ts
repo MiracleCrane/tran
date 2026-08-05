@@ -128,13 +128,19 @@ export function matchHistoryImages(
  *  自动落盘。Transcript 挂载时调用一次即可（内部幂等）。 */
 const recordedItemIds = new Set<string>()
 let recording = false
+/** 上次扫描过的 items 引用：store 任何字段更新都会触发订阅回调，
+ *  items 没换引用就不用重扫（流式批量更新之外的高频更新全部短路）。 */
+let lastScannedItems: unknown = null
 export function initSentImageRecording(): void {
   if (recording) return
   recording = true
   const scan = (): void => {
     const s = useSessionStore.getState()
+    if (s.items === lastScannedItems) return
     const sessionKey = s.meta?.sdkSessionId ?? s.meta?.sessionId
+    // meta 未就绪先不落盘也不记指纹：等 meta 到位后同一批 items 还能补扫。
     if (!sessionKey) return
+    lastScannedItems = s.items
     for (const item of s.items) {
       if (item.kind !== 'user' || item.isHistory || recordedItemIds.has(item.id)) continue
       const atts = item.attachments ?? []

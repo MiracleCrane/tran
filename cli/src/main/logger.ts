@@ -1,3 +1,4 @@
+import { app } from 'electron'
 import {
   appendFileSync,
   existsSync,
@@ -11,6 +12,7 @@ import {
 import { resolve } from 'node:path'
 
 let logPath: string | null = null
+let cachedLogDir: string | null = null
 let maintenanceTimer: ReturnType<typeof setInterval> | null = null
 
 const LOG_FILE_NAME = 'main.log'
@@ -20,15 +22,24 @@ const MAX_ARCHIVE_FILES = 8
 const LOG_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 const LOG_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000
 
+/** 日志目录惰性解析并缓存：基于 process.cwd() 的话，打包后 cwd 可能是
+ *  System32 或只读目录，统一落到 userData/logs。app.getPath('userData')
+ *  在 ready 前即可用；为防极端环境（app 尚不可用/被非主进程加载）解析
+ *  失败时回退 cwd。 */
 function logDir(): string {
-  // In dev, process.cwd() is the project root (where package.json lives),
-  // so logs/ lands at d:\localproject\codecli\logs.
-  const dir = resolve(process.cwd(), 'logs')
+  if (cachedLogDir) return cachedLogDir
+  let dir: string
+  try {
+    dir = resolve(app.getPath('userData'), 'logs')
+  } catch {
+    dir = resolve(process.cwd(), 'logs')
+  }
   try {
     mkdirSync(dir, { recursive: true })
   } catch {
     /* ignore */
   }
+  cachedLogDir = dir
   return dir
 }
 
@@ -42,14 +53,23 @@ function timestampForFile(): string {
   return new Date().toISOString().replace(/[:.]/g, '-')
 }
 
+/** 轮转检查降频：此前每条日志都 existsSync+statSync 一遍，纯浪费。
+ *  改为每 ROTATE_CHECK_EVERY 条才 stat 一次（首条立即检查）；2MB 阈值下
+ *  最多多写百来条日志的量，无实际影响。文件不存在时 statSync 抛错走
+ *  catch，等价于原先的 existsSync 判断。 */
+const ROTATE_CHECK_EVERY = 100
+let writesSinceRotateCheck = ROTATE_CHECK_EVERY
+
 function rotateIfNeeded(path: string): void {
+  writesSinceRotateCheck += 1
+  if (writesSinceRotateCheck < ROTATE_CHECK_EVERY) return
+  writesSinceRotateCheck = 0
   try {
-    if (!existsSync(path)) return
     if (statSync(path).size < MAX_LOG_BYTES) return
     const archivePath = resolve(logDir(), `${LOG_ARCHIVE_PREFIX}${timestampForFile()}.log`)
     renameSync(path, archivePath)
   } catch {
-    /* best effort */
+    /* 文件不存在或 stat 失败：无需轮转 */
   }
 }
 

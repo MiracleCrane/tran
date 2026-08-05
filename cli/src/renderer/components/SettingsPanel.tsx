@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import ConfirmDialog from './ConfirmDialog'
 import type {
   ComposerModel,
@@ -31,6 +31,7 @@ import {
 } from '../utils/downloadFormat'
 import { defaultModelsForAgent } from '../../shared/models'
 import { emitForgeEvent, onForgeEvent } from '../events'
+import { useTransientFlag } from '../hooks/useTransientFlag'
 
 const EFFORTS: { id: EffortLevel; label: string }[] = [
   { id: 'low', label: '低' },
@@ -127,9 +128,12 @@ export default function SettingsPanel(): JSX.Element {
   const [nativeNotifications, setNativeNotifications] = useState(true)
   const [aiNaming, setAiNaming] = useState(true)
   const [summaryApiBaseUrl, setSummaryApiBaseUrl] = useState('https://api.deepseek.com')
+  // API Key 不再回显明文：输入框只承载「本次新输入」，已配置状态用主进程回的掩码提示。
   const [summaryApiKey, setSummaryApiKey] = useState('')
+  const [summaryKeyMasked, setSummaryKeyMasked] = useState<string | null>(null)
   const [summaryModel, setSummaryModel] = useState('')
   const [autoTodoNudge, setAutoTodoNudge] = useState(false)
+  const [cloudUsage, setCloudUsage] = useState(true)
   const [probing, setProbing] = useState(false)
   const [probes, setProbes] = useState<SummaryModelProbe[] | null>(null)
   const [diagnosing, setDiagnosing] = useState(false)
@@ -143,16 +147,20 @@ export default function SettingsPanel(): JSX.Element {
   const [exportingDiagnostic, setExportingDiagnostic] = useState(false)
   const [diagnosticMessage, setDiagnosticMessage] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [appVersion, setAppVersion] = useState('')
   // Kimi Code CLI 版本（与 Tran 自身更新分开：只查不装，升级要重启 ACP 连接）。
   const [kimiVersion, setKimiVersion] = useState<KimiVersionInfo | null>(null)
   const [checkingKimi, setCheckingKimi] = useState(false)
-  const [kimiCopied, setKimiCopied] = useState(false)
+  // 「已复制」提示：1.5s 自动复位，定时器由 hook 统一清理。
+  const [kimiCopied, flashKimiCopied] = useTransientFlag()
   const [upgradingKimi, setUpgradingKimi] = useState(false)
   const [kimiUpgradeMsg, setKimiUpgradeMsg] = useState<string | null>(null)
   const [kimiConfirmOpen, setKimiConfirmOpen] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [savedAt, setSavedAt] = useState(false)
+  // 「已保存」提示：连续保存不再互相踩定时器，卸载时也会清理。
+  const [savedAt, flashSaved] = useTransientFlag()
+  const [importMessage, setImportMessage] = useState<string | null>(null)
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const updateDownloadIdRef = useRef<string | null>(null)
   const appearance = useAppearanceStore((s) => s.settings)
@@ -161,33 +169,46 @@ export default function SettingsPanel(): JSX.Element {
   const currentCwd = useSessionStore((s) => s.meta?.cwd)
   const reloadForBackendSwitch = useSessionStore((s) => s.reloadForBackendSwitch)
 
-  useEffect(() => {
+  // 初始加载：任何一步失败都不能让页面永久停在「加载中」——
+  // catch 记录错误（页面顶部给出重试入口），finally 一律 setLoaded。
+  const loadInitial = useCallback((): void => {
+    setLoadError(null)
     void window.api.getAppVersion().then(setAppVersion).catch(() => {})
     void Promise.all([
       window.api.getPreferences(),
       window.api.listAgentBackends().catch(() => [] as AgentBackendInfo[]),
       window.api.getApiKey().catch(() => null)
-    ]).then(([p, backends, apiKey]) => {
-      setAgentBackend(p.agentBackend ?? 'kimi')
-      setAgentBackends(backends)
-      setEffort(p.defaultEffort ?? 'high')
-      setPermMode(p.defaultPermissionMode ?? 'default')
-      setModels(p.composerModels ?? [])
-      setVulkan(!!p.vulkanBackend)
-      setClaudeBackend(p.claudeExecutionBackend ?? 'windows')
-      setWslSupportEnabled(!!p.wslSupportEnabled)
-      setMinimizeToTray(!!p.minimizeToTray)
-      setStartMaximized(!!p.startMaximized)
-      setNativeNotifications(p.nativeNotifications !== false)
-      setAiNaming(p.aiNamingEnabled !== false)
-      setSummaryApiBaseUrl(p.summaryApiBaseUrl ?? 'https://api.deepseek.com')
-      setSummaryApiKey(apiKey ?? '')
-      setSummaryModel(p.summaryModel ?? '')
-      setAutoTodoNudge(p.autoTodoNudge === true)
-      setAskOnClose(!p.closePromptDismissed)
-      setLoaded(true)
-    })
+    ])
+      .then(([p, backends, apiKey]) => {
+        setAgentBackend(p.agentBackend ?? 'kimi')
+        setAgentBackends(backends)
+        setEffort(p.defaultEffort ?? 'high')
+        setPermMode(p.defaultPermissionMode ?? 'default')
+        setModels(p.composerModels ?? [])
+        setVulkan(!!p.vulkanBackend)
+        setClaudeBackend(p.claudeExecutionBackend ?? 'windows')
+        setWslSupportEnabled(!!p.wslSupportEnabled)
+        setMinimizeToTray(!!p.minimizeToTray)
+        setStartMaximized(!!p.startMaximized)
+        setNativeNotifications(p.nativeNotifications !== false)
+        setAiNaming(p.aiNamingEnabled !== false)
+        setSummaryApiBaseUrl(p.summaryApiBaseUrl ?? 'https://api.deepseek.com')
+        // getApiKey 只回 { configured, masked }，不再下发明文。
+        setSummaryKeyMasked(apiKey?.masked ?? null)
+        setSummaryModel(p.summaryModel ?? '')
+        setAutoTodoNudge(p.autoTodoNudge === true)
+        setCloudUsage(p.cloudUsageEnabled !== false)
+        setAskOnClose(!p.closePromptDismissed)
+      })
+      .catch((e: unknown) => {
+        setLoadError(e instanceof Error ? e.message : String(e))
+      })
+      .finally(() => setLoaded(true))
   }, [])
+
+  useEffect(() => {
+    loadInitial()
+  }, [loadInitial])
 
   useEffect(() => {
     return window.api.onUpdateDownloadProgress((next) => {
@@ -202,8 +223,7 @@ export default function SettingsPanel(): JSX.Element {
     setVulkan(next)
     try {
       await window.api.savePreferences({ vulkanBackend: next })
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
+      flashSaved()
     } catch {
       setVulkan(!next) // revert on failure
     }
@@ -214,8 +234,7 @@ export default function SettingsPanel(): JSX.Element {
     setMinimizeToTray(next)
     try {
       await window.api.savePreferences({ minimizeToTray: next })
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
+      flashSaved()
     } catch {
       setMinimizeToTray(!next)
     }
@@ -227,8 +246,7 @@ export default function SettingsPanel(): JSX.Element {
     setStartMaximized(next)
     try {
       await window.api.savePreferences({ startMaximized: next })
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
+      flashSaved()
     } catch {
       setStartMaximized(!next)
     }
@@ -239,8 +257,7 @@ export default function SettingsPanel(): JSX.Element {
     setNativeNotifications(next)
     try {
       await window.api.savePreferences({ nativeNotifications: next })
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
+      flashSaved()
     } catch {
       setNativeNotifications(!next)
     }
@@ -251,8 +268,7 @@ export default function SettingsPanel(): JSX.Element {
     setAiNaming(next)
     try {
       await window.api.savePreferences({ aiNamingEnabled: next })
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
+      flashSaved()
     } catch {
       setAiNaming(!next)
     }
@@ -262,21 +278,37 @@ export default function SettingsPanel(): JSX.Element {
     setSummaryApiBaseUrl(next)
     try {
       await window.api.savePreferences({ summaryApiBaseUrl: next.trim() })
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
+      flashSaved()
     } catch {
       /* 保留输入，方便用户修正后重试 */
     }
   }
 
+  /** 保存新输入的 Key。空输入直接忽略（清除走旁边的「清除」按钮），
+   *  保存成功后清空输入框并刷新掩码回显——界面上任何时刻都不留明文。 */
   const saveSummaryApiKey = async (next: string): Promise<void> => {
-    setSummaryApiKey(next)
+    const trimmed = next.trim()
+    if (!trimmed) return
     try {
-      await window.api.setApiKey(next.trim())
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
+      await window.api.setApiKey(trimmed)
+      const info = await window.api.getApiKey().catch(() => null)
+      setSummaryKeyMasked(info?.masked ?? null)
+      setSummaryApiKey('')
+      flashSaved()
     } catch {
       /* 保留输入，方便用户修正后重试 */
+    }
+  }
+
+  /** 清除已存储的 Key（掩码回显模式下无法靠清空输入框来清除）。 */
+  const clearSummaryApiKey = async (): Promise<void> => {
+    try {
+      await window.api.setApiKey('')
+      setSummaryKeyMasked(null)
+      setSummaryApiKey('')
+      flashSaved()
+    } catch {
+      /* 清除失败保持原状 */
     }
   }
 
@@ -286,10 +318,21 @@ export default function SettingsPanel(): JSX.Element {
     setAutoTodoNudge(next)
     try {
       await window.api.savePreferences({ autoTodoNudge: next })
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
+      flashSaved()
     } catch {
       setAutoTodoNudge(!next)
+    }
+  }
+
+  /** 云端额度查询开关（默认开）。它复用 Kimi CLI 的登录凭证直连云端私有接口，
+   *  属于"非官方公开"的调用方式——给用户一个明确的知情关闭入口。 */
+  const toggleCloudUsage = async (next: boolean): Promise<void> => {
+    setCloudUsage(next)
+    try {
+      await window.api.savePreferences({ cloudUsageEnabled: next })
+      flashSaved()
+    } catch {
+      setCloudUsage(!next)
     }
   }
 
@@ -299,8 +342,7 @@ export default function SettingsPanel(): JSX.Element {
     setSummaryModel(next)
     try {
       await window.api.savePreferences({ summaryModel: next.trim() })
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
+      flashSaved()
     } catch {
       /* 保存失败就留在输入框里，不回滚用户输入 */
     }
@@ -345,8 +387,7 @@ export default function SettingsPanel(): JSX.Element {
     setAskOnClose(next)
     try {
       await window.api.savePreferences({ closePromptDismissed: !next })
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
+      flashSaved()
     } catch {
       setAskOnClose(!next)
     }
@@ -391,8 +432,7 @@ export default function SettingsPanel(): JSX.Element {
     if (!kimiVersion) return
     try {
       await navigator.clipboard.writeText(kimiVersion.upgradeCommand)
-      setKimiCopied(true)
-      setTimeout(() => setKimiCopied(false), 1500)
+      flashKimiCopied()
     } catch {
       /* clipboard unavailable */
     }
@@ -465,8 +505,7 @@ export default function SettingsPanel(): JSX.Element {
       emitForgeEvent('agentBackendChanged')
       emitForgeEvent('providerChanged')
       emitForgeEvent('modelOptionsChanged')
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
+      flashSaved()
     } catch {
       setAgentBackend(previous)
       return
@@ -487,8 +526,7 @@ export default function SettingsPanel(): JSX.Element {
       })
       setModels(prefs.composerModels ?? cleanModels)
       emitForgeEvent('modelOptionsChanged')
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
+      flashSaved()
     } finally {
       setSaving(false)
     }
@@ -548,7 +586,7 @@ export default function SettingsPanel(): JSX.Element {
   // closePromptDismissed changes behind our back - re-sync the toggles.
   useEffect(() => {
     const handler = (): void => {
-      void reloadPreferenceState()
+      void reloadPreferenceState().catch(() => {})
     }
     const offClosePrefs = onForgeEvent('closePrefsChanged', handler)
     const offWslSupport = onForgeEvent('wslSupportChanged', handler)
@@ -570,18 +608,29 @@ export default function SettingsPanel(): JSX.Element {
   }
 
   const importSettingsFile = async (file: File): Promise<void> => {
-    const parsed = JSON.parse(await file.text()) as SettingsBackup
-    await window.api.importSettings(parsed)
-    if (parsed.appearance) {
-      const next = parsed.appearance as Partial<typeof appearance>
-      if (typeof next.motionSpeed === 'number') updateAppearance('motionSpeed', next.motionSpeed)
-      if (typeof next.glassGlow === 'boolean') updateAppearance('glassGlow', next.glassGlow)
+    setImportMessage(null)
+    // 解析失败单独提示：之前 JSON.parse 抛异常被 void 吞掉，界面毫无反应。
+    let parsed: SettingsBackup
+    try {
+      parsed = JSON.parse(await file.text()) as SettingsBackup
+    } catch {
+      setImportMessage('文件无法解析：不是有效的 JSON 设置备份。')
+      return
     }
-    await reloadPreferenceState()
-    emitForgeEvent('providerChanged')
-    emitForgeEvent('modelOptionsChanged')
-    setSavedAt(true)
-    setTimeout(() => setSavedAt(false), 1500)
+    try {
+      await window.api.importSettings(parsed)
+      if (parsed.appearance) {
+        const next = parsed.appearance as Partial<typeof appearance>
+        if (typeof next.motionSpeed === 'number') updateAppearance('motionSpeed', next.motionSpeed)
+        if (typeof next.glassGlow === 'boolean') updateAppearance('glassGlow', next.glassGlow)
+      }
+      await reloadPreferenceState()
+      emitForgeEvent('providerChanged')
+      emitForgeEvent('modelOptionsChanged')
+      flashSaved()
+    } catch (e) {
+      setImportMessage(`导入失败：${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   const inputCls =
@@ -599,7 +648,7 @@ export default function SettingsPanel(): JSX.Element {
     <div className="h-full overflow-y-auto bg-bg-base">
       <div className="mx-auto max-w-2xl space-y-6 px-6 py-6">
         {/* #35 吸顶标题栏：下滚后"返回对话"仍可点。 */}
-        <div className="sticky top-0 z-10 -mx-6 flex items-center gap-3 bg-bg-base/95 px-6 py-3">
+        <div className="sticky top-0 z-10 -mx-6 flex items-center gap-3 bg-bg-base/85 px-6 py-3 backdrop-blur-md">
           <button
             type="button"
             onClick={() => useUiStore.getState().setView('chat')}
@@ -614,6 +663,20 @@ export default function SettingsPanel(): JSX.Element {
             </span>
           )}
         </div>
+
+        {/* 初始加载失败：页面照常渲染（显示默认值），顶部给错误与重试入口。 */}
+        {loadError && (
+          <div className="flex items-center gap-3 rounded-xl border border-red-400/20 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+            <span className="min-w-0 flex-1">设置加载失败：{loadError}</span>
+            <button
+              type="button"
+              onClick={loadInitial}
+              className="shrink-0 rounded-md border border-red-400/30 px-2 py-1 text-[11px] transition hover:bg-red-400/10"
+            >
+              重试
+            </button>
+          </div>
+        )}
 
         <section className="glass-panel-soft rounded-2xl p-4">
           <div className="mb-4 flex items-center justify-between gap-3">
@@ -825,6 +888,9 @@ export default function SettingsPanel(): JSX.Element {
               }}
             />
           </div>
+          {importMessage && (
+            <div className="mt-2 text-[11px] leading-relaxed text-red-300">{importMessage}</div>
+          )}
         </section>
 
         <section className="glass-panel-soft rounded-2xl p-4">
@@ -837,6 +903,12 @@ export default function SettingsPanel(): JSX.Element {
               description="新会话发第一条消息后自动生成短标题（每次约消耗一两百 token）；侧栏可一键补全老会话。关闭后不做任何命名调用，命令说明和思考块摘要也一并停用。"
               checked={aiNaming}
               onChange={(checked) => void toggleAiNaming(checked)}
+            />
+            <ToggleControl
+              label="云端套餐额度显示"
+              description="状态栏额度环的数据来源：复用 Kimi CLI 的登录凭证直连 Kimi 云端接口（与 CLI 同款数据源，但属于未公开的私有接口）。若你不希望 Tran 触碰 CLI 的登录凭证或访问云端，可关闭；关闭后额度环显示为不可用，聊天等其他功能不受影响。"
+              checked={cloudUsage}
+              onChange={(checked) => void toggleCloudUsage(checked)}
             />
             <ToggleControl
               label="后台任务结束后自动更新待办"
@@ -867,16 +939,27 @@ export default function SettingsPanel(): JSX.Element {
               </label>
               <label className="block">
                 <span className="mb-1 block text-[11px] text-zinc-500">API Key</span>
-                <input
-                  type="password"
-                  value={summaryApiKey}
-                  spellCheck={false}
-                  autoComplete="off"
-                  placeholder="sk-..."
-                  onChange={(e) => setSummaryApiKey(e.target.value)}
-                  onBlur={(e) => void saveSummaryApiKey(e.target.value)}
-                  className="w-full rounded-lg border border-border-subtle bg-bg-elev/60 px-2.5 py-1.5 font-mono text-[11px] text-zinc-200 outline-none focus:border-accent/50"
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="password"
+                    value={summaryApiKey}
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder={summaryKeyMasked ? `已配置 ${summaryKeyMasked} · 输入新 Key 覆盖` : 'sk-...'}
+                    onChange={(e) => setSummaryApiKey(e.target.value)}
+                    onBlur={(e) => void saveSummaryApiKey(e.target.value)}
+                    className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-elev/60 px-2.5 py-1.5 font-mono text-[11px] text-zinc-200 outline-none focus:border-accent/50"
+                  />
+                  {summaryKeyMasked && (
+                    <button
+                      type="button"
+                      onClick={() => void clearSummaryApiKey()}
+                      className="shrink-0 rounded-lg border border-border-subtle px-2.5 py-1.5 text-[11px] text-zinc-400 transition hover:bg-red-950/40 hover:text-red-300"
+                    >
+                      清除
+                    </button>
+                  )}
+                </div>
               </label>
               <div className="flex items-center gap-2">
                 <input

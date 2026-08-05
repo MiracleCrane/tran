@@ -20,6 +20,12 @@ export function useCheapNote(
 ): string | null {
   const [note, setNote] = useState<string | null>(null)
 
+  // input 变化先清掉旧说明：请求是异步的，不清的话旧输入的说明会挂在新输入上，
+  // 直到新请求返回（失败则永远挂着）。
+  useEffect(() => {
+    setNote(null)
+  }, [input])
+
   useEffect(() => {
     if (!ready || !input.trim()) return
     let cancelled = false

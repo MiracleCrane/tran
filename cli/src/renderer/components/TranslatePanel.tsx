@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { TranslateEngine, TranslateTestResult } from '../../shared/ipc'
 import { ToolPanelAlert, ToolPanelButton } from './ToolPanelChrome'
 import { useUiStore } from '../store/uiStore'
+import { useTransientFlag } from '../hooks/useTransientFlag'
 
 /** Translate engine management page. Pick which engine translateTexts()
  *  routes through (LLM provider vs Baidu) and configure/test Baidu credentials. */
@@ -24,19 +25,31 @@ export default function TranslatePanel(): JSX.Element {
   const [secretKey, setSecretKey] = useState('')
   const [showSecret, setShowSecret] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [savedAt, setSavedAt] = useState(false)
+  const [savedAt, flashSaved] = useTransientFlag()
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<TranslateTestResult | null>(null)
 
-  useEffect(() => {
-    void window.api.getTranslateConfig().then((c) => {
-      setEngine(c.engine)
-      setAppId(c.baidu.appId)
-      setSecretKey(c.baidu.secretKey)
-      setLoaded(true)
-    })
+  // 初始加载：失败也要 setLoaded，否则页面永久停在「加载中」。
+  const loadConfig = useCallback((): void => {
+    setLoadError(null)
+    void window.api
+      .getTranslateConfig()
+      .then((c) => {
+        setEngine(c.engine)
+        setAppId(c.baidu.appId)
+        setSecretKey(c.baidu.secretKey)
+      })
+      .catch((e: unknown) => {
+        setLoadError(e instanceof Error ? e.message : String(e))
+      })
+      .finally(() => setLoaded(true))
   }, [])
+
+  useEffect(() => {
+    loadConfig()
+  }, [loadConfig])
 
   const save = async (): Promise<void> => {
     setSaving(true)
@@ -45,8 +58,7 @@ export default function TranslatePanel(): JSX.Element {
         engine,
         baidu: { appId: appId.trim(), secretKey: secretKey.trim() }
       })
-      setSavedAt(true)
-      setTimeout(() => setSavedAt(false), 1500)
+      flashSaved()
     } finally {
       setSaving(false)
     }
@@ -81,7 +93,7 @@ export default function TranslatePanel(): JSX.Element {
     <div className="h-full overflow-y-auto bg-bg-base">
       <div className="mx-auto max-w-2xl space-y-6 px-6 py-6">
         {/* #35 吸顶标题栏：下滚后"返回对话"仍可点。 */}
-        <div className="sticky top-0 z-10 -mx-6 flex items-center gap-3 bg-bg-base/95 px-6 py-3">
+        <div className="sticky top-0 z-10 -mx-6 flex items-center gap-3 bg-bg-base/85 px-6 py-3 backdrop-blur-md">
           <button
             type="button"
             onClick={() => useUiStore.getState().setView('chat')}
@@ -94,6 +106,20 @@ export default function TranslatePanel(): JSX.Element {
         <p className="mt-0.5 text-xs text-zinc-500">
           技能 / 插件描述翻译所用引擎。百度翻译专用接口独立计费,不受大模型限流影响。
         </p>
+
+        {/* 初始加载失败：显示错误并允许重试（表单仍可用，只是回显的是默认值）。 */}
+        {loadError && (
+          <ToolPanelAlert tone="error">
+            <span className="mr-2">配置加载失败：{loadError}</span>
+            <button
+              type="button"
+              onClick={loadConfig}
+              className="text-accent underline-offset-2 hover:underline"
+            >
+              重试
+            </button>
+          </ToolPanelAlert>
+        )}
 
         {/* engine selector */}
         <section className="space-y-2">

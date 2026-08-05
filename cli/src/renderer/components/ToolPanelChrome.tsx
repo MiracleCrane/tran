@@ -33,7 +33,7 @@ export function ToolPanelHeader({
 }): JSX.Element {
   // #35 吸顶标题栏：下滚后"返回对话"仍可点。
   return (
-    <div className="sticky top-0 z-10 -mx-6 mb-5 flex items-start justify-between gap-4 bg-bg-base/95 px-6 py-3">
+    <div className="sticky top-0 z-10 -mx-6 mb-5 flex items-start justify-between gap-4 bg-bg-base/85 px-6 py-3 backdrop-blur-md">
       <div className="min-w-0">
         <div className="flex items-center gap-3">
           <button

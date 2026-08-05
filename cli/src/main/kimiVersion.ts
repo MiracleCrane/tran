@@ -1,7 +1,7 @@
 import { net } from 'electron'
 import { log } from './logger'
 import { resolveWindowsKimiCommand } from './windowsKimi'
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import type { KimiInstallMethod, KimiUpgradeResult } from '../shared/ipc'
 
 /**
@@ -66,6 +66,22 @@ function parseLocalVersion(output: string): string | undefined {
   return /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(output)?.[1]
 }
 
+/** 超时后把子进程整树杀掉（与 kimiServerApi.killServerChild 同姿态）：
+ *  Windows 上 cmd/powershell 包裹时 child.kill 到不了孙进程，用 taskkill /T /F。
+ *  此前超时只 resolve 不收尸，探测/升级进程会一直挂在后台。 */
+function killChildTree(child: ChildProcess): void {
+  if (child.exitCode !== null) return
+  try {
+    if (process.platform === 'win32' && child.pid) {
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }).unref()
+    } else {
+      child.kill('SIGTERM')
+    }
+  } catch {
+    /* 尽力而为 */
+  }
+}
+
 function probeLocalVersion(): Promise<string | undefined> {
   return resolveWindowsKimiCommand()
     .then(
@@ -73,18 +89,24 @@ function probeLocalVersion(): Promise<string | undefined> {
         new Promise<string | undefined>((resolve) => {
           let settled = false
           let out = ''
+          let spawned: ChildProcess | null = null
           const done = (value: string | undefined): void => {
             if (settled) return
             settled = true
             clearTimeout(timer)
             resolve(value)
           }
-          const timer = setTimeout(() => done(undefined), LOCAL_PROBE_TIMEOUT_MS)
+          const timer = setTimeout(() => {
+            // 超时不能只 resolve：挂死的 kimi 进程要收掉。
+            if (spawned) killChildTree(spawned)
+            done(undefined)
+          }, LOCAL_PROBE_TIMEOUT_MS)
           try {
             const child = spawn(resolved.command, [...resolved.argsPrefix, '--version'], {
               stdio: ['ignore', 'pipe', 'pipe'],
               windowsHide: true
             })
+            spawned = child
             child.stdout.on('data', (c: Buffer) => {
               out += c.toString()
             })
@@ -193,26 +215,29 @@ function runUpgradeCommand(command: string, args: string[]): Promise<KimiUpgrade
       cache = null // 版本变了，作废缓存
       resolve(result)
     }
-    const timer = setTimeout(
-      () => done({ ok: false, error: `升级超时（${UPGRADE_TIMEOUT_MS / 60000} 分钟）`, output: output.slice(-4000) }),
-      UPGRADE_TIMEOUT_MS
-    )
+    let child: ChildProcess | null = null
+    const timer = setTimeout(() => {
+      // 超时后升级进程还在后台跑（占着 kimi 可执行文件），必须整树收掉。
+      if (child) killChildTree(child)
+      done({ ok: false, error: `升级超时（${UPGRADE_TIMEOUT_MS / 60000} 分钟）`, output: output.slice(-4000) })
+    }, UPGRADE_TIMEOUT_MS)
     log('kimi-version', `开始升级：${command} ${args.join(' ')}`)
-    let child
+    let proc
     try {
-      child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      proc = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     } catch (error) {
       done({ ok: false, error: error instanceof Error ? error.message : String(error) })
       return
     }
+    child = proc
     const collect = (chunk: Buffer): void => {
       output += chunk.toString()
       if (output.length > 64 * 1024) output = output.slice(-64 * 1024)
     }
-    child.stdout.on('data', collect)
-    child.stderr.on('data', collect)
-    child.on('error', (error) => done({ ok: false, error: error.message, output: output.slice(-4000) }))
-    child.on('close', (code) => {
+    proc.stdout.on('data', collect)
+    proc.stderr.on('data', collect)
+    proc.on('error', (error) => done({ ok: false, error: error.message, output: output.slice(-4000) }))
+    proc.on('close', (code) => {
       if (code === 0) {
         log('kimi-version', '升级成功')
         done({ ok: true, output: output.slice(-4000) })

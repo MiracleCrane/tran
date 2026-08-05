@@ -154,13 +154,34 @@ export class AcpClient {
    * 同步置位 closed 并断开 child 引用：'close' 事件是异步到达的，在它到达
    * 之前 request()/notify()/respond() 的守卫（this.closed || !this.child）
    * 会放行，把数据写进刚被 kill 的进程 stdin，触发 EPIPE。
+   *
+   * Windows 下 kimi 常经 cmd.exe 包装启动（见 windowsKimi.ts），child.kill()
+   * 只能杀到 cmd 本体、杀不掉 kimi 孙进程（实测泄漏 ~300MB/个）。这里先收
+   * stdin 给孙进程 EOF（其 acp 模式读到 EOF 会自行退出），再用 taskkill /T
+   * 终止整棵进程树兜底（同 kimiServerApi.killServerChild 的写法）；非 Windows
+   * 维持 SIGTERM。进程已退出时全程静默——close 可能在 'close' 事件后被调用。
    */
   close(): void {
     this.closing = true
     this.closed = true
     const child = this.child
     this.child = null
-    child?.kill()
+    if (child && child.exitCode === null && child.signalCode === null) {
+      try {
+        child.stdin.end()
+      } catch {
+        /* 进程可能刚退出：尽力而为 */
+      }
+      try {
+        if (process.platform === 'win32' && child.pid) {
+          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }).unref()
+        } else {
+          child.kill('SIGTERM')
+        }
+      } catch {
+        /* 关闭路径尽力而为 */
+      }
+    }
     this.rejectAll(new Error(`ACP server (${this.options.logTag}) closed.`))
   }
 

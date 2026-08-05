@@ -138,6 +138,17 @@ function scheduleAutoUpdateCheck(): void {
 configureWindowsGpuBackend()
 scheduleLogMaintenance()
 
+/** 创建系统托盘（whenReady 与 macOS activate 重建共用同一套回调）。 */
+function buildForgeTray(): ForgeTray | null {
+  return createTray(
+    () => mainWindow,
+    () => {
+      isQuitting = true
+      app.quit()
+    }
+  )
+}
+
 function showAndFocusMainWindow(): void {
   const win = mainWindow
   if (!win || win.isDestroyed()) return
@@ -358,16 +369,13 @@ if (!hasSingleInstanceLock) {
         log('startup', `孤儿会话目录清理失败：${error instanceof Error ? error.message : String(error)}`)
       }
     })
-    forgeTray = createTray(
-      () => mainWindow,
-      () => {
-        isQuitting = true
-        app.quit()
-      }
-    )
+    forgeTray = buildForgeTray()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      // macOS：window-all-closed 销毁了托盘但进程常驻，activate 重建窗口时
+      // 托盘也要一并重建，否则「后台运行」提示与托盘退出入口都没了。
+      if (!forgeTray) forgeTray = buildForgeTray()
     })
 
     // 文件对话框预热：Windows 首次 showOpenDialog 慢常因 shell/Quick Access

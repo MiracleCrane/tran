@@ -5,7 +5,7 @@ import { currentAgentBackend, getPreferences } from './preferences'
 import { getSettingsSnapshot, replaceSettingsSnapshot } from './settings'
 import { AGENT_BACKENDS } from '../shared/agentBackends'
 import { DEFAULT_KIMI_MODEL_ID } from '../shared/models'
-import { resolveWindowsKimiCommand } from './windowsKimi'
+import { decodeConsoleOutput, resolveWindowsKimiCommand } from './windowsKimi'
 import { readRecentLog } from './logger'
 import type {
   DiagnosticReportOptions,
@@ -74,41 +74,41 @@ function runAsync(command: string, args: string[], timeoutMs = 10000): Promise<C
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true
       })
-      let stdout = ''
-      let stderr = ''
+      // H2：不 setEncoding，按 Buffer 收集统一解码——kimi.cmd 安装在中文用户名
+      // 路径下时，探测输出里的路径按系统代码页（GBK）编码，硬按 UTF-8 解会乱码。
+      const stdoutChunks: Buffer[] = []
+      const stderrChunks: Buffer[] = []
       let settled = false
 
-      const finish = (result: CommandResult): void => {
+      const finish = (result: Omit<CommandResult, 'stdout' | 'stderr'>): void => {
         if (settled) return
         settled = true
         clearTimeout(timer)
-        resolve(result)
+        resolve({
+          ...result,
+          stdout: cleanOutput(decodeConsoleOutput(Buffer.concat(stdoutChunks))),
+          stderr: cleanOutput(decodeConsoleOutput(Buffer.concat(stderrChunks)))
+        })
       }
 
       const timer = setTimeout(() => {
         child.kill()
         finish({
           ok: false,
-          stdout: cleanOutput(stdout),
-          stderr: cleanOutput(stderr),
           status: null,
           error: `timed out after ${timeoutMs}ms`
         })
       }, timeoutMs)
 
-      child.stdout.setEncoding('utf8')
-      child.stderr.setEncoding('utf8')
-      child.stdout.on('data', (chunk: string) => {
-        stdout += chunk
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdoutChunks.push(chunk)
       })
-      child.stderr.on('data', (chunk: string) => {
-        stderr += chunk
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderrChunks.push(chunk)
       })
       child.on('error', (error) => {
         finish({
           ok: false,
-          stdout: cleanOutput(stdout),
-          stderr: cleanOutput(stderr),
           status: null,
           error: error.message
         })
@@ -116,8 +116,6 @@ function runAsync(command: string, args: string[], timeoutMs = 10000): Promise<C
       child.on('close', (code) => {
         finish({
           ok: code === 0,
-          stdout: cleanOutput(stdout),
-          stderr: cleanOutput(stderr),
           status: code
         })
       })

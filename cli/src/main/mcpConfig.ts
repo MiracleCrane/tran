@@ -6,19 +6,28 @@ import { log } from './logger'
 import type { McpScope, McpServerConfigInput } from '../shared/ipc'
 
 /**
- * Persists MCP servers to the same config files `claude mcp` uses, since the
- * Agent SDK has no API for writing them (only dynamic per-session injection).
+ * 把 MCP 服务器持久化到 Kimi Code 实际读取的配置文件（GitHub #62）。
  *
- *   user    → ~/.claude.json            top-level mcpServers
- *   local   → ~/.claude.json            projects[cwd].mcpServers
- *   project → {cwd}/.mcp.json           mcpServers
+ * 此前写的是 ~/.claude.json（旧 Claude 后端残留），Kimi Code 根本不读它。
+ * Kimi 实际读取的是 $KIMI_CODE_HOME/mcp.json（未设 KIMI_CODE_HOME 时为
+ * ~/.kimi-code/mcp.json，与 usageService.ts 的 credentials 路径同一套解析），
+ * 文件形如 {"mcpServers": {"名字": {command,args,env}}}（本机实证）。
  *
- * Each operation is a read-modify-write that only touches the target `mcpServers`
- * subtree, leaving every other key in the file untouched.
+ *   user    → $KIMI_CODE_HOME/mcp.json   顶层 mcpServers
+ *   local   → $KIMI_CODE_HOME/mcp.json   顶层 mcpServers（Kimi 无 per-project
+ *             概念，local 展平到顶层，与 user 落点相同）
+ *   project → {cwd}/.mcp.json            顶层 mcpServers
+ *             （注意：Kimi Code 未证实会读项目级 .mcp.json，此路径保留是为了
+ *             兼容其他读取 .mcp.json 约定的工具；对 Kimi 可能不生效。）
+ *
+ * 每次操作都是读-改-写，只动目标 `mcpServers` 子树，文件里其余键原样保留。
  */
 
+/** Kimi Code 的用户级 MCP 配置文件。CLI 的 home 可能被 KIMI_CODE_HOME 指到
+ *  别处（如 C:\LegacyD\Programs\kimi-code），写死 ~/.kimi-code 会写错地方。 */
 function userConfigPath(): string {
-  return join(homedir(), '.claude.json')
+  const home = process.env.KIMI_CODE_HOME?.trim()
+  return join(home || join(homedir(), '.kimi-code'), 'mcp.json')
 }
 
 function projectConfigPath(cwd: string): string {
@@ -29,9 +38,8 @@ function projectConfigPath(cwd: string): string {
  * 读出待改写的配置根对象。
  *
  * 这里绝不能把「读取/解析失败」降级成空对象：saveMcpServer 是
- * 读-改-写，空对象会让随后的写入把整个文件（~/.claude.json 与 claude CLI
- * 共用，含认证、projects、历史）替换成只剩一个 mcpServers 的内容。
- * 解析失败时抛错，让调用方放弃写入。
+ * 读-改-写，空对象会让随后的写入把整个文件（mcp.json 与 Kimi CLI 共用）
+ * 替换成只剩一个 mcpServers 的内容。解析失败时抛错，让调用方放弃写入。
  */
 function readRoot(path: string): Record<string, unknown> {
   const result = readJsonSafe<Record<string, unknown>>(path)
@@ -46,22 +54,9 @@ function readRoot(path: string): Record<string, unknown> {
   return value
 }
 
-/** Resolve (creating as needed) the `mcpServers` object for the given scope
- *  within `root`, mutating root in place. */
-function locateServers(
-  root: Record<string, unknown>,
-  cwd: string,
-  scope: McpScope
-): Record<string, unknown> {
-  if (scope === 'local') {
-    if (!root['projects'] || typeof root['projects'] !== 'object') root['projects'] = {}
-    const projects = root['projects'] as Record<string, unknown>
-    if (!projects[cwd] || typeof projects[cwd] !== 'object') projects[cwd] = {}
-    const proj = projects[cwd] as Record<string, unknown>
-    if (!proj['mcpServers'] || typeof proj['mcpServers'] !== 'object') proj['mcpServers'] = {}
-    return proj['mcpServers'] as Record<string, unknown>
-  }
-  // user and project both use a top-level mcpServers (project uses a separate file)
+/** 取（必要时创建）root 顶层的 `mcpServers` 对象，原地修改 root。
+ *  三个 scope 的目标文件虽不同，但结构一致：都是顶层 mcpServers。 */
+function locateServers(root: Record<string, unknown>): Record<string, unknown> {
   if (!root['mcpServers'] || typeof root['mcpServers'] !== 'object') root['mcpServers'] = {}
   return root['mcpServers'] as Record<string, unknown>
 }
@@ -78,7 +73,7 @@ export function saveMcpServer(args: {
 }): void {
   const path = pathFor(args.cwd, args.scope)
   const root = readRoot(path)
-  const servers = locateServers(root, args.cwd, args.scope)
+  const servers = locateServers(root)
   servers[args.name] = args.config
   writeJsonAtomic(path, root)
   log('mcp', `saved server="${args.name}" scope=${args.scope} path=${path}`)
@@ -92,7 +87,7 @@ export function deleteMcpServer(args: {
   const path = pathFor(args.cwd, args.scope)
   if (!existsSync(path)) return false
   const root = readRoot(path)
-  const servers = locateServers(root, args.cwd, args.scope)
+  const servers = locateServers(root)
   if (!(args.name in servers)) return false
   delete servers[args.name]
   writeJsonAtomic(path, root)

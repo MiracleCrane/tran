@@ -2553,11 +2553,9 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   border-left: 2px solid rgba(139, 92, 246, 0.55);
 }
 
-/* #11 思考动画（第四迭代：彗星环绕）—— 14px 见方内一颗紫黄渐变彗星头
- *  沿圆形轨道绕中心旋转，身后拖一条沿轨道切线渐隐的紫→黄拖尾。
- *  ::before 是整周期旋转的 conic-gradient 环形拖尾（radial mask 只留外圈，
- *  中心区域保持干净透明）；::after 是彗星头（小圆点 + 柔光），用
- *  rotate+translate 做同周期同向公转，与拖尾亮端始终对齐。
+/* #37 思考动画（第五迭代：纯渐变球）—— 去掉彗星头/拖尾/亮点等"月海斑纹"
+ *  细节，14px 圆内只留一层紫→黄 conic 渐变整体缓速旋转，安静不抢焦点。
+ *  尺寸与挂载位置同上一版（14px、inline-block），调用方零改动。
  *  只动 transform，合成器友好；reduced-motion 全局开关会把它降为近静止。 */
 .thinking-moon {
   position: relative;
@@ -2565,6 +2563,7 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
+  border-radius: 50%;
   overflow: hidden;
 }
 
@@ -2573,51 +2572,21 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   position: absolute;
   inset: 0;
   border-radius: 50%;
+  /* 首尾同色（#facc15）保证旋转无接缝；紫黄延续既有配色语言。 */
   background: conic-gradient(
     from 0deg,
-    rgba(250, 204, 21, 0.95) 0deg,
-    rgba(192, 132, 252, 0.55) 55deg,
-    rgba(139, 92, 246, 0.22) 120deg,
-    transparent 190deg,
-    transparent 360deg
+    #facc15,
+    #c084fc 35%,
+    #8b5cf6 70%,
+    #facc15 100%
   );
-  -webkit-mask: radial-gradient(
-    farthest-side,
-    transparent calc(100% - 3.5px),
-    #000 calc(100% - 2px)
-  );
-  mask: radial-gradient(
-    farthest-side,
-    transparent calc(100% - 3.5px),
-    #000 calc(100% - 2px)
-  );
-  animation: thinking-moon-spin 1.2s linear infinite;
-}
-
-.thinking-moon::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 3.5px;
-  height: 3.5px;
-  margin: -1.75px 0 0 -1.75px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #fef9c3, #facc15 55%, #c084fc 100%);
-  box-shadow:
-    0 0 2px rgba(250, 204, 21, 0.9),
-    0 0 3.5px rgba(192, 132, 252, 0.55);
-  animation: thinking-moon-orbit 1.2s linear infinite;
+  /* 轻微模糊把色带过渡揉开，视觉上是"渐变球"而不是"色轮"。 */
+  filter: blur(1.5px);
+  animation: thinking-moon-spin 1.6s linear infinite;
 }
 
 @keyframes thinking-moon-spin {
   to { transform: rotate(360deg); }
-}
-
-/* 彗星头公转：与拖尾同周期同向，rotate 前置使圆点始终位于轨道 12 点相位。 */
-@keyframes thinking-moon-orbit {
-  from { transform: rotate(0deg) translateY(-4.75px); }
-  to { transform: rotate(360deg) translateY(-4.75px); }
 }
 
 /* #46 chip 有运行中项：文字紫黄流光扫过（与 .thinking-moon 同一 #8b5cf6/#facc15
@@ -2864,6 +2833,8 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
    - AI 容器宽 92%，右侧剩 8%（≈80px）；
    - 用户气泡最宽 85% 且靠右，左侧至少剩 15%（≈150px）。
    写成"AI 靠左、用户靠右"反而会压在正文上，因为那正是气泡所在的一侧。 */
+/* #43 常显 HH:mm 小字（低透明度不抢正文），悬停该条消息时提亮；
+ *  完整时间放在元素 title 里，所以 pointer-events 要开着让 tooltip 能触发。 */
 .tran-msg-time {
   position: absolute;
   z-index: 5;
@@ -2872,8 +2843,7 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   line-height: 1;
   white-space: nowrap;
   color: rgb(113 113 122 / 0.9);
-  pointer-events: none;
-  opacity: 0;
+  opacity: 0.55;
   transition: opacity 140ms ease;
 }
 /* AI：右侧留白，与正文首行对齐。 */
@@ -2889,7 +2859,6 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
 }
 .group\/msg:hover .tran-msg-time {
   opacity: 1;
-  transition-delay: 500ms;
 }
 @media (prefers-reduced-motion: reduce) {
   .tran-msg-time {

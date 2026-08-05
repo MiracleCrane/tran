@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process'
-import type { GitBranchInfo, GitCommit, GitStatus } from '../shared/ipc'
+import { promises as fsp } from 'node:fs'
+import { isAbsolute, resolve, sep } from 'node:path'
+import type { GitBranchInfo, GitCommit, GitFileChange, GitStatus, GitWorkingChanges } from '../shared/ipc'
 import { log } from './logger'
 
 /**
@@ -304,6 +306,213 @@ export async function diff(
 /** git fetch — update remote-tracking refs without merging. */
 export async function fetch(cwd: string): Promise<{ stdout: string; stderr: string }> {
   return runGit(cwd, ['fetch'], 60_000)
+}
+
+/* ------------------------------------------------------------------ */
+/* 会话级改动视图（Changes 面板）：工作区相对 HEAD 的全部改动聚合。       */
+/* ------------------------------------------------------------------ */
+
+/** 路径入参校验（渲染层回传的路径最终来自我们自己的 status 输出，但仍要挡
+ *  以 - 开头的选项注入与 NUL；不做存在性检查——删除态的文件本来就不在）。 */
+function assertPath(value: string): string {
+  const p = value.trim()
+  if (!p) throw new Error('路径不能为空')
+  if (p.startsWith('-')) throw new Error(`路径不能以 - 开头：${p}`)
+  if (p.includes('\0')) throw new Error('路径包含非法字符')
+  return p
+}
+
+/** 把 repo 相对路径解析到 cwd 内的绝对路径；越界（../、绝对路径）直接拒绝。
+ *  git 自己的命令天然被仓库边界约束，这层校验保护的是我们**自己**的 fs 读写。 */
+function resolveInsideCwd(cwd: string, relPath: string): string {
+  if (isAbsolute(relPath)) throw new Error('只接受仓库内的相对路径')
+  const abs = resolve(cwd, relPath)
+  const root = resolve(cwd)
+  if (abs !== root && !abs.startsWith(root + sep)) throw new Error(`路径越出项目目录：${relPath}`)
+  return abs
+}
+
+/** HEAD 是否存在（空仓库首个 commit 之前没有）。 */
+async function hasHead(cwd: string): Promise<boolean> {
+  try {
+    await runGit(cwd, [...READ_ONLY_GIT_FLAGS, 'rev-parse', '--verify', '-q', 'HEAD'])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 首 8KB 含 NUL 即视为二进制（与 git 同判据）。 */
+async function sniffBinary(absPath: string): Promise<boolean> {
+  const handle = await fsp.open(absPath, 'r')
+  try {
+    const buf = Buffer.alloc(8192)
+    const { bytesRead } = await handle.read(buf, 0, buf.length, 0)
+    return buf.subarray(0, bytesRead).includes(0)
+  } finally {
+    await handle.close()
+  }
+}
+
+/** 解析 `git status --porcelain -z`，每个文件归并成单条记录（MM 这类
+ *  暂存+未暂存并存的只出一条）。与 readStatus 的分桶视角不同，这里是
+ *  Changes 面板要的"文件清单"视角。 */
+async function readChangeEntries(
+  cwd: string
+): Promise<Array<Pick<GitFileChange, 'path' | 'oldPath' | 'status'>>> {
+  const { stdout } = await runGit(cwd, [...READ_ONLY_GIT_FLAGS, 'status', '--porcelain', '-z'])
+  const entries: Array<Pick<GitFileChange, 'path' | 'oldPath' | 'status'>> = []
+  const tokens = stdout.split('\0')
+  for (let i = 0; i < tokens.length; i++) {
+    const entry = tokens[i]
+    if (!entry) continue
+    const x = entry[0]
+    const y = entry[1]
+    const path = entry.slice(3)
+    let oldPath: string | undefined
+    if ((x === 'R' || x === 'C') && i + 1 < tokens.length) {
+      oldPath = tokens[++i]
+    }
+    let status: GitFileChange['status']
+    if (x === '?' && y === '?') status = 'untracked'
+    else if (x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D')) status = 'conflicted'
+    else if (x === 'R' || x === 'C') status = 'renamed'
+    else if (x === 'A' || y === 'A') status = 'added'
+    else if (x === 'D' || y === 'D') status = 'deleted'
+    else status = 'modified'
+    entries.push({ path, ...(oldPath ? { oldPath } : {}), status })
+  }
+  return entries
+}
+
+/** 解析 `git diff --numstat -z` 输出 → path → {additions, deletions, binary}。
+ *  -z 下重命名条目形如 `add\tdel\t\0old\0new\0`（路径域为空，后跟两个 NUL 段）。 */
+function parseNumstat(stdout: string): Map<string, { additions: number | null; deletions: number | null }> {
+  const map = new Map<string, { additions: number | null; deletions: number | null }>()
+  const tokens = stdout.split('\0')
+  for (let i = 0; i < tokens.length; i++) {
+    const entry = tokens[i]
+    if (!entry) continue
+    const m = /^(\d+|-)\t(\d+|-)\t(.*)$/.exec(entry)
+    if (!m) continue
+    const additions = m[1] === '-' ? null : Number(m[1])
+    const deletions = m[2] === '-' ? null : Number(m[2])
+    let path = m[3]
+    if (!path && i + 2 < tokens.length) {
+      // 重命名：跳过 old，取 new
+      i++
+      path = tokens[++i]
+    }
+    if (path) map.set(path, { additions, deletions })
+  }
+  return map
+}
+
+/** 未跟踪文件的行数（作为"全新增"展示）。超 1MB 或二进制不数。 */
+async function countUntrackedLines(absPath: string): Promise<{ additions: number | null; binary: boolean }> {
+  try {
+    const stat = await fsp.stat(absPath)
+    if (!stat.isFile() || stat.size > 1024 * 1024) return { additions: null, binary: false }
+    if (await sniffBinary(absPath)) return { additions: null, binary: true }
+    if (stat.size === 0) return { additions: 0, binary: false }
+    const text = await fsp.readFile(absPath, 'utf8')
+    const lines = text.split('\n')
+    return { additions: text.endsWith('\n') ? lines.length - 1 : lines.length, binary: false }
+  } catch {
+    return { additions: null, binary: false }
+  }
+}
+
+/** 工作区改动聚合：status 清单 + numstat 行数（相对 HEAD，暂存/未暂存合并视角），
+ *  未跟踪文件读盘数行。空仓库（无 HEAD）退化为相对空索引的 numstat。 */
+export async function getWorkingChanges(cwd: string): Promise<GitWorkingChanges> {
+  const entries = await readChangeEntries(cwd)
+  let numstat = new Map<string, { additions: number | null; deletions: number | null }>()
+  if (entries.some((e) => e.status !== 'untracked')) {
+    try {
+      const head = await hasHead(cwd)
+      const args = [...READ_ONLY_GIT_FLAGS, 'diff', '--numstat', '-z', '-M']
+      if (head) args.push('HEAD')
+      const { stdout } = await runGit(cwd, args)
+      numstat = parseNumstat(stdout)
+    } catch (e) {
+      log('git', `numstat failed cwd=${cwd}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  const files: GitFileChange[] = []
+  for (const entry of entries) {
+    if (entry.status === 'untracked') {
+      let counted: { additions: number | null; binary: boolean } = { additions: null, binary: false }
+      try {
+        counted = await countUntrackedLines(resolveInsideCwd(cwd, entry.path))
+      } catch {
+        /* 越界/读失败 → 不数 */
+      }
+      files.push({ ...entry, additions: counted.additions, deletions: counted.additions === null ? null : 0, binary: counted.binary })
+    } else {
+      const stat = numstat.get(entry.path)
+      files.push({
+        ...entry,
+        additions: stat?.additions ?? null,
+        deletions: stat?.deletions ?? null,
+        binary: stat ? stat.additions === null && stat.deletions === null : false
+      })
+    }
+  }
+  // 排序：冲突最前，其余按路径
+  files.sort((a, b) => (a.status === 'conflicted' ? -1 : 0) - (b.status === 'conflicted' ? -1 : 0) || a.path.localeCompare(b.path))
+  let totalAdditions = 0
+  let totalDeletions = 0
+  for (const f of files) {
+    totalAdditions += f.additions ?? 0
+    totalDeletions += f.deletions ?? 0
+  }
+  return { files, totalAdditions, totalDeletions }
+}
+
+/** 单文件相对 HEAD 的完整 diff（暂存+未暂存合并视角）。未跟踪文件合成
+ *  unified diff（git diff 不认识它们）；二进制/超大文件返回占位说明。 */
+export async function getFileDiff(
+  cwd: string,
+  relPath: string,
+  opts: { untracked?: boolean } = {}
+): Promise<string> {
+  const p = assertPath(relPath)
+  if (opts.untracked) {
+    const abs = resolveInsideCwd(cwd, p)
+    const stat = await fsp.stat(abs)
+    if (!stat.isFile()) return `[${p} 不是普通文件]`
+    if (stat.size > 512 * 1024) return `[新文件，${(stat.size / 1024).toFixed(0)} KB，过大不展示内容]`
+    if (await sniffBinary(abs)) return `[新增二进制文件，${(stat.size / 1024).toFixed(1)} KB]`
+    const text = await fsp.readFile(abs, 'utf8')
+    const body = text.length ? text.split('\n') : []
+    if (body.length && body[body.length - 1] === '') body.pop()
+    const lines = body.map((l) => `+${l}`)
+    return [`--- /dev/null`, `+++ b/${p}`, `@@ -0,0 +1,${lines.length} @@`, ...lines].join('\n')
+  }
+  const head = await hasHead(cwd)
+  const args = [...READ_ONLY_GIT_FLAGS, 'diff', '-M']
+  if (head) args.push('HEAD')
+  args.push('--', p)
+  const { stdout } = await runGit(cwd, args, 20_000)
+  return stdout
+}
+
+/** 还原单个文件：跟踪文件恢复到 HEAD（索引+工作区一起），未跟踪文件直接删除。
+ *  调用方（渲染层）负责确认弹窗——这是不可逆操作。 */
+export async function revertFile(cwd: string, relPath: string, untracked: boolean): Promise<void> {
+  const p = assertPath(relPath)
+  if (untracked) {
+    const abs = resolveInsideCwd(cwd, p)
+    await fsp.rm(abs, { force: false })
+    return
+  }
+  if (!(await hasHead(cwd))) {
+    throw new Error('仓库还没有任何提交，无法从 HEAD 还原；如需丢弃请手动处理')
+  }
+  // `checkout HEAD -- <path>` 的语义正是「把该路径的索引与工作区都还原到 HEAD」；
+  // `--` 在这里是安全且必要的（路径可能以任意字符开头）。
+  await runGit(cwd, ['checkout', 'HEAD', '--', p])
 }
 
 /** Unstage paths (git reset). Omit paths to unstage everything back to HEAD. */

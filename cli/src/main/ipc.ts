@@ -120,6 +120,9 @@ const MIME: Record<string, string> = {
   bmp: 'image/bmp'
 }
 const MAX_TEXT_INLINE = 512 * 1024 // inline at most 512KB of a text file
+/** 图片附件上限：整读进内存再 base64（膨胀 ~1.33 倍）且经 IPC 复制多份，
+ *  不设上限一张巨图就能把主进程顶爆。 */
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 const MAX_DIRECTORY_ENTRIES = 300
 /** 待办自动催更的最小间隔（同一会话）。见 forge:nudgeTodos。 */
 const NUDGE_COOLDOWN_MS = 5 * 60_000
@@ -231,6 +234,11 @@ async function readPickedFiles(cwd: string, paths: string[], source: string): Pr
           : 'other'
       let data = ''
       if (kind === 'image') {
+        // 超限图片拒绝读取：走本函数统一的错误形态（记日志并跳过该文件），
+        // 错误消息为用户可读中文，出现在日志/诊断里。
+        if (stat.size > MAX_IMAGE_BYTES) {
+          throw new Error(`图片超过 ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB 上限，已拒绝附加：${basename(p)}`)
+        }
         data = (await withPathReadTimeout(readFile(p), `read image ${p}`)).toString('base64')
       } else if (kind === 'text') {
         data = (await withPathReadTimeout(readFile(p, 'utf-8'), `read text ${p}`)).slice(0, MAX_TEXT_INLINE)
@@ -975,8 +983,23 @@ export function registerIpc(
     void pollSwarmTasks(sessionId)
   }
 
+  // 渲染层 reload/跳转不会发退订：旧页面的前台 poller 没人收，会永远按 15s
+  // 轮询并向无监听者推送。给 webContents 挂一次性守卫——主框架导航（含
+  // reload）或销毁时全停；新页面加载后会重新 subscribe，从零起表。
+  const swarmGuardedContents = new WeakSet<Electron.WebContents>()
+  const ensureSwarmNavGuard = (): void => {
+    const win = getMainWindow()
+    if (!win || win.isDestroyed()) return
+    const wc = win.webContents
+    if (swarmGuardedContents.has(wc)) return
+    swarmGuardedContents.add(wc)
+    wc.on('did-navigate', () => stopSwarmPolling())
+    wc.on('destroyed', () => stopSwarmPolling())
+  }
+
   ipcMain.handle('forge:subscribeSwarmTasks', async (_e, sessionId: string): Promise<void> => {
     const id = requireString(sessionId, 'sessionId')
+    ensureSwarmNavGuard()
     // 换前台：上一个前台**降级为后台**而不是停掉——它可能正跑着后台任务，
     // 停了就又回到"切走即失联"。它的任务收尾后 pollSwarmTasks 自己回收。
     for (const [other, poller] of swarmPollers) {
@@ -1038,9 +1061,18 @@ export function registerIpc(
     }
   )
 
-  ipcMain.handle('forge:getApiKey', async (): Promise<string | null> => {
-    return getApiKey()
-  })
+  ipcMain.handle(
+    'forge:getApiKey',
+    async (): Promise<{ configured: boolean; masked: string | null }> => {
+      // 解密后的完整 Key 不回传渲染层（渲染层只拿它做设置页回显）：
+      // 返回掩码形态，同时保留「是否已配置」的判断能力。
+      const key = getApiKey()
+      if (!key) return { configured: false, masked: null }
+      // 短 Key 前后各留 4 位就等于全泄露，一律只给 ***。
+      const masked = key.length >= 12 ? `${key.slice(0, 4)}***${key.slice(-4)}` : '***'
+      return { configured: true, masked }
+    }
+  )
 
   ipcMain.handle('forge:setApiKey', async (_e, key: string): Promise<void> => {
     setApiKey(key)
@@ -1125,6 +1157,23 @@ export function registerIpc(
 
   ipcMain.handle('forge:gitPushUpstream', async (_e, cwd: string) =>
     gitModule.pushUpstream(cwd)
+  )
+
+  ipcMain.handle('forge:gitWorkingChanges', async (_e, cwd: string) =>
+    gitModule.getWorkingChanges(requireString(cwd, 'cwd'))
+  )
+
+  ipcMain.handle(
+    'forge:gitFileDiff',
+    async (_e, cwd: string, path: string, opts?: { untracked?: boolean }) =>
+      gitModule.getFileDiff(requireString(cwd, 'cwd'), requireString(path, 'path'), opts)
+  )
+
+  ipcMain.handle(
+    'forge:gitRevertFile',
+    async (_e, cwd: string, path: string, untracked: boolean): Promise<void> => {
+      await gitModule.revertFile(requireString(cwd, 'cwd'), requireString(path, 'path'), !!untracked)
+    }
   )
 
   return bridge
