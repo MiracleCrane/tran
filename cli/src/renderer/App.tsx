@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useSessionStore, foldBackgroundSwarmTasks, takeAttachedSwarmTasks } from './store/sessionStore'
 import { useUiStore, type View } from './store/uiStore'
 import Onboarding from './components/Onboarding'
@@ -15,13 +15,33 @@ import GitToolbar, { requestCloseGitDrawer } from './components/GitToolbar'
 import AttachmentPreviewPane from './components/AttachmentPreviewPane'
 import PermissionModal from './components/PermissionModal'
 import ImageContextMenuHost from './components/ImageContextMenu'
-import McpPanel from './components/McpPanel'
-import ProvidersPanel from './components/ProvidersPanel'
-import SkillsPanel from './components/SkillsPanel'
-import SettingsPanel from './components/SettingsPanel'
-import TranslatePanel from './components/TranslatePanel'
-import HelpPanel from './components/HelpPanel'
-import WslHealthPanel from './components/WslHealthPanel'
+/**
+ * 全屏工具面板一律懒加载：它们只有点进去才用得上，却占了首屏 bundle 相当一块
+ * （设置页一个就一千多行）。聊天主链路的组件保持静态导入——那些是首屏就要画的。
+ */
+const McpPanel = lazy(() => import('./components/McpPanel'))
+const ProvidersPanel = lazy(() => import('./components/ProvidersPanel'))
+const SkillsPanel = lazy(() => import('./components/SkillsPanel'))
+const SettingsPanel = lazy(() => import('./components/SettingsPanel'))
+const TranslatePanel = lazy(() => import('./components/TranslatePanel'))
+const HelpPanel = lazy(() => import('./components/HelpPanel'))
+const WslHealthPanel = lazy(() => import('./components/WslHealthPanel'))
+
+const LAZY_PANELS = {
+  mcp: McpPanel,
+  providers: ProvidersPanel,
+  skills: SkillsPanel,
+  settings: SettingsPanel,
+  translate: TranslatePanel,
+  help: HelpPanel,
+  wslHealth: WslHealthPanel
+} as const
+
+/** 面板 chunk 加载中的占位。本地文件读取通常一帧就完成，所以刻意做得很轻——
+ *  真闪一下 spinner 反而比空白更晃眼。 */
+function PanelLoading(): JSX.Element {
+  return <div className="flex h-full items-center justify-center text-[11px] text-zinc-600">加载中…</div>
+}
 import ErrorBoundary from './components/ErrorBoundary'
 import ClosePromptDialog from './components/ClosePromptDialog'
 import UpdateAvailableDialog from './components/UpdateAvailableDialog'
@@ -265,58 +285,14 @@ function MainViewContent({
   onTranscriptAtBottomChange: (atBottom: boolean) => void
   onToggleChatTopbar: (expandDelta?: number) => void
 }): JSX.Element {
-  if (view === 'mcp') {
+  const lazyPanel = LAZY_PANELS[view as keyof typeof LAZY_PANELS]
+  if (lazyPanel) {
+    const Panel = lazyPanel
     return (
       <div className="min-h-0 flex-1 overflow-hidden">
-        <McpPanel />
-      </div>
-    )
-  }
-
-  if (view === 'providers') {
-    return (
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <ProvidersPanel />
-      </div>
-    )
-  }
-
-  if (view === 'skills') {
-    return (
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <SkillsPanel />
-      </div>
-    )
-  }
-
-  if (view === 'settings') {
-    return (
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <SettingsPanel />
-      </div>
-    )
-  }
-
-  if (view === 'translate') {
-    return (
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <TranslatePanel />
-      </div>
-    )
-  }
-
-  if (view === 'help') {
-    return (
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <HelpPanel />
-      </div>
-    )
-  }
-
-  if (view === 'wslHealth') {
-    return (
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <WslHealthPanel />
+        <Suspense fallback={<PanelLoading />}>
+          <Panel />
+        </Suspense>
       </div>
     )
   }

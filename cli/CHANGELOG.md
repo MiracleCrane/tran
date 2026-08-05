@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.0.52 - 2026-08-05
+
+### 中文
+
+- 修复:**「改动」面板的还原对新增/重命名/未跟踪目录全都无效**。新增文件和重命名后的新路径在 HEAD 里根本不存在,`git checkout HEAD -- <路径>` 必然报 pathspec 错误,点了还原只弹一句英文 git 报错;未跟踪目录因为没开递归删除会抛 EISDIR。现在按改动类型分派:新增走撤索引+删文件、重命名 checkout 旧路径再移除新路径、未跟踪递归删除,AA 冲突这类 HEAD 里没有的情况也有兜底。已用真实仓库逐项验证。
+- 修复:**重命名文件的 diff 显示成整文件新增**。只把新路径交给 git 会让 pathspec 滤掉旧路径、rename 检测失效,现在两个路径一起传。
+- 修复:**空仓库(还没有任何提交)下改动面板看不到内容**。没有 HEAD 时改用空树对象作基准,已暂存的文件不再显示成"无改动"。
+- 修复:**刚发出的消息可能在会话重启后消失**。历史合并的指纹去重里,按 id 命中的条目不消耗计数,导致与历史同文的新消息被误判为"已落盘"而丢弃(例如历史里有过"继续",再发一条"继续")。
+- 修复:**超过 20MB 的图片附件静默消失**。此前只在主进程日志里留一行,界面上毫无反应;现在会明确告诉你哪个文件没能附加、为什么,粘贴失败也不再无声无息。
+- 修复:**ACP 断线重连期间的两处竞态**。恢复窗口内新消息会撞上还没 load 完的会话报错、并发的真实回复会被历史回放吞掉;现在恢复期间挂会话级闸门,消息排队等恢复完成,恢复中二次断线也能继续处理。
+- 修复:会话在等权限时被销毁后,重新打开会复活那个早已取消的权限弹窗(作答会落到失效的 requestId)。
+- 优化:**首屏 bundle 从 1758KB 降到 1604KB**。设置、MCP、技能、翻译等七个全屏面板改为按需加载,点开才拉对应的代码块。
+
+### English
+
+- Fixed: **Changes-panel revert did nothing for added / renamed / untracked-directory files**. Added files and rename targets don't exist in HEAD, so `git checkout HEAD -- <path>` always failed with a pathspec error; untracked directories threw EISDIR without recursive removal. Revert now dispatches on change type (unstage+delete for added, checkout-old + remove-new for renames, recursive delete for untracked), with a fallback for AA conflicts. Verified case by case against a real repository.
+- Fixed: renamed files rendered as whole-file additions (passing only the new path made git's rename detection fail); empty repositories (no commits yet) showed nothing in the Changes panel (now diffed against the empty-tree object).
+- Fixed: **a just-sent message could vanish after a session restart** — id-matched entries didn't consume their fingerprint count, so a new message identical to an older one was mistaken for already-persisted and dropped.
+- Fixed: image attachments over 20MB disappeared silently; the UI now names the skipped file and the reason (paste failures too).
+- Fixed: two races during ACP reconnection (messages sent mid-recovery hit a not-yet-loaded session; concurrent real replies were swallowed by history replay) — recovery now holds a per-session gate. Also fixed a cancelled permission prompt coming back to life when reopening a session that was destroyed while waiting.
+- Improved: **first-paint bundle down from 1758KB to 1604KB** — seven full-screen panels (settings, MCP, skills, translate, …) now load on demand.
+
 ## v1.0.51 - 2026-08-05
 
 ### 中文

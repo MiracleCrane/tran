@@ -183,7 +183,8 @@ const api: ForgeApi = {
   gitPushUpstream: (cwd) => ipcRenderer.invoke('forge:gitPushUpstream', cwd),
   gitWorkingChanges: (cwd) => ipcRenderer.invoke('forge:gitWorkingChanges', cwd),
   gitFileDiff: (cwd, path, opts) => ipcRenderer.invoke('forge:gitFileDiff', cwd, path, opts),
-  gitRevertFile: (cwd, path, untracked) => ipcRenderer.invoke('forge:gitRevertFile', cwd, path, untracked),
+  gitRevertFile: (cwd, path, untracked, opts) =>
+    ipcRenderer.invoke('forge:gitRevertFile', cwd, path, untracked, opts),
 
   onAgentEvent: (cb) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: AgentEvent): void => cb(payload)

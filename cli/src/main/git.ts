@@ -342,6 +342,20 @@ async function hasHead(cwd: string): Promise<boolean> {
   }
 }
 
+/**
+ * 空树对象的固定 hash（所有 git 仓库都一样）。
+ *
+ * 空仓库（还没有任何 commit）里没有 HEAD 可比：不给基准的话 `git diff` 比的是
+ * 索引↔工作区,已暂存的文件会显示成"无改动"——而在用户眼里它们全都是新增的。
+ * 拿空树当基准就能得到"相对于什么都没有"的 diff,正是这时候想看的东西。
+ */
+const EMPTY_TREE_HASH = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
+/** diff 的基准：有 HEAD 用 HEAD,空仓库用空树。 */
+async function diffBase(cwd: string): Promise<string> {
+  return (await hasHead(cwd)) ? 'HEAD' : EMPTY_TREE_HASH
+}
+
 /** 首 8KB 含 NUL 即视为二进制（与 git 同判据）。 */
 async function sniffBinary(absPath: string): Promise<boolean> {
   const handle = await fsp.open(absPath, 'r')
@@ -430,9 +444,7 @@ export async function getWorkingChanges(cwd: string): Promise<GitWorkingChanges>
   let numstat = new Map<string, { additions: number | null; deletions: number | null }>()
   if (entries.some((e) => e.status !== 'untracked')) {
     try {
-      const head = await hasHead(cwd)
-      const args = [...READ_ONLY_GIT_FLAGS, 'diff', '--numstat', '-z', '-M']
-      if (head) args.push('HEAD')
+      const args = [...READ_ONLY_GIT_FLAGS, 'diff', '--numstat', '-z', '-M', await diffBase(cwd)]
       const { stdout } = await runGit(cwd, args)
       numstat = parseNumstat(stdout)
     } catch (e) {
@@ -470,12 +482,15 @@ export async function getWorkingChanges(cwd: string): Promise<GitWorkingChanges>
   return { files, totalAdditions, totalDeletions }
 }
 
-/** 单文件相对 HEAD 的完整 diff（暂存+未暂存合并视角）。未跟踪文件合成
- *  unified diff（git diff 不认识它们）；二进制/超大文件返回占位说明。 */
+/** 单文件相对基准（HEAD / 空树）的完整 diff。未跟踪文件合成 unified diff
+ *  （git diff 不认识它们）；二进制/超大文件返回占位说明。
+ *
+ *  重命名要把**两个**路径都交给 git：只给新路径的话 pathspec 会把旧路径滤掉，
+ *  rename 检测失效，一次重命名会显示成"整文件新增"。 */
 export async function getFileDiff(
   cwd: string,
   relPath: string,
-  opts: { untracked?: boolean } = {}
+  opts: { untracked?: boolean; oldPath?: string } = {}
 ): Promise<string> {
   const p = assertPath(relPath)
   if (opts.untracked) {
@@ -490,29 +505,70 @@ export async function getFileDiff(
     const lines = body.map((l) => `+${l}`)
     return [`--- /dev/null`, `+++ b/${p}`, `@@ -0,0 +1,${lines.length} @@`, ...lines].join('\n')
   }
-  const head = await hasHead(cwd)
-  const args = [...READ_ONLY_GIT_FLAGS, 'diff', '-M']
-  if (head) args.push('HEAD')
-  args.push('--', p)
+  const args = [...READ_ONLY_GIT_FLAGS, 'diff', '-M', await diffBase(cwd), '--', p]
+  if (opts.oldPath) args.push(assertPath(opts.oldPath))
   const { stdout } = await runGit(cwd, args, 20_000)
   return stdout
 }
 
-/** 还原单个文件：跟踪文件恢复到 HEAD（索引+工作区一起），未跟踪文件直接删除。
- *  调用方（渲染层）负责确认弹窗——这是不可逆操作。 */
-export async function revertFile(cwd: string, relPath: string, untracked: boolean): Promise<void> {
+/**
+ * 还原单个文件。三种情况的手段完全不同，认错了要么报错要么留下半个状态：
+ *
+ * - **未跟踪**：磁盘上删掉（目录要递归）。HEAD 里没有它，checkout 无从谈起。
+ * - **新增（已暂存）**：HEAD 里同样没有 —— `checkout HEAD -- <path>` 会报
+ *   "pathspec did not match"。正确做法是先从索引撤下（`rm --cached`）再删文件。
+ * - **重命名**：传进来的是新路径，HEAD 里只有旧路径。要把旧路径 checkout 回来，
+ *   再把新路径从索引和磁盘上去掉，否则会剩下两份。
+ *
+ * 调用方（渲染层）负责确认弹窗——这是不可逆操作。
+ */
+export async function revertFile(
+  cwd: string,
+  relPath: string,
+  untracked: boolean,
+  opts: { status?: GitFileChange['status']; oldPath?: string } = {}
+): Promise<void> {
   const p = assertPath(relPath)
-  if (untracked) {
+  if (untracked || opts.status === 'untracked') {
     const abs = resolveInsideCwd(cwd, p)
-    await fsp.rm(abs, { force: false })
+    // 未跟踪条目可能是整个目录（git status 对未跟踪目录只给一条 `dir/`）。
+    await fsp.rm(abs, { force: true, recursive: true })
     return
   }
-  if (!(await hasHead(cwd))) {
-    throw new Error('仓库还没有任何提交，无法从 HEAD 还原；如需丢弃请手动处理')
+  const head = await hasHead(cwd)
+
+  if (opts.status === 'renamed' && opts.oldPath) {
+    const old = assertPath(opts.oldPath)
+    if (!head) throw new Error('仓库还没有任何提交，无法还原重命名')
+    await runGit(cwd, ['checkout', head ? 'HEAD' : EMPTY_TREE_HASH, '--', old])
+    // 新路径：从索引撤下并删除磁盘副本，否则旧新两份同时存在。
+    await runGit(cwd, ['rm', '-f', '--quiet', '--', p]).catch(async () => {
+      // 已被手工改动过时 rm 会拒绝，退回"撤索引 + 删文件"。
+      await runGit(cwd, ['rm', '--cached', '--quiet', '--', p]).catch(() => undefined)
+      await fsp.rm(resolveInsideCwd(cwd, p), { force: true, recursive: true })
+    })
+    return
   }
+
+  if (opts.status === 'added' || !head) {
+    // HEAD 里没有这个路径：撤索引 + 删磁盘文件。--cached 保证 rm 不会因为
+    // 文件有未暂存改动而拒绝。
+    await runGit(cwd, ['rm', '--cached', '--quiet', '--', p]).catch(() => undefined)
+    await fsp.rm(resolveInsideCwd(cwd, p), { force: true, recursive: true })
+    return
+  }
+
   // `checkout HEAD -- <path>` 的语义正是「把该路径的索引与工作区都还原到 HEAD」；
   // `--` 在这里是安全且必要的（路径可能以任意字符开头）。
-  await runGit(cwd, ['checkout', 'HEAD', '--', p])
+  try {
+    await runGit(cwd, ['checkout', 'HEAD', '--', p])
+  } catch (error) {
+    // HEAD 里没有该路径（典型是 AA 冲突：双方都新增）——checkout 报 pathspec
+    // 不匹配。这种情况的"还原"只能是撤索引 + 删文件。
+    if (!/did not match|pathspec/i.test(error instanceof Error ? error.message : String(error))) throw error
+    await runGit(cwd, ['rm', '--cached', '--quiet', '--', p]).catch(() => undefined)
+    await fsp.rm(resolveInsideCwd(cwd, p), { force: true, recursive: true })
+  }
 }
 
 /** Unstage paths (git reset). Omit paths to unstage everything back to HEAD. */

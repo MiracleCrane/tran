@@ -202,6 +202,21 @@ async function readDirectoryEntries(path: string): Promise<{ entries: PickedDire
   }
 }
 
+/** 读不进来的文件（超限/读失败/不是常规文件）回一个带 error 的失败占位条目，
+ *  而不是从结果数组里悄悄消失——渲染层据此提示用户（PickedFile.error）。 */
+function skippedPickedFile(path: string, reason: string): PickedFile {
+  const name = basename(path)
+  return {
+    path,
+    name,
+    kind: 'other',
+    mimeType: 'application/octet-stream',
+    data: '',
+    size: 0,
+    error: `无法附加 ${name}：${reason}`
+  }
+}
+
 async function readPickedFiles(cwd: string, paths: string[], source: string): Promise<PickedFile[]> {
   const out: PickedFile[] = []
   for (const rawPath of paths) {
@@ -224,6 +239,7 @@ async function readPickedFiles(cwd: string, paths: string[], source: string): Pr
       }
       if (!stat.isFile()) {
         log('ipc', `${source} skip ${p}: not a file or directory`)
+        out.push(skippedPickedFile(p, '不是文件或目录'))
         continue
       }
       const ext = extname(p).slice(1).toLowerCase()
@@ -234,10 +250,10 @@ async function readPickedFiles(cwd: string, paths: string[], source: string): Pr
           : 'other'
       let data = ''
       if (kind === 'image') {
-        // 超限图片拒绝读取：走本函数统一的错误形态（记日志并跳过该文件），
-        // 错误消息为用户可读中文，出现在日志/诊断里。
+        // 超限图片拒绝读取：走本函数统一的错误形态（记日志 + 回一个带 error
+        // 的占位条目），错误消息为用户可读中文，会显示在输入区。
         if (stat.size > MAX_IMAGE_BYTES) {
-          throw new Error(`图片超过 ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB 上限，已拒绝附加：${basename(p)}`)
+          throw new Error(`图片超过 ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
         }
         data = (await withPathReadTimeout(readFile(p), `read image ${p}`)).toString('base64')
       } else if (kind === 'text') {
@@ -252,7 +268,9 @@ async function readPickedFiles(cwd: string, paths: string[], source: string): Pr
         size: stat.size
       })
     } catch (e) {
-      log('ipc', `${source} skip ${rawPath}: ${e instanceof Error ? e.message : String(e)}`)
+      const reason = e instanceof Error ? e.message : String(e)
+      log('ipc', `${source} skip ${rawPath}: ${reason}`)
+      out.push(skippedPickedFile(rawPath, reason))
     }
   }
   return out
@@ -1165,14 +1183,25 @@ export function registerIpc(
 
   ipcMain.handle(
     'forge:gitFileDiff',
-    async (_e, cwd: string, path: string, opts?: { untracked?: boolean }) =>
+    async (_e, cwd: string, path: string, opts?: { untracked?: boolean; oldPath?: string }) =>
       gitModule.getFileDiff(requireString(cwd, 'cwd'), requireString(path, 'path'), opts)
   )
 
   ipcMain.handle(
     'forge:gitRevertFile',
-    async (_e, cwd: string, path: string, untracked: boolean): Promise<void> => {
-      await gitModule.revertFile(requireString(cwd, 'cwd'), requireString(path, 'path'), !!untracked)
+    async (
+      _e,
+      cwd: string,
+      path: string,
+      untracked: boolean,
+      opts?: { status?: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'conflicted'; oldPath?: string }
+    ): Promise<void> => {
+      await gitModule.revertFile(
+        requireString(cwd, 'cwd'),
+        requireString(path, 'path'),
+        !!untracked,
+        opts
+      )
     }
   )
 

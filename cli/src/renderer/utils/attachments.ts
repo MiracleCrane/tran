@@ -1,6 +1,18 @@
 import type { PickedFile } from '../../shared/ipc'
 import type { UserAttachment } from '../types'
 
+/** 把主进程返回的条目拆成「真能附加的」和「被跳过的原因」两拨：带 error 的
+ *  是失败占位（超限图片/读失败），只能拿去提示用户，不能进附件列表。 */
+export function splitPickedFiles(files: PickedFile[]): { files: PickedFile[]; errors: string[] } {
+  const ok: PickedFile[] = []
+  const errors: string[] = []
+  for (const file of files) {
+    if (file.error) errors.push(file.error)
+    else ok.push(file)
+  }
+  return { files: ok, errors }
+}
+
 export function pickedFileToUserAttachment(file: PickedFile): UserAttachment {
   const base = {
     name: file.name,
@@ -9,6 +21,12 @@ export function pickedFileToUserAttachment(file: PickedFile): UserAttachment {
     mimeType: file.mimeType,
     size: file.size
   } satisfies Omit<UserAttachment, 'dataUrl' | 'text'>
+
+  // 失败占位没有数据可预览，直接落到预览面板/消息里的"不可用"形态，
+  // 并把主进程给的具体原因带过去（超限图片以前在这里表现为空白）。
+  if (file.error) {
+    return { ...base, previewState: 'error', previewError: file.error }
+  }
 
   if (file.kind === 'image') {
     return {

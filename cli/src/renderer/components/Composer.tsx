@@ -15,7 +15,7 @@ import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, Permission
 import DisclosureSelect from './DisclosureSelect'
 import ModePanel from './ModePanel'
 import { AGENT_TOOL_NAMES, BASH_TOOL_NAMES, countRunningTools, countTotalTools } from '../utils/toolStats'
-import { pickedFileToUserAttachment, userAttachmentToPickedFile } from '../utils/attachments'
+import { pickedFileToUserAttachment, splitPickedFiles, userAttachmentToPickedFile } from '../utils/attachments'
 import ChipPopover, { type ChipAnchor, type ChipKind } from './ChipPopover'
 import UsageRings from './UsageRings'
 import { defaultModelsForAgent, modelLabelForAgent } from '../../shared/models'
@@ -103,6 +103,15 @@ function formatBytes(bytes: number): string {
 function roughAttachmentTokens(files: PickedFile[]): number {
   const textChars = files.reduce((sum, file) => sum + (file.kind === 'text' ? file.data.length : 0), 0)
   return Math.ceil(textChars / 4)
+}
+
+/** 未能附加的文件汇成一行提示：最多列两条具体原因，其余折成计数，
+ *  免得一次拖十个失败文件把输入区顶开。missing = 连占位条目都没回来的份额。 */
+function describeSkippedFiles(errors: string[], missing = 0): string | null {
+  const shown = errors.slice(0, 2)
+  const rest = errors.length - shown.length + Math.max(0, missing)
+  if (rest > 0) shown.push(`另有 ${rest} 个文件未能附加`)
+  return shown.length ? shown.join('；') : null
 }
 
 function normalizeSlashName(name: string): string {
@@ -377,7 +386,9 @@ export default function Composer(): JSX.Element {
   }, [draftKey])
   const dragDepth = useRef(0)
   const [dragActive, setDragActive] = useState(false)
-  const [dropError, setDropError] = useState<string | null>(null)
+  // 附件添加失败提示（选择器/拖拽/粘贴共用）：超限图片等被主进程跳过的文件
+  // 以前只进日志，用户侧什么都看不见。
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
   // 附件文件选择器等待指示（局部 spinner，不整屏转圈）。
   const [pickingFile, setPickingFile] = useState(false)
   const textareaHeight = manualTextareaHeight ?? autoTextareaHeight
@@ -576,7 +587,7 @@ export default function Composer(): JSX.Element {
   const pickAttachment = async (): Promise<void> => {
     if (!meta) return
     const actionSeq = ++attachmentActionSeqRef.current
-    setDropError(null)
+    setAttachmentError(null)
     // 局部小指示（不整屏转圈）：按钮上 spinner，页面其余部分保持可操作。
     setPickingFile(true)
     let files: Awaited<ReturnType<typeof window.api.pickFiles>> = []
@@ -586,7 +597,9 @@ export default function Composer(): JSX.Element {
       setPickingFile(false)
     }
     if (attachmentActionSeqRef.current !== actionSeq) return
-    if (files.length) setAttachments((prev) => [...prev, ...files])
+    const { files: added, errors } = splitPickedFiles(files)
+    if (added.length) setAttachments((prev) => [...prev, ...added])
+    setAttachmentError(describeSkippedFiles(errors))
   }
 
   const removeAttachment = (i: number): void => {
@@ -653,7 +666,7 @@ export default function Composer(): JSX.Element {
     e.dataTransfer.dropEffect = meta ? 'copy' : 'none'
     dragDepth.current += 1
     if (meta) {
-      setDropError(null)
+      setAttachmentError(null)
       setDragActive(true)
     }
   }
@@ -679,7 +692,7 @@ export default function Composer(): JSX.Element {
     e.stopPropagation()
     dragDepth.current = 0
     setDragActive(false)
-    setDropError(null)
+    setAttachmentError(null)
     if (!meta) return
 
     const paths = Array.from(
@@ -691,17 +704,16 @@ export default function Composer(): JSX.Element {
     )
 
     if (!paths.length) {
-      setDropError('无法读取拖入文件路径')
+      setAttachmentError('无法读取拖入文件路径')
       return
     }
 
     const actionSeq = ++attachmentActionSeqRef.current
     const files = await window.api.readFiles(meta.cwd, paths)
     if (attachmentActionSeqRef.current !== actionSeq) return
-    if (files.length) setAttachments((prev) => [...prev, ...files])
-    if (files.length < paths.length) {
-      setDropError(`有 ${paths.length - files.length} 个文件无法引用`)
-    }
+    const { files: added, errors } = splitPickedFiles(files)
+    if (added.length) setAttachments((prev) => [...prev, ...added])
+    setAttachmentError(describeSkippedFiles(errors, paths.length - files.length))
   }
 
   /** 剪贴板粘贴图片（截图工具/复制的图片）：与拖拽走同一附件管线，
@@ -711,9 +723,10 @@ export default function Composer(): JSX.Element {
     const images = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'))
     if (!images.length) return
     e.preventDefault()
-    setDropError(null)
+    setAttachmentError(null)
     const actionSeq = ++attachmentActionSeqRef.current
     const picked: PickedFile[] = []
+    const errors: string[] = []
     for (const file of images) {
       try {
         const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -734,11 +747,13 @@ export default function Composer(): JSX.Element {
           size: file.size
         })
       } catch {
-        /* 单个文件读取失败不影响其余 */
+        // 单个文件读取失败不影响其余，但要让用户看见（否则粘贴后毫无反应）。
+        errors.push(`无法附加剪贴板图片（${file.type || '未知格式'}）`)
       }
     }
     if (attachmentActionSeqRef.current !== actionSeq) return
     if (picked.length) setAttachments((prev) => [...prev, ...picked])
+    setAttachmentError(describeSkippedFiles(errors))
   }
 
   const submit = async (cutIn = false): Promise<void> => {
@@ -1160,8 +1175,18 @@ export default function Composer(): JSX.Element {
               {roughAttachmentTokens(attachments) > 0 && ` / 约 ${roughAttachmentTokens(attachments).toLocaleString()} tokens`}
             </div>
           )}
-          {dropError && (
-            <div className="px-1 pt-2 text-[11px] text-orange-300">{dropError}</div>
+          {attachmentError && (
+            <div className="flex min-w-0 items-center gap-1 px-1 pt-2 text-[11px] text-orange-300">
+              <span className="truncate">{attachmentError}</span>
+              <button
+                type="button"
+                onClick={() => setAttachmentError(null)}
+                className="shrink-0 rounded px-0.5 text-orange-300/70 transition hover:bg-white/[0.06] hover:text-orange-200"
+                title="关闭提示"
+              >
+                ×
+              </button>
+            </div>
           )}
           <div className="composer-toolbar flex flex-wrap items-center gap-2 px-1 pt-2">
             <button

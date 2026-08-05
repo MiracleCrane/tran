@@ -214,6 +214,10 @@ export interface PickedFile {
   size: number
   entries?: PickedDirectoryEntry[]
   entriesTruncated?: boolean
+  /** 该文件**没能**读进来（超过图片上限、读取失败/超时…）时的用户可读原因。
+   *  带 error 的条目只是"失败占位"：不含数据，渲染层不得把它并入附件列表，
+   *  只用来把"跳过了哪个文件、为什么"显示给用户（否则超限图片静默消失）。 */
+  error?: string
 }
 
 /** A model shown in the Composer dropdown (user-editable in Settings). */
@@ -870,10 +874,17 @@ export interface ForgeApi {
   gitPushUpstream(cwd: string): Promise<{ stdout: string; stderr: string }>
   /** Changes 面板：工作区全部改动聚合（相对 HEAD）。 */
   gitWorkingChanges(cwd: string): Promise<GitWorkingChanges>
-  /** Changes 面板：单文件完整 diff；untracked=true 时合成"全新增"diff。 */
-  gitFileDiff(cwd: string, path: string, opts?: { untracked?: boolean }): Promise<string>
-  /** Changes 面板：还原单文件（跟踪→HEAD；未跟踪→删除）。渲染层先弹确认。 */
-  gitRevertFile(cwd: string, path: string, untracked: boolean): Promise<void>
+  /** Changes 面板：单文件完整 diff；untracked=true 时合成"全新增"diff；
+   *  重命名要一并传 oldPath，否则 rename 检测失效会显示成整文件新增。 */
+  gitFileDiff(cwd: string, path: string, opts?: { untracked?: boolean; oldPath?: string }): Promise<string>
+  /** Changes 面板：还原单文件。手段随 status 而变（新增/重命名在 HEAD 里没有
+   *  对应路径，不能走 checkout），所以要把 status 与 oldPath 一起传下去。 */
+  gitRevertFile(
+    cwd: string,
+    path: string,
+    untracked: boolean,
+    opts?: { status?: GitFileChange['status']; oldPath?: string }
+  ): Promise<void>
 
   onAgentEvent(cb: (e: AgentEvent) => void): () => void
   onPermissionRequest(cb: (r: PermissionRequestPayload) => void): () => void

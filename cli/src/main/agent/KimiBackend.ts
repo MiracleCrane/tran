@@ -121,6 +121,13 @@ interface ActiveKimiSession {
   stallAbort?: (error: Error) => void
   /** #41 权限/elicitation 等待中：是在等用户不是 agent 卡死，静默监督暂停。 */
   waitingOnUser: boolean
+  /** #3 恢复闸门：ACP 断连自动恢复窗口（退避重连 + session/load）内挂闸。
+   *  期间该会话不发起任何新 turn——新进程还没 session/load 过这个
+   *  acpSessionId，直接 session/prompt 会以 "session not found" 报错；也不会
+   *  有并发真实轮被 replay 累积器吞掉。恢复成功/失败/dispose 都必须放开。 */
+  recoveryGate?: Promise<void>
+  /** recoveryGate 的 resolve 句柄（放闸用；releaseRecoveryGate 保证幂等）。 */
+  recoveryRelease?: () => void
 }
 
 interface PendingPermission {
@@ -280,8 +287,6 @@ export class KimiBackend {
   private client: AcpClient | null = null
   /** L4：dispose 后置位——在途 ensureClient 返回的 client 直接关掉，防泄漏。 */
   private disposed = false
-  /** #3：自动恢复进行中（防重入；意外断开只会触发一轮恢复）。 */
-  private recovering = false
   /** Model choices discovered from session/new configOptions (ACP-side source
    *  of truth), merged over DEFAULT_KIMI_MODELS in listModels(). */
   private discoveredModels: ComposerModel[] = []
@@ -417,9 +422,40 @@ export class KimiBackend {
         this.markAcpSessionDead(session.acpSessionId)
         // Kimi ACP 未实现 session/close —— 只取消当前 turn 并丢弃本地映射。
         this.client?.notify('session/cancel', { sessionId: session.acpSessionId })
+        // M5：本轮已随 session/cancel 作废，挂在它上面的权限/elicitation 等待
+        // 一并清掉（详见 dropPendingPermissions）。
+        this.dropPendingPermissions(session)
       }
     }
     this.sessions.delete(sessionId)
+  }
+
+  /**
+   * M5：作废并清掉挂在该会话上的未应答权限/elicitation 等待。
+   *
+   * close 走的是"立墓碑 + session/cancel"路径，这些请求不会再有合法应答；条目
+   * 却因为 client 仍存活而永不过期。留着有两个后果：pendingPermissions 泄漏；
+   * 以及会话稍后被 resume 时（典型：后台缓冲超上限连运行中会话一起销毁，用户
+   * 随后重开），redeliverPendingPermissions 按 acpSessionId + client 匹配成功，
+   * 把早已取消那一轮的弹窗重投给渲染层——用户作答只会 respond 到一个作废的
+   * requestId。顺手回一个 cancelled outcome（尽力而为，进程可能已死），不让
+   * agent 侧一直等应答。参考 handleClientClose 的清理做法。
+   */
+  private dropPendingPermissions(session: ActiveKimiSession): void {
+    for (const [toolUseID, pending] of [...this.pendingPermissions]) {
+      // 只清确属本会话的条目：同一 acpSessionId 已被新会话接管时不会走到这里
+      // （调用点在"映射还指向自己"的分支内），不会误伤接管者的弹窗。
+      const mine = (!!session.acpSessionId && pending.acpSessionId === session.acpSessionId)
+        || pending.sessionId === session.id
+      if (!mine) continue
+      this.pendingPermissions.delete(toolUseID)
+      try {
+        pending.client.respond(pending.requestId, { outcome: { outcome: 'cancelled' } })
+      } catch (error) {
+        log('kimi', `cancel pending permission failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    session.waitingOnUser = false
   }
 
   /**
@@ -888,6 +924,16 @@ export class KimiBackend {
     // running——这里挡住，避免用户轮与隐藏轮并发撞 "another turn"。隐藏轮
     // 结束时会在 finally 里补 drain 排队的消息。
     if (session.running || session.hiddenTurn || session.closed) return
+    // #3 恢复闸门：ACP 自动恢复窗口内（退避最长十几秒 + session/load）不发新
+    // turn。此时 ensureClient 会立刻拉起新进程，而新进程还没 load 过该
+    // acpSessionId，直接 session/prompt 只会把 "session not found" 砸给用户，
+    // 还绕过了退避与恢复通告。消息留在队列里，闸门放开后按原顺序继续；恢复
+    // 失败的会话已被 failSession 封停（closed 置位），在下面的复检里收场。
+    if (session.recoveryGate) {
+      await this.awaitRecoveryGate(session)
+      if (session.closed || session.running || session.hiddenTurn) return
+      if (this.sessions.get(session.id) !== session) return
+    }
     const next = session.queue.shift()
     if (!next) return
     session.running = true
@@ -1049,7 +1095,8 @@ export class KimiBackend {
    *  对话流抢 FIFO。 */
   private async runHiddenUsageTurn(session: ActiveKimiSession): Promise<void> {
     if (session.closed || !session.acpSessionId || session.hiddenTurn) return
-    if (session.running || session.queue.length) return
+    // #3 恢复闸门：恢复窗口内直接放弃（隐藏轮是"有则更好"，不排队等闸门）。
+    if (session.running || session.queue.length || session.recoveryGate) return
     session.hiddenTurn = true
     session.hiddenText = ''
     try {
@@ -1103,8 +1150,8 @@ export class KimiBackend {
     const session = this.sessions.get(sessionId)
     if (!session || session.closed || !session.acpSessionId) return false
     // 会话不空闲就放弃。不排队、不重试：催更是"有则更好"，抢 FIFO 会拖慢用户
-    // 自己的那一轮，而下一次后台任务收尾还会再有机会。
-    if (session.running || session.hiddenTurn || session.queue.length) return false
+    // 自己的那一轮，而下一次后台任务收尾还会再有机会。#3 恢复窗口内同理放弃。
+    if (session.running || session.hiddenTurn || session.queue.length || session.recoveryGate) return false
 
     session.hiddenTurn = true
     session.hiddenText = ''
@@ -1155,7 +1202,8 @@ export class KimiBackend {
    *  途时直接放弃，状态区等下次机会，不与对话流抢 FIFO）。 */
   private async runHiddenMcpTurn(session: ActiveKimiSession, allowRetry = true): Promise<void> {
     if (session.closed || !session.acpSessionId || session.hiddenTurn) return
-    if (session.running || session.queue.length) return
+    // #3 恢复闸门：恢复窗口内直接放弃（同 runHiddenUsageTurn）。
+    if (session.running || session.queue.length || session.recoveryGate) return
     session.hiddenTurn = true
     session.hiddenText = ''
     try {
@@ -1803,6 +1851,8 @@ export class KimiBackend {
     this.disposed = true
     for (const session of this.sessions.values()) {
       this.disarmStallWatch(session)
+      // #3：退出路径放开所有恢复闸门，不留永久挂起的等待者。
+      this.releaseRecoveryGate(session)
     }
     const client = this.client
     this.client = null
@@ -1847,10 +1897,12 @@ export class KimiBackend {
     }
     // 没建立 acpSessionId 的会话（prepareSession 在途）走原路径：其 ready
     // 已被 rejectAll 拒绝，start() 的 ready.catch 负责 onEnded + 清理。
-    // recovering 防重入：恢复期间重建 client 失败会再次触发 onClose（spawn
-    // 'error'），不重复发通告、不再起一轮恢复（重试循环自己在跑）。
-    const affected = [...this.sessions.values()].filter((s) => !s.closed && s.acpSessionId)
-    if (!affected.length || this.disposed || this.recovering) return
+    // 防重入按会话粒度（recoveryGate）而非全局标志：恢复期间重建 client 失败
+    // 会再次触发 onClose（spawn 'error'），还挂着闸门的会话由在跑的重试循环
+    // 负责，不重复通告；而本轮已恢复成功（闸门已放开）的会话必须能再走一轮
+    // 通告 + 恢复，否则它会静悄悄地停在一个已经死掉的连接上，下次交互直接报错。
+    const affected = [...this.sessions.values()].filter((s) => !s.closed && s.acpSessionId && !s.recoveryGate)
+    if (!affected.length || this.disposed) return
     for (const session of affected) {
       // (a) 正在流式的消息封口（保留已输出内容，渲染层不再停在"流式中"）。
       this.sealStreamMessage(session)
@@ -1859,15 +1911,42 @@ export class KimiBackend {
         session,
         `Kimi ACP 连接已断开（${error?.trim() || '进程意外退出'}），正在自动恢复……`
       )
+      // (c) 挂恢复闸门：从此刻起到该会话 load 完成/恢复失败为止，drain 与隐藏
+      // 轮都不会发新 prompt（同步挂闸——AcpClient 先 rejectAll 再回调 onClose，
+      // 被打断轮的 finally 补 drain 是微任务，晚于这里，一定见得到闸门）。
+      this.armRecoveryGate(session)
     }
     void this.recoverSessions(affected, error)
+  }
+
+  /** #3：挂恢复闸门（已挂则保持原闸，不产生第二个 pending promise）。 */
+  private armRecoveryGate(session: ActiveKimiSession): void {
+    if (session.recoveryGate) return
+    session.recoveryGate = new Promise<void>((resolve) => {
+      session.recoveryRelease = resolve
+    })
+  }
+
+  /** #3：放开恢复闸门（幂等）。恢复成功、恢复失败、会话中途消失、dispose 提前
+   *  返回——所有出口都必须走到这里，否则等闸的 drain 会永久挂起。 */
+  private releaseRecoveryGate(session: ActiveKimiSession): void {
+    const release = session.recoveryRelease
+    session.recoveryGate = undefined
+    session.recoveryRelease = undefined
+    release?.()
+  }
+
+  /** #3：等恢复闸门放开。恢复窗口内二次断连会重新挂闸，故循环等待；上限纯属
+   *  防御（每道闸都在恢复收尾时无条件放开，不会死等）。 */
+  private async awaitRecoveryGate(session: ActiveKimiSession): Promise<void> {
+    for (let i = 0; i < 8 && session.recoveryGate; i++) {
+      await session.recoveryGate
+    }
   }
 
   /** #3：重建 client 并逐会话 session/load 复活映射（回放事件吞掉后丢弃——
    *  渲染层 transcript 未清，重放出去就是重复历史）。 */
   private async recoverSessions(affected: ActiveKimiSession[], closeError?: string): Promise<void> {
-    if (this.recovering) return
-    this.recovering = true
     try {
       let client: AcpClient | null = null
       for (let attempt = 0; attempt < CLIENT_RECOVERY_BACKOFF_MS.length; attempt++) {
@@ -1881,43 +1960,64 @@ export class KimiBackend {
         }
       }
       for (const session of affected) {
-        // 恢复窗口内会话可能又被关闭/取代（ready.catch、close、二次断连）。
-        if (this.sessions.get(session.id) !== session || session.closed || !session.acpSessionId) continue
-        if (!client) {
-          this.failSession(session, closeError?.trim() || 'ACP 连接已断开，自动恢复失败。')
-          continue
-        }
         try {
-          // session/load 会重放历史：套 replay 累积器吞掉、完成后直接丢弃。
-          session.replaying = true
-          session.replay = {
-            sessionId: session.acpSessionId,
-            messages: [],
-            pendingToolResults: new Map(),
-            terminalToolCalls: new Set(),
-            thinkingText: '',
-            text: '',
-            userMsgId: null
+          // 恢复窗口内会话可能又被关闭/取代（ready.catch、close、二次断连）。
+          if (this.sessions.get(session.id) !== session || session.closed || !session.acpSessionId) continue
+          const acpSessionId = session.acpSessionId
+          // 二次断连：逐会话 load 期间连接可能又断了，捕获的 client 已作废
+          // （handleClientClose 把 this.client 清空/换代）。改用当前活着的那个
+          // 再试，拿不到才判失败——否则本轮还没轮到的会话会陪着一个死连接一起
+          // 被拆掉，而它们本可以挂在新进程上活下来。
+          if (client && this.client !== client) {
+            client = await this.ensureClient().catch(() => null)
           }
-          await this.loadSessionWithRecovery(client, session, session.acpSessionId)
-          // (d) 恢复成功。⚠️ 不自动重发被打断轮的 prompt，由用户继续。
-          this.emitConnectionNotice(session, 'Kimi ACP 连接已恢复。被打断那一轮的请求不会自动重发，请继续对话。')
-          log('kimi', `ACP auto-recovery ok session=${session.id}`)
-        } catch (e) {
-          this.failSession(session, userFacingError(e))
+          if (!client) {
+            this.failSession(session, closeError?.trim() || 'ACP 连接已断开，自动恢复失败。')
+            continue
+          }
+          try {
+            // session/load 会重放历史：套 replay 累积器吞掉、完成后直接丢弃。
+            // 闸门保证这段窗口里没有并发的真实用户轮，累积器不会吞掉真实轮的
+            // session/update（否则那一轮的流式输出会整体丢失）。
+            session.replaying = true
+            session.replay = {
+              sessionId: acpSessionId,
+              messages: [],
+              pendingToolResults: new Map(),
+              terminalToolCalls: new Set(),
+              thinkingText: '',
+              text: '',
+              userMsgId: null
+            }
+            await this.loadSessionWithRecovery(client, session, acpSessionId)
+            // (d) 恢复成功。⚠️ 不自动重发被打断轮的 prompt，由用户继续。
+            this.emitConnectionNotice(session, 'Kimi ACP 连接已恢复。被打断那一轮的请求不会自动重发，请继续对话。')
+            log('kimi', `ACP auto-recovery ok session=${session.id}`)
+          } catch (e) {
+            this.failSession(session, userFacingError(e))
+          } finally {
+            session.replaying = false
+            session.replay = undefined
+          }
         } finally {
-          session.replaying = false
-          session.replay = undefined
+          // 逐会话放闸：load 成功（可继续发消息）或失败（会话已封停）都放开，
+          // 等闸的 drain 立刻收场，不会因为后面的会话还在恢复而跟着等。
+          this.releaseRecoveryGate(session)
         }
       }
     } finally {
-      this.recovering = false
+      // 兜底放闸：任何提前 return（dispose）都不能留下没放开的闸门，否则该会话
+      // 的 drain 永久挂起。releaseRecoveryGate 幂等，重复调用无副作用。
+      for (const session of affected) this.releaseRecoveryGate(session)
     }
   }
 
   /** #3：单会话恢复失败——落到原来的报错/拆除路径并清理映射与缓冲。 */
   private failSession(session: ActiveKimiSession, error: string): void {
     if (this.sessions.get(session.id) !== session) return
+    // 封停标记：等恢复闸门的 drain / 在途隐藏轮放闸后见 closed 即收场，不会对
+    // 一个已经拆掉的会话继续发 prompt 或投递消息。
+    session.closed = true
     this.sessions.delete(session.id)
     if (session.acpSessionId && this.acpToSession.get(session.acpSessionId) === session.id) {
       this.acpToSession.delete(session.acpSessionId)

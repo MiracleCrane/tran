@@ -638,14 +638,16 @@ function startProgressiveSessionHistory(
               if (fp) sourceFingerprints.set(fp, (sourceFingerprints.get(fp) ?? 0) + 1)
             }
             const liveItems = s.items.filter((item) => {
-              if (sourceIds.has(item.id)) return false
               const fp = transcriptFingerprint(item)
-              if (fp) {
-                const remaining = sourceFingerprints.get(fp) ?? 0
-                if (remaining > 0) {
-                  sourceFingerprints.set(fp, remaining - 1)
-                  return false
-                }
+              const remaining = fp ? (sourceFingerprints.get(fp) ?? 0) : 0
+              // id 命中说明这条**就是**磁盘里的那条，因此必须一并消耗掉它自己的
+              // 指纹计数——否则同内容的下一条（刚发出、还没落盘的乐观条目）会被
+              // 这份没减掉的剩余计数误判成"已落盘"而丢弃，表现为刚发的消息从
+              // 对话里消失（打开旧会话 → 重发一条历史里出现过的短消息 →
+              // restartSession/切配置）。
+              if (sourceIds.has(item.id) || remaining > 0) {
+                if (fp && remaining > 0) sourceFingerprints.set(fp, remaining - 1)
+                return false
               }
               return true
             })

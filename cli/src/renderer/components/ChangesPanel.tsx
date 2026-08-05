@@ -85,7 +85,10 @@ export default function ChangesPanel({ cwd, refreshKey, onClose }: ChangesPanelP
     if (next && diffs[file.path] === undefined) {
       setDiffs((d) => ({ ...d, [file.path]: null }))
       void window.api
-        .gitFileDiff(cwd, file.path, { untracked: file.status === 'untracked' })
+        .gitFileDiff(cwd, file.path, {
+          untracked: file.status === 'untracked',
+          ...(file.oldPath ? { oldPath: file.oldPath } : {})
+        })
         .then((text) => {
           setDiffs((d) => ({ ...d, [file.path]: text || '[无差异内容]' }))
         })
@@ -100,7 +103,10 @@ export default function ChangesPanel({ cwd, refreshKey, onClose }: ChangesPanelP
     if (!file) return
     setReverting(true)
     try {
-      await window.api.gitRevertFile(cwd, file.path, file.status === 'untracked')
+      await window.api.gitRevertFile(cwd, file.path, file.status === 'untracked', {
+        status: file.status,
+        ...(file.oldPath ? { oldPath: file.oldPath } : {})
+      })
       setConfirmRevert(null)
       if (expanded === file.path) setExpanded(null)
       load()
