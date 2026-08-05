@@ -2553,40 +2553,35 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   border-left: 2px solid rgba(139, 92, 246, 0.55);
 }
 
-/* #37 思考动画（第五迭代：纯渐变球）—— 去掉彗星头/拖尾/亮点等"月海斑纹"
- *  细节，14px 圆内只留一层紫→黄 conic 渐变整体缓速旋转，安静不抢焦点。
- *  尺寸与挂载位置同上一版（14px、inline-block），调用方零改动。
- *  只动 transform，合成器友好；reduced-motion 全局开关会把它降为近静止。 */
-.thinking-moon {
-  position: relative;
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  overflow: hidden;
+/* 状态短语流光文字（取代 #37 的 .thinking-moon 渐变球）：状态文字本身扫光，
+ *  不同状态挂不同配色修饰类；与 .chip-flow-text 同一 background-clip:text 机制。
+ *  只动 background-position；reduced-motion 全局开关会把它降为近静止。 */
+.flow-text {
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: flow-text-sweep 2s linear infinite;
 }
 
-.thinking-moon::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  /* 首尾同色（#facc15）保证旋转无接缝；紫黄延续既有配色语言。 */
-  background: conic-gradient(
-    from 0deg,
-    #facc15,
-    #c084fc 35%,
-    #8b5cf6 70%,
-    #facc15 100%
-  );
-  /* 轻微模糊把色带过渡揉开，视觉上是"渐变球"而不是"色轮"。 */
-  filter: blur(1.5px);
-  animation: thinking-moon-spin 1.6s linear infinite;
+/* AI 输出中（Composer 忙碌行）：紫黄，延续 accent 配色语言。 */
+.flow-text-violet {
+  background-image: linear-gradient(90deg, #8b5cf6 0%, #facc15 50%, #8b5cf6 100%);
 }
 
-@keyframes thinking-moon-spin {
-  to { transform: rotate(360deg); }
+/* Tran 正在处理（Transcript 底栏）：青蓝。 */
+.flow-text-sky {
+  background-image: linear-gradient(90deg, #38bdf8 0%, #a5f3fc 50%, #38bdf8 100%);
+}
+
+/* 输出中（消息流式游标行）：翠绿。 */
+.flow-text-emerald {
+  background-image: linear-gradient(90deg, #34d399 0%, #a7f3d0 50%, #34d399 100%);
+}
+
+@keyframes flow-text-sweep {
+  from { background-position: 0% 0; }
+  to { background-position: -200% 0; }
 }
 
 /* #46 chip 有运行中项：文字紫黄流光扫过（与 .thinking-moon 同一 #8b5cf6/#facc15

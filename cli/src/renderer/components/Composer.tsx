@@ -30,15 +30,16 @@ const EFFORTS: { id: EffortLevel; label: string }[] = [
 const PERMISSION_MODE_OPTIONS: {
   value: PermissionMode
   label: string
+  menuLabel?: string
   description: string
   accentClass?: string
 }[] = [
-  { value: 'default', label: '逐条确认', description: '每个工具操作都需要手动确认' },
+  { value: 'default', label: '逐条确认', menuLabel: '逐条确认 (default)', description: '每个工具操作都需要手动确认' },
   // 映射依据 kimi 语义：yolo=自动批准全部工具操作但仍会与用户交互（自动通过）；
   // auto=完全无人值守、审批与提问全自己拍板（完全自主）。此前两值曾映射反。
-  // label 不带英文模式名：底部工具栏宽度有限，带 "(yolo)" 这类后缀会被 truncate 成省略号。
-  { value: 'yolo', label: '自动通过', description: '自动批准全部工具操作，但关键问题仍会询问', accentClass: 'text-amber-300' },
-  { value: 'auto', label: '完全自主', description: '完全自主运行、不再询问（慎用）', accentClass: 'text-red-300' }
+  // 触发按钮宽度有限，label 只留中文短名；英文模式名放 menuLabel 在下拉项里展示。
+  { value: 'yolo', label: '自动通过', menuLabel: '自动通过 (yolo)', description: '自动批准全部工具操作，但关键问题仍会询问', accentClass: 'text-amber-300' },
+  { value: 'auto', label: '完全自主', menuLabel: '完全自主 (auto)', description: '完全自主运行、不再询问（慎用）', accentClass: 'text-red-300' }
 ]
 
 type PromptTemplate = { command: string; label: string; text: string }
@@ -1263,7 +1264,7 @@ export default function Composer(): JSX.Element {
                       <path d="M5 20V14M12 20V8M19 20V4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
                     </svg>
                   }
-                  className="w-fit"
+                  className="min-w-[4.5rem]"
                 />
               )}
               {meta && (

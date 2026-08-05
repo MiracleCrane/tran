@@ -4,6 +4,8 @@ import Collapse from './Collapse'
 export interface DisclosureOption {
   value: string
   label: string
+  /** 下拉项里展示的完整文案（比触发按钮上的 label 更长时用它，如带英文模式名）。 */
+  menuLabel?: string
   /** 下拉项里的一行小字说明（对齐 kimi web 的双行选项）。 */
   description?: string
   /** 当前值在触发按钮上的着色 class（如 auto 金色、yolo 红色）。 */
@@ -102,7 +104,7 @@ export default function DisclosureSelect({
             >
               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? 'bg-accent' : 'bg-transparent'}`} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate">{o.label}</span>
+                <span className="block truncate">{o.menuLabel ?? o.label}</span>
                 {o.description && (
                   <span className="block truncate text-[10px] text-zinc-600">{o.description}</span>
                 )}

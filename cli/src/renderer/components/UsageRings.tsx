@@ -46,6 +46,13 @@ function pct2(ratio: number | undefined): string | null {
   return ratio === undefined ? null : `${(ratio * 100).toFixed(2)}%`
 }
 
+/** 接口原始枚举（LEVEL_ADVANCED）→ 展示文案（Advanced）；未识别的值原样透出。 */
+function formatMembershipLevel(raw: string): string {
+  const stripped = raw.replace(/^LEVEL_/i, '')
+  if (!/^[A-Z][A-Z0-9_]*$/.test(stripped)) return stripped
+  return stripped.charAt(0) + stripped.slice(1).toLowerCase()
+}
+
 /** 单个小圆环：pct 为 null 时置灰显示"—"（无数据）。 */
 function Ring({
   pct,
@@ -238,7 +245,9 @@ export default function UsageRings(): JSX.Element {
             <span className="h-2 w-2 rounded-full bg-accent" />
             <span className="flex-1 text-xs font-semibold text-zinc-100">用量</span>
             {plan?.membershipLevel && (
-              <span className="text-[10px] text-zinc-600">{plan.membershipLevel}</span>
+              <span className="text-[10px] text-zinc-600" title="Kimi 会员等级">
+                {formatMembershipLevel(plan.membershipLevel)}
+              </span>
             )}
           </div>
 
@@ -289,9 +298,6 @@ export default function UsageRings(): JSX.Element {
               额度读取失败：{planError}
             </div>
           )}
-          <div className="mt-3 border-t border-white/[0.06] pt-2 text-[10px] leading-relaxed text-zinc-600">
-            额度来自 Kimi Code 官方接口（CLI 自己的登录态）；上下文来自 /usage。
-          </div>
         </div>,
         document.body
       )}

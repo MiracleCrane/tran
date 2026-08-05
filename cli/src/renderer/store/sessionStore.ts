@@ -196,6 +196,9 @@ interface SessionStore {
   /** On app start: auto-enter the last-used project if any, else leave meta null
    *  so Onboarding shows. Sets bootstrapped regardless. */
   bootstrap: () => Promise<void>
+  /** 启动时进入上次的项目：只切界面，后端推迟到第一条消息（懒创建，
+   *  与 newChat 同机制）。bootstrap 内部使用，不给 UI 直接调。 */
+  openStartupProject: (cwd: string, model?: string) => Promise<void>
   /** Switch the active working directory (project): close the current session and
    *  start a fresh one in the new cwd (history is per-cwd in the sidebar). */
   switchProject: (path: string) => Promise<void>
@@ -1994,7 +1997,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         const proj = await window.api.getStartupProject()
         if (proj) {
           const provider = await window.api.getActiveProvider()
-          await get().startSession({ cwd: proj.path, model: provider?.model })
+          await get().openStartupProject(proj.path, provider?.model)
         }
       } finally {
         set({ bootstrapped: true })
@@ -2003,6 +2006,94 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     })()
 
     return startupBootstrapPromise
+  },
+
+  /**
+   * 启动时进入上次的项目 —— **懒创建**，与 newChat 同一套机制。
+   *
+   * 此前这里直接调 startSession()，也就是每开一次 Tran 就真的 `session/new`
+   * 一个空会话落盘；用户进来还没说话就切去历史会话，那条 "New Session" 就
+   * 永远留在列表里了（2026-08-05 实测：仅启动一次，磁盘会话目录 104 → 105）。
+   *
+   * 「新建对话改为懒创建」当初只覆盖了侧栏的新建按钮，**漏了这条启动路径** ——
+   * 同一个毛病换个入口又冒出来。现在两条路一致：先只把界面切成空会话，把
+   * 「怎么起」记进 pendingSessionStart，等真的发第一条消息再起后端。没说话
+   * 就没有会话，也就没有空壳要清理。
+   */
+  async openStartupProject(cwd: string, model?: string) {
+    const newId = uid()
+    const requestSeq = nextSessionNavigationSeq()
+    const isLatestRequest = (): boolean => isCurrentSessionNavigation(get, requestSeq, newId)
+    const prefs = await window.api.getPreferences().catch(() => null)
+    const agentBackend = prefs?.agentBackend
+    const permissionMode = prefs?.defaultPermissionMode ?? 'default'
+    const effort = prefs?.defaultEffort ?? 'high'
+    // 启动路径没有"上一个会话"要快照，判导航序号即可（用户可能在偏好还没
+    // 读回来时就点了侧栏的历史会话）。
+    if (sessionNavigationSeq !== requestSeq) return
+    // starting 保持 false：没有任何东西在启动，不该显示"正在进入会话"骨架。
+    set({
+      starting: false,
+      effort,
+      items: [],
+      tasks: [], pendingQueue: [],
+      sessionConfigDirty: false,
+      sessionModelDirty: false,
+      bridgeEnded: false,
+      planEntries: [],
+      planUpdatedAt: null,
+      contextUsage: null,
+      mcpServers: null,
+      modePanel: defaultModePanel(),
+      goal: null,
+      elicitationQueue: [],
+      pendingPermissions: [],
+      status: { running: false },
+      currentStreamingMsgId: null,
+      meta: {
+        sessionId: newId,
+        ...(agentBackend ? { agentBackend } : {}),
+        cwd,
+        model: displayModelForAgent(agentBackend, model),
+        permissionMode,
+        tools: []
+      }
+    })
+    // 侧栏历史列表要立刻可用：用户很可能一进来就去点历史会话。
+    void get().refreshSessions()
+    // 后端推迟到第一条消息（与 newChat 同形态，见 pendingSessionStart）。
+    pendingSessionStart = {
+      sessionId: newId,
+      start: async () => {
+        const startGate = createSessionStartGate(newId)
+        try {
+          await window.api.startSession({
+            cwd,
+            ...(modelForAgent(agentBackend, model) ? { model: modelForAgent(agentBackend, model) } : {}),
+            ...(agentBackend ? { agentBackend } : {}),
+            effort: get().effort,
+            permissionMode,
+            bridgeSessionId: newId
+          })
+          startGate.resolve()
+        } catch (error: unknown) {
+          startGate.reject(error)
+          if (!isLatestRequest()) return
+          set((s) => ({
+            starting: false,
+            status: { ...s.status, error: error instanceof Error ? error.message : String(error) }
+          }))
+          return
+        }
+        if (!isLatestRequest()) {
+          await window.api.destroySession(newId).catch(() => {})
+          return
+        }
+        set({ starting: false })
+        void get().refreshSessions()
+        scheduleInitWatchdog(get, set, newId)
+      }
+    }
   },
 
   async switchProject(path: string) {

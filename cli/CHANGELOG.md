@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.54 - 2026-08-05
+
+### 中文
+
+- 修复:**每次打开 Tran 都会凭空多一条 "New Session"**。启动时自动进入上次的项目走的是"立刻起后端会话"那条老路,也就是每开一次应用就真的 `session/new` 一个空会话落盘;进来还没说话就切到历史会话,那条空会话就永远留在列表里了。
+- 「新建对话改为懒创建」当初只覆盖了侧栏的新建按钮,**漏了启动这条路径**,所以同一个毛病换个入口又冒了出来。现在两条路统一:先只把界面切成空会话,等真的发第一条消息才起后端 —— 没说话就没有会话。
+- 实测确认:修复前仅启动一次,磁盘会话目录 104 → 105;修复后 105 → 105,不再新增。
+
+### English
+
+- Fixed: **every launch of Tran left behind an extra "New Session"**. Auto-entering the last project on startup still used the eager path, so each launch really did `session/new` an empty session on disk; switch to a history session before saying anything and that empty shell stayed in the list forever.
+- The earlier "lazy session creation" change only covered the sidebar's new-chat button and **missed the startup path**, so the same defect resurfaced through a different entry point. Both paths now behave the same: the UI switches to an empty session immediately and the backend session is only created when you actually send the first message.
+- Verified empirically: before the fix a single launch took the on-disk session count from 104 to 105; after the fix it stays at 105.
+
 ## v1.0.53 - 2026-08-05
 
 ### 中文
