@@ -164,12 +164,20 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
   // "The completion arrives automatically in a later turn."），所以在用户
   // 发下一条消息之前，待办物理上不可能自己更新。Tran 靠磁盘任务记录能比
   // agent 先知道，这里就是把这个时间差告诉用户。
+  //
+  // 2026-08 误报修复：swarmTasks 里躺着全部历史任务，「存在一个已收尾任务」
+  // 几乎永远为真，横幅变成常驻。加 30 分钟新鲜度窗口——只有**刚刚**收尾的
+  // 任务才提示；老任务早就被后续 turn 通知过了，再挂横幅只是噪声。
+  const SETTLED_NOTICE_WINDOW_MS = 30 * 60 * 1000
   const settledBackgroundTask =
     !running &&
     hasUnfinished &&
     (swarmTasks ?? []).some((t) => {
       const status = (t.status ?? '').toLowerCase()
-      return status === 'completed' || status === 'failed' || status === 'stopped'
+      if (status !== 'completed' && status !== 'failed' && status !== 'stopped') return false
+      const completedMs = t.completedAt ? Date.parse(t.completedAt) : NaN
+      // 没有收尾时间的记录不参与判断（无法证明它"刚"收尾）。
+      return Number.isFinite(completedMs) && Date.now() - completedMs <= SETTLED_NOTICE_WINDOW_MS
     })
 
   const staleSince = planUpdatedAt === null ? 0 : Date.now() - planUpdatedAt

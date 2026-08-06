@@ -5,7 +5,7 @@ import { readJsonSafe, writeFileAtomic } from './atomicWrite'
 import { log } from './logger'
 import { cheapSummarize, cheapComplete } from './cheapModel'
 import { loadSettings } from './settings'
-import { getBaiduCreds } from './translateConfig'
+import { getBaiduCreds, getTranslateEngine } from './translateConfig'
 import { translateLongTextViaBaidu } from './baidu'
 
 /**
@@ -245,8 +245,9 @@ async function summarizeRaw(prompt: string): Promise<string | null> {
  * - 展开后 → 全文翻译（真要读的时候）
  * 两者都缓存，键不同。
  *
- * 通道由设置决定（thinkingTranslateEngine，2026-08 用户拍的板）：
- * - baidu（默认）：百度机翻，认证后 100 万字符/月免费，质量"能看懂"级；
+ * 通道统一由「翻译」面板的引擎设置决定（translateEngine，2026-08 整合——
+ * 此前思考翻译在「系统」页另有一个开关，和翻译面板重复了）：
+ * - baidu：百度机翻，认证后 100 万字符/月免费，质量"能看懂"级；
  *   走 translateLongTextViaBaidu 按行切块保格式。没配百度密钥 → null。
  * - llm：摘要旁路那把 key 的 DeepSeek，质量更好、按量计费（实测一个月十几块）。
  * 两边都不可用就是 null——没有也不该有"拿主 agent 额度兜底"这一层（2026-08
@@ -264,7 +265,7 @@ export async function translateThinking(text: string): Promise<string | null> {
   const pending = inflight.get(key)
   if (pending) return pending
 
-  const engine = loadSettings().thinkingTranslateEngine ?? 'baidu'
+  const engine = getTranslateEngine()
   const run = (
     engine === 'baidu'
       ? translateViaBaiduEngine(input)

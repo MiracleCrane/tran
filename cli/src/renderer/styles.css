@@ -394,6 +394,10 @@ textarea:focus-visible {
     background: transparent;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) 0rem;
+    /* 行高必须钳在容器内（2026-08 布局 bug）：grid 的 auto 行高按内容的
+       max-content 算，会话一多侧栏把整行撑出视口，连带着 main-surface 一起
+       变高——表现就是输入框和侧栏「工具」区一起被挤到屏幕外。 */
+    grid-template-rows: minmax(0, 100%);
     align-items: stretch;
     transition: grid-template-columns 720ms cubic-bezier(0.16, 1, 0.3, 1);
   }
@@ -487,6 +491,35 @@ textarea:focus-visible {
   .sidebar-resize-handle:hover::after,
   .sidebar-resize-handle.is-dragging::after {
     background: rgba(255, 255, 255, 0.16);
+  }
+
+  /* 收起态悬停浮出的完整面板：盖在正文之上，不推开布局。
+     left:0 贴着图标条的左边缘起画，宽度由内联 style 给（跟随用户调过的宽度）。 */
+  .sidebar-peek {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    display: flex;
+    animation: sidebar-peek-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    filter: drop-shadow(0 18px 48px rgba(0, 0, 0, 0.55));
+  }
+
+  /* 浮层里的那份面板要撑满外壳给的宽度，覆盖它自身的 w-64。 */
+  .sidebar-peek > * {
+    width: 100%;
+  }
+
+  @keyframes sidebar-peek-in {
+    from {
+      opacity: 0;
+      transform: translateX(-6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 
   .workspace-preview-slot {
@@ -2398,14 +2431,24 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   background: transparent;
 }
 
-/* Markdown rendering */
+/* Markdown rendering
+ *
+ * 正文排版对齐 Codex（实测自其 app.asar 的 CSS 变量）：
+ *   --markdown-font-size:   var(--text-sm) !important  → 13px
+ *   --markdown-line-height: var(--leading-relaxed)     → 1.625
+ * 别被 --codex-chat-font-size(14px) 带偏——那是聊天**容器**的字号，markdown
+ * 正文被上面那条 !important 单独压小了一档。Tran 原先 14px/1.6，于是同一段话
+ * 比 Codex 显大、每行也更长。
+ *
+ * 段落间距原为 0.45em（≈6px），是"发挤"的另一半原因。Codex 没把 markdown 的
+ * 段落间距暴露成变量，这里取常规正文的 0.75em ≈ 10px —— 这个数不是抄来的。 */
 .prose-forge {
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.625;
   word-wrap: break-word;
 }
 .prose-forge p {
-  margin: 0.45em 0;
+  margin: 0.75em 0;
 }
 .prose-forge p:first-child {
   margin-top: 0;
@@ -2989,14 +3032,16 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
      三条原则：分区靠背景台阶不靠描边；投影全去；强调色只留给状态和主动作。
      ========================================================================== */
 
-  /* 1. 拆掉玻璃：描边 / 投影 / 内高光 / 两层透镜伪元素 */
+  /* 1. 拆掉玻璃：描边 / 投影 / 内高光 / 两层透镜伪元素。
+     2026-08：不再清 border-radius——之前连圆角一起拆，简约风下所有面板成了
+     方形框（用户反馈"怎么都是方形的"）。拆玻璃拆的是质感，不是形状，
+     各组件自己的 rounded-* 恢复生效。 */
   :root[data-ui='flat'] .main-surface,
   :root[data-ui='flat'] .glass-panel,
   :root[data-ui='flat'] .glass-panel-soft,
   :root[data-ui='flat'] .glass-control,
   :root[data-ui='flat'] .glass-sidebar {
     border: 0;
-    border-radius: 0;
     box-shadow: none;
     background: transparent;
   }
@@ -3277,5 +3322,19 @@ div:has(textarea:focus) .composer-shortcut-hint {
   /* 原生下拉选项的实底。 */
   :root[data-theme='charcoal'] select option {
     background: #212121;
+  }
+
+  /* bg-bg-* 表面令牌抬成中性灰（2026-08 用户反馈"设置页过黑"）：原值是
+     rgba(14,15,20,0.26) 之类的半透深黑，叠在炭灰壳上比对话区还黑一截。
+     属性选择器连 /85、/60 等斜杠变体一起盖（这些类没有 hover:/focus:
+     变体用法，已全量查过）；tailwind 工具类在 utilities 层，必须 !important。 */
+  :root[data-theme='charcoal'] [class*='bg-bg-base'] {
+    background-color: #1b1b1b !important;
+  }
+  :root[data-theme='charcoal'] [class*='bg-bg-panel'] {
+    background-color: #212121 !important;
+  }
+  :root[data-theme='charcoal'] [class*='bg-bg-elev'] {
+    background-color: #262626 !important;
   }
 }

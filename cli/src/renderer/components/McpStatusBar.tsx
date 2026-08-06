@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useTransientFlag } from '../hooks/useTransientFlag'
 import type { McpServerEntry, McpServerStatusKind } from '../../shared/ipc'
@@ -48,6 +49,8 @@ export default function McpStatusBar(): JSX.Element | null {
   const sessionId = useSessionStore((s) => s.meta?.sessionId)
   // 转圈 1.5s 自动停；useTransientFlag 内部管理定时器清理。
   const [refreshing, flashRefreshing] = useTransientFlag(1500)
+  // 默认收起成一行摘要（2026-08 用户：整条铺开太占地方，要看再点开）。
+  const [expanded, setExpanded] = useState(false)
 
   if (!servers || servers.length === 0) return null
 
@@ -59,10 +62,41 @@ export default function McpStatusBar(): JSX.Element | null {
     void window.api.refreshMcpServers(sessionId).catch(() => {})
   }
 
+  const abnormal = servers.filter((s) => s.status !== 'connected').length
+
+  if (!expanded) {
+    return (
+      // 收起态：一枚胶囊搞定——全绿就只显示「MCP · n」，有异常才把数字标橙。
+      <div className="mx-auto flex w-full max-w-5xl shrink-0 items-center px-6 pb-1.5 pt-0.5 text-[11px]">
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          title="展开 MCP 状态"
+          className="flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.03] px-2 py-0.5 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
+        >
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${abnormal > 0 ? 'bg-amber-400' : 'bg-emerald-400'}`}
+          />
+          MCP · {servers.length}
+          {abnormal > 0 && <span className="text-amber-400">{abnormal} 异常</span>}
+          <span className="text-zinc-600">▸</span>
+        </button>
+      </div>
+    )
+  }
+
   return (
     // 2026-08 重样式：服务器收成小胶囊 + 底部发丝分割线。之前是裸文本行直接
     // 压在对话内容上，和待办卡提示、消息正文三段糊在一起，边界感为零。
     <div className="mx-auto flex w-full max-w-5xl shrink-0 items-center gap-2 border-b border-white/[0.06] px-6 pb-2 pt-0.5 text-[11px] text-zinc-500">
+      <button
+        type="button"
+        onClick={() => setExpanded(false)}
+        title="收起 MCP 状态"
+        className="shrink-0 rounded-full p-1 text-zinc-600 transition hover:bg-white/[0.06] hover:text-zinc-300"
+      >
+        ▾
+      </button>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {servers.map((server) => (
           <span

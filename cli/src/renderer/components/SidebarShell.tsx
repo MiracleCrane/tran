@@ -78,6 +78,15 @@ function ResizeHandle(): JSX.Element {
 export default function SidebarShell(): JSX.Element {
   const collapsed = useUiStore((s) => s.sidebarCollapsed)
   const width = useUiStore((s) => s.sidebarWidth)
+  const hoverExpand = useUiStore((s) => s.sidebarHoverExpand)
+  const [peeking, setPeeking] = useState(false)
+
+  // 展开之后残留的 peek 会盖在正文上，必须清掉。
+  useEffect(() => {
+    if (!collapsed || !hoverExpand) setPeeking(false)
+  }, [collapsed, hoverExpand])
+
+  const peekOn = collapsed && hoverExpand
 
   return (
     <div
@@ -85,8 +94,21 @@ export default function SidebarShell(): JSX.Element {
       // 宽度经 CSS 变量下发：Sidebar 内部那个 w-64 是 Tailwind 工具类，
       // 在 styles.css 里用不带 @layer 的规则覆盖它（无层声明胜过任何 @layer）。
       style={{ ['--sidebar-w' as string]: `${width}px` }}
+      {...(peekOn
+        ? {
+            onPointerEnter: () => setPeeking(true),
+            onPointerLeave: () => setPeeking(false)
+          }
+        : {})}
     >
+      {/* 图标条始终挂着：它决定在流的那一列有多宽。浮出时它被浮层盖住，
+          但不能卸载——卸载会让 Sidebar 每次悬停都重建，内部状态全丢。 */}
       <Sidebar />
+      {peekOn && peeking && (
+        <div className="sidebar-peek" style={{ width: `${width}px` }}>
+          <Sidebar forceExpanded />
+        </div>
+      )}
       {/* 收起态是固定宽度的图标条，不给调节边。 */}
       {!collapsed && <ResizeHandle />}
     </div>

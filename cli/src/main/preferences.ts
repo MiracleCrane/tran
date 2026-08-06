@@ -67,8 +67,7 @@ export function getPreferences(): Preferences {
     autoTodoNudge: s.autoTodoNudge,
     cloudUsageEnabled: s.cloudUsageEnabled,
     summaryModel: s.summaryModel,
-    summaryApiBaseUrl: s.summaryApiBaseUrl,
-    thinkingTranslateEngine: s.thinkingTranslateEngine
+    summaryApiBaseUrl: s.summaryApiBaseUrl
   }
 }
 
@@ -112,9 +111,6 @@ export function savePreferences(prefs: Preferences): Preferences {
   if (prefs.summaryModel !== undefined) s.summaryModel = prefs.summaryModel.trim() || undefined
   if (prefs.summaryApiBaseUrl !== undefined) {
     s.summaryApiBaseUrl = prefs.summaryApiBaseUrl.trim() || undefined
-  }
-  if (prefs.thinkingTranslateEngine !== undefined) {
-    s.thinkingTranslateEngine = prefs.thinkingTranslateEngine
   }
   saveSettings(s)
   return getPreferences()

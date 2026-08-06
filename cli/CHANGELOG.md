@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.0.60 - 2026-08-06
+
+### 中文
+
+- 修复:**会话一多,输入框和侧栏「工具」区被挤出屏幕**。workspace 网格的行高按内容 max-content 算,侧栏会话列表把整行撑出视口,连带主列一起变高。现在行高钳在容器内(minmax(0,100%)),侧栏根补 h-full/min-h-0,列表自己滚动。
+- 修复:用量卡低分辨率下文字堆叠。「每周额度」被长重置文案压成竖排——现在标题和百分比永不换行,倒计时和具体时刻挪到进度条下的明细行,明细行自然折行。
+- 修复:待办「后台任务已结束」横幅误报常驻。旧逻辑是"历史任务里存在一个已收尾任务",而列表有 90+ 条历史,几乎永远为真。加 30 分钟新鲜度窗口,只有刚收尾的任务才提示。
+- 翻译配置整合:思考块全文翻译的引擎开关并入「翻译」面板(原来系统页还有一个重复开关),技能描述翻译和思考翻译共用同一个引擎 + 同一把百度密钥。
+- MCP 状态行默认收起成一枚胶囊(「● MCP · n」,有异常标橙),点开才看服务器列表。
+- 炭灰主题下设置页/工具菜单过黑(半透深黑叠底比对话区还黑),统一抬成 Codex 中性灰;简约风不再清 border-radius(方形框恢复圆角)。
+- Claude Code:侧栏收起态悬停浮出完整面板(peek);活动折叠摘要分段渲染——做了什么(工具动作)提亮、想了什么(思考)压暗,次数缩小挂后。
+
+### English
+
+- Fixed: with many sessions, the composer and the sidebar "tools" section were pushed off-screen — the workspace grid row sized to max-content, so a long session list stretched the whole row (and the main column with it). Rows are now clamped (minmax(0,100%)) and the sidebar roots got h-full/min-h-0 so the list scrolls itself.
+- Fixed: usage card text piling up at low resolutions — titles and percentages never wrap now; countdown and concrete reset time moved to the detail line under the progress bar, which wraps naturally.
+- Fixed: the "background task finished" todo banner showed permanently — it used to fire whenever ANY settled task existed in history (90+ entries). Now only tasks settled within the last 30 minutes trigger it.
+- Translation settings unified: the thinking-translation engine moved into the Translate panel (one engine + one Baidu credential for both skill descriptions and thinking blocks).
+- MCP status bar now defaults to a collapsed pill (expand to see servers).
+- Charcoal theme: settings/tools surfaces no longer pitch black (raised to Codex neutral grays); the flat style no longer strips border-radius (panels are round again).
+- Claude Code: hover-to-peek sidebar when collapsed; segmented activity summary rendering (tool actions emphasized, thinking subdued, counts smaller).
+
 ## v1.0.59 - 2026-08-05
 
 ### 中文

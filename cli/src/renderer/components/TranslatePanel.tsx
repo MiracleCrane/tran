@@ -97,14 +97,15 @@ export default function TranslatePanel(): JSX.Element {
           <button
             type="button"
             onClick={() => useUiStore.getState().setView('chat')}
-            className="glass-control flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[11px] text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100"
+            className="glass-control flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-[11px] text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100"
           >
             ← 返回对话
           </button>
           <h1 className="text-lg font-semibold text-zinc-100">翻译</h1>
         </div>
         <p className="mt-0.5 text-xs text-zinc-500">
-          技能 / 插件描述翻译所用引擎。百度翻译专用接口独立计费,不受大模型限流影响。
+          翻译引擎统一配置：技能 / 插件描述翻译、思考块全文翻译都用这里选的引擎。
+          百度翻译专用接口独立计费,不受大模型限流影响。
         </p>
 
         {/* 初始加载失败：显示错误并允许重试（表单仍可用，只是回显的是默认值）。 */}
@@ -134,7 +135,8 @@ export default function TranslatePanel(): JSX.Element {
               )}
             </div>
             <p className="mt-1.5 pl-6 text-[11px] leading-relaxed text-zinc-500">
-              使用当前激活运营商的 /v1/messages 接口翻译。翻译质量高,但与大模型共享额度,近期频繁限流。
+              翻译质量高。已配置「摘要 / 命名 API」时优先走那个便宜通道（DeepSeek 等）；
+              未配置时用当前激活运营商的 /v1/messages——与大模型共享额度,近期频繁限流。
             </p>
           </button>
 
@@ -149,7 +151,8 @@ export default function TranslatePanel(): JSX.Element {
               )}
             </div>
             <p className="mt-1.5 pl-6 text-[11px] leading-relaxed text-zinc-500">
-              走百度通用翻译 API,独立额度、响应快,适合大量短文本描述。
+              走百度通用翻译 API,独立额度、响应快。实名认证后每月 100 万字符免费,
+              技能描述和思考块全文翻译都够用。
             </p>
           </button>
         </section>
@@ -230,7 +233,7 @@ export default function TranslatePanel(): JSX.Element {
         </div>
 
         <p className="text-[11px] leading-relaxed text-zinc-600">
-          保存后立即生效。技能面板的描述翻译会改用所选引擎;百度密钥已加密保存。
+          保存后立即生效。技能面板的描述翻译、思考块全文翻译都会改用所选引擎;百度密钥已加密保存。
         </p>
       </div>
     </div>

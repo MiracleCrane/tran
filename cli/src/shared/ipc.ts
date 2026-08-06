@@ -285,8 +285,6 @@ export interface Preferences {
   summaryModel?: string
   /** 总结类请求使用的 OpenAI 兼容 API 根地址。 */
   summaryApiBaseUrl?: string
-  /** 思考块全文翻译通道：baidu = 百度机翻（免费额度），llm = 摘要旁路的 DeepSeek。 */
-  thinkingTranslateEngine?: TranslateEngine
 }
 
 /** 提示词策略自检的一项结果（设置页「提示词自检」）。四种请求形态各打一发，

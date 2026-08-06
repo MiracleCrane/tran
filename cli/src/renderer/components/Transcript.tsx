@@ -634,21 +634,60 @@ interface ActivityEntry {
   index: number
 }
 
-/** 一段连续「思考 + 工具调用」的规则摘要："思考 2 段 · 运行了命令 ×5 · 编辑了文件"。 */
-function summarizeActivity(blocks: AssistantBlock[]): string {
+interface ActivitySegment {
+  /** thinking = 想了什么（过程），tool = 做了什么（结果）。两者视觉权重不同。 */
+  kind: 'thinking' | 'tool'
+  label: string
+  /** >1 才显示次数。 */
+  count: number
+}
+
+/**
+ * 折叠摘要的分段结构（渲染见 ActivitySummary）。
+ *
+ * 原先直接返回一整条字符串 "思考 2 段 · 运行了命令 ×5 · 编辑了文件"：同色、同
+ * 字重、挤在一行，扫一眼分不出哪段是思考、哪段是动作、各做了几次——用户反馈的
+ * "区分度不够"就是这个。改成结构化分段后交给渲染层拉开层次：**做了什么**要突出
+ * （那是这段活动的实质），**想了什么**要收敛（那只是过程），次数用更小更暗的字号
+ * 挂在后面，不跟动作名抢注意力。
+ */
+function summarizeActivity(blocks: AssistantBlock[]): ActivitySegment[] {
   let thinking = 0
   const tools = new Map<string, number>()
   for (const block of blocks) {
     if (block.kind === 'thinking') thinking += 1
     else if (block.kind === 'tool') tools.set(block.name, (tools.get(block.name) ?? 0) + 1)
   }
-  const parts: string[] = []
-  if (thinking > 0) parts.push(thinking > 1 ? `思考 ${thinking} 段` : '思考')
+  const segments: ActivitySegment[] = []
+  // 思考排最前：时间上它也确实发生在动作之前。
+  if (thinking > 0) segments.push({ kind: 'thinking', label: '思考', count: thinking })
   for (const [name, count] of tools) {
-    const label = TOOL_ACTIVITY_LABEL[name] ?? `使用了 ${name}`
-    parts.push(count > 1 ? `${label} ×${count}` : label)
+    segments.push({ kind: 'tool', label: TOOL_ACTIVITY_LABEL[name] ?? `使用了 ${name}`, count })
   }
-  return parts.join(' · ')
+  return segments
+}
+
+/** 折叠摘要的一行渲染：动作亮、思考暗、次数最暗，分隔点几乎不可见。 */
+function ActivitySummary({ segments }: { segments: ActivitySegment[] }): JSX.Element {
+  return (
+    <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+      {segments.map((seg, i) => (
+        <span key={`${seg.kind}-${seg.label}`} className="inline-flex items-baseline gap-1">
+          {i > 0 && (
+            <span className="mr-0.5 text-zinc-700" aria-hidden>
+              ·
+            </span>
+          )}
+          <span className={seg.kind === 'tool' ? 'text-zinc-300' : 'text-zinc-500'}>{seg.label}</span>
+          {seg.count > 1 && (
+            <span className="text-[10px] tabular-nums text-zinc-600">
+              {seg.kind === 'thinking' ? `${seg.count} 段` : `×${seg.count}`}
+            </span>
+          )}
+        </span>
+      ))}
+    </span>
+  )
 }
 
 /** 完成轮的一段折叠活动（Codex 风）：默认一行规则摘要，点开还原成
@@ -671,7 +710,7 @@ const ActivityGroupRow = memo(function ActivityGroupRow({
         className="flex cursor-pointer select-none items-center gap-1.5 text-left text-xs text-zinc-500 transition hover:text-zinc-400"
       >
         <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
-        <span>{summarizeActivity(entries.map((e) => e.block))}</span>
+        <ActivitySummary segments={summarizeActivity(entries.map((e) => e.block))} />
       </button>
       {open && entries.map(renderBlock)}
     </div>
@@ -705,7 +744,7 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
         className="flex cursor-pointer select-none items-center gap-1.5 text-left text-xs text-zinc-500 transition hover:text-zinc-400"
       >
         <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
-        <span>{summarizeActivity(blocks)}</span>
+        <ActivitySummary segments={summarizeActivity(blocks)} />
       </button>
       {open &&
         blocks.map((block, i) =>

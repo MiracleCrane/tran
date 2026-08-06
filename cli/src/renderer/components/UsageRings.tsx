@@ -128,12 +128,12 @@ function QuotaRow({
   const reset = resetLabel(w?.resetAt)
   return (
     <div>
+      {/* 布局纪律（2026-08 低分辨率挤字事故）：标题和百分比**永不换行**；
+          倒计时和具体时刻放明细行，明细行允许自然折行——文案再长也只在
+          明细行里折，绝不再把「每周额度」压成一列竖排字。 */}
       <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
-        <span className="text-zinc-400">{title}</span>
-        <span className="whitespace-nowrap text-zinc-500">
-          {pctText ?? '—'}
-          {reset ? <span className="text-zinc-600">{` · ${reset}`}</span> : ''}
-        </span>
+        <span className="shrink-0 whitespace-nowrap text-zinc-400">{title}</span>
+        <span className="shrink-0 whitespace-nowrap text-zinc-500">{pctText ?? '—'}</span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-black/30">
         <div
@@ -141,10 +141,15 @@ function QuotaRow({
           style={{ width: `${(ratio ?? 0) * 100}%` }}
         />
       </div>
-      {w?.used !== undefined && w.limit !== undefined && (
-        <div className="mt-1 text-[11px] text-zinc-600">
-          {fmtK(w.used)} / {fmtK(w.limit)}
-          {w.remaining !== undefined ? `　剩余 ${fmtK(w.remaining)}` : ''}
+      {(w?.used !== undefined || reset) && (
+        <div className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+          {w?.used !== undefined && w.limit !== undefined && (
+            <span>
+              {fmtK(w.used)} / {fmtK(w.limit)}
+              {w.remaining !== undefined ? `　剩余 ${fmtK(w.remaining)}` : ''}
+            </span>
+          )}
+          {reset && <span>{w?.used !== undefined ? ' · ' : ''}{reset}</span>}
         </div>
       )}
     </div>
@@ -260,9 +265,12 @@ export default function UsageRings(): JSX.Element {
       </button>
 
       {open && anchor && createPortal(
+        // 宽度自适应：原先写死 w-80(320px)。窗口窄到 320px 上下时整张卡会顶出
+        // 视口——而它是 fixed + 右下角锚定，顶出去的那半边完全够不着。
+        // min() 保证够宽时仍是 20rem，窄时收到「视口宽 − 2rem」。
         <div
           ref={cardRef}
-          className="glass-panel tran-enter fixed z-[90] w-80 rounded-2xl p-4 shadow-2xl"
+          className="glass-panel tran-enter fixed z-[90] w-[min(20rem,calc(100vw-2rem))] rounded-2xl p-4 shadow-2xl"
           style={{ right: anchor.right, bottom: anchor.bottom }}
           onPointerEnter={() => setHover(true)}
           onPointerLeave={() => setHover(false)}
@@ -276,21 +284,26 @@ export default function UsageRings(): JSX.Element {
             <QuotaRow title={`${zhWindowLabel(rollingLabel)} 额度`} {...(plan?.rolling ? { window: plan.rolling } : {})} />
             <QuotaRow title="每周额度" {...(plan?.weekly ? { window: plan.weekly } : {})} />
 
+            {/* 这一行最容易堆字：右侧「$余额 · 充值 X / 赠金 Y」很长且整段不可断。
+                拆成两段——总额跟标题同排并保持 nowrap（数字断行没法看），
+                充值/赠金明细占满一行、自己换到第二行去。 */}
             {deepseek && (
-              <div className="flex items-baseline justify-between gap-2 text-xs">
-                <span className="text-zinc-400">DeepSeek 余额</span>
-                <span className="whitespace-nowrap text-zinc-500">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-xs">
+                <span className="shrink-0 whitespace-nowrap text-zinc-400">DeepSeek 余额</span>
+                <span className="shrink-0 whitespace-nowrap text-zinc-500">
                   {deepseek.currency === 'USD' ? '$' : '¥'}
                   {deepseek.totalBalance}
-                  <span className="text-zinc-600">{` · 充值 ${deepseek.toppedUpBalance} / 赠金 ${deepseek.grantedBalance}`}</span>
+                </span>
+                <span className="w-full text-right text-[11px] text-zinc-600">
+                  {`充值 ${deepseek.toppedUpBalance} / 赠金 ${deepseek.grantedBalance}`}
                 </span>
               </div>
             )}
 
             <div>
               <div className="mb-1 flex items-baseline justify-between text-xs">
-                <span className="text-zinc-400">上下文窗口</span>
-                <span className="text-zinc-500">
+                <span className="shrink-0 whitespace-nowrap text-zinc-400">上下文窗口</span>
+                <span className="shrink-0 whitespace-nowrap text-zinc-500">
                   {contextPct === null ? '—' : `${contextPct.toFixed(2)}%`}
                 </span>
               </div>
@@ -314,11 +327,16 @@ export default function UsageRings(): JSX.Element {
                   ['输出', contextUsage.outputTokens],
                   ['缓存命中', contextUsage.cacheReadTokens]
                 ] as const).map(([label, value]) => (
-                  <div key={label} className="rounded-lg border border-white/[0.06] bg-black/20 px-1.5 py-1.5">
-                    <div className="text-xs font-semibold text-zinc-100">
+                  <div
+                    key={label}
+                    // min-w-0：grid 子项默认 min-width:auto，内容撑得下就不收缩，
+                    // 三列会一起把卡片顶宽/顶破。加了它数字才肯 truncate。
+                    className="min-w-0 rounded-lg border border-white/[0.06] bg-black/20 px-1.5 py-1.5"
+                  >
+                    <div className="truncate text-xs font-semibold text-zinc-100">
                       {value !== undefined ? fmtK(value) : '—'}
                     </div>
-                    <div className="mt-0.5 text-[9px] text-zinc-500">{label}</div>
+                    <div className="mt-0.5 truncate text-[9px] text-zinc-500">{label}</div>
                   </div>
                 ))}
               </div>

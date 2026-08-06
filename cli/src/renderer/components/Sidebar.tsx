@@ -283,7 +283,13 @@ const NAV_ITEMS: { view: View; label: string; icon: () => JSX.Element }[] = [
   { view: 'help', label: '说明', icon: HelpIcon }
 ]
 
-export default function Sidebar(): JSX.Element {
+/**
+ * @param forceExpanded 强制按展开态渲染，忽略 store 里的 sidebarCollapsed。
+ *   仅供 SidebarShell 的「悬停浮出」使用：收起态下鼠标移上图标条时要在浮层里
+ *   画一份完整面板，而此时 store 的 collapsed 必须保持 true——一旦翻成 false，
+ *   在流的那一列会被撑开、把正文推走，那就不是浮层而是真展开了。
+ */
+export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boolean } = {}): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
   const sessions = useSessionStore((s) => s.sessions)
   // #5b 运行中会话标识：并行契约新增字段，包含当前正在跑 turn 的 sdkSessionId。
@@ -304,7 +310,8 @@ export default function Sidebar(): JSX.Element {
   const deleteSession = useSessionStore((s) => s.deleteSession)
   const view = useUiStore((s) => s.view)
   const setView = useUiStore((s) => s.setView)
-  const collapsed = useUiStore((s) => s.sidebarCollapsed)
+  const collapsedState = useUiStore((s) => s.sidebarCollapsed)
+  const collapsed = collapsedState && !forceExpanded
   const toggleSidebar = useUiStore((s) => s.toggleSidebar)
   const navCollapsed = useUiStore((s) => s.navCollapsed)
   const toggleNav = useUiStore((s) => s.toggleNav)
@@ -1135,7 +1142,7 @@ export default function Sidebar(): JSX.Element {
         on ? 'glass-active text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200'
       }`
     return (
-      <div key="sidebar-collapsed" className="sidebar-collapse glass-sidebar flex w-14 shrink-0 flex-col items-center rounded-[18px] border py-2.5">
+      <div key="sidebar-collapsed" className="sidebar-collapse glass-sidebar flex h-full min-h-0 w-14 shrink-0 flex-col items-center rounded-[18px] border py-2.5">
         <button
           onClick={handleToggleSidebar}
           className={iconBtn(false)}
@@ -1280,7 +1287,7 @@ export default function Sidebar(): JSX.Element {
     ))
 
   return (
-    <div key="sidebar-expanded" className="sidebar-expand glass-sidebar flex w-64 shrink-0 flex-col rounded-[18px] border">
+    <div key="sidebar-expanded" className="sidebar-expand glass-sidebar flex h-full min-h-0 w-64 shrink-0 flex-col rounded-[18px] border">
       {/* brand + collapse */}
       <div className="flex items-center gap-2 px-4 pt-3">
         <AppLogo size={30} className="shrink-0" />

@@ -31,6 +31,13 @@ interface UiStore {
    */
   sidebarWidth: number
   setSidebarWidth: (width: number) => void
+  /**
+   * 收起态下，鼠标悬停在图标条上是否自动展开成完整面板（浮层，不推开正文）。
+   * 默认开——收起之后不用为了看一眼会话列表专门去点箭头/按快捷键。
+   * 暂存在 localStorage；等设置体系整合完再挪进正式设置项。
+   */
+  sidebarHoverExpand: boolean
+  setSidebarHoverExpand: (on: boolean) => void
   /** Footer tool nav (skills/mcp/providers/translate/settings) collapsed. */
   navCollapsed: boolean
   toggleNav: () => void
@@ -59,6 +66,17 @@ export function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Math.round(width)))
 }
 
+const HOVER_EXPAND_KEY = 'tran.sidebarHoverExpand'
+
+function readHoverExpand(): boolean {
+  try {
+    // 只有显式存过 '0' 才算关；没存过 = 默认开。
+    return localStorage.getItem(HOVER_EXPAND_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
 function readSidebarWidth(): number {
   try {
     const raw = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY))
@@ -83,6 +101,15 @@ export const useUiStore = create<UiStore>((set) => ({
       /* 隐私模式/存储满：不持久化也要让本次生效 */
     }
     set({ sidebarWidth: next })
+  },
+  sidebarHoverExpand: readHoverExpand(),
+  setSidebarHoverExpand: (on) => {
+    try {
+      localStorage.setItem(HOVER_EXPAND_KEY, on ? '1' : '0')
+    } catch {
+      /* 隐私模式/存储满：不持久化也要让本次生效 */
+    }
+    set({ sidebarHoverExpand: on })
   },
   navCollapsed: false,
   toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),

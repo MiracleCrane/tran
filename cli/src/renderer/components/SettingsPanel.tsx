@@ -138,8 +138,6 @@ export default function SettingsPanel(): JSX.Element {
   const [deepseekApiKey, setDeepseekApiKey] = useState('')
   const [deepseekKeyMasked, setDeepseekKeyMasked] = useState<string | null>(null)
   const [summaryModel, setSummaryModel] = useState('')
-  // 思考块全文翻译走哪个通道（2026-08 用户拍板：默认百度机翻，免费额度）。
-  const [thinkingEngine, setThinkingEngine] = useState<'llm' | 'baidu'>('baidu')
   const [autoTodoNudge, setAutoTodoNudge] = useState(false)
   const [cloudUsage, setCloudUsage] = useState(true)
   const [probing, setProbing] = useState(false)
@@ -204,7 +202,6 @@ export default function SettingsPanel(): JSX.Element {
         // getApiKey 只回 { configured, masked }，不再下发明文。
         setSummaryKeyMasked(apiKey?.masked ?? null)
         setSummaryModel(p.summaryModel ?? '')
-        setThinkingEngine(p.thinkingTranslateEngine ?? 'baidu')
         setAutoTodoNudge(p.autoTodoNudge === true)
         setCloudUsage(p.cloudUsageEnabled !== false)
         setAskOnClose(!p.closePromptDismissed)
@@ -386,17 +383,6 @@ export default function SettingsPanel(): JSX.Element {
       flashSaved()
     } catch {
       /* 保存失败就留在输入框里，不回滚用户输入 */
-    }
-  }
-
-  /** 思考翻译通道：baidu = 百度机翻（密钥在「翻译」面板配）；llm = 上面的摘要 API。 */
-  const saveThinkingEngine = async (next: 'llm' | 'baidu'): Promise<void> => {
-    setThinkingEngine(next)
-    try {
-      await window.api.savePreferences({ thinkingTranslateEngine: next })
-      flashSaved()
-    } catch {
-      /* 保存失败就留在选择上，不回滚 */
     }
   }
 
@@ -1070,21 +1056,10 @@ export default function SettingsPanel(): JSX.Element {
                   {diagnosing ? '自检中…' : '提示词自检'}
                 </button>
               </div>
-              <label className="block">
-                <span className="mb-1 block text-[11px] text-zinc-500">思考块全文翻译通道</span>
-                <select
-                  value={thinkingEngine}
-                  onChange={(e) => void saveThinkingEngine(e.target.value as 'llm' | 'baidu')}
-                  className="w-full rounded-lg border border-border-subtle bg-bg-elev/60 px-2.5 py-1.5 text-[11px] text-zinc-200 outline-none focus:border-accent/50"
-                >
-                  <option value="baidu">百度机翻（免费额度，密钥在「翻译」面板配置）</option>
-                  <option value="llm">DeepSeek（用上面的摘要 API，质量更好，按量计费）</option>
-                </select>
-                <div className="mt-0.5 text-[10px] leading-relaxed text-zinc-600">
-                  展开英文思考块时的整段翻译。百度机翻认证后每月 100 万字符免费，质量够用；
-                  DeepSeek 质量更好但按量计费（实测一个月约十几块）。通道不可用时显示原文并给一句轻提示。
-                </div>
-              </label>
+              <div className="text-[10px] leading-relaxed text-zinc-600">
+                思考块全文翻译的引擎在「翻译」面板统一设置（百度机翻免费 / 运营商模型质量高），
+                不再单独配置。
+              </div>
               {probes && (
                 <div className="space-y-1 rounded-lg border border-white/[0.06] bg-bg-elev/60 p-2">
                   {probes.map((p) => (
