@@ -218,7 +218,11 @@ function SkillsTab({
 }): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
   const starting = useSessionStore((s) => s.starting)
-  const skillRoot = '~/.kimi-code/skills/'
+  // sdkSessionId 只有后端会话真的建起来之后才有值；懒创建期间它是空的。
+  const sessionLive = !!meta?.sdkSessionId
+  // 写 ~/.kimi-code 是不对的：home 可能被 KIMI_CODE_HOME 指到别处（见 kimiHome.ts），
+  // 那时这里显示的路径会把人指向一个空目录。用变量名表述，任何配置下都成立。
+  const skillRoot = '$KIMI_CODE_HOME/skills/'
 
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -270,10 +274,18 @@ function SkillsTab({
       )}
       {!loading && !error && skills.length === 0 && (
         <div className="rounded-xl border border-border-subtle bg-bg-panel px-5 py-10 text-center text-sm text-zinc-400">
-          没有可用的技能。
+          {sessionLive ? '没有可用的技能。' : '会话还没开始，暂时读不到技能。'}
           <p className="mt-1 text-xs text-zinc-600">
-            技能来自 <code className="text-zinc-500">{skillRoot}</code>{' '}
-            或已安装的插件 —— 去商店看看。
+            {sessionLive ? (
+              <>
+                技能来自 <code className="text-zinc-500">{skillRoot}</code>{' '}
+                或已安装的插件 —— 去商店看看。
+              </>
+            ) : (
+              // 懒创建：后端要等第一条消息才启动，此前拿不到技能列表。
+              // 这不是错误，别摆出报错的样子（以前这里直接弹 IPC 原始异常）。
+              <>在对话里发一条消息后，技能列表就会出现。</>
+            )}
           </p>
         </div>
       )}

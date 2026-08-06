@@ -75,16 +75,52 @@ function ResizeHandle(): JSX.Element {
   )
 }
 
+/**
+ * 悬停浮出的进入/离开延迟。
+ *
+ * 两个方向的抖动都要治，而且**成因相反**：
+ * - 进入不加延迟 → 鼠标从侧栏边上扫过去就弹出来（"过于灵敏"）；
+ * - 离开不加延迟 → 从窄图标条斜着往浮层里移动时，指针会有几帧落在两者之间的
+ *   空隙上，pointerleave 立刻触发、面板当场消失（"不灵敏"，其实是关早了）。
+ * 所以进入给短延迟防误触，离开给长延迟容忍路径抖动。
+ */
+const PEEK_OPEN_DELAY_MS = 140
+const PEEK_CLOSE_DELAY_MS = 260
+
 export default function SidebarShell(): JSX.Element {
   const collapsed = useUiStore((s) => s.sidebarCollapsed)
   const width = useUiStore((s) => s.sidebarWidth)
   const hoverExpand = useUiStore((s) => s.sidebarHoverExpand)
   const [peeking, setPeeking] = useState(false)
+  const peekTimerRef = useRef<number | null>(null)
 
-  // 展开之后残留的 peek 会盖在正文上，必须清掉。
+  const clearPeekTimer = (): void => {
+    if (peekTimerRef.current !== null) {
+      window.clearTimeout(peekTimerRef.current)
+      peekTimerRef.current = null
+    }
+  }
+
+  const schedulePeek = (next: boolean): void => {
+    clearPeekTimer()
+    peekTimerRef.current = window.setTimeout(
+      () => {
+        peekTimerRef.current = null
+        setPeeking(next)
+      },
+      next ? PEEK_OPEN_DELAY_MS : PEEK_CLOSE_DELAY_MS
+    )
+  }
+
+  // 展开之后残留的 peek 会盖在正文上，必须清掉（连同在途的定时器）。
   useEffect(() => {
-    if (!collapsed || !hoverExpand) setPeeking(false)
+    if (!collapsed || !hoverExpand) {
+      clearPeekTimer()
+      setPeeking(false)
+    }
   }, [collapsed, hoverExpand])
+
+  useEffect(() => clearPeekTimer, [])
 
   const peekOn = collapsed && hoverExpand
 
@@ -96,14 +132,18 @@ export default function SidebarShell(): JSX.Element {
       style={{ ['--sidebar-w' as string]: `${width}px` }}
       {...(peekOn
         ? {
-            onPointerEnter: () => setPeeking(true),
-            onPointerLeave: () => setPeeking(false)
+            onPointerEnter: () => schedulePeek(true),
+            onPointerLeave: () => schedulePeek(false)
           }
         : {})}
     >
-      {/* 图标条始终挂着：它决定在流的那一列有多宽。浮出时它被浮层盖住，
-          但不能卸载——卸载会让 Sidebar 每次悬停都重建，内部状态全丢。 */}
-      <Sidebar />
+      {/* 图标条始终挂着：它决定在流的那一列有多宽，卸载会让 Sidebar 每次悬停
+          都重建、内部状态全丢。但浮出时必须**隐形**——浮层用的是半透明玻璃底，
+          图标条会从底下透上来，两层图标叠在一起（用户反馈的"缩略视图还在"）。
+          用 invisible 而不是条件渲染：元素还在，宽度与布局不变。 */}
+      <div className={peeking ? 'invisible' : ''}>
+        <Sidebar />
+      </div>
       {peekOn && peeking && (
         <div className="sidebar-peek" style={{ width: `${width}px` }}>
           <Sidebar forceExpanded />

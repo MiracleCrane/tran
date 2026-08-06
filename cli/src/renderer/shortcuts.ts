@@ -102,6 +102,87 @@ function gotoSession(n: number): void {
   void s.openSessionCrossProject(target.sessionId, target.cwd ?? '', target.runtimeBackend)
 }
 
+/**
+ * 自定义绑定：actionId → 键位串数组，覆盖默认值。
+ *
+ * 存在 localStorage 而不是主进程的 tran-settings.json：快捷键是纯渲染层的事，
+ * 走 IPC 得铺 preload + settings 字段 + 类型 + 归一化一整套，换不来任何好处。
+ */
+const BINDINGS_KEY = 'tran.shortcutBindings'
+
+function readOverrides(): Record<string, string[]> {
+  try {
+    const raw = localStorage.getItem(BINDINGS_KEY)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, string[]> = {}
+    for (const [id, keys] of Object.entries(parsed as Record<string, unknown>)) {
+      if (Array.isArray(keys) && keys.every((k) => typeof k === 'string')) out[id] = keys as string[]
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function writeOverrides(map: Record<string, string[]>): void {
+  try {
+    localStorage.setItem(BINDINGS_KEY, JSON.stringify(map))
+  } catch {
+    /* 隐私模式/存储满：本次会话内仍生效（listeners 会拿到新表） */
+  }
+}
+
+const bindingListeners = new Set<() => void>()
+
+/** 绑定变更后通知已挂载的监听器重建映射表。 */
+export function onShortcutBindingsChanged(fn: () => void): () => void {
+  bindingListeners.add(fn)
+  return () => bindingListeners.delete(fn)
+}
+
+export function setShortcutBinding(id: string, keys: string[]): void {
+  const map = readOverrides()
+  map[id] = keys
+  writeOverrides(map)
+  for (const fn of bindingListeners) fn()
+}
+
+/** 恢复某个动作的默认键位。 */
+export function resetShortcutBinding(id: string): void {
+  const map = readOverrides()
+  delete map[id]
+  writeOverrides(map)
+  for (const fn of bindingListeners) fn()
+}
+
+/** 应用自定义绑定后的完整动作表（设置页与全局监听共用同一出处）。 */
+export function resolvedShortcuts(): ShortcutAction[] {
+  const overrides = readOverrides()
+  return buildShortcuts().map((a) =>
+    overrides[a.id] ? { ...a, keys: overrides[a.id] } : a
+  )
+}
+
+/** 该动作当前是否被改过（用于设置页显示"恢复默认"）。 */
+export function isShortcutOverridden(id: string): boolean {
+  return Object.prototype.hasOwnProperty.call(readOverrides(), id)
+}
+
+/**
+ * 键位冲突检测：返回与给定键位撞车的其它动作 id。
+ *
+ * 必须做——两个动作绑同一个键时，全局监听按注册顺序命中第一个，后者永远不触发，
+ * 而用户在设置页看到的是"两个都绑好了"，只会以为坏了。
+ */
+export function conflictingActions(id: string, keys: string[]): string[] {
+  const wanted = new Set(keys)
+  return resolvedShortcuts()
+    .filter((a) => a.id !== id && a.keys.some((k) => wanted.has(k)))
+    .map((a) => a.id)
+}
+
 export function buildShortcuts(): ShortcutAction[] {
   const ui = (): ReturnType<typeof useUiStore.getState> => useUiStore.getState()
   const sess = (): ReturnType<typeof useSessionStore.getState> => useSessionStore.getState()
@@ -184,7 +265,11 @@ export function buildShortcuts(): ShortcutAction[] {
  * 没命中的事件原样放行——绝不能因为装了这套就让打字变卡或吞键。
  */
 export function installShortcuts(): () => void {
-  const actions = buildShortcuts()
+  // 自定义绑定变更时重建动作表；不这么做的话，改完键位要重启才生效。
+  let actions = resolvedShortcuts()
+  const unsubscribe = onShortcutBindingsChanged(() => {
+    actions = resolvedShortcuts()
+  })
   const onKeyDown = (e: KeyboardEvent): void => {
     // 输入法组字过程中不参与匹配：composing 期间的 keydown 是 IME 的，
     // 拿去比对会在中文输入时误触发。
@@ -201,5 +286,8 @@ export function installShortcuts(): () => void {
     }
   }
   document.addEventListener('keydown', onKeyDown, true)
-  return () => document.removeEventListener('keydown', onKeyDown, true)
+  return () => {
+    unsubscribe()
+    document.removeEventListener('keydown', onKeyDown, true)
+  }
 }

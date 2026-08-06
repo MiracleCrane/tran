@@ -572,7 +572,18 @@ export function registerIpc(
     try {
       return await bridge.listSkills(sessionId)
     } catch (err) {
-      log('ipc', `listSkills failed: ${err instanceof Error ? err.message : String(err)}`)
+      const message = err instanceof Error ? err.message : String(err)
+      // 会话懒创建：新会话的 sessionId 只是渲染层生成的本地 uid，ACP 后端要等
+      // 用户发出第一条消息才真正启动（见 sessionStore 的 pendingSessionStart）。
+      // 这期间点开技能页，requireSession 必然抛 "session not found"——那不是
+      // 错误，是"后端还没起"。原先直接抛给渲染层，用户看到的是一句
+      // `Error invoking remote method 'forge:listSkills'` 的原始报错。
+      // 返回空列表，由渲染层给一句人话。
+      if (/session not found/i.test(message)) {
+        log('ipc', `listSkills: 会话尚未启动，返回空列表 (${sessionId})`)
+        return []
+      }
+      log('ipc', `listSkills failed: ${message}`)
       throw err
     }
   })

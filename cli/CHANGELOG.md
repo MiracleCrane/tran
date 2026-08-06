@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.62 - 2026-08-06
+
+### 中文
+
+- 修复:**技能页报错 `session not found`**。会话是懒创建的——新会话的 sessionId 只是渲染层的本地 uid,ACP 后端要等你发出第一条消息才真正启动。这期间点开技能页,后端必然找不到会话,原始 IPC 异常直接砸到界面上。现在返回空列表,并显示「会话还没开始,暂时读不到技能」。
+- 顺带修:技能页显示的路径写死了 `~/.kimi-code/skills/`,home 被 `KIMI_CODE_HOME` 指到别处时会把人指向一个空目录,改成 `$KIMI_CODE_HOME/skills/`。
+- 新增:**快捷键配置**(设置 → 系统)。列出全部动作、点击键位就地重录、Esc 取消、改过的可一键恢复默认,改动立即生效无需重启。带冲突检测——两个动作绑同一个键时,全局监听只会命中先注册的那个,后者永远不触发,而界面看起来"两个都绑好了",那种坏法最难查。
+- 侧栏悬停浮出修两处手感问题:**过于灵敏**(鼠标扫过就弹)加 140ms 进入延迟;**不灵敏**其实是关早了——从窄图标条斜着往浮层移动时,指针有几帧落在两者的空隙上,`pointerleave` 当场触发,现在给 260ms 离开延迟。
+- 侧栏浮出时图标条不再透出来:浮层是半透明玻璃底,底下的图标会叠上来。
+
+### English
+
+- Fix: **`session not found` error on the Skills page.** Sessions are created lazily — a new session's id is just a renderer-local uid, and the ACP backend only starts once you send the first message. Opening the Skills page before that guaranteed a backend miss, and the raw IPC exception was surfaced directly. It now returns an empty list and shows "the session hasn't started yet".
+- Also fixed: the Skills page hardcoded `~/.kimi-code/skills/` as the skill root, which points at an empty directory when the home is redirected via `KIMI_CODE_HOME`. Now shown as `$KIMI_CODE_HOME/skills/`.
+- New: **keyboard shortcut configuration** (Settings → System). Lists every action, click a binding to re-record, Esc cancels, changed ones can be reset. Takes effect immediately. Includes conflict detection — two actions on the same key means the global listener only ever reaches the first-registered one while the UI looks like both are bound.
+- Sidebar hover-reveal: added a 140ms open delay (it used to fire when merely brushing past) and a 260ms close delay (the "unresponsive" feel was actually closing too early — moving diagonally from the rail into the panel leaves a few frames in the gap between them, which fired `pointerleave` immediately).
+- The collapsed icon rail no longer bleeds through the hover panel, whose glass background is translucent.
+
 ## v1.0.61 - 2026-08-06
 
 ### 中文

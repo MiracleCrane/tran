@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import ShortcutSettings from './ShortcutSettings'
 import ConfirmDialog from './ConfirmDialog'
 import type {
   ComposerModel,
@@ -985,6 +986,7 @@ export default function SettingsPanel(): JSX.Element {
               checked={autoTodoNudge}
               onChange={(checked) => void toggleAutoTodoNudge(checked)}
             />
+            <ShortcutSettings />
             {/* 独立摘要 API：不复用 Kimi 的任何登录态或内部接口。 */}
             <div className="space-y-2">
               <div>
@@ -1380,9 +1382,6 @@ export default function SettingsPanel(): JSX.Element {
           </div>
         </section>
 
-        <p className="text-[11px] leading-relaxed text-zinc-600">
-          此处的默认 effort 与权限模式对**新建对话**生效;当前会话可在输入框工具栏里实时切换权限模式,effort 仍会在下一条消息生效。模型列表保存后立即更新 Composer 下拉。
-        </p>
       </div>
     </div>
   )
