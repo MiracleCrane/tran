@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { TranslateEngine, TranslateTestResult } from '../../shared/ipc'
+import type { TranslateEngine, ThinkingTranslateEngine, TranslateTestResult } from '../../shared/ipc'
+import { refreshThinkingTranslateStatus } from '../hooks/useThinkingTranslateStatus'
 import { ToolPanelAlert, ToolPanelButton } from './ToolPanelChrome'
 import { useUiStore } from '../store/uiStore'
 import { useTransientFlag } from '../hooks/useTransientFlag'
@@ -21,6 +22,8 @@ function RadioDot({ on }: { on: boolean }): JSX.Element {
 
 export default function TranslatePanel(): JSX.Element {
   const [engine, setEngine] = useState<TranslateEngine>('llm')
+  // 思考翻译单独一个引擎，与上面的描述翻译分离（见 shared/ipc 注释）。
+  const [thinkingEngine, setThinkingEngine] = useState<ThinkingTranslateEngine>('auto')
   const [appId, setAppId] = useState('')
   const [secretKey, setSecretKey] = useState('')
   const [showSecret, setShowSecret] = useState(false)
@@ -38,6 +41,7 @@ export default function TranslatePanel(): JSX.Element {
       .getTranslateConfig()
       .then((c) => {
         setEngine(c.engine)
+        setThinkingEngine(c.thinkingEngine)
         setAppId(c.baidu.appId)
         setSecretKey(c.baidu.secretKey)
       })
@@ -56,8 +60,11 @@ export default function TranslatePanel(): JSX.Element {
     try {
       await window.api.saveTranslateConfig({
         engine,
+        thinkingEngine,
         baidu: { appId: appId.trim(), secretKey: secretKey.trim() }
       })
+      // 让已挂载的思考块立刻用上新引擎（否则回落提示会停在旧状态）。
+      refreshThinkingTranslateStatus()
       flashSaved()
     } finally {
       setSaving(false)
@@ -122,7 +129,8 @@ export default function TranslatePanel(): JSX.Element {
           </ToolPanelAlert>
         )}
 
-        {/* engine selector */}
+        {/* engine selector —— 只管技能/插件描述 */}
+        <div className="pt-1 text-xs font-medium text-zinc-300">技能 / 插件描述翻译</div>
         <section className="space-y-2">
           <button type="button" onClick={() => setEngine('llm')} className={`block w-full text-left ${cardCls(engine === 'llm')}`}>
             <div className="flex items-center gap-2">
@@ -144,7 +152,7 @@ export default function TranslatePanel(): JSX.Element {
             <div className="flex items-center gap-2">
               <RadioDot on={engine === 'baidu'} />
               <span className="text-sm font-medium text-zinc-100">百度翻译</span>
-              {engine === 'baidu' && (
+              {(engine === 'baidu' || thinkingEngine === 'baidu' || thinkingEngine === 'auto') && (
                 <span className="rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-medium text-accent">
                   当前
                 </span>
@@ -157,8 +165,73 @@ export default function TranslatePanel(): JSX.Element {
           </button>
         </section>
 
+        {/* 思考翻译：独立开关。与上面分离的理由见 shared/ipc 的
+            ThinkingTranslateEngine 注释——描述是短句机翻够用，思考满篇代码
+            路径，机翻会译坏，两者不能共用一个选择。 */}
+        <div className="pt-3 text-xs font-medium text-zinc-300">思考过程翻译</div>
+        <section className="space-y-2">
+          <button type="button" onClick={() => setThinkingEngine('auto')} className={`block w-full text-left ${cardCls(thinkingEngine === 'auto')}`}>
+            <div className="flex items-center gap-2">
+              <RadioDot on={thinkingEngine === 'auto'} />
+              <span className="text-sm font-medium text-zinc-100">自动（推荐）</span>
+              {thinkingEngine === 'auto' && (
+                <span className="rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                  当前
+                </span>
+              )}
+            </div>
+            <p className="mt-1.5 pl-6 text-[11px] leading-relaxed text-zinc-500">
+              配了下面的百度密钥就走百度（免费额度内不花钱）,没配则回落到摘要 / 命名 API
+              那条通道。既优先省钱,又不会因为没填密钥就静默失去翻译。
+            </p>
+            {/* 实时显示当前落点：'自动' 到底走了哪条不该靠猜——尤其回落那条是要花钱的。 */}
+            {thinkingEngine === 'auto' && (
+              <p className="mt-1 pl-6 text-[11px] text-zinc-500">
+                当前实际走：
+                {appId.trim() ? (
+                  <span className="text-emerald-400/80">百度（免费额度内）</span>
+                ) : (
+                  <span className="text-amber-500/80">模型翻译（按量计费）—— 未填下方百度密钥</span>
+                )}
+              </p>
+            )}
+          </button>
+
+          <button type="button" onClick={() => setThinkingEngine('baidu')} className={`block w-full text-left ${cardCls(thinkingEngine === 'baidu')}`}>
+            <div className="flex items-center gap-2">
+              <RadioDot on={thinkingEngine === 'baidu'} />
+              <span className="text-sm font-medium text-zinc-100">百度翻译</span>
+              {thinkingEngine === 'baidu' && (
+                <span className="rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                  当前
+                </span>
+              )}
+            </div>
+            <p className="mt-1.5 pl-6 text-[11px] leading-relaxed text-zinc-500">
+              免费额度内不花钱。但思考过程里的路径、变量名、命令和报错原文,机翻可能
+              一并译掉——要读代码细节时不如下面那条。未配置密钥时不翻译。
+            </p>
+          </button>
+
+          <button type="button" onClick={() => setThinkingEngine('llm')} className={`block w-full text-left ${cardCls(thinkingEngine === 'llm')}`}>
+            <div className="flex items-center gap-2">
+              <RadioDot on={thinkingEngine === 'llm'} />
+              <span className="text-sm font-medium text-zinc-100">模型翻译</span>
+              {thinkingEngine === 'llm' && (
+                <span className="rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                  当前
+                </span>
+              )}
+            </div>
+            <p className="mt-1.5 pl-6 text-[11px] leading-relaxed text-zinc-500">
+              走摘要 / 命名 API（DeepSeek 等）。提示词明确要求保留代码、命令、路径、
+              变量名与报错原文不译,读起来最准,代价是按量计费。
+            </p>
+          </button>
+        </section>
+
         {/* baidu credentials (only when baidu is the chosen engine) */}
-        {engine === 'baidu' && (
+        {(engine === 'baidu' || thinkingEngine === 'baidu' || thinkingEngine === 'auto') && (
           <section className="space-y-4 rounded-xl border border-border-subtle bg-bg-panel p-4">
             <div>
               <label className={labelCls}>App ID</label>

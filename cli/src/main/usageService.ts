@@ -227,10 +227,22 @@ function parsePlanUsage(payload: unknown): PlanUsageInfo {
 }
 
 export async function fetchPlanUsage(): Promise<PlanUsageResult> {
-  // 显式开关（默认开）：这条链路直连 Kimi 云端私有接口并复用 CLI 的 OAuth
-  // 凭证（含 refresh_token 轮换写回）。用户关掉后不发任何请求、不碰凭证文件。
-  if (loadSettings().cloudUsageEnabled === false) {
-    return { ok: false, error: '云端额度查询已在设置中关闭' }
+  /**
+   * **默认关闭，必须显式打开**（2026-08 改）。
+   *
+   * 这条链路直连 Kimi 的**私有接口** `api.kimi.com/coding/v1/usages`，并复用
+   * CLI 的 OAuth 凭证（含 refresh_token 轮换写回）——它不是公开 API，用它查额度
+   * 有账号被封的实际先例（本项目作者本人遇到过）。
+   *
+   * 原先写的是 `=== false` 才拦，也就是 opt-out：`undefined`（从没动过设置的
+   * 全新安装）一律放行，等于**默认就在打私有接口**。改成 `!== true` 的 opt-in，
+   * 只有用户在设置里明确打开才发请求。
+   *
+   * 关闭状态下 5h / 每周两行显示"—"。上下文那行不受影响：它来自 ACP 的隐藏
+   * /usage 轮，纯本地，和这条链路无关。
+   */
+  if (loadSettings().cloudUsageEnabled !== true) {
+    return { ok: false, error: '云端额度查询未开启（走 Kimi 私有接口，有封号风险，默认关闭）' }
   }
   let token = await getValidAccessToken()
   if (!token) return { ok: false, error: AUTH_EXPIRED_MESSAGE }

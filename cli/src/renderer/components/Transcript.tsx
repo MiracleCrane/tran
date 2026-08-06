@@ -15,6 +15,7 @@ import EmptyState from './EmptyState'
 import QueryResultCard from './QueryResultCard'
 import UserMessageNav, { type UserNavEntry } from './UserMessageNav'
 import { useCheapNote } from '../hooks/useCheapNote'
+import { useThinkingTranslateStatus } from '../hooks/useThinkingTranslateStatus'
 
 const INITIAL_HIGHLIGHT_DELAY_MS = 420
 const SCROLL_HIGHLIGHT_RESUME_MS = 180
@@ -546,6 +547,8 @@ const ThinkingBlock = memo(function ThinkingBlock({
   const [showOriginal, setShowOriginal] = useState(false)
   const wantsTranslation = open && !streaming && looksEnglish(text)
   const translationState = useCheapNote(fetchThinkingTranslation, text, wantsTranslation)
+  // auto 在没配百度时会回落到付费的摘要 API——回落必须可见，否则就是悄悄花钱。
+  const translateStatus = useThinkingTranslateStatus(wantsTranslation)
   const translated = translationState.value
 
   if (!text) return <></>
@@ -576,13 +579,25 @@ const ThinkingBlock = memo(function ThinkingBlock({
           {/* 只在真的译出来了才给切换；没译出来（限流/失败）就安静地显示原文，
               不留任何"出错了"的痕迹。 */}
           {translated && (
-            <button
-              type="button"
-              onClick={() => setShowOriginal((v) => !v)}
-              className="mt-1 pl-1.5 text-[10px] text-zinc-600 transition hover:text-zinc-400"
-            >
-              {showOriginal ? '看译文' : '看原文'}
-            </button>
+            <span className="mt-1 flex flex-wrap items-baseline gap-x-2 pl-1.5">
+              <button
+                type="button"
+                onClick={() => setShowOriginal((v) => !v)}
+                className="text-[10px] text-zinc-600 transition hover:text-zinc-400"
+              >
+                {showOriginal ? '看译文' : '看原文'}
+              </button>
+              {/* 回落提示：没配百度 → 走的是按量计费的摘要 API。设置里选了
+                  「自动」的人未必知道这一点，不说等于替他做了花钱的决定。 */}
+              {translateStatus.autoFellBack && (
+                <span
+                  className="text-[10px] text-amber-500/70"
+                  title="翻译引擎选的是「自动」，但未配置百度密钥，因此走了摘要 / 命名 API（按量计费）。在 设置 → 翻译 里填百度密钥即可免费。"
+                >
+                  未配百度 · 本次用模型翻译（计费）
+                </span>
+              )}
+            </span>
           )}
           {wantsTranslation && !translated && !translationState.settled && (
             <div className="mt-1 pl-1.5 text-[10px] text-zinc-600">

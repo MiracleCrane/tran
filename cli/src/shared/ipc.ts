@@ -480,6 +480,19 @@ export interface SettingsBackup {
  *  /v1/messages; 'baidu' = Baidu generic-translate API (avoids model rate limits). */
 export type TranslateEngine = 'llm' | 'baidu'
 
+/**
+ * 思考翻译单独的引擎选择——**刻意不与 translateEngine 共用**。
+ *
+ * 两者取舍完全不同：技能/插件描述是短句、几乎没有代码，机翻足够且免费；而思考
+ * 过程满篇是路径、变量名、命令与报错原文，机翻会把 `ANTHROPIC_BASE_URL` 一起译
+ * 了、把 `--force-with-lease` 拆开。共用一个开关等于逼用户在「描述省钱」和
+ * 「思考能读」之间二选一。
+ *
+ * 'auto'（默认）：配了百度密钥就走百度（免费额度内不花钱），没配则回落到摘要旁路
+ * 的便宜模型——既不让没配百度的人突然失去翻译，也不默认去烧钱。
+ */
+export type ThinkingTranslateEngine = 'auto' | 'llm' | 'baidu'
+
 /** Baidu translate credentials. appId is non-secret; secretKey is the API key
  *  (encrypted at rest via safeStorage, returned plaintext to the renderer for
  *  editing — same stance as provider tokens). */
@@ -490,6 +503,8 @@ export interface BaiduTranslateConfig {
 
 export interface TranslateConfig {
   engine: TranslateEngine
+  /** 思考翻译的引擎，独立于上面的 engine（见 ThinkingTranslateEngine）。 */
+  thinkingEngine: ThinkingTranslateEngine
   baidu: BaiduTranslateConfig
 }
 

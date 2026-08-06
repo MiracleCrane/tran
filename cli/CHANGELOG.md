@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.0.61 - 2026-08-06
+
+### 中文
+
+- **安全:云端额度查询改为默认关闭。** 这条链路直连 `api.kimi.com/coding/v1/usages` —— Kimi 的**私有接口**,并复用 CLI 的 OAuth 凭证,用它查额度有账号被封的实际先例。此前的闸门写的是"显式设成 false 才拦",也就是说全新安装(值为 `undefined`)**一律放行**——等于默认就在打私有接口。现在改成必须用户明确打开,开关文案也写明了风险。关闭后 5h / 每周两行显示「—」;上下文那行来自本地 `/usage`,不受影响。
+- 需要说明的是:5h / 每周额度**只能**来自那个私有接口。核对过 `kimi.exe` 里 `/usage` 的输出模板(`formatUsageReport`),它只给会话 token 累计和上下文窗口,没有任何额度行——所以关掉之后没有替代数据源。
+- 新增:**思考翻译单独设置**(设置 → 翻译)。此前它和「技能/插件描述翻译」共用一个开关,但两者取舍相反:描述是短句、机翻足够且免费;思考过程满篇路径、变量名、命令与报错原文,机翻会一并译坏。合并等于逼用户在「描述省钱」和「思考能读」之间二选一。
+- 思考翻译默认「自动」:配了百度密钥走百度(免费额度内不花钱),没配则回落到摘要 API。**回落一律可见**——思考块的译文旁标「未配百度 · 本次用模型翻译(计费)」,设置页也实时显示当前落点。悄悄回落就是悄悄花钱。
+- 额度百分比不再显示两位小数,一律取整。
+- 折叠活动摘要拉开层次:动作亮、思考暗、次数更小更暗,不再是一行同色文字挤在一起。
+
+### English
+
+- **Security: cloud quota lookup now defaults to OFF.** It calls `api.kimi.com/coding/v1/usages` — a **private** Kimi endpoint — reusing the CLI's OAuth credentials, and there is a real precedent of an account being banned over it. The old gate only blocked when the setting was explicitly `false`, so a fresh install (value `undefined`) was **allowed through** — i.e. it hit the private endpoint by default. It now requires an explicit opt-in, and the toggle spells out the risk. With it off the 5h/weekly rows show "—"; the context row comes from the local `/usage` turn and is unaffected.
+- Worth stating plainly: the 5h/weekly figures can **only** come from that private endpoint. `/usage`'s own output template in `kimi.exe` (`formatUsageReport`) yields session token totals and the context window only — no quota lines — so there is no alternative source once it is off.
+- New: **thinking translation is now its own setting** (Settings → Translate). It used to share one switch with skill/plugin description translation, but the trade-offs are opposite: descriptions are short sentences where machine translation is fine and free; thinking text is full of paths, identifiers, commands and raw errors that machine translation mangles.
+- Thinking translation defaults to "auto": Baidu when its credentials are set (free within quota), otherwise it falls back to the summary API. **The fallback is always visible** — the thinking block labels it and the settings page shows the live channel. A silent fallback is silent spending.
+- Quota percentages are rounded to whole numbers.
+- The folded activity summary now has visual hierarchy: actions bright, thinking dim, counts smaller and dimmer.
+
 ## v1.0.60 - 2026-08-06
 
 ### 中文

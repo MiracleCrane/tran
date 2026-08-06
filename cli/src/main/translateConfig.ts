@@ -1,6 +1,6 @@
 import { loadSettings, saveSettings, getBaiduSecret, setBaiduSecret } from './settings'
 import { translateViaBaidu } from './baidu'
-import type { TranslateConfig, TranslateTestResult } from '../shared/ipc'
+import type { TranslateConfig, TranslateTestResult, TranslateEngine, ThinkingTranslateEngine } from '../shared/ipc'
 
 /** Translate-engine config (Translate panel). Stored in tran-settings.json
  *  alongside providers/projects; the Baidu secretKey is safeStorage-encrypted. */
@@ -9,6 +9,7 @@ export function getTranslateConfig(): TranslateConfig {
   const s = loadSettings()
   return {
     engine: s.translateEngine ?? 'llm',
+    thinkingEngine: s.thinkingTranslateEngine ?? 'auto',
     baidu: {
       appId: s.baiduAppId ?? '',
       secretKey: getBaiduSecret() ?? ''
@@ -21,6 +22,7 @@ export function getTranslateConfig(): TranslateConfig {
 export function saveTranslateConfig(cfg: TranslateConfig): TranslateConfig {
   const s = loadSettings()
   s.translateEngine = cfg.engine
+  s.thinkingTranslateEngine = cfg.thinkingEngine
   s.baiduAppId = cfg.baidu.appId
   setBaiduSecret(cfg.baidu.secretKey)
   saveSettings(s)
@@ -38,6 +40,27 @@ export function getBaiduCreds(): { appId: string; secretKey: string } | null {
 /** Which engine translateTexts() should route to. */
 export function getTranslateEngine(): TranslateConfig['engine'] {
   return loadSettings().translateEngine ?? 'llm'
+}
+
+/** 用户在设置里选的思考翻译引擎（未选过 = 'auto'）。 */
+export function getThinkingTranslateEngine(): ThinkingTranslateEngine {
+  return loadSettings().thinkingTranslateEngine ?? 'auto'
+}
+
+/**
+ * 思考翻译最终落到哪条通道。
+ *
+ * 'auto' 的含义是「优先免费、但绝不因此让功能消失」：配了百度密钥就走百度
+ * （免费额度内不花钱），没配则回落到摘要旁路的便宜模型。
+ *
+ * 为什么不干脆把默认值设成 'baidu'：没配密钥的用户会**静默失去翻译**——
+ * translateViaBaiduEngine 拿不到凭据只会记一行日志然后返回 null，界面上就是
+ * 「展开思考还是一屏英文」，而用户根本不知道是自己没填密钥。
+ */
+export function resolveThinkingTranslateEngine(): TranslateEngine {
+  const choice = getThinkingTranslateEngine()
+  if (choice === 'auto') return getBaiduCreds() ? 'baidu' : 'llm'
+  return choice
 }
 
 /** Test Baidu credentials by translating a sample — does NOT persist. */

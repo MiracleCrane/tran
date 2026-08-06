@@ -5,7 +5,7 @@ import { readJsonSafe, writeFileAtomic } from './atomicWrite'
 import { log } from './logger'
 import { cheapSummarize, cheapComplete } from './cheapModel'
 import { loadSettings } from './settings'
-import { getBaiduCreds, getTranslateEngine } from './translateConfig'
+import { getBaiduCreds, resolveThinkingTranslateEngine } from './translateConfig'
 import { translateLongTextViaBaidu } from './baidu'
 
 /**
@@ -265,7 +265,9 @@ export async function translateThinking(text: string): Promise<string | null> {
   const pending = inflight.get(key)
   if (pending) return pending
 
-  const engine = getTranslateEngine()
+  // 思考翻译有自己的引擎开关（与技能描述翻译分离，见 shared/ipc 的
+  // ThinkingTranslateEngine 注释）。'auto' 在这里已被解析成具体通道。
+  const engine = resolveThinkingTranslateEngine()
   const run = (
     engine === 'baidu'
       ? translateViaBaiduEngine(input)

@@ -139,7 +139,7 @@ export default function SettingsPanel(): JSX.Element {
   const [deepseekKeyMasked, setDeepseekKeyMasked] = useState<string | null>(null)
   const [summaryModel, setSummaryModel] = useState('')
   const [autoTodoNudge, setAutoTodoNudge] = useState(false)
-  const [cloudUsage, setCloudUsage] = useState(true)
+  const [cloudUsage, setCloudUsage] = useState(false)
   const [probing, setProbing] = useState(false)
   const [probes, setProbes] = useState<SummaryModelProbe[] | null>(null)
   const [diagnosing, setDiagnosing] = useState(false)
@@ -203,7 +203,8 @@ export default function SettingsPanel(): JSX.Element {
         setSummaryKeyMasked(apiKey?.masked ?? null)
         setSummaryModel(p.summaryModel ?? '')
         setAutoTodoNudge(p.autoTodoNudge === true)
-        setCloudUsage(p.cloudUsageEnabled !== false)
+        // opt-in：只有显式 true 才算开（与 usageService 的闸门一致）。
+        setCloudUsage(p.cloudUsageEnabled === true)
         setAskOnClose(!p.closePromptDismissed)
         // DeepSeek key 状态独立拉（同样是只回掩码），不进上面的 Promise.all
         // 是怕它失败拖垮整个初始化——这一个字段不值得。
@@ -362,8 +363,9 @@ export default function SettingsPanel(): JSX.Element {
     }
   }
 
-  /** 云端额度查询开关（默认开）。它复用 Kimi CLI 的登录凭证直连云端私有接口，
-   *  属于"非官方公开"的调用方式——给用户一个明确的知情关闭入口。 */
+  /** 云端额度查询开关（**默认关**）。它复用 Kimi CLI 的登录凭证直连
+   *  api.kimi.com 的**私有接口**，不是公开 API——用它查额度有账号被封的实际
+   *  先例，所以改成必须用户显式打开（2026-08）。 */
   const toggleCloudUsage = async (next: boolean): Promise<void> => {
     setCloudUsage(next)
     try {
@@ -973,7 +975,7 @@ export default function SettingsPanel(): JSX.Element {
             />
             <ToggleControl
               label="云端套餐额度显示"
-              description="状态栏额度环的数据来源：复用 Kimi CLI 的登录凭证直连 Kimi 云端接口（与 CLI 同款数据源，但属于未公开的私有接口）。若你不希望 Tran 触碰 CLI 的登录凭证或访问云端，可关闭；关闭后额度环显示为不可用，聊天等其他功能不受影响。"
+              description="⚠ 默认关闭，有账号风险。5h / 每周额度这两行只能来自 api.kimi.com 的私有接口（kimi 的 /usage 命令不提供额度信息，已核对其输出模板），需要复用 CLI 的登录凭证直连。这不是公开 API，已有因此被封号的实际先例——除非你清楚风险，否则保持关闭。关闭后这两行显示「—」；上下文那行来自本地 /usage，不受影响。"
               checked={cloudUsage}
               onChange={(checked) => void toggleCloudUsage(checked)}
             />

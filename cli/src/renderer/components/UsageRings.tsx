@@ -70,7 +70,8 @@ function windowRatio(w?: UsageLimitWindow): number | undefined {
 }
 
 function pct2(ratio: number | undefined): string | null {
-  return ratio === undefined ? null : `${(ratio * 100).toFixed(2)}%`
+  // 取整显示：两位小数在这个尺寸下既看不清也没意义（2026-08 用户要求）。
+  return ratio === undefined ? null : `${Math.round(ratio * 100)}%`
 }
 
 /** 单个小圆环：pct 为 null 时置灰显示"—"（无数据）。 */
@@ -115,7 +116,7 @@ function Ring({
   )
 }
 
-/** 预览卡里的一行额度：标题 + 两位小数百分比 + 重置时间 + 用量明细。 */
+/** 预览卡里的一行额度：标题 + 整数百分比 + 重置时间 + 用量明细。 */
 function QuotaRow({
   title,
   window: w
@@ -260,7 +261,7 @@ export default function UsageRings(): JSX.Element {
         <Ring
           pct={contextPct}
           label="上下文"
-          title={`上下文 ${contextPct === null ? '—' : `${contextPct.toFixed(2)}%`}`}
+          title={`上下文 ${contextPct === null ? '—' : `${Math.round(contextPct)}%`}`}
         />
       </button>
 
@@ -304,7 +305,7 @@ export default function UsageRings(): JSX.Element {
               <div className="mb-1 flex items-baseline justify-between text-xs">
                 <span className="shrink-0 whitespace-nowrap text-zinc-400">上下文窗口</span>
                 <span className="shrink-0 whitespace-nowrap text-zinc-500">
-                  {contextPct === null ? '—' : `${contextPct.toFixed(2)}%`}
+                  {contextPct === null ? '—' : `${Math.round(contextPct)}%`}
                 </span>
               </div>
               <div className="h-1.5 overflow-hidden rounded-full bg-black/30">

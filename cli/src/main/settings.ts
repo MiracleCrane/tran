@@ -11,7 +11,8 @@ import type {
   ComposerModel,
   ClaudeExecutionBackend,
   AgentBackendId,
-  TranslateEngine
+  TranslateEngine,
+  ThinkingTranslateEngine
 } from '../shared/ipc'
 import { AGENT_BACKEND_IDS } from '../shared/agentBackends'
 import { normalizeCwdForCompare } from '../shared/paths'
@@ -26,6 +27,7 @@ const PERMISSION_MODES = new Set<PermissionMode>([
 ])
 const CLAUDE_BACKENDS = new Set<ClaudeExecutionBackend>(['windows', 'wsl'])
 const TRANSLATE_ENGINES = new Set<TranslateEngine>(['llm', 'baidu'])
+const THINKING_TRANSLATE_ENGINES = new Set<ThinkingTranslateEngine>(['auto', 'llm', 'baidu'])
 
 interface PersistedSettings {
   /** Settings schema version for migrations/normalization. */
@@ -88,9 +90,15 @@ interface PersistedSettings {
    *  (default true). */
   nativeNotifications?: boolean
   /** --- Translate engine config (Translate panel) --- */
-  /** Which engine translateTexts() routes to.（思考块全文翻译也走这一个开关，
-   *  见 cheapNotes.translateThinking——2026-08 整合，不再有两个翻译开关。） */
+  /** 技能/插件描述翻译（translateTexts）走哪个引擎。
+   *
+   *  注意：思考块全文翻译**不再**跟这个开关走。曾经合并成一个（2026-08），但两者
+   *  取舍相反——描述是短句，机翻足够且免费；思考满篇路径/变量名/命令/报错原文，
+   *  机翻会把它们一并译坏。合并等于逼用户在「描述省钱」和「思考能读」之间二选一，
+   *  故拆回两个开关，见下面的 thinkingTranslateEngine。 */
   translateEngine?: TranslateEngine
+  /** 思考块全文翻译的引擎，独立于上面那个。缺省 'auto'：配了百度走百度，否则便宜模型。 */
+  thinkingTranslateEngine?: ThinkingTranslateEngine
   /** Baidu app id (non-secret). */
   baiduAppId?: string
   /** base64 of safeStorage-encrypted Baidu secret key. */
@@ -258,6 +266,11 @@ function normalizeSettings(raw: unknown): PersistedSettings {
     : undefined
   settings.translateEngine = TRANSLATE_ENGINES.has(source.translateEngine as TranslateEngine)
     ? source.translateEngine as TranslateEngine
+    : undefined
+  settings.thinkingTranslateEngine = THINKING_TRANSLATE_ENGINES.has(
+    source.thinkingTranslateEngine as ThinkingTranslateEngine
+  )
+    ? (source.thinkingTranslateEngine as ThinkingTranslateEngine)
     : undefined
 
   settings.wslSupportEnabled = optionalBoolean(source.wslSupportEnabled)
