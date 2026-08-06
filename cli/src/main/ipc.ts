@@ -5,7 +5,18 @@ import { basename, extname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AgentBridge } from './agent/AgentBridge'
 import { AGENT_BACKENDS } from '../shared/agentBackends'
-import { getApiKey, setApiKey, getDeepseekApiKey, setDeepseekApiKey, loadSettings, saveSettings } from './settings'
+import {
+  getApiKey,
+  setApiKey,
+  getDeepseekApiKey,
+  setDeepseekApiKey,
+  loadSettings,
+  saveSettings,
+  listSummaryProfiles,
+  upsertSummaryProfile,
+  deleteSummaryProfile,
+  setActiveSummaryProfile
+} from './settings'
 import { saveMcpServer, deleteMcpServer } from './mcpConfig'
 import {
   listProviders,
@@ -103,7 +114,8 @@ import type {
   PromptDiagnosis,
   SessionTodosResult,
   PlanUsageResult,
-  DeepseekBalanceResult
+  DeepseekBalanceResult,
+  SummaryProfile
 } from '../shared/ipc'
 
 /** DeepSeek key 状态回传：完整明文不出主进程，只给掩码（对齐 forge:getApiKey）。 */
@@ -1134,6 +1146,15 @@ export function registerIpc(
   ipcMain.handle('forge:setApiKey', async (_e, key: string): Promise<void> => {
     setApiKey(key)
   })
+
+  // ---- 摘要 API 多套配置（换服务商不再覆盖旧的，见 settings.ts）----
+  ipcMain.handle('forge:listSummaryProfiles', async () => listSummaryProfiles())
+  ipcMain.handle(
+    'forge:upsertSummaryProfile',
+    async (_e, profile: SummaryProfile, key?: string | null) => upsertSummaryProfile(profile, key)
+  )
+  ipcMain.handle('forge:deleteSummaryProfile', async (_e, id: string) => deleteSummaryProfile(id))
+  ipcMain.handle('forge:setActiveSummaryProfile', async (_e, id: string) => setActiveSummaryProfile(id))
 
   ipcMain.handle(
     'forge:respondPermission',

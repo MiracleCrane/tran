@@ -160,6 +160,10 @@ const api: ForgeApi = {
   pickDirectory: (options) => ipcRenderer.invoke('forge:pickDirectory', options),
   getApiKey: () => ipcRenderer.invoke('forge:getApiKey'),
   setApiKey: (key) => ipcRenderer.invoke('forge:setApiKey', key),
+  listSummaryProfiles: () => ipcRenderer.invoke('forge:listSummaryProfiles'),
+  upsertSummaryProfile: (profile, key) => ipcRenderer.invoke('forge:upsertSummaryProfile', profile, key),
+  deleteSummaryProfile: (id) => ipcRenderer.invoke('forge:deleteSummaryProfile', id),
+  setActiveSummaryProfile: (id) => ipcRenderer.invoke('forge:setActiveSummaryProfile', id),
 
   respondPermission: (resp) => ipcRenderer.invoke('forge:respondPermission', resp),
 

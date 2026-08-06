@@ -630,18 +630,56 @@ const ThinkingBlock = memo(function ThinkingBlock({
  *  compare can short-circuit: the forest node is rebuilt every frame, but the
  *  underlying item keeps its reference when unchanged. */
 /** 完成轮活动摘要里工具名 → 中文动作（纯规则统计，不调 API）。 */
+/** 「回到最新」按钮：自己订阅 running——主组件刻意不订阅它（turn 起止会
+ *  引发全列表重渲染，见 Transcript 顶部注释），按钮独立重渲染代价为零。 */
+const LatestButton = memo(function LatestButton({
+  onJump
+}: {
+  onJump: (behavior: 'auto' | 'smooth') => void
+}): JSX.Element {
+  const running = useSessionStore((s) => s.status.running)
+  return (
+    <div className="group/latest absolute bottom-4 left-1/2 -translate-x-1/2" data-follow-no-lock>
+      <button
+        onClick={() => onJump(running ? 'auto' : 'smooth')}
+        title="回到最新"
+        aria-label="回到最新"
+        className="glass-control flex h-8 items-center gap-1 rounded-full px-2.5 text-xs text-zinc-400 transition hover:text-zinc-200"
+      >
+        <span aria-hidden className={`leading-none ${running ? 'flow-text flow-text-violet' : ''}`}>↓</span>
+        <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-150 group-hover/latest:max-w-[2.5rem] group-hover/latest:opacity-100">
+          最新
+        </span>
+      </button>
+    </div>
+  )
+})
+
+/** 完成轮活动摘要里工具名 → 中文动作（纯规则统计，不调 API）。
+ *  覆盖两套命名：渲染层规范名（Bash/Read…）和 wire 原始名（terminal/read_file…）
+ *  ——后者漏配会直接露出「使用了 read_file」这种中英混排（2026-08 用户反馈丑）。 */
 const TOOL_ACTIVITY_LABEL: Record<string, string> = {
   Bash: '运行了命令',
+  terminal: '运行了命令',
   Edit: '编辑了文件',
+  patch: '编辑了文件',
+  edit_file: '编辑了文件',
   Write: '创建了文件',
+  write_file: '创建了文件',
   Read: '读取了文件',
+  read_file: '读取了文件',
   Glob: '查找了文件',
   Grep: '搜索了内容',
+  search: '搜索了内容',
   Agent: '派发了子代理',
   AgentSwarm: '派发了子代理',
+  Task: '派发了子代理',
   WebSearch: '搜索了网页',
+  web_search: '搜索了网页',
   FetchURL: '抓取了网页',
-  TodoList: '更新了待办'
+  WebFetch: '抓取了网页',
+  TodoList: '更新了待办',
+  todo_list: '更新了待办'
 }
 
 interface ActivityEntry {
@@ -1476,6 +1514,9 @@ export default function Transcript({
     <div
       className="relative h-full"
       onPointerDownCapture={(event) => {
+        // 「回到最新」按钮自身不该触发跟随锁（2026-08 bug：点它时先吃了
+        // lockFollowOutput，流式期间被锁在半路，怎么点都滑不到真底）。
+        if ((event.target as HTMLElement).closest?.('[data-follow-no-lock]')) return
         lockFollowOutput()
         markScrollIntent()
         // #8b 聚焦意图：点击某个 bar（展开思考/工具卡、选中文本）即视为停下
@@ -1567,24 +1608,11 @@ export default function Transcript({
         context={footerContext}
       />
       <UserMessageNav entries={userNavEntries} activeId={activeUserNavId} onJump={jumpToUserMessage} />
-      {/* 回到最新：挪到右下角并收成圆形图标。原先是 `bottom-4 left-1/2` 的
-          胶囊按钮——正悬在阅读列的正下方，一往上滚就挡住最后一两行正文，而这
-          恰恰是你往回翻时想看的内容。右下角既在导航条（right-2 top-1/2，
-          max-h-50vh，够不到底部）之外，也不压正文。hover 才展开"最新"二字。 */}
+      {/* 回到最新：底部居中（Codex 风，2026-08 用户点名）。输出中箭头挂
+          紫黄流光（动态=正在干活），非输出静态箭头。按钮带 data-follow-no-lock：
+          点它不吃 pointerdown 的跟随锁，否则流式期间永远差一截到不了底。 */}
       {!layoutTransitioning && !atBottom && (
-        <div className="group/latest absolute bottom-4 right-4">
-          <button
-            onClick={() => pinToBottom('smooth')}
-            title="回到最新"
-            aria-label="回到最新"
-            className="glass-control flex h-8 items-center gap-1 rounded-full px-2.5 text-xs text-zinc-400 transition hover:text-zinc-200"
-          >
-            <span aria-hidden className="leading-none">↓</span>
-            <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-150 group-hover/latest:max-w-[2.5rem] group-hover/latest:opacity-100">
-              最新
-            </span>
-          </button>
-        </div>
+        <LatestButton onJump={pinToBottom} />
       )}
     </div>
   )

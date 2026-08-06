@@ -3,7 +3,9 @@ export const FORGE_RENDERER_EVENTS = {
   closePrefsChanged: 'forge:close-prefs-changed',
   modelOptionsChanged: 'forge:model-options-changed',
   providerChanged: 'forge:provider-changed',
-  wslSupportChanged: 'forge:wsl-support-changed'
+  wslSupportChanged: 'forge:wsl-support-changed',
+  /** 打开会话搜索面板（侧栏搜索图标 / Ctrl+K → SessionSearchPalette）。 */
+  openSessionSearch: 'forge:open-session-search'
 } as const
 
 export type ForgeRendererEventKey = keyof typeof FORGE_RENDERER_EVENTS

@@ -9,7 +9,7 @@ import ProjectSwitcher from './ProjectSwitcher'
 import type { ClaudeExecutionBackend, SessionListItem, SessionPreview } from '../../shared/ipc'
 import { normalizeCwdForCompare } from '../../shared/paths'
 import { relTime } from '../utils/format'
-import { onForgeEvent } from '../events'
+import { onForgeEvent, emitForgeEvent } from '../events'
 
 type SessionGroupMode = 'time' | 'project'
 type SessionListTransitionPhase = 'idle' | 'exiting' | 'loading' | 'entering'
@@ -150,6 +150,12 @@ const PlusIcon = (): JSX.Element => (
     <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
   </svg>
 )
+const SearchIcon = (): JSX.Element => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+    <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
+    <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+  </svg>
+)
 const EditIcon = (): JSX.Element => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
     <path
@@ -278,7 +284,7 @@ const LanguageIcon = (): JSX.Element => (
  *  接入 kimi 对应能力后再恢复。 */
 const NAV_ITEMS: { view: View; label: string; icon: () => JSX.Element }[] = [
   { view: 'skills', label: '技能', icon: SkillsIcon },
-  { view: 'translate', label: '翻译', icon: LanguageIcon },
+  { view: 'translate', label: 'AI 辅助', icon: LanguageIcon },
   { view: 'settings', label: '设置', icon: GearIcon },
   { view: 'help', label: '说明', icon: HelpIcon }
 ]
@@ -319,7 +325,6 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
-  const [sessionSearch, setSessionSearch] = useState('')
   const [groupMode, setGroupMode] = useState<SessionGroupMode>('time')
   /** 「全部」视图里被折叠的 cwd 组（label = 完整路径）。 */
   const [collapsedGroupLabels, setCollapsedGroupLabels] = useState<Set<string>>(() => new Set())
@@ -932,21 +937,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   }, [meta?.cwd, view])
 
   const filteredSessions = useMemo(() => {
-    const q = sessionSearch.trim().toLowerCase()
+    // 关键词搜索已挪进 SessionSearchPalette（Ctrl+K / 搜索图标），列表本身
+    // 不再做行内过滤，只保留 WSL 后端可见性这一层。
     return sessions
       .filter((session) => {
         if (!wslSupportEnabled && (session.runtimeBackend ?? 'windows') === 'wsl') return false
-        if (!q) return true
-        const haystack = [
-          session.summary,
-          session.cwd,
-          session.gitBranch,
-          session.runtimeBackend
-        ]
-          .filter(Boolean)
-          .join('\n')
-          .toLowerCase()
-        return haystack.includes(q)
+        return true
       })
       .slice()
       .sort((a, b) => {
@@ -960,7 +956,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
           BACKEND_SORT_ORDER[b.runtimeBackend ?? 'windows']
         )
       })
-  }, [pinnedSessionKeys, sessionSearch, sessions, wslSupportEnabled])
+  }, [pinnedSessionKeys, sessions, wslSupportEnabled])
 
   // 显示顺序在本次挂载期间保持稳定。
   // 上面那个排序按 lastModified 倒序——而**打开一个会话就会刷新它的 mtime**，
@@ -1159,7 +1155,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             void newChat()
             setView('chat')
           }}
-          className="accent-soft-button mt-2 flex h-9 w-9 items-center justify-center rounded-full text-white transition hover:brightness-110"
+          className="mt-2 flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200"
           title="新建对话"
         >
           <PlusIcon />
@@ -1288,10 +1284,13 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
 
   return (
     <div key="sidebar-expanded" className="sidebar-expand glass-sidebar flex h-full min-h-0 w-64 shrink-0 flex-col rounded-[18px] border">
-      {/* brand + collapse */}
+      {/* brand + collapse（全窗口唯一品牌位，标题栏不再重复；文字挂常静流光，
+          2026-08 用户点名要的动效） */}
       <div className="flex items-center gap-2 px-4 pt-3">
         <AppLogo size={30} className="shrink-0" />
-        <div className="text-brand-gradient flex-1 text-sm font-semibold">Tran</div>
+        <div className="flex-1 text-sm font-semibold">
+          <span className="flow-text flow-text-violet">Tran</span>
+        </div>
         <button
           onClick={handleToggleSidebar}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
@@ -1325,6 +1324,13 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
           最近会话
         </span>
         <span className="flex items-center gap-1">
+          <button
+            onClick={() => emitForgeEvent('openSessionSearch')}
+            className="flex h-5 w-5 items-center justify-center rounded-md text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
+            title="搜索会话（Ctrl+K）"
+          >
+            <SearchIcon />
+          </button>
           <button
             onClick={() => setGroupMode((mode) => (mode === 'time' ? 'project' : 'time'))}
             className="rounded-md px-1.5 py-0.5 text-[10px] text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
@@ -1405,13 +1411,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               </button>
             ))}
           </div>
-          <input
-            value={sessionSearch}
-            onChange={(event) => setSessionSearch(event.target.value)}
-            placeholder="搜索会话"
-            className="h-8 w-full rounded-lg border border-white/[0.08] bg-bg-elev/60 px-2.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-accent/60"
-          />
-          {/* 分组切换（按时间/按项目）挪到上面的「最近会话」标题行了。 */}
+          {/* 搜索已挪进 Codex 风命令面板（「最近会话」行的 🔍 图标 / Ctrl+K），
+              不再常驻一个输入框占一整行（2026-08 用户：搜索框太大了）。 */}
         </div>
 
         {/* grouped sessions */}

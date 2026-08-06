@@ -478,6 +478,27 @@ export interface SettingsBackup {
 
 /** Which engine translateTexts() routes to. 'llm' = active provider's
  *  /v1/messages; 'baidu' = Baidu generic-translate API (avoids model rate limits). */
+/**
+ * 一套摘要 / 命名 API 配置（会话命名、命令说明、思考摘要、模型翻译共用）。
+ *
+ * 做成**列表 + 一个激活**而不是单份配置：换服务商时旧的 baseUrl/型号/Key 会被
+ * 直接覆盖，想换回去得重新找 Key 重填一遍。用户在 DeepSeek 与智谱之间来回比较
+ * 时这个代价很实在。与主 Agent 的 providers 是同一个模式。
+ *
+ * key 不随该结构下发到渲染层——只回掩码（keyMasked），明文仅在保存时单向传入，
+ * 落盘走 safeStorage 加密。与 getApiKey 的既有约定一致。
+ */
+export interface SummaryProfile {
+  id: string
+  /** 展示名，用户可改（"DeepSeek"、"智谱免费"…）。 */
+  name: string
+  baseUrl: string
+  /** 空 = 用该服务的默认型号。 */
+  model: string
+  /** 只读回显，形如 `sk-…abcd`；未配置时为空。 */
+  keyMasked?: string
+}
+
 export type TranslateEngine = 'llm' | 'baidu'
 
 /**
@@ -488,10 +509,18 @@ export type TranslateEngine = 'llm' | 'baidu'
  * 了、把 `--force-with-lease` 拆开。共用一个开关等于逼用户在「描述省钱」和
  * 「思考能读」之间二选一。
  *
- * 'auto'（默认）：配了百度密钥就走百度（免费额度内不花钱），没配则回落到摘要旁路
- * 的便宜模型——既不让没配百度的人突然失去翻译，也不默认去烧钱。
+ * 取值：
+ * - `'follow'`（**默认**）：跟随上面那个 translateEngine，不单独配置。绝大多数
+ *   人不需要两套——尤其接入 GLM-4.7-Flash 之后，它免费且两类任务都做得好，
+ *   "描述省钱 vs 思考能读"的矛盾本来就不存在了。
+ * - `'auto'`：配了百度密钥走百度（免费），否则回落到摘要旁路的便宜模型。
+ * - `'llm'` / `'baidu'`：显式指定，不受上面那个开关影响。
+ *
+ * 保留可单独指定，是因为两者的取舍**可能**相反：思考过程满篇路径、变量名、命令
+ * 与报错原文，通用机翻会一并译坏；而技能描述是短句，机翻足够。默认合并、需要时
+ * 能拆开，比强制二选一好。
  */
-export type ThinkingTranslateEngine = 'auto' | 'llm' | 'baidu'
+export type ThinkingTranslateEngine = 'follow' | 'auto' | 'llm' | 'baidu'
 
 /** Baidu translate credentials. appId is non-secret; secretKey is the API key
  *  (encrypted at rest via safeStorage, returned plaintext to the renderer for
@@ -867,6 +896,14 @@ export interface ForgeApi {
   /** 摘要 API Key 只回传掩码形态（前 4 后 4 + ***），完整明文不出主进程；
    *  configured 用于设置页判断「是否已配置」。 */
   getApiKey(): Promise<{ configured: boolean; masked: string | null }>
+  listSummaryProfiles(): Promise<{ profiles: SummaryProfile[]; activeId: string | null }>
+  /** key 传 undefined = 保留原有；传空串 = 清除。 */
+  upsertSummaryProfile(
+    profile: SummaryProfile,
+    key?: string | null
+  ): Promise<{ profiles: SummaryProfile[]; activeId: string | null }>
+  deleteSummaryProfile(id: string): Promise<{ profiles: SummaryProfile[]; activeId: string | null }>
+  setActiveSummaryProfile(id: string): Promise<{ profiles: SummaryProfile[]; activeId: string | null }>
   setApiKey(key: string): Promise<void>
 
   respondPermission(resp: PermissionResponsePayload): Promise<void>

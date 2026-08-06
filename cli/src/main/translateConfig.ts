@@ -9,7 +9,7 @@ export function getTranslateConfig(): TranslateConfig {
   const s = loadSettings()
   return {
     engine: s.translateEngine ?? 'llm',
-    thinkingEngine: s.thinkingTranslateEngine ?? 'auto',
+    thinkingEngine: s.thinkingTranslateEngine ?? 'follow',
     baidu: {
       appId: s.baiduAppId ?? '',
       secretKey: getBaiduSecret() ?? ''
@@ -42,9 +42,9 @@ export function getTranslateEngine(): TranslateConfig['engine'] {
   return loadSettings().translateEngine ?? 'llm'
 }
 
-/** 用户在设置里选的思考翻译引擎（未选过 = 'auto'）。 */
+/** 用户在设置里选的思考翻译引擎（未选过 = 'follow'，即跟随描述翻译）。 */
 export function getThinkingTranslateEngine(): ThinkingTranslateEngine {
-  return loadSettings().thinkingTranslateEngine ?? 'auto'
+  return loadSettings().thinkingTranslateEngine ?? 'follow'
 }
 
 /**
@@ -59,6 +59,8 @@ export function getThinkingTranslateEngine(): ThinkingTranslateEngine {
  */
 export function resolveThinkingTranslateEngine(): TranslateEngine {
   const choice = getThinkingTranslateEngine()
+  // follow = 用技能描述翻译那一个开关，默认就是它：两套引擎多数人不需要。
+  if (choice === 'follow') return getTranslateEngine()
   if (choice === 'auto') return getBaiduCreds() ? 'baidu' : 'llm'
   return choice
 }

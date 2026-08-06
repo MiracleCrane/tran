@@ -1,5 +1,5 @@
 import { log } from './logger'
-import { getApiKey, loadSettings } from './settings'
+import { getApiKey, getActiveSummaryProfile, loadSettings } from './settings'
 
 /**
  * 轻量摘要旁路：会话命名、命令说明、思考摘要和翻译通过用户配置的
@@ -23,13 +23,18 @@ const REQUEST_TIMEOUT_MS = 20000
 /** 探测用更短的超时：连不上就别让用户对着转圈等。 */
 const PROBE_TIMEOUT_MS = 8000
 
-/** 设置里选的型号；没选或选了空串一律回落默认值。 */
+/** 型号：优先取激活的那套配置，其次旧的单份字段，最后默认值。 */
 export function cheapModelId(): string {
+  const fromProfile = getActiveSummaryProfile()?.model
+  if (fromProfile && fromProfile.trim()) return fromProfile.trim()
   const configured = loadSettings().summaryModel
   return typeof configured === 'string' && configured.trim() ? configured.trim() : DEFAULT_CHEAP_MODEL
 }
 
+/** 同上：多套配置取代了单份 summaryApiBaseUrl，旧字段仅作回退。 */
 function summaryApiBaseUrl(): string {
+  const fromProfile = getActiveSummaryProfile()?.baseUrl
+  if (fromProfile && fromProfile.trim()) return fromProfile.trim().replace(/\/+$/, '')
   const configured = loadSettings().summaryApiBaseUrl
   return typeof configured === 'string' && configured.trim()
     ? configured.trim().replace(/\/+$/, '')
@@ -83,20 +88,82 @@ export type CheapCallResult =
   | { ok: false; error: string; status?: number }
 
 /**
+ * 限流退避与串行化。
+ *
+ * 为什么必须有：免费档的模型（智谱 GLM-4.7-Flash 等）并发限 1 QPS，而且平台侧
+ * 经常整体拥塞——2026-08 实测跑 12 条命令说明就撞了 6 次
+ * `429 / code 1305 该模型当前访问量过大`，间隔已经放到 1.5 秒。而 Tran 的调用
+ * 模式恰恰是**突发并发**：一轮结束后一屏冒出五六个工具卡，explainCommand 会
+ * 同时打五六发（inflight 去重只挡得住同一条命令）。
+ *
+ * 不做的话表现是"命令说明时有时无"——因为这条旁路的失败策略是静默回退。
+ *
+ * 设计上刻意不给所有请求无条件加间隔：DeepSeek 那种不限流的服务不该被拖慢。
+ * 只有**真的撞过 429 之后**才进入冷却期并拉开间距，一段时间不再撞就自动恢复。
+ */
+const RATE_LIMIT_MAX_RETRIES = 4
+const RATE_LIMIT_BASE_DELAY_MS = 1500
+/** 撞限流后，后续请求之间强制拉开的最小间距。 */
+const COOLDOWN_SPACING_MS = 1200
+/** 冷却期长度：这段时间内没再撞限流就恢复全速。 */
+const COOLDOWN_WINDOW_MS = 60_000
+
+let queueTail: Promise<unknown> = Promise.resolve()
+let lastRequestAt = 0
+let cooldownUntil = 0
+
+function isRateLimited(status: number | undefined, detail: string): boolean {
+  // 429 是标准；智谱用 HTTP 200 + body 里的 code 1305，光看状态码会漏。
+  return status === 429 || /\b1305\b|too many requests|rate limit|访问量过大/i.test(detail)
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** 串行执行 + 冷却期内拉开间距。所有出网请求都必须经过这里。 */
+async function enqueue<T>(task: () => Promise<T>): Promise<T> {
+  const run = queueTail.then(async () => {
+    if (Date.now() < cooldownUntil) {
+      const wait = lastRequestAt + COOLDOWN_SPACING_MS - Date.now()
+      if (wait > 0) await sleep(wait)
+    }
+    lastRequestAt = Date.now()
+    return task()
+  })
+  // 队尾始终推进，且吞掉异常——否则一次失败会让整条链后续全部拒绝。
+  queueTail = run.then(
+    () => undefined,
+    () => undefined
+  )
+  return run
+}
+
+/**
  * 打一次小请求。thinking 关闭是关键——总结任务开思考纯烧额度还慢。
  *
- * 失败一律不重试，只有一个例外：服务不接受 temperature（见 SUMMARY_TEMPERATURE）。
+ * 两种重试，触发条件完全不同：
+ * - **服务不接受 temperature**：确定性的配置冲突，去掉参数重打一次必然有结果。
+ * - **限流**：指数退避重试。这是唯一值得重打的"云端抖动"，因为免费档撞限流是
+ *   常态而非异常；其余失败（型号不认、额度用尽、网络断）一律不重试——这些功能
+ *   全是"有则更好"，盲目重试只会在故障时把请求量翻倍。
  */
 export async function cheapComplete(opts: CheapCallOptions): Promise<CheapCallResult> {
-  const first = await cheapCompleteOnce(opts, true)
-  // 只有"这个服务不接受 temperature"这一种情况值得重打：它是确定性的配置
-  // 冲突，不是云端抖动，去掉再打必然是同一个结果。其余失败一律不重试
-  // （这些功能全是"有则更好"，重试只会在抖动时把额度翻倍）。
-  if (!first.ok && rejectedForTemperature(first.status, first.error)) {
-    log('cheap-model', '服务不接受 temperature，去掉重试一次')
-    return cheapCompleteOnce(opts, false)
+  let result = await enqueue(() => cheapCompleteOnce(opts, true))
+
+  for (let attempt = 0; attempt < RATE_LIMIT_MAX_RETRIES; attempt++) {
+    if (result.ok || !isRateLimited(result.status, result.error)) break
+    // 撞了就进冷却：后续请求（含本次重试）自动拉开间距。
+    cooldownUntil = Date.now() + COOLDOWN_WINDOW_MS
+    const delay = RATE_LIMIT_BASE_DELAY_MS * 2 ** attempt
+    log('cheap-model', `限流，${delay}ms 后重试（第 ${attempt + 1}/${RATE_LIMIT_MAX_RETRIES} 次）`)
+    await sleep(delay)
+    result = await enqueue(() => cheapCompleteOnce(opts, true))
   }
-  return first
+
+  if (!result.ok && rejectedForTemperature(result.status, result.error)) {
+    log('cheap-model', '服务不接受 temperature，去掉重试一次')
+    return enqueue(() => cheapCompleteOnce(opts, false))
+  }
+  return result
 }
 
 async function cheapCompleteOnce(
@@ -116,7 +183,17 @@ async function cheapCompleteOnce(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? REQUEST_TIMEOUT_MS)
   const baseUrl = summaryApiBaseUrl()
-  const isDeepSeek = /^https:\/\/api\.deepseek\.com(?:\/|$)/i.test(baseUrl)
+  /**
+   * 需要显式关思考的服务。
+   *
+   * 原先只认 DeepSeek。接入智谱后实测发现：GLM-4.7-Flash 是**混合思考模型**，
+   * 不传这个参数时推理会把 max_tokens 全吃光，`content` 返回空串而
+   * `reasoning_content` 有内容——表现是"模型什么都不回"，极难排查。
+   * 命令说明这类任务 max_tokens 只有几十，必然踩中。
+   */
+  const disableThinking =
+    /^https:\/\/api\.deepseek\.com(?:\/|$)/i.test(baseUrl) ||
+    /(?:^|\.)bigmodel\.cn|(?:^|\.)z\.ai/i.test(baseUrl)
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
@@ -125,7 +202,7 @@ async function cheapCompleteOnce(
         model,
         max_tokens: opts.maxTokens ?? 50,
         ...(withTemperature ? { temperature: SUMMARY_TEMPERATURE } : {}),
-        ...(isDeepSeek ? { thinking: { type: 'disabled' } } : {}),
+        ...(disableThinking ? { thinking: { type: 'disabled' } } : {}),
         ...(opts.stop?.length ? { stop: opts.stop } : {}),
         messages
       }),
@@ -148,10 +225,31 @@ async function cheapCompleteOnce(
       }
     }
     const json = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>
+      choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>
+      error?: { code?: unknown; message?: unknown }
     }
-    const text = json.choices?.[0]?.message?.content
+    const message = json.choices?.[0]?.message
+    const text = message?.content
     if (typeof text !== 'string' || !text.trim()) {
+      /**
+       * 空 content 有两种成因，必须在错误信息里区分开，否则上层无从判断。
+       *
+       * 1. **限流**：智谱不是回 429，而是 **HTTP 200 + body 里 `code:1305`**。
+       *    走到这里 response.ok 是真，只是没有 content。若只写"返回内容为空"，
+       *    1305 就丢了，cheapComplete 的限流重试永远触发不到。
+       * 2. **思考吃光了预算**：混合思考模型没关 thinking 时，推理占满 max_tokens，
+       *    content 空而 reasoning_content 有内容。把长度带出来，排查时一眼可辨
+       *    （否则只能看到"模型什么都不回"）。
+       */
+      const apiCode = json.error?.code
+      const apiMessage = json.error?.message
+      if (apiCode !== undefined || apiMessage !== undefined) {
+        return { ok: false, error: `${String(apiCode ?? '')}: ${String(apiMessage ?? '')}`.trim() }
+      }
+      const reasoning = message?.reasoning_content
+      if (typeof reasoning === 'string' && reasoning.length > 0) {
+        return { ok: false, error: `返回内容为空（推理占满预算，reasoning ${reasoning.length} 字符）` }
+      }
       return { ok: false, error: '返回内容为空' }
     }
     return { ok: true, text }

@@ -238,20 +238,15 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
         {projects.length === 0 && (
           <div className="px-3 py-2 text-xs text-zinc-600">还没有项目</div>
         )}
-        {projects.map((p, i) => {
+        {projects.map((p) => {
           const isCurrent = currentCwd !== null && normalizeCwdForCompare(p.path) === currentCwd
           const editing = editingPath === p.path
           const confirming = confirmPath === p.path
           return (
-            <div
-              key={p.path}
-              className="group relative transition-all duration-[360ms] ease-spring"
-              style={{
-                transitionDelay: open ? `${i * 40}ms` : '0ms',
-                opacity: open ? 1 : 0,
-                transform: open ? 'translateY(0)' : 'translateY(-6px)'
-              }}
-            >
+            // 2026-08：删掉逐行 stagger 级联。逐行延迟淡入会让每一项的截断宽度
+            // 在动画期间反复变化（用户截图反馈"点开之后内容一直在变"），
+            // 开合动画交给外层 Collapse 一次做完，行内容进来就是定稿。
+            <div key={p.path} className="group relative">
               {editing ? (
                 <input
                   autoFocus
@@ -345,14 +340,9 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
       </div>
       <div className="mt-0.5 border-t border-white/[0.06] pt-0.5">
         <div
-          style={{
-            transitionDelay: open ? `${projects.length * 40}ms` : '0ms',
-            opacity: open ? 1 : 0,
-            transform: open ? 'translateY(0)' : 'translateY(-6px)'
-          }}
           className={`grid ${
             wslSupportEnabled ? 'grid-cols-2' : 'grid-cols-1'
-          } gap-1.5 transition-all duration-[360ms] ease-spring`}
+          } gap-1.5`}
         >
           {addProjectBackends.map((item) => (
             <button

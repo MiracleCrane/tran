@@ -137,6 +137,16 @@ export default function SidebarShell(): JSX.Element {
           }
         : {})}
     >
+      {/* 悬停触发区加宽（2026-08 用户反馈"只有最左上一点能触发"）：dock 与主区
+          之间本就有 16px 死沟（.main-surface 的 margin-left），把它并进触发区。
+          条带位于图标层之上会吞掉图标点击，所以只铺沟、不盖图标条本体。 */}
+      {peekOn && (
+        <div
+          className="absolute bottom-0 left-full top-0 w-4"
+          onPointerEnter={() => schedulePeek(true)}
+          onPointerLeave={() => schedulePeek(false)}
+        />
+      )}
       {/* 图标条始终挂着：它决定在流的那一列有多宽，卸载会让 Sidebar 每次悬停
           都重建、内部状态全丢。但浮出时必须**隐形**——浮层用的是半透明玻璃底，
           图标条会从底下透上来，两层图标叠在一起（用户反馈的"缩略视图还在"）。

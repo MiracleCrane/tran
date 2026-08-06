@@ -12,7 +12,8 @@ import type {
   ClaudeExecutionBackend,
   AgentBackendId,
   TranslateEngine,
-  ThinkingTranslateEngine
+  ThinkingTranslateEngine,
+  SummaryProfile
 } from '../shared/ipc'
 import { AGENT_BACKEND_IDS } from '../shared/agentBackends'
 import { normalizeCwdForCompare } from '../shared/paths'
@@ -27,7 +28,19 @@ const PERMISSION_MODES = new Set<PermissionMode>([
 ])
 const CLAUDE_BACKENDS = new Set<ClaudeExecutionBackend>(['windows', 'wsl'])
 const TRANSLATE_ENGINES = new Set<TranslateEngine>(['llm', 'baidu'])
-const THINKING_TRANSLATE_ENGINES = new Set<ThinkingTranslateEngine>(['auto', 'llm', 'baidu'])
+const THINKING_TRANSLATE_ENGINES = new Set<ThinkingTranslateEngine>(['follow', 'auto', 'llm', 'baidu'])
+
+/** 落盘形态：key 逐条加密，与顶层 apiKeyEnc/apiKeyPlain 同一套约定。 */
+interface StoredSummaryProfile {
+  id: string
+  name: string
+  baseUrl: string
+  model?: string
+  /** base64 of safeStorage-encrypted key */
+  keyEnc?: string
+  /** plaintext fallback when safeStorage is unavailable */
+  keyPlain?: string
+}
 
 interface PersistedSettings {
   /** Settings schema version for migrations/normalization. */
@@ -84,20 +97,25 @@ interface PersistedSettings {
   /** 总结类杂活（会话命名、命令说明、思考摘要…）用的型号。空 = 用
    *  cheapModel.DEFAULT_CHEAP_MODEL。别写死猜测的型号——设置页有探测按钮。 */
   summaryModel?: string
-  /** 总结类请求使用的 OpenAI 兼容 API 根地址。 */
+  /** 总结类请求使用的 OpenAI 兼容 API 根地址。
+   *  **旧字段**：已被 summaryProfiles 取代，仅用于首次启动时迁移出第一条配置。 */
   summaryApiBaseUrl?: string
+  /** 多套摘要 API 配置（见 shared/ipc 的 SummaryProfile）。换服务商不再覆盖旧的。 */
+  summaryProfiles?: StoredSummaryProfile[]
+  /** 当前激活的那套；指向不存在的 id 时回落到第一条。 */
+  activeSummaryProfileId?: string
   /** Show OS native notifications when a session ends while window is inactive
    *  (default true). */
   nativeNotifications?: boolean
   /** --- Translate engine config (Translate panel) --- */
-  /** 技能/插件描述翻译（translateTexts）走哪个引擎。
+  /** 翻译引擎（技能/插件描述；思考块默认也跟随它）。
    *
-   *  注意：思考块全文翻译**不再**跟这个开关走。曾经合并成一个（2026-08），但两者
-   *  取舍相反——描述是短句，机翻足够且免费；思考满篇路径/变量名/命令/报错原文，
-   *  机翻会把它们一并译坏。合并等于逼用户在「描述省钱」和「思考能读」之间二选一，
-   *  故拆回两个开关，见下面的 thinkingTranslateEngine。 */
+   *  思考块可以单独指定（见下面的 thinkingTranslateEngine），但**默认跟随这一个**。
+   *  曾经强制拆成两个开关，理由是取舍相反——描述是短句机翻够用，思考满篇路径/
+   *  变量名/命令/报错原文会被机翻译坏。接入 GLM-4.7-Flash 之后这个矛盾消失了：
+   *  它免费且两类都做得好，多数人不需要配两套。所以改成"默认合并、需要时可拆"。 */
   translateEngine?: TranslateEngine
-  /** 思考块全文翻译的引擎，独立于上面那个。缺省 'auto'：配了百度走百度，否则便宜模型。 */
+  /** 思考块全文翻译的引擎。缺省 'follow' = 跟随上面的 translateEngine，不单独配置。 */
   thinkingTranslateEngine?: ThinkingTranslateEngine
   /** Baidu app id (non-secret). */
   baiduAppId?: string
@@ -174,6 +192,39 @@ function normalizeActiveProviderId(value: unknown, providers?: Provider[]): stri
   if (typeof value !== 'string') return undefined
   if (!providers || providers.some((provider) => provider.id === value)) return value
   return providers[0]?.id ?? null
+}
+
+function normalizeSummaryProfile(value: unknown): StoredSummaryProfile | null {
+  const raw = asRecord(value)
+  if (!raw) return null
+  const id = optionalString(raw.id)?.trim()
+  const baseUrl = optionalString(raw.baseUrl)?.trim()
+  if (!id || !baseUrl) return null
+  const out: StoredSummaryProfile = {
+    id,
+    name: optionalString(raw.name)?.trim() || baseUrl,
+    baseUrl
+  }
+  const model = optionalString(raw.model)?.trim()
+  if (model) out.model = model
+  const keyEnc = optionalString(raw.keyEnc)
+  const keyPlain = optionalString(raw.keyPlain)
+  if (keyEnc) out.keyEnc = keyEnc
+  else if (keyPlain) out.keyPlain = keyPlain
+  return out
+}
+
+function normalizeSummaryProfiles(value: unknown): StoredSummaryProfile[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const seen = new Set<string>()
+  const out: StoredSummaryProfile[] = []
+  for (const item of value) {
+    const p = normalizeSummaryProfile(item)
+    if (!p || seen.has(p.id)) continue
+    seen.add(p.id)
+    out.push(p)
+  }
+  return out
 }
 
 function normalizeProject(value: unknown): Project | null {
@@ -283,6 +334,8 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.autoTodoNudge = optionalBoolean(source.autoTodoNudge)
   settings.summaryModel = optionalString(source.summaryModel)
   settings.summaryApiBaseUrl = optionalString(source.summaryApiBaseUrl)
+  settings.summaryProfiles = normalizeSummaryProfiles(source.summaryProfiles)
+  settings.activeSummaryProfileId = optionalString(source.activeSummaryProfileId)
   settings.nativeNotifications = optionalBoolean(source.nativeNotifications)
 
   settings.composerModels = normalizeComposerModels(source.composerModels)
@@ -390,7 +443,126 @@ export function replaceSettingsSnapshot(snapshot: Record<string, unknown>): void
   save({ ...snapshot } as PersistedSettings)
 }
 
+const DEFAULT_SUMMARY_BASE_URL = 'https://api.deepseek.com'
+
+function decryptProfileKey(p: StoredSummaryProfile): string | null {
+  if (p.keyEnc && safeStorage.isEncryptionAvailable()) {
+    try {
+      return safeStorage.decryptString(Buffer.from(p.keyEnc, 'base64'))
+    } catch {
+      return null
+    }
+  }
+  return p.keyPlain ?? null
+}
+
+/**
+ * 读出全部配置；首次运行时从**旧的单份配置**迁移出第一条。
+ *
+ * 迁移刻意不删旧字段：万一用户回退到旧版本，那边还得靠 summaryApiBaseUrl /
+ * apiKeyEnc 工作。多留几个字节换一条退路。
+ */
+function loadSummaryProfiles(): StoredSummaryProfile[] {
+  const s = load()
+  if (s.summaryProfiles && s.summaryProfiles.length > 0) return s.summaryProfiles
+
+  const legacyBase = s.summaryApiBaseUrl?.trim()
+  // 连 baseUrl 和 key 都没有 = 从没配过，不必凭空造一条。
+  if (!legacyBase && !s.apiKeyEnc && !s.apiKeyPlain) return []
+
+  const migrated: StoredSummaryProfile = {
+    id: 'legacy',
+    name: legacyBase && !/deepseek\.com/i.test(legacyBase) ? legacyBase : 'DeepSeek',
+    baseUrl: legacyBase || DEFAULT_SUMMARY_BASE_URL
+  }
+  if (s.summaryModel?.trim()) migrated.model = s.summaryModel.trim()
+  if (s.apiKeyEnc) migrated.keyEnc = s.apiKeyEnc
+  else if (s.apiKeyPlain) migrated.keyPlain = s.apiKeyPlain
+  return [migrated]
+}
+
+function persistSummaryProfiles(profiles: StoredSummaryProfile[], activeId?: string): void {
+  const s = load()
+  s.summaryProfiles = profiles
+  if (activeId !== undefined) s.activeSummaryProfileId = activeId
+  save(s)
+}
+
+/** 当前激活的那套；id 失效时回落到第一条（而不是让整条链路失灵）。 */
+export function getActiveSummaryProfile(): StoredSummaryProfile | null {
+  const profiles = loadSummaryProfiles()
+  if (profiles.length === 0) return null
+  const id = load().activeSummaryProfileId
+  return profiles.find((p) => p.id === id) ?? profiles[0]
+}
+
+function maskKey(key: string): string {
+  return key.length <= 8 ? '••••' : `${key.slice(0, 3)}…${key.slice(-4)}`
+}
+
+/** 渲染层用的列表：key 只回掩码，明文绝不下发（与 getApiKey 的既有约定一致）。 */
+export function listSummaryProfiles(): { profiles: SummaryProfile[]; activeId: string | null } {
+  const stored = loadSummaryProfiles()
+  return {
+    profiles: stored.map((p) => {
+      const key = decryptProfileKey(p)
+      const out: SummaryProfile = { id: p.id, name: p.name, baseUrl: p.baseUrl, model: p.model ?? '' }
+      if (key) out.keyMasked = maskKey(key)
+      return out
+    }),
+    activeId: getActiveSummaryProfile()?.id ?? null
+  }
+}
+
+/** 新增或更新一套配置。key 传 undefined/null = 保留原有，传空串 = 清除。 */
+export function upsertSummaryProfile(
+  profile: SummaryProfile,
+  key?: string | null
+): { profiles: SummaryProfile[]; activeId: string | null } {
+  const profiles = loadSummaryProfiles()
+  const idx = profiles.findIndex((p) => p.id === profile.id)
+  const prev = idx >= 0 ? profiles[idx] : undefined
+  const next: StoredSummaryProfile = {
+    id: profile.id,
+    name: profile.name.trim() || profile.baseUrl,
+    baseUrl: profile.baseUrl.trim() || DEFAULT_SUMMARY_BASE_URL
+  }
+  if (profile.model?.trim()) next.model = profile.model.trim()
+
+  // key 没传就沿用旧值——改个名字或型号不该把 Key 冲掉。
+  if (key === undefined || key === null) {
+    if (prev?.keyEnc) next.keyEnc = prev.keyEnc
+    else if (prev?.keyPlain) next.keyPlain = prev.keyPlain
+  } else if (key) {
+    if (safeStorage.isEncryptionAvailable()) next.keyEnc = safeStorage.encryptString(key).toString('base64')
+    else next.keyPlain = key
+  }
+
+  if (idx >= 0) profiles[idx] = next
+  else profiles.push(next)
+  // 第一条自动激活，否则用户新增完还得再点一下才生效。
+  const activeId = load().activeSummaryProfileId ?? (profiles.length === 1 ? next.id : undefined)
+  persistSummaryProfiles(profiles, activeId)
+  return listSummaryProfiles()
+}
+
+export function deleteSummaryProfile(id: string): { profiles: SummaryProfile[]; activeId: string | null } {
+  const profiles = loadSummaryProfiles().filter((p) => p.id !== id)
+  const current = load().activeSummaryProfileId
+  persistSummaryProfiles(profiles, current === id ? profiles[0]?.id : current)
+  return listSummaryProfiles()
+}
+
+export function setActiveSummaryProfile(id: string): { profiles: SummaryProfile[]; activeId: string | null } {
+  const profiles = loadSummaryProfiles()
+  if (profiles.some((p) => p.id === id)) persistSummaryProfiles(profiles, id)
+  return listSummaryProfiles()
+}
+
 export function getApiKey(): string | null {
+  // 优先用激活的那套配置；没有配置时回落到旧的单份字段。
+  const active = getActiveSummaryProfile()
+  if (active) return decryptProfileKey(active)
   const s = load()
   if (s.apiKeyEnc && safeStorage.isEncryptionAvailable()) {
     try {

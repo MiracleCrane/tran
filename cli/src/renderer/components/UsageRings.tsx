@@ -165,6 +165,8 @@ export default function UsageRings(): JSX.Element {
   const [plan, setPlan] = useState<PlanUsageInfo | null>(null)
   const [planError, setPlanError] = useState<string | null>(null)
   const [deepseek, setDeepseek] = useState<DeepseekBalanceInfo | null>(null)
+  /** 摘要 API 是否指向 DeepSeek —— 只有它有公开的余额接口。 */
+  const [summaryIsDeepseek, setSummaryIsDeepseek] = useState(true)
   const planFetchedAtRef = useRef(0)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const cardRef = useRef<HTMLDivElement | null>(null)
@@ -197,6 +199,17 @@ export default function UsageRings(): JSX.Element {
   useEffect(() => {
     refreshPlan()
   }, [refreshPlan])
+
+  // 余额行只对 DeepSeek 有意义：智谱等兼容服务没有公开的余额查询接口。
+  useEffect(() => {
+    void window.api
+      .getPreferences()
+      .then((p) => {
+        const url = p.summaryApiBaseUrl ?? 'https://api.deepseek.com'
+        setSummaryIsDeepseek(/(?:^|\.)deepseek\.com/i.test(url))
+      })
+      .catch(() => setSummaryIsDeepseek(true))
+  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -288,7 +301,14 @@ export default function UsageRings(): JSX.Element {
             {/* 这一行最容易堆字：右侧「$余额 · 充值 X / 赠金 Y」很长且整段不可断。
                 拆成两段——总额跟标题同排并保持 nowrap（数字断行没法看），
                 充值/赠金明细占满一行、自己换到第二行去。 */}
-            {deepseek && (
+            {/* 非 DeepSeek 的摘要 API 不显示余额，但要说明原因——直接留白会让人
+                以为坏了（用户明确要求"说明一下"）。 */}
+            {!summaryIsDeepseek && (
+              <div className="text-[11px] leading-relaxed text-zinc-600">
+                当前摘要 API 不是 DeepSeek，无余额可查（该服务未提供公开的余额接口）。
+              </div>
+            )}
+            {summaryIsDeepseek && deepseek && (
               <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-xs">
                 <span className="shrink-0 whitespace-nowrap text-zinc-400">DeepSeek 余额</span>
                 <span className="shrink-0 whitespace-nowrap text-zinc-500">

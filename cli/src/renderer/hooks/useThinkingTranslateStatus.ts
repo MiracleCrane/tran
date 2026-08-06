@@ -38,8 +38,18 @@ function load(): Promise<void> {
     .getTranslateConfig()
     .then((cfg) => {
       const hasBaidu = !!cfg.baidu.appId.trim()
+      // 与主进程 resolveThinkingTranslateEngine 的解析顺序保持一致：
+      // follow → 用描述翻译那个开关；auto → 有百度密钥走百度，否则便宜模型。
       const engine: 'baidu' | 'llm' =
-        cfg.thinkingEngine === 'auto' ? (hasBaidu ? 'baidu' : 'llm') : cfg.thinkingEngine
+        cfg.thinkingEngine === 'follow'
+          ? cfg.engine
+          : cfg.thinkingEngine === 'auto'
+            ? hasBaidu
+              ? 'baidu'
+              : 'llm'
+            : cfg.thinkingEngine
+      // 只有 auto 因缺密钥而落到付费模型才算"悄悄花钱"；follow 是用户明确选的
+      // 同一个引擎，不该报警。
       emit({ engine, autoFellBack: cfg.thinkingEngine === 'auto' && !hasBaidu })
     })
     .catch(() => {

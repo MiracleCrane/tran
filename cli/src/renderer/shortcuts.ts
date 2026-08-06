@@ -1,5 +1,6 @@
 import { useSessionStore } from './store/sessionStore'
 import { useUiStore } from './store/uiStore'
+import { emitForgeEvent } from './events'
 
 /**
  * 全局快捷键注册表。
@@ -234,6 +235,14 @@ export function buildShortcuts(): ShortcutAction[] {
       label: '复制工作目录',
       keys: ['Ctrl+Shift+C'],
       run: () => void copyText(sess().meta?.cwd ?? '')
+    },
+    {
+      id: 'searchSessions',
+      label: '搜索会话',
+      // Ctrl+K 对齐 Codex 的搜索面板键位；输入框里也要能开（它是全局动作）。
+      keys: ['Ctrl+K'],
+      allowInInput: true,
+      run: () => emitForgeEvent('openSessionSearch')
     },
     {
       id: 'openSettings',

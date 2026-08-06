@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.0.63 - 2026-08-06
+
+### 中文
+
+- 新增:**摘要 API 支持多套配置、随时切换**（设置 → AI 辅助）。此前是单份配置,换服务商会把上一家的 baseUrl / 型号 / Key 直接覆盖掉,想换回去得重新找 Key 重填。现在存成列表,点一下切换激活项,旧的全部留着;每条 Key 各自走系统安全存储。旧配置首次运行自动迁移成第一条,旧字段刻意保留——万一回退到旧版本那边还得靠它们工作。
+- 新增:**限流串行队列 + 指数退避**。免费档模型(如智谱 GLM-4.7-Flash)并发限 1 QPS 且平台侧常拥塞,而 Tran 的调用是突发并发的——一轮结束后一屏冒出五六个工具卡会同时打五六发。实测 10 条并发:**无防护成功 2/10,加上之后 10/10**。冷却是自适应的,撞过限流才拉开间距,不限流的服务不受拖累。
+- 修复:混合思考模型返回空内容。`thinking: {type:'disabled'}` 原先只对 DeepSeek 发,而 GLM-4.7-Flash 不传这个参数时推理会把 `max_tokens` 全吃光、`content` 返回空串——命令说明这类只给几十 token 的任务必然踩中,表现是"模型什么都不回",极难排查。
+- 修复:智谱的限流是 **HTTP 200 + body `code:1305`**,不是 429。原代码走"返回内容为空"分支且错误信息里没有 1305,重试判定永远触发不了。现在把响应体的 error 带进错误信息,并区分"限流"与"推理占满预算"两种空返回。
+- **设置整合**:摘要 / 命名 API 的配置从「系统」搬到「AI 辅助」页,与翻译引擎放在一起——翻译的「模型翻译」通道走的就是那份 baseUrl + Key,分在两页配用户根本连不起来。侧栏入口「翻译」改名「AI 辅助」。
+- 思考翻译新增「跟随上面」并作为**默认**:多数人不需要为描述和思考配两套引擎,但仍可单独指定。
+- 用量卡的余额行按服务商自适应:摘要 API 不是 DeepSeek 时不显示余额,并说明原因(该服务未提供公开的余额接口),而不是留一行空白。
+
+### English
+
+- New: **multiple summary-API profiles with instant switching** (Settings → AI Assist). It used to be a single config, so switching providers overwrote the previous baseUrl / model / key outright — going back meant hunting down the key again. Profiles are now a list; switching just changes which one is active and every key is kept (each encrypted via OS secure storage). An existing single config migrates into the first profile on first run, and the legacy fields are deliberately left in place so a downgrade still works.
+- New: **serial queue with exponential backoff for rate limits.** Free-tier models (e.g. Zhipu GLM-4.7-Flash) cap at 1 QPS and the platform is often congested, while Tran's calls are bursty — a finished turn can surface five or six tool cards that all fire at once. Measured over 10 concurrent calls: **2/10 succeeded unguarded, 10/10 with the queue.** The cooldown is adaptive, so providers that don't rate-limit are never slowed down.
+- Fix: empty responses from hybrid-thinking models. `thinking: {type:'disabled'}` was only sent to DeepSeek; without it GLM-4.7-Flash spends the entire `max_tokens` budget on reasoning and returns an empty `content` — guaranteed for tasks budgeted at a few dozen tokens, and it presents as "the model returns nothing at all".
+- Fix: Zhipu signals rate limiting as **HTTP 200 with `code:1305` in the body**, not 429. The old path fell into the "empty content" branch with no trace of 1305 in the error, so the retry check could never fire.
+- **Settings consolidation**: the summary/naming API config moved from System to the AI Assist page, next to the translation engine — the "model translation" path uses exactly that baseUrl and key, and splitting them across two pages made the connection invisible. The sidebar entry is renamed from Translate to AI Assist.
+- Thinking translation gains a "follow the above" option, now the **default**; it can still be set independently.
+- The usage card's balance row adapts to the provider: when the summary API isn't DeepSeek it explains why there's no balance instead of leaving a blank row.
+
 ## v1.0.62 - 2026-08-06
 
 ### 中文

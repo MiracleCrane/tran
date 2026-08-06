@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { TranslateEngine, ThinkingTranslateEngine, TranslateTestResult } from '../../shared/ipc'
 import { refreshThinkingTranslateStatus } from '../hooks/useThinkingTranslateStatus'
+import SummaryApiSettings from './SummaryApiSettings'
 import { ToolPanelAlert, ToolPanelButton } from './ToolPanelChrome'
 import { useUiStore } from '../store/uiStore'
 import { useTransientFlag } from '../hooks/useTransientFlag'
@@ -23,7 +24,7 @@ function RadioDot({ on }: { on: boolean }): JSX.Element {
 export default function TranslatePanel(): JSX.Element {
   const [engine, setEngine] = useState<TranslateEngine>('llm')
   // 思考翻译单独一个引擎，与上面的描述翻译分离（见 shared/ipc 注释）。
-  const [thinkingEngine, setThinkingEngine] = useState<ThinkingTranslateEngine>('auto')
+  const [thinkingEngine, setThinkingEngine] = useState<ThinkingTranslateEngine>('follow')
   const [appId, setAppId] = useState('')
   const [secretKey, setSecretKey] = useState('')
   const [showSecret, setShowSecret] = useState(false)
@@ -129,6 +130,12 @@ export default function TranslatePanel(): JSX.Element {
           </ToolPanelAlert>
         )}
 
+        {/* 摘要 / 命名 API：从「设置 → 系统」搬来。翻译选「模型翻译」时走的就是它，
+            两者必须在同一页配，否则用户在这选了模型、却要去别处填 Key。 */}
+        <SummaryApiSettings />
+
+        <div className="h-px bg-white/[0.06]" />
+
         {/* engine selector —— 只管技能/插件描述 */}
         <div className="pt-1 text-xs font-medium text-zinc-300">技能 / 插件描述翻译</div>
         <section className="space-y-2">
@@ -170,6 +177,22 @@ export default function TranslatePanel(): JSX.Element {
             路径，机翻会译坏，两者不能共用一个选择。 */}
         <div className="pt-3 text-xs font-medium text-zinc-300">思考过程翻译</div>
         <section className="space-y-2">
+          <button type="button" onClick={() => setThinkingEngine('follow')} className={`block w-full text-left ${cardCls(thinkingEngine === 'follow')}`}>
+            <div className="flex items-center gap-2">
+              <RadioDot on={thinkingEngine === 'follow'} />
+              <span className="text-sm font-medium text-zinc-100">跟随上面（默认）</span>
+              {thinkingEngine === 'follow' && (
+                <span className="rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                  当前
+                </span>
+              )}
+            </div>
+            <p className="mt-1.5 pl-6 text-[11px] leading-relaxed text-zinc-500">
+              和「技能 / 插件描述翻译」用同一个引擎,不单独配置。多数情况够用——
+              只有当你发现思考里的路径、变量名被译坏时,才需要在下面单独指定。
+            </p>
+          </button>
+
           <button type="button" onClick={() => setThinkingEngine('auto')} className={`block w-full text-left ${cardCls(thinkingEngine === 'auto')}`}>
             <div className="flex items-center gap-2">
               <RadioDot on={thinkingEngine === 'auto'} />

@@ -14,6 +14,7 @@ import RuntimeStatusStrip from './components/RuntimeStatusStrip'
 import ErrorDiagnosticPanel from './components/ErrorDiagnosticPanel'
 import GitToolbar, { requestCloseGitDrawer } from './components/GitToolbar'
 import AttachmentPreviewPane from './components/AttachmentPreviewPane'
+import SessionSearchPalette from './components/SessionSearchPalette'
 import PermissionModal from './components/PermissionModal'
 import ImageContextMenuHost from './components/ImageContextMenu'
 /**
@@ -126,8 +127,8 @@ function WindowTitlebar(): JSX.Element {
   return (
     <div className="window-titlebar flex shrink-0 items-center text-[13px] text-zinc-200/80">
       <div className="window-titlebar-drag flex min-w-0 flex-1 items-center gap-2 px-4">
-        <AppLogo size={16} className="shrink-0 rounded-[4px]" />
-        <span className="font-medium">Tran</span>
+        {/* 品牌只留侧栏那一处（2026-08 用户反馈"两个 Tran 重复"）：
+            标题栏保持纯拖拽区。 */}
       </div>
       <div className="window-controls flex h-full shrink-0 items-stretch">
         <button
@@ -761,6 +762,7 @@ export default function App(): JSX.Element {
           </div>
           <PermissionModal />
           <ImageContextMenuHost />
+          <SessionSearchPalette />
           <ClosePromptDialog open={closePromptOpen} onClose={() => setClosePromptOpen(false)} />
           <UpdateAvailableDialog
             info={availableUpdate}
