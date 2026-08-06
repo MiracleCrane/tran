@@ -66,6 +66,7 @@ export function getPreferences(): Preferences {
     aiNamingEnabled: s.aiNamingEnabled,
     autoTodoNudge: s.autoTodoNudge,
     cloudUsageEnabled: s.cloudUsageEnabled,
+    summaryThinkingEnabled: s.summaryThinkingEnabled,
     summaryModel: s.summaryModel,
     summaryApiBaseUrl: s.summaryApiBaseUrl
   }
@@ -107,6 +108,7 @@ export function savePreferences(prefs: Preferences): Preferences {
   if (prefs.aiNamingEnabled !== undefined) s.aiNamingEnabled = prefs.aiNamingEnabled
   if (prefs.autoTodoNudge !== undefined) s.autoTodoNudge = prefs.autoTodoNudge
   if (prefs.cloudUsageEnabled !== undefined) s.cloudUsageEnabled = prefs.cloudUsageEnabled
+  if (prefs.summaryThinkingEnabled !== undefined) s.summaryThinkingEnabled = prefs.summaryThinkingEnabled
   // 空串代表「用默认型号」，要能靠它清空——所以判 undefined 而不是 truthy。
   if (prefs.summaryModel !== undefined) s.summaryModel = prefs.summaryModel.trim() || undefined
   if (prefs.summaryApiBaseUrl !== undefined) {

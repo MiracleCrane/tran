@@ -161,6 +161,11 @@ const api: ForgeApi = {
   getApiKey: () => ipcRenderer.invoke('forge:getApiKey'),
   setApiKey: (key) => ipcRenderer.invoke('forge:setApiKey', key),
   listSummaryProfiles: () => ipcRenderer.invoke('forge:listSummaryProfiles'),
+  onSummaryApiIssue: (cb) => {
+    const listener = (_e: unknown, payload: { kind: string; detail: string }): void => cb(payload)
+    ipcRenderer.on('forge:summary-api-issue', listener)
+    return () => ipcRenderer.removeListener('forge:summary-api-issue', listener)
+  },
   upsertSummaryProfile: (profile, key) => ipcRenderer.invoke('forge:upsertSummaryProfile', profile, key),
   deleteSummaryProfile: (id) => ipcRenderer.invoke('forge:deleteSummaryProfile', id),
   setActiveSummaryProfile: (id) => ipcRenderer.invoke('forge:setActiveSummaryProfile', id),

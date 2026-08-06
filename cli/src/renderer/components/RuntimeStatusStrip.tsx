@@ -14,6 +14,14 @@ export default function RuntimeStatusStrip(): JSX.Element {
   const setView = useUiStore((s) => s.setView)
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
+  /** 摘要 API 的不可自愈故障（额度耗尽/凭证失效）。静默回退是这条链路的常态，
+   *  但这两类静默下去就是"功能悄悄停了"，必须让用户看见。 */
+  const [summaryIssue, setSummaryIssue] = useState<{ kind: string; detail: string } | null>(null)
+
+  useEffect(() => {
+    if (typeof window.api.onSummaryApiIssue !== 'function') return
+    return window.api.onSummaryApiIssue(setSummaryIssue)
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -101,6 +109,22 @@ export default function RuntimeStatusStrip(): JSX.Element {
             <span className="max-w-24 truncate text-zinc-600">{status.wslDistro}</span>
           )}
         </button>
+        {summaryIssue && (
+          <button
+            type="button"
+            onClick={() => {
+              setView('translate')
+              setSummaryIssue(null)
+            }}
+            className={`${chip} shrink-0 text-amber-400/90 hover:text-amber-300`}
+            title={`${summaryIssue.detail}
+
+点击前往「AI 辅助」检查配置；点掉即忽略本次提示。`}
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+            <span>{summaryIssue.kind === 'quota' ? '摘要额度已用尽' : '摘要 Key 失效'}</span>
+          </button>
+        )}
         <div className={`runtime-provider-reveal ${showProvider ? 'is-visible' : ''}`}>
           <button
             type="button"

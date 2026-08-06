@@ -53,7 +53,7 @@ import {
 } from './runtimeDiagnostics'
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { checkKimiVersion, upgradeKimi } from './kimiVersion'
-import { probeCheapModels, diagnoseSummaryPrompt } from './cheapModel'
+import { probeCheapModels, diagnoseSummaryPrompt, onSummaryIssue } from './cheapModel'
 import { explainCommand, summarizeThinking, translateThinking } from './cheapNotes'
 import { fetchSessionTodos } from './kimiTodos'
 import { getPlanUsageCached } from './usageService'
@@ -1148,6 +1148,10 @@ export function registerIpc(
   })
 
   // ---- 摘要 API 多套配置（换服务商不再覆盖旧的，见 settings.ts）----
+  // 摘要 API 的不可自愈故障（额度耗尽/凭证失效）推给渲染层显示。
+  // 静默回退是这条链路的常态设计，但那两类故障静默下去就是"功能悄悄不工作"。
+  onSummaryIssue((kind, detail) => send('forge:summary-api-issue', { kind, detail }))
+
   ipcMain.handle('forge:listSummaryProfiles', async () => listSummaryProfiles())
   ipcMain.handle(
     'forge:upsertSummaryProfile',

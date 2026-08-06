@@ -97,6 +97,13 @@ interface PersistedSettings {
   /** 总结类杂活（会话命名、命令说明、思考摘要…）用的型号。空 = 用
    *  cheapModel.DEFAULT_CHEAP_MODEL。别写死猜测的型号——设置页有探测按钮。 */
   summaryModel?: string
+  /** 摘要类请求是否**开启**模型思考（默认关）。
+   *
+   *  这些任务是 12/16 字的短摘要，推理帮不上忙却极烧额度——实测火山方舟上的
+   *  GLM-5.2 回一条 12 字命令说明，开思考要多花 762 个推理 token，关掉是 0，
+   *  而两边答案质量一样。免费额度是按 token 算的（推理 token 也算），差 700 倍。
+   *  留成开关是因为将来某些模型可能确实需要推理才答得准。 */
+  summaryThinkingEnabled?: boolean
   /** 总结类请求使用的 OpenAI 兼容 API 根地址。
    *  **旧字段**：已被 summaryProfiles 取代，仅用于首次启动时迁移出第一条配置。 */
   summaryApiBaseUrl?: string
@@ -334,6 +341,7 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.autoTodoNudge = optionalBoolean(source.autoTodoNudge)
   settings.summaryModel = optionalString(source.summaryModel)
   settings.summaryApiBaseUrl = optionalString(source.summaryApiBaseUrl)
+  settings.summaryThinkingEnabled = optionalBoolean(source.summaryThinkingEnabled)
   settings.summaryProfiles = normalizeSummaryProfiles(source.summaryProfiles)
   settings.activeSummaryProfileId = optionalString(source.activeSummaryProfileId)
   settings.nativeNotifications = optionalBoolean(source.nativeNotifications)

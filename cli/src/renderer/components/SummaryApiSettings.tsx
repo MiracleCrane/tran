@@ -4,16 +4,10 @@ import type { PromptDiagnosis, SummaryModelProbe, SummaryProfile } from '../../s
 /** 新建配置时的预设，省得用户去翻文档抄 URL。 */
 const PRESETS: Array<{ name: string; baseUrl: string; model: string; note: string }> = [
   {
-    name: '智谱 GLM-4.7-Flash',
-    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    model: 'glm-4.7-flash',
-    note: '完全免费 · 限 1 QPS（已内置队列与退避）'
-  },
-  {
     name: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com',
     model: 'deepseek-v4-flash',
-    note: '按量计费 · 不限流'
+    note: '按量计费 · 相同前缀命中缓存后输入费率极低'
   }
 ]
 
@@ -39,6 +33,8 @@ export default function SummaryApiSettings(): JSX.Element {
   const [diagnosing, setDiagnosing] = useState(false)
   const [diagnosis, setDiagnosis] = useState<PromptDiagnosis[] | null>(null)
   const [saved, setSaved] = useState(false)
+  /** 摘要请求是否开思考。默认关——见下面 label 里的实测数据。 */
+  const [thinking, setThinking] = useState(false)
 
   const flash = useCallback(() => {
     setSaved(true)
@@ -52,7 +48,18 @@ export default function SummaryApiSettings(): JSX.Element {
 
   useEffect(() => {
     void window.api.listSummaryProfiles().then(apply)
+    void window.api.getPreferences().then((p) => setThinking(p.summaryThinkingEnabled === true))
   }, [apply])
+
+  const toggleThinking = async (next: boolean): Promise<void> => {
+    setThinking(next)
+    try {
+      await window.api.savePreferences({ summaryThinkingEnabled: next })
+      flash()
+    } catch {
+      setThinking(!next)
+    }
+  }
 
   const newId = (): string =>
     `sp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -131,9 +138,7 @@ export default function SummaryApiSettings(): JSX.Element {
         </div>
         <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
           可以存多套、随时切换——换服务商不会覆盖旧配置，想换回去点一下就行。
-          推荐 <span className="text-zinc-300">智谱 GLM-4.7-Flash</span>：完全免费，实测命令说明
-          11/12 合格、延迟中位 485ms，翻译能原样保留路径与变量名。它免费档限 1 QPS，
-          Tran 已内置串行队列与限流退避（实测把 10 条并发的成功率从 2/10 拉到 10/10）。
+          Tran 内置串行队列与限流退避，撞到 429 会自动退避重试，不会让说明"时有时无"。
         </div>
       </div>
 
@@ -234,7 +239,7 @@ export default function SummaryApiSettings(): JSX.Element {
               className={inputCls}
               value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              placeholder="智谱免费 / DeepSeek …"
+              placeholder="DeepSeek / 备用通道 …"
             />
           </label>
           <label className="block">
@@ -243,7 +248,7 @@ export default function SummaryApiSettings(): JSX.Element {
               className={inputCls}
               value={draft.baseUrl}
               onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
-              placeholder="https://open.bigmodel.cn/api/paas/v4"
+              placeholder="https://api.deepseek.com"
             />
           </label>
           <label className="block">
@@ -252,7 +257,7 @@ export default function SummaryApiSettings(): JSX.Element {
               className={inputCls}
               value={draft.model}
               onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-              placeholder="glm-4.7-flash"
+              placeholder="deepseek-v4-flash"
             />
           </label>
           <label className="block">
@@ -287,6 +292,23 @@ export default function SummaryApiSettings(): JSX.Element {
           </div>
         </div>
       )}
+
+      <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border-subtle bg-bg-panel p-2.5">
+        <input
+          type="checkbox"
+          checked={thinking}
+          onChange={(e) => void toggleThinking(e.target.checked)}
+          className="mt-0.5 shrink-0 accent-[--color-accent]"
+        />
+        <span className="min-w-0">
+          <span className="block text-xs text-zinc-300">开启模型思考</span>
+          <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-500">
+            默认关。这些任务是 12~16 字的短摘要，推理帮不上忙却极烧额度——实测同一条命令说明，
+            开思考多花 <span className="text-zinc-300">762 个推理 token</span>，关掉是 0，两边答案质量一样。
+            免费额度按 token 算（推理 token 也算）。只有当你发现某个模型不推理就答不准时才开。
+          </span>
+        </span>
+      </label>
 
       <div className="flex gap-2">
         <button type="button" className={btnCls} disabled={probing} onClick={() => void runProbe()}>

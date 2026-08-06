@@ -90,16 +90,15 @@ export type CheapCallResult =
 /**
  * 限流退避与串行化。
  *
- * 为什么必须有：免费档的模型（智谱 GLM-4.7-Flash 等）并发限 1 QPS，而且平台侧
- * 经常整体拥塞——2026-08 实测跑 12 条命令说明就撞了 6 次
- * `429 / code 1305 该模型当前访问量过大`，间隔已经放到 1.5 秒。而 Tran 的调用
- * 模式恰恰是**突发并发**：一轮结束后一屏冒出五六个工具卡，explainCommand 会
- * 同时打五六发（inflight 去重只挡得住同一条命令）。
+ * 为什么必须有：Tran 的调用模式是**突发并发**——一轮结束后一屏冒出五六个工具卡，
+ * explainCommand 会同时打五六发（inflight 去重只挡得住同一条命令）。任何服务在
+ * 这种瞬时并发下都可能回 429，而这条旁路的失败策略是静默回退，表现就是"命令说明
+ * 时有时无"，用户根本不知道发生了什么。
  *
- * 不做的话表现是"命令说明时有时无"——因为这条旁路的失败策略是静默回退。
+ * 2026-08 实测（10 条并发）：无防护成功 2/10，加上串行队列 + 指数退避后 10/10。
  *
- * 设计上刻意不给所有请求无条件加间隔：DeepSeek 那种不限流的服务不该被拖慢。
- * 只有**真的撞过 429 之后**才进入冷却期并拉开间距，一段时间不再撞就自动恢复。
+ * 设计上刻意不给所有请求无条件加间隔：不限流的服务不该被拖慢。只有**真的撞过
+ * 429 之后**才进入冷却期并拉开间距，一段时间不再撞就自动恢复全速。
  */
 const RATE_LIMIT_MAX_RETRIES = 6
 const RATE_LIMIT_BASE_DELAY_MS = 1500
@@ -116,8 +115,58 @@ let lastRequestAt = 0
 let cooldownUntil = 0
 
 function isRateLimited(status: number | undefined, detail: string): boolean {
-  // 429 是标准；智谱用 HTTP 200 + body 里的 code 1305，光看状态码会漏。
-  return status === 429 || /\b1305\b|too many requests|rate limit|访问量过大/i.test(detail)
+  // 不能只看状态码：部分服务用 HTTP 200 + body 里的错误码表示限流（实测遇到过），
+  // 只判 429 会整类漏掉、退避重试永远触发不到。所以正文也一起匹配。
+  return (
+    status === 429 ||
+    /too many requests|rate limit|rate_limit|访问量过大|请求过于频繁|限流/i.test(detail)
+  )
+}
+
+/**
+ * 「这条旁路坏了，而且不是抖动」——需要让用户看见的那类失败。
+ *
+ * 这条链路的失败策略是**静默回退**（命令说明缺失就显示原命令），因为它们全是
+ * "有则更好"。但那个设计有个盲区：额度耗尽 / Key 失效 / 欠费属于**不会自愈**的
+ * 故障，静默下去的表现是"功能悄悄不工作了"，用户完全无从察觉——2026-08 用户
+ * 明确要求"没额度了要提示"。限流不算：它会自愈，退避重试兜得住。
+ */
+export type SummaryIssueKind = 'quota' | 'auth'
+
+export function classifySummaryIssue(
+  status: number | undefined,
+  detail: string
+): SummaryIssueKind | null {
+  if (status === 401 || status === 403 || /invalid api key|unauthorized|authenticationerror/i.test(detail)) {
+    return 'auth'
+  }
+  if (
+    status === 402 ||
+    /insufficient|quota|balance|arrears|欠费|余额不足|额度不足|额度已用尽|超出配额/i.test(detail)
+  ) {
+    return 'quota'
+  }
+  return null
+}
+
+let issueListener: ((kind: SummaryIssueKind, detail: string) => void) | null = null
+/** 主进程接线：把这类故障推给渲染层（见 ipc.ts）。 */
+export function onSummaryIssue(fn: (kind: SummaryIssueKind, detail: string) => void): void {
+  issueListener = fn
+}
+
+/** 同一类问题的通报间隔——每次调用都弹一遍等于刷屏。 */
+const ISSUE_NOTIFY_INTERVAL_MS = 10 * 60_000
+const lastIssueNotifiedAt = new Map<SummaryIssueKind, number>()
+
+function reportIssue(status: number | undefined, detail: string): void {
+  const kind = classifySummaryIssue(status, detail)
+  if (!kind) return
+  const now = Date.now()
+  if (now - (lastIssueNotifiedAt.get(kind) ?? 0) < ISSUE_NOTIFY_INTERVAL_MS) return
+  lastIssueNotifiedAt.set(kind, now)
+  log('cheap-model', `摘要 API 故障[${kind}]：${detail.slice(0, 160)}`)
+  issueListener?.(kind, detail.slice(0, 200))
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
@@ -164,8 +213,10 @@ export async function cheapComplete(opts: CheapCallOptions): Promise<CheapCallRe
 
   if (!result.ok && rejectedForTemperature(result.status, result.error)) {
     log('cheap-model', '服务不接受 temperature，去掉重试一次')
-    return enqueue(() => cheapCompleteOnce(opts, false))
+    result = await enqueue(() => cheapCompleteOnce(opts, false))
   }
+  // 额度耗尽/凭证失效这类不会自愈的故障要浮到界面上，否则功能只是"悄悄不工作"。
+  if (!result.ok) reportIssue(result.status, result.error)
   return result
 }
 
@@ -187,16 +238,21 @@ async function cheapCompleteOnce(
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? REQUEST_TIMEOUT_MS)
   const baseUrl = summaryApiBaseUrl()
   /**
-   * 需要显式关思考的服务。
+   * 是否给这次请求带上"关思考"。
    *
-   * 原先只认 DeepSeek。接入智谱后实测发现：GLM-4.7-Flash 是**混合思考模型**，
-   * 不传这个参数时推理会把 max_tokens 全吃光，`content` 返回空串而
-   * `reasoning_content` 有内容——表现是"模型什么都不回"，极难排查。
-   * 命令说明这类任务 max_tokens 只有几十，必然踩中。
+   * 默认关思考：这些任务是 12/16 字的短摘要，推理帮不上忙却极烧额度——实测火山
+   * 方舟上的 GLM-5.2 回一条命令说明，开思考多花 762 个推理 token，关掉是 0，
+   * 两边答案质量一样。免费额度按 token 算（推理 token 也算），差 700 倍。
+   * 更隐蔽的后果：混合思考模型不关思考时推理会把 max_tokens 吃光，`content`
+   * 返回空串而 `reasoning_content` 有内容，表现是"模型什么都不回"。
+   *
+   * 字段只发给**已知接受它的服务**：别家收到不认识的字段可能直接 400，
+   * 那就不是省额度而是整条链路挂掉。方舟按整个域名放行——它是聚合平台，
+   * 同一域名后面挂什么模型取决于接入点，逐个判断迟早漏。
    */
-  const disableThinking =
-    /^https:\/\/api\.deepseek\.com(?:\/|$)/i.test(baseUrl) ||
-    /(?:^|\.)bigmodel\.cn|(?:^|\.)z\.ai/i.test(baseUrl)
+  const knownAcceptsThinkingField =
+    /^https:\/\/api\.deepseek\.com(?:\/|$)/i.test(baseUrl) || /(?:^|\.)volces\.com/i.test(baseUrl)
+  const disableThinking = loadSettings().summaryThinkingEnabled !== true && knownAcceptsThinkingField
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
@@ -237,9 +293,9 @@ async function cheapCompleteOnce(
       /**
        * 空 content 有两种成因，必须在错误信息里区分开，否则上层无从判断。
        *
-       * 1. **限流**：智谱不是回 429，而是 **HTTP 200 + body 里 `code:1305`**。
-       *    走到这里 response.ok 是真，只是没有 content。若只写"返回内容为空"，
-       *    1305 就丢了，cheapComplete 的限流重试永远触发不到。
+       * 1. **限流**：部分服务用 HTTP 200 + body 里的错误码表示限流。走到这里
+       *    response.ok 是真，只是没有 content。若只写"返回内容为空"，错误码就
+       *    丢了，cheapComplete 的限流重试永远触发不到。
        * 2. **思考吃光了预算**：混合思考模型没关 thinking 时，推理占满 max_tokens，
        *    content 空而 reasoning_content 有内容。把长度带出来，排查时一眼可辨
        *    （否则只能看到"模型什么都不回"）。

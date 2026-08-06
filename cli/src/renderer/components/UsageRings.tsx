@@ -196,13 +196,15 @@ export default function UsageRings(): JSX.Element {
     refreshPlan()
   }, [refreshPlan])
 
-  // 余额行只对 DeepSeek 有意义：智谱等兼容服务没有公开的余额查询接口。
+  // 余额行只对 DeepSeek 有意义（别家没有公开的余额接口）。
+  // 判断依据必须是**当前激活的那套摘要配置**，不是旧的 summaryApiBaseUrl 字段——
+  // 多套配置上线后旧字段只是迁移遗留，跟实际生效的可能不一致。
   useEffect(() => {
     void window.api
-      .getPreferences()
-      .then((p) => {
-        const url = p.summaryApiBaseUrl ?? 'https://api.deepseek.com'
-        setSummaryIsDeepseek(/(?:^|\.)deepseek\.com/i.test(url))
+      .listSummaryProfiles()
+      .then(({ profiles, activeId }) => {
+        const active = profiles.find((p) => p.id === activeId) ?? profiles[0]
+        setSummaryIsDeepseek(/(?:^|\.)deepseek\.com/i.test(active?.baseUrl ?? ''))
       })
       .catch(() => setSummaryIsDeepseek(true))
   }, [])

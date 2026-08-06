@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.65 - 2026-08-06
+
+### 中文
+
+- 新增:**摘要请求的「开启模型思考」开关（默认关）**。这些任务是 12~16 字的短摘要,推理帮不上忙却极烧额度——实测同一条命令说明,开思考多花 **762 个推理 token**,关掉是 **0**,两边答案质量一样。免费额度按 token 算(推理 token 也算),差 700 倍。只有当某个模型不推理就答不准时才需要打开。
+- 新增:**摘要 API 故障提示**。这条链路的失败策略一向是静默回退(命令说明缺失就显示原命令),因为它们都是"有则更好"。但那个设计有盲区:**额度耗尽 / Key 失效**属于不会自愈的故障,静默下去就是"功能悄悄停了",用户完全无从察觉。现在这两类会在运行状态条上显示,点击直达「AI 辅助」页;限流不算(会自愈,退避重试兜得住),同类问题 10 分钟内只提示一次。
+- 支持火山方舟:关思考的字段现在也发给 `volces.com`。方舟是聚合平台(豆包/DeepSeek/GLM 都在上面),同一域名后面挂什么模型取决于接入点,所以按整个域名放行而不是逐个模型判断。
+- 清理:移除智谱 GLM-4.7-Flash 的预设与相关文案。限流退避逻辑**保留**——它不是某家专属,任何服务在突发并发下都可能 429,只是把厂商专属错误码换成了通用匹配。
+- 修复:用量卡判断"是不是 DeepSeek"时读的是旧的 `summaryApiBaseUrl` 字段,而多套配置上线后真正生效的是激活的那一条,两者可能不一致。
+
+### English
+
+- New: **"enable model thinking" toggle for summary requests (off by default).** These are 12–16 character summaries where reasoning doesn't help but burns quota — measured on one command explanation: thinking cost **762 extra reasoning tokens** versus **0** with it off, for answers of identical quality. Free-tier quotas count reasoning tokens too, so the difference is ~700x. Only turn it on if a given model can't answer accurately without it.
+- New: **summary-API failure surfacing.** This path has always failed silently by design (a missing command note just shows the raw command) because these features are nice-to-have. That design has a blind spot: **quota exhaustion and invalid credentials don't self-heal**, so silence means the feature just quietly stops working with no way to notice. Those two now appear in the runtime status strip and click through to the AI Assist page. Rate limiting is excluded (it self-heals via backoff), and each issue type is reported at most once per 10 minutes.
+- Volcengine Ark support: the disable-thinking field is now sent to `volces.com` as well. Ark is an aggregator (Doubao, DeepSeek and GLM all live behind it) where the model depends on the endpoint, so the whole domain is allow-listed rather than individual models.
+- Cleanup: removed the Zhipu GLM-4.7-Flash preset and related copy. The rate-limit backoff **stays** — it isn't vendor-specific; any provider can return 429 under burst concurrency. Vendor-specific error codes were replaced with generic matching.
+- Fix: the usage card decided "is this DeepSeek?" from the legacy `summaryApiBaseUrl` field, which can disagree with the profile that is actually active now that multiple profiles are supported.
+
 ## v1.0.64 - 2026-08-06
 
 ### 中文

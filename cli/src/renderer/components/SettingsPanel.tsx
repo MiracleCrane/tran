@@ -997,8 +997,12 @@ export default function SettingsPanel(): JSX.Element {
                 <div className="text-xs font-medium text-zinc-300">DeepSeek 余额</div>
                 <div className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
                   用量卡里显示 DeepSeek 账户余额（总 / 充值 / 赠金），走官方公开的
-                  /user/balance 接口。填你的 DeepSeek API Key 即可；官方只暴露余额，
-                  没有 token 用量明细。Key 使用系统安全存储。
+                  /user/balance 接口；官方只暴露余额，没有 token 用量明细。
+                  <span className="text-zinc-400">
+                    通常不用填——「AI 辅助」里激活的那套配置如果就是 DeepSeek，会直接复用它的 Key。
+                  </span>
+                  只有当摘要 API 用的是别家、而你仍想看 DeepSeek 余额时才需要单独填。
+                  Key 使用系统安全存储。
                 </div>
               </div>
               <div className="flex items-center gap-2">

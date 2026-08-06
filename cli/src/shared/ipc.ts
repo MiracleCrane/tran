@@ -281,6 +281,8 @@ export interface Preferences {
   /** 云端套餐额度查询（默认开）。直连 api.kimi.com 私有接口并复用 Kimi CLI 的
    *  OAuth 凭证——非官方公开接口，可能随服务端策略失效；关闭后不发任何相关请求。 */
   cloudUsageEnabled?: boolean
+  /** 摘要类请求是否开启模型思考（默认关；开思考极烧额度，见 settings.ts 注释）。 */
+  summaryThinkingEnabled?: boolean
   /** 总结类杂活（命名、命令说明、思考摘要…）共用的 OpenAI 兼容模型。 */
   summaryModel?: string
   /** 总结类请求使用的 OpenAI 兼容 API 根地址。 */
@@ -897,6 +899,8 @@ export interface ForgeApi {
    *  configured 用于设置页判断「是否已配置」。 */
   getApiKey(): Promise<{ configured: boolean; masked: string | null }>
   listSummaryProfiles(): Promise<{ profiles: SummaryProfile[]; activeId: string | null }>
+  /** 摘要 API 出现不可自愈故障（额度耗尽 / 凭证失效）时推送。返回取消订阅函数。 */
+  onSummaryApiIssue(cb: (payload: { kind: string; detail: string }) => void): () => void
   /** key 传 undefined = 保留原有；传空串 = 清除。 */
   upsertSummaryProfile(
     profile: SummaryProfile,
