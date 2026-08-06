@@ -32,13 +32,12 @@ function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n)
 }
 
-/** 重置倒计时 + 具体到期时刻，单位一律中文（2026-08 用户要求统一）：
- *  同一天到期 →「3 小时 8 分钟后重置 · 今天 21:34」（不跨天不标星期几）；
- *  跨天 →「5 天 2 小时后重置 · 8月11日 周二 21:34」。 */
-function resetLabel(resetAt?: number): string | null {
+/** 重置信息拆两段：倒计时（左）+ 具体到期时刻（右），同一行两端错开——
+ *  塞在一段里太长会撞车（2026-08 用户反馈）。 */
+function resetParts(resetAt?: number): { countdown: string; moment: string } | null {
   if (!resetAt) return null
   const ms = resetAt - Date.now()
-  if (ms <= 0) return '即将重置'
+  if (ms <= 0) return { countdown: '即将重置', moment: '' }
   const hours = Math.floor(ms / 3_600_000)
   const minutes = Math.floor((ms % 3_600_000) / 60_000)
   const countdown =
@@ -55,12 +54,13 @@ function resetLabel(resetAt?: number): string | null {
   const moment = sameDay
     ? `今天 ${time}`
     : `${at.getMonth() + 1}月${at.getDate()}日 周${WEEKDAY_NAMES[at.getDay()]} ${time}`
-  return `${countdown} · ${moment}`
+  return { countdown, moment }
 }
 
-/** API 给的窗口标签可能是英文缩写（"5h"），卡里统一成中文。 */
+/** API 给的窗口标签可能是英文缩写（"5h"），卡里统一成中文（紧凑无空格，
+ *  和「每周额度」对齐——"5 小时 额度"中间那道缝用户看着不对）。 */
 function zhWindowLabel(label: string): string {
-  return label.replace(/^(\d+)\s*h$/i, '$1 小时')
+  return label.replace(/^(\d+)\s*h$/i, '$1小时')
 }
 
 /** used/limit → 0–1 比例；任一缺失或 limit 为 0 时返回 undefined（显示"—"）。 */
@@ -126,12 +126,12 @@ function QuotaRow({
 }): JSX.Element {
   const ratio = windowRatio(w)
   const pctText = pct2(ratio)
-  const reset = resetLabel(w?.resetAt)
+  const reset = resetParts(w?.resetAt)
   return (
     <div>
-      {/* 布局纪律（2026-08 低分辨率挤字事故）：标题和百分比**永不换行**；
-          倒计时和具体时刻放明细行，明细行允许自然折行——文案再长也只在
-          明细行里折，绝不再把「每周额度」压成一列竖排字。 */}
+      {/* 布局纪律（2026-08 两次迭代）：标题和百分比**永不换行**；明细行只放
+          重置信息——用量数字（24/100 剩余 76）按用户要求移除，进度条和百分比
+          已经表达了。倒计时靠左、具体时刻靠右，两端错开不撞车。 */}
       <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
         <span className="shrink-0 whitespace-nowrap text-zinc-400">{title}</span>
         <span className="shrink-0 whitespace-nowrap text-zinc-500">{pctText ?? '—'}</span>
@@ -142,15 +142,10 @@ function QuotaRow({
           style={{ width: `${(ratio ?? 0) * 100}%` }}
         />
       </div>
-      {(w?.used !== undefined || reset) && (
-        <div className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-          {w?.used !== undefined && w.limit !== undefined && (
-            <span>
-              {fmtK(w.used)} / {fmtK(w.limit)}
-              {w.remaining !== undefined ? `　剩余 ${fmtK(w.remaining)}` : ''}
-            </span>
-          )}
-          {reset && <span>{w?.used !== undefined ? ' · ' : ''}{reset}</span>}
+      {reset && (
+        <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px] text-zinc-600">
+          <span className="min-w-0 truncate">{reset.countdown}</span>
+          {reset.moment && <span className="shrink-0 whitespace-nowrap">{reset.moment}</span>}
         </div>
       )}
     </div>
@@ -181,7 +176,8 @@ export default function UsageRings(): JSX.Element {
         if (result.ok) {
           setPlan(result.data)
           setPlanError(null)
-        } else {
+        } else if (!result.disabled) {
+          // disabled = 功能关着（opt-in 门），正常态不弹错误框，额度环显示 —。
           setPlanError(result.error)
         }
       })
@@ -295,7 +291,7 @@ export default function UsageRings(): JSX.Element {
           </div>
 
           <div className="space-y-3">
-            <QuotaRow title={`${zhWindowLabel(rollingLabel)} 额度`} {...(plan?.rolling ? { window: plan.rolling } : {})} />
+            <QuotaRow title={`${zhWindowLabel(rollingLabel)}额度`} {...(plan?.rolling ? { window: plan.rolling } : {})} />
             <QuotaRow title="每周额度" {...(plan?.weekly ? { window: plan.weekly } : {})} />
 
             {/* 这一行最容易堆字：右侧「$余额 · 充值 X / 赠金 Y」很长且整段不可断。

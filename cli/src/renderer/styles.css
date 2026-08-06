@@ -3338,3 +3338,11 @@ div:has(textarea:focus) .composer-shortcut-hint {
     background-color: #262626 !important;
   }
 }
+
+/* 侧栏收起（含 peek 浮出）时：主区左缘的 inset 描边在图标条分界处留下一条
+   突兀竖线，peek 浮层的半透底盖不住它（2026-08 用户反馈"浮出后竖线不消失"）。
+   分界线本就该由图标条/浮层自己的边框承担。glass-glow-off 的那条是 !important，
+   这条必须也无层 + !important + 源码序在最后才压得住。 */
+:root:has(.sidebar-collapse) .main-surface {
+  box-shadow: none !important;
+}

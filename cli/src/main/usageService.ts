@@ -242,7 +242,8 @@ export async function fetchPlanUsage(): Promise<PlanUsageResult> {
    * /usage 轮，纯本地，和这条链路无关。
    */
   if (loadSettings().cloudUsageEnabled !== true) {
-    return { ok: false, error: '云端额度查询未开启（走 Kimi 私有接口，有封号风险，默认关闭）' }
+    // disabled 标记：这是"功能关着"的正常态，渲染层显示 — 而不是"读取失败"红框。
+    return { ok: false, disabled: true, error: '云端额度查询未开启（走 Kimi 私有接口，有封号风险，默认关闭）' }
   }
   let token = await getValidAccessToken()
   if (!token) return { ok: false, error: AUTH_EXPIRED_MESSAGE }

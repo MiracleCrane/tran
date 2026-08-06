@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.0.64 - 2026-08-06
+
+### 中文
+
+- 新增:**会话搜索命令面板**（Codex 同款）。侧栏常驻搜索框撤掉，「最近会话」行改为 🔍 图标；点开或按 Ctrl+K 弹出居中搜索面板：实时过滤会话（标题/路径/分支），↑↓ 选择、Enter 进入、Esc 关闭，底部带「新对话」推荐。
+- 修复:**侧栏收起态三宗罪**（CDP 实测定位）：①浮出后分界竖线不消失——元凶是主区面板的一圈 inset 描边，图标条隐形后它还立着，收起态下不再画；②peek 浮出时「工具」区强制展开，不再跟随展开态的收起状态；③图标条的新建对话按钮去紫改中性。
+- 修复:悬停触发区实测全轨可达（此前怀疑只有部分位置可触发，CDP 事件链实测整条图标条都行）。
+- 修复:「回到最新」按钮——挪到底部居中（Codex 位）；输出中箭头挂流光、静态时素箭头；**点它不再吃跟随锁**（此前按钮自己触发"停留阅读"锁，流式期间怎么点都差一截到不了底）。
+- 修复:活动自动折叠不再顶飞阅读位置——折叠改成 sticky 决策，只有当你在底部时才折新收尾的活动组；上翻阅读期间布局绝不变。
+- 修复:思考翻译「不可用」轻提示替代永远转圈；云端额度关闭时额度环显示「—」不再弹"读取失败"红框。
+- 优化:会话列表单行化——时间不再占第二行（悬停显示），标题单行放满整行宽度,行高收紧一屏多看几条。
+- 优化:活动摘要行（思考 N 段 · 运行了命令 ×3…）改成浅底药丸，与真思考块一眼区分；工具名全部中文（read_file/terminal 这类 wire 原始名不再外露）。
+- 优化:用量卡额度行去掉「24/100 剩余 76」数字（进度条+百分比已表达），倒计时靠左、具体到期时刻靠右错开;「5 小时 额度」标题缝隙消除。
+- 优化:项目下拉去掉逐行 stagger 动画（动画期间截断宽度反复变化，看着像内容一直在变）。
+- 优化:品牌去重——标题栏的 Tran 标志移除，全窗口只留侧栏一处并带常静流光。
+- 优化:MCP 状态行与顶部运行状态条（● Windows / Agent Kimi CLI x.y.z）下线,空间还给正文。
+- 智谱免费档耐心加长:限流退避从 ~22s 放到 ~76s（6 轮，单轮封顶 30s）——"慢一点排队我愿意"。
+
+### English
+
+- New: Codex-style session search palette — the permanent sidebar search box is gone; a 🔍 icon (or Ctrl+K) opens a centered palette with live filtering, keyboard navigation, and a "new chat" suggestion.
+- Fixed: collapsed-sidebar trio (verified via CDP): the stray divider line that survived peeking (the main surface's inset ring — no longer painted when collapsed); peek now force-expands the tools section; the rail's new-chat button is no longer purple.
+- Fixed: the "back to latest" button — now bottom-centered, animated while streaming, and no longer eats its own follow-lock (previously it could never reach the true bottom during streaming).
+- Fixed: auto-folded activity groups no longer yank your reading position — folding is sticky and only happens while you're at the bottom.
+- Fixed: translation-unavailable shows a one-line hint instead of spinning forever; disabled cloud quota shows "—" instead of an error box.
+- Session rows are single-line now (time moved to hover), titles use the full row width; activity summary rows are subtle pills with fully-Chinese tool labels; usage-card quota rows drop the redundant numbers and split countdown/reset-time apart; project dropdown stagger animation removed; brand deduplicated to the sidebar with a shimmer; MCP row and runtime status strip removed; longer rate-limit patience for free-tier GLM.
+
 ## v1.0.63 - 2026-08-06
 
 ### 中文

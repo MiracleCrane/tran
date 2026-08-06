@@ -9,8 +9,6 @@ import Composer from './components/Composer'
 import ElicitationCard from './components/ElicitationCard'
 import PlanCard from './components/PlanCard'
 import GoalCard from './components/GoalCard'
-import McpStatusBar from './components/McpStatusBar'
-import RuntimeStatusStrip from './components/RuntimeStatusStrip'
 import ErrorDiagnosticPanel from './components/ErrorDiagnosticPanel'
 import GitToolbar, { requestCloseGitDrawer } from './components/GitToolbar'
 import AttachmentPreviewPane from './components/AttachmentPreviewPane'
@@ -251,7 +249,8 @@ function ChatTopbar({
         aria-hidden={collapsed}
       >
         <div ref={bodyRef} className="chat-topbar-body">
-          <RuntimeStatusStrip />
+          {/* RuntimeStatusStrip（● Windows / Agent Kimi Code CLI x.y.z 那一行）
+              按用户要求移除（2026-08）：信息密度低、白占一行，空间还给正文。 */}
           <GitToolbar cornerAction={<ChatTopbarToggle collapsed={false} onClick={toggle} />} />
         </div>
       </div>
@@ -304,7 +303,8 @@ function MainViewContent({
       <ChatTopbar collapsed={chatTopbarCollapsed} onToggle={onToggleChatTopbar} />
       <GoalCard />
       <PlanCard />
-      <McpStatusBar />
+      {/* McpStatusBar 按用户要求下线（2026-08）：常驻一行的收益太低，后续挪到
+          左侧边栏做插件式入口。组件保留，这里不再挂载。 */}
       <div className="min-h-0 flex-1 overflow-hidden" onPointerDownCapture={requestCloseGitDrawer}>
         <Transcript
           layoutTransitioning={chatTopbarLayoutMotion}

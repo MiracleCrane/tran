@@ -101,8 +101,11 @@ export type CheapCallResult =
  * 设计上刻意不给所有请求无条件加间隔：DeepSeek 那种不限流的服务不该被拖慢。
  * 只有**真的撞过 429 之后**才进入冷却期并拉开间距，一段时间不再撞就自动恢复。
  */
-const RATE_LIMIT_MAX_RETRIES = 4
+const RATE_LIMIT_MAX_RETRIES = 6
 const RATE_LIMIT_BASE_DELAY_MS = 1500
+/** 单次退避上限：免费档平台拥塞是常态（2026-08 用户明确"慢一点排队我愿意"），
+ *  耐心放到 ~76s 总长（1.5/3/6/12/24/30），但单次别超过 30s 没边界。 */
+const RATE_LIMIT_MAX_DELAY_MS = 30_000
 /** 撞限流后，后续请求之间强制拉开的最小间距。 */
 const COOLDOWN_SPACING_MS = 1200
 /** 冷却期长度：这段时间内没再撞限流就恢复全速。 */
@@ -153,7 +156,7 @@ export async function cheapComplete(opts: CheapCallOptions): Promise<CheapCallRe
     if (result.ok || !isRateLimited(result.status, result.error)) break
     // 撞了就进冷却：后续请求（含本次重试）自动拉开间距。
     cooldownUntil = Date.now() + COOLDOWN_WINDOW_MS
-    const delay = RATE_LIMIT_BASE_DELAY_MS * 2 ** attempt
+    const delay = Math.min(RATE_LIMIT_MAX_DELAY_MS, RATE_LIMIT_BASE_DELAY_MS * 2 ** attempt)
     log('cheap-model', `限流，${delay}ms 后重试（第 ${attempt + 1}/${RATE_LIMIT_MAX_RETRIES} 次）`)
     await sleep(delay)
     result = await enqueue(() => cheapCompleteOnce(opts, true))

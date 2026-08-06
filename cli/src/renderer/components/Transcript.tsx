@@ -201,7 +201,7 @@ function rowKeyOf(row: DisplayRow): string {
   return row.kind === 'item' ? row.node.item.id : row.id
 }
 
-function buildDisplayRows(roots: ItemNode[]): DisplayRow[] {
+function buildDisplayRows(roots: ItemNode[], shouldFold: (groupKey: string) => boolean): DisplayRow[] {
   const rows: DisplayRow[] = []
   let toolRun: { node: ItemNode; blocks: AssistantBlock[] }[] = []
   let envelopeRun: ItemNode[] = []
@@ -209,14 +209,27 @@ function buildDisplayRows(roots: ItemNode[]): DisplayRow[] {
     const all = toolRun.flatMap((r) => r.blocks)
     // 聚合门槛按**块数**而不是消息数：重放历史里一条消息常常只有 1 个块，
     // 按消息数算永远够不着 2。
+    // 2026-08 滚动稳定：折叠与否交给 shouldFold 判定（组件侧按"组创建时用户
+    // 是否在底部" sticky 记忆）——用户上翻阅读时新收尾的活动**不折叠**，
+    // 已折叠的组也不因上翻而展开，布局在阅读位置脚下绝不变。
     if (all.length >= 2) {
       const pureTools = all.every((b): b is ToolBlock => b.kind === 'tool')
       if (pureTools) {
-        // 纯工具组维持原有的 ToolGroupCard（带运行/错误态），不回归现有设计。
-        rows.push({ kind: 'toolGroup', id: `tool-group-${all[0].toolUseId}`, blocks: all })
+        const key = `tool-group-${all[0].toolUseId}`
+        if (shouldFold(key)) {
+          // 纯工具组维持原有的 ToolGroupCard（带运行/错误态），不回归现有设计。
+          rows.push({ kind: 'toolGroup', id: key, blocks: all })
+        } else {
+          for (const r of toolRun) rows.push({ kind: 'item', node: r.node })
+        }
       } else {
-        // 含思考的混合组：走一行规则摘要，点开还原完整渲染。
-        rows.push({ kind: 'activityGroup', id: `activity-group-${toolRun[0].node.item.id}`, blocks: all })
+        const key = `activity-group-${toolRun[0].node.item.id}`
+        if (shouldFold(key)) {
+          // 含思考的混合组：走一行规则摘要，点开还原完整渲染。
+          rows.push({ kind: 'activityGroup', id: key, blocks: all })
+        } else {
+          for (const r of toolRun) rows.push({ kind: 'item', node: r.node })
+        }
       }
     } else {
       for (const r of toolRun) rows.push({ kind: 'item', node: r.node })
@@ -227,11 +240,16 @@ function buildDisplayRows(roots: ItemNode[]): DisplayRow[] {
     // 连续 ≥2 个信封才折叠；单个维持单张卡。组 id 取首条 id——live 期间新到
     // 的信封进尾部已有组时组 id 不变，展开状态和位置都不闪。
     if (envelopeRun.length >= 2) {
-      rows.push({
-        kind: 'envelopeGroup',
-        id: `envelope-group-${envelopeRun[0].item.id}`,
-        entries: envelopeRun.map((n) => ({ id: n.item.id, text: envelopeTextOf(n) ?? '' }))
-      })
+      const key = `envelope-group-${envelopeRun[0].item.id}`
+      if (shouldFold(key)) {
+        rows.push({
+          kind: 'envelopeGroup',
+          id: key,
+          entries: envelopeRun.map((n) => ({ id: n.item.id, text: envelopeTextOf(n) ?? '' }))
+        })
+      } else {
+        for (const n of envelopeRun) rows.push({ kind: 'item', node: n })
+      }
     } else {
       for (const n of envelopeRun) rows.push({ kind: 'item', node: n })
     }
@@ -646,7 +664,16 @@ const LatestButton = memo(function LatestButton({
         aria-label="回到最新"
         className="glass-control flex h-8 items-center gap-1 rounded-full px-2.5 text-xs text-zinc-400 transition hover:text-zinc-200"
       >
-        <span aria-hidden className={`leading-none ${running ? 'flow-text flow-text-violet' : ''}`}>↓</span>
+        {/* 箭头用 SVG 居中：文本字形 ↓ 的基线偏移在圆钮里怎么调都是歪的
+            （2026-08 用户反馈）。输出中挂紫黄流光 = 动态。 */}
+        <span
+          aria-hidden
+          className={`flex h-3.5 w-3.5 items-center justify-center ${running ? 'flow-text flow-text-violet' : ''}`}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
         <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-150 group-hover/latest:max-w-[2.5rem] group-hover/latest:opacity-100">
           最新
         </span>
@@ -760,7 +787,7 @@ const ActivityGroupRow = memo(function ActivityGroupRow({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex cursor-pointer select-none items-center gap-1.5 text-left text-xs text-zinc-500 transition hover:text-zinc-400"
+        className="flex w-fit cursor-pointer select-none items-center gap-1.5 rounded-lg bg-white/[0.03] px-2 py-1 text-left text-xs text-zinc-500 transition hover:bg-white/[0.055] hover:text-zinc-400"
       >
         <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
         <ActivitySummary segments={summarizeActivity(entries.map((e) => e.block))} />
@@ -794,7 +821,7 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
         type="button"
         aria-expanded={open}
         onClick={() => setUserToggled(!open)}
-        className="flex cursor-pointer select-none items-center gap-1.5 text-left text-xs text-zinc-500 transition hover:text-zinc-400"
+        className="flex w-fit cursor-pointer select-none items-center gap-1.5 rounded-lg bg-white/[0.03] px-2 py-1 text-left text-xs text-zinc-500 transition hover:bg-white/[0.055] hover:text-zinc-400"
       >
         <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
         <ActivitySummary segments={summarizeActivity(blocks)} />
@@ -1015,6 +1042,21 @@ export default function Transcript({
 
   const roots = useMemo(() => buildForest(items), [items])
   /**
+   * 折叠决策的 sticky 记忆（2026-08 滚动稳定）：组第一次出现时，用户**在底部**
+   * 才折成摘要行；在上翻阅读时出现的组保持展开——布局绝不在用户脚下变化。
+   * 一旦定了就不再翻转（已经折的组不因为你上翻而重新展开，反之亦然），
+   * 换会话时清空（见下面 useMemo 里的 prevSessionKeyRef 分支）。
+   */
+  const foldDecisionsRef = useRef(new Map<string, boolean>())
+  const foldDecisionFor = (groupKey: string): boolean => {
+    const map = foldDecisionsRef.current
+    const existing = map.get(groupKey)
+    if (existing !== undefined) return existing
+    const decision = atBottomRef.current
+    map.set(groupKey, decision)
+    return decision
+  }
+  /**
    * 历史渐进注水会往 items **头部**插入旧消息（每次 50 条）。虚拟列表默认按
    * 下标定位，头部多出 N 条 = 当前可视内容整体往下推 N 条的高度——表现就是
    * 「往上滚、一停住、内容自己往下跳一大截」。触发链路：滚动时注水暂停，
@@ -1026,12 +1068,13 @@ export default function Transcript({
    * 分组（toolGroup/envelopeGroup）导致的行数变化也一并算对。
    */
   const { displayRows, firstItemIndex } = useMemo(() => {
-    const rows = buildDisplayRows(roots)
+    const rows = buildDisplayRows(roots, foldDecisionFor)
     // 换会话：整表重来，基数复位，别把上个会话的偏移带过来。
     if (prevSessionKeyRef.current !== sessionKey) {
       prevSessionKeyRef.current = sessionKey
       firstItemIndexRef.current = FIRST_ITEM_INDEX_BASE
       prevFirstRowKeyRef.current = null
+      foldDecisionsRef.current.clear()
     }
     const firstKey = rows.length ? rowKeyOf(rows[0]) : null
     const prevKey = prevFirstRowKeyRef.current

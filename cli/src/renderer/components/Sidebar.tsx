@@ -1257,19 +1257,20 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
           return (
             <div
               key={sessionKey(s)}
-              className="group relative [content-visibility:auto] [contain-intrinsic-size:auto_44px]"
+              className="group relative [content-visibility:auto] [contain-intrinsic-size:auto_34px]"
             >
               <div
-                className={`sidebar-session-row relative w-full rounded-xl border px-2.5 py-2 text-left ${
+                className={`sidebar-session-row relative w-full rounded-xl border px-2.5 py-1.5 text-left ${
                   active ? 'is-active glass-active text-zinc-100' : 'border-transparent text-zinc-400'
                 }`}
               >
                 {active && (
                   <span className="session-active-bar absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-accent" />
                 )}
-                <div className="truncate text-xs">{s.summary || '(未命名)'}</div>
-                <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-zinc-600">
-                  <span>{relTime(s.lastModified)}</span>
+                {/* 单行标题（2026-08 用户定稿）：一行尽量放长，时间不再占第二行，
+                    收进 hover 提示（title）。 */}
+                <div className="flex items-center gap-1.5 text-xs" title={relTime(s.lastModified)}>
+                  <span className="min-w-0 flex-1 truncate">{s.summary || '(未命名)'}</span>
                   <span className={`session-runtime-badge ${snapshot.showRuntimeBadges ? 'is-visible' : ''}`}>
                     {backendLabel(s.runtimeBackend)}
                   </span>
@@ -1497,7 +1498,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                   key={key}
                   data-session-id={s.sessionId}
                   data-session-backend={s.runtimeBackend ?? 'windows'}
-                  className={`session-row-shell group relative [content-visibility:auto] [contain-intrinsic-size:auto_44px] ${
+                  className={`session-row-shell group relative [content-visibility:auto] [contain-intrinsic-size:auto_34px] ${
                     inserting ? 'is-inserting' : ''
                   } ${exiting ? 'is-exiting' : ''
                   }`}
@@ -1534,7 +1535,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                       }}
                       onPointerMove={handleSidebarPointerGlow}
                       onPointerLeave={hidePreview}
-                      className={`sidebar-session-row relative w-full rounded-xl border px-2.5 py-2 text-left ${
+                      className={`sidebar-session-row relative w-full rounded-xl border px-2.5 py-1.5 text-left ${
                         multiMode ? '' : 'pr-20'
                       } ${
                         active
@@ -1561,14 +1562,15 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                           </span>
                         )}
                         <span className="min-w-0 flex-1">
-                          <div className="truncate text-xs">{s.summary || '(未命名)'}</div>
-                          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-zinc-600">
+                          {/* 单行标题：时间收进 hover 提示，不再占第二行（2026-08
+                              用户定稿）；运行中圆点跟在标题后面。 */}
+                          <div className="flex items-center gap-1.5 text-xs" title={relTime(s.lastModified)}>
+                            <span className="min-w-0 flex-1 truncate">{s.summary || '(未命名)'}</span>
                             {/* #5b：列表条目自带的 running 之外，还叠加 store 实时上报的
                                 runningSdkSessionIds（当前正在跑 turn 的会话）。 */}
                             {(s.running || runningSdkSessionIds.includes(s.sessionId)) && (
                               <span className="session-running-dot" title="运行中" />
                             )}
-                            <span>{relTime(s.lastModified)}</span>
                             <span className={`session-runtime-badge ${wslSupportEnabled ? 'is-visible' : ''}`}>
                               {backendLabel(s.runtimeBackend)}
                             </span>
@@ -1657,8 +1659,11 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
           </button>
           {/* grid-rows 0fr↔1fr animates height without guessing a max-height;
               the inner overflow-hidden clips the rows mid-tween. The spring
-              curve + per-item stagger give the non-linear pop. */}
-          <Collapse open={!navCollapsed}>
+              curve + per-item stagger give the non-linear pop.
+              peek 浮出（forceExpanded）时强制展开工具区：peek 的意义就是快速
+              触达这四个入口，用户在展开态收起过「工具」不该让浮出态也收起
+              （2026-08 用户反馈）。 */}
+          <Collapse open={forceExpanded || !navCollapsed}>
             <div className="mt-1">
               {NAV_ITEMS.map((item, i) => {
                 const on = view === item.view

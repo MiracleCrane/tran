@@ -623,7 +623,7 @@ export interface PlanUsageInfo {
 
 export type PlanUsageResult =
   | { ok: true; data: PlanUsageInfo }
-  | { ok: false; error: string }
+  | { ok: false; error: string; /** 功能被关闭（opt-in 门未开）时是正常状态，不是故障——渲染层别弹错误框。 */ disabled?: boolean }
 
 /** DeepSeek 账户余额（官方 GET /user/balance；金额是接口原样返回的字符串）。 */
 export interface DeepseekBalanceInfo {
