@@ -1,6 +1,6 @@
-/** #48 用户消息定位导航条（Kimi Web 同款）：对话区右缘悬浮一列本会话的
- *  用户消息摘要，点击跳转到对应消息。常态收成细条（每条消息一节），hover
- *  展开成摘要列表；条目过多时列表自身可滚动。无用户消息时整体隐藏。 */
+/** #48 用户消息定位导航条。2026-08 改版（Codex 风，用户录屏指定）：对话区
+ *  **左缘**一列小横线——每条用户消息一节，当前节更亮更长；常态无框无底，
+ *  hover 才浮出摘要列表。点击跳转，最新在下。无用户消息时整体隐藏。 */
 
 export interface UserNavEntry {
   id: string
@@ -25,9 +25,9 @@ export default function UserMessageNav({
   if (entries.length === 0) return null
   return (
     // data-user-msg-nav：Transcript 的 wheel 捕获据此豁免导航条自身的滚动。
-    <div data-user-msg-nav className="group absolute right-2 top-1/2 z-10 -translate-y-1/2">
-      {/* 常态细条：每条消息一节，点击同样可跳转；最新在下。 */}
-      <div className="flex max-h-[50vh] flex-col items-end gap-1 overflow-hidden rounded-full border border-white/[0.06] bg-zinc-950/50 px-1.5 py-2 backdrop-blur-sm group-hover:hidden">
+    <div data-user-msg-nav className="group absolute left-1 top-1/2 z-10 -translate-y-1/2">
+      {/* 常态：一列小横线（Codex 同款）。无框无底，嵌在对话区左缘。 */}
+      <div className="flex max-h-[60vh] flex-col items-start gap-[5px] overflow-hidden py-2 group-hover:opacity-0">
         {entries.map((entry) => (
           <button
             key={entry.id}
@@ -35,14 +35,16 @@ export default function UserMessageNav({
             onClick={() => onJump(entry.rowIndex)}
             title={entry.summary}
             aria-label={`跳转到：${entry.summary}`}
-            className={`h-1 w-3 shrink-0 rounded-full transition ${
-              entry.id === activeId ? 'bg-accent' : 'bg-zinc-600/70 hover:bg-zinc-400'
+            className={`h-[3px] shrink-0 rounded-full transition-all ${
+              entry.id === activeId
+                ? 'w-4 bg-accent'
+                : 'w-2.5 bg-zinc-600/60 hover:bg-zinc-400'
             }`}
           />
         ))}
       </div>
-      {/* hover 展开：摘要列表，条目多时内部滚动。 */}
-      <div className="hidden max-h-[60vh] w-56 overflow-y-auto rounded-xl border border-white/[0.08] bg-zinc-950/80 p-1.5 shadow-xl shadow-black/40 backdrop-blur group-hover:block">
+      {/* hover 展开：摘要列表（浮在条带右侧），条目多时内部滚动。 */}
+      <div className="pointer-events-none absolute left-3 top-1/2 hidden max-h-[60vh] w-56 -translate-y-1/2 overflow-y-auto rounded-xl border border-white/[0.08] bg-zinc-950/85 p-1.5 opacity-0 shadow-xl shadow-black/40 backdrop-blur transition-opacity group-hover:pointer-events-auto group-hover:block group-hover:opacity-100">
         {entries.map((entry, i) => (
           <button
             key={entry.id}

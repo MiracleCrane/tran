@@ -191,15 +191,21 @@ export function buildShortcuts(): ShortcutAction[] {
   const list: ShortcutAction[] = [
     {
       id: 'toggleSidebar',
-      label: '收起 / 展开侧栏',
-      // Alt+Q 是主键位（用户指定）；Ctrl+B 一并保留——它是 VS Code / Codex 的
-      // 通用肌肉记忆，多绑一个不占成本。Alt+Q 在 Windows 上没冲突：Chromium
-      // 未占用，且 Tran 是自绘标题栏、没有菜单栏，不会触发菜单助记键。
-      keys: ['Alt+Q', 'Ctrl+B'],
+      label: '收起 / 展开侧栏（图标条）',
+      // Ctrl+B 是 VS Code / Codex 的通用肌肉记忆：收成图标条。
+      keys: ['Ctrl+B'],
       // 侧栏开合在输入时也该能用：不影响文本，纯视图动作。
       allowInInput: true,
-      // 语义与手动点收起按钮**完全一致**：就是 collapsed 的切换，没有第二种状态。
       run: () => ui().toggleSidebar()
+    },
+    {
+      id: 'hideSidebar',
+      label: '隐藏 / 显示侧栏（完全隐藏）',
+      // Alt+Q 是用户指定的完全隐藏键位（2026-08）：连图标条都不留，Codex 风。
+      // Windows 上没冲突：Chromium 未占用，Tran 是自绘标题栏、没有菜单栏。
+      keys: ['Alt+Q'],
+      allowInInput: true,
+      run: () => ui().toggleSidebarHidden()
     },
     {
       id: 'newChat',

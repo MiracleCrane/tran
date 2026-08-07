@@ -134,6 +134,12 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
+/* 输入框 textarea 例外（2026-08）：它有自己的中性聚焦处理（.composer-focus-ring），
+   全局紫色 outline 会在面板外缘再画一圈紫边，用户当 bug 报。 */
+.composer-textarea:focus-visible {
+  outline: none;
+}
+
 @layer components {
   .app-shell {
     --window-radius: 0px;
@@ -2523,9 +2529,10 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
 .prose-forge li {
   margin: 0.15em 0;
 }
-/* 符号比正文暗一档：它是结构提示，不该和内容抢注意力。 */
+/* 符号比正文暗一档：它是结构提示，不该和内容抢注意力。
+ *  但 0.32 太暗了（2026-08 用户反馈"序号圆点看不清"），抬到 0.55。 */
 .prose-forge li::marker {
-  color: rgba(255, 255, 255, 0.32);
+  color: rgba(255, 255, 255, 0.55);
 }
 /* GFM 任务列表（- [ ] / - [x]）自带勾选框，再叠一个圆点就重复了。 */
 .prose-forge li:has(> input[type='checkbox']) {
@@ -2538,9 +2545,13 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   margin: 0.7em 0 0.3em;
   line-height: 1.3;
 }
+/* 链接（2026-08 Codex 风）：链接蓝 + 无下划线 + 站点 favicon（favicon 由
+ *  LinkRenderer 里联渲染——Codex 用的 google s2/favicons 国内不通，直连站点
+ *  /favicon.ico，失败回退通用小箭头）。
+ *  色值来自 Codex 桌面版 asar 实测（--blue-400 #0285ff），按暗色底提亮到 #3d9bff。 */
 .prose-forge a {
-  color: #e5a08e;
-  text-decoration: underline;
+  color: #3d9bff;
+  text-decoration: none;
 }
 .prose-forge blockquote {
   border-left: 3px solid rgba(139, 92, 246, 0.55);
@@ -3422,4 +3433,44 @@ div:has(textarea:focus) .composer-shortcut-hint {
 }
 :root[data-theme='charcoal'] .app-shell-merged .sidebar-peek > * {
   background: #1b1b1b;
+}
+
+/* markdown 代码块外框（PreRenderer）：头部 语言标签 + 复制钮，下面代码本体。
+   框只有一层——里面的 pre 不再自己带边框。 */
+.md-code-block {
+  margin: 0.5em 0;
+  overflow: hidden;
+  border: 1px solid rgba(238, 232, 226, 0.14);
+  border-radius: 10px;
+  background: rgba(8, 10, 14, 0.62);
+}
+.md-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+}
+.md-code-lang {
+  font-size: 10px;
+  color: #71717a;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.md-code-copy {
+  font-size: 10px;
+  color: #71717a;
+  padding: 1px 6px;
+  border-radius: 6px;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.md-code-copy:hover {
+  color: #d4d4d8;
+  background: rgba(255, 255, 255, 0.06);
+}
+.md-code-block > pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }

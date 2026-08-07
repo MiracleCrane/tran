@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useSessionStore, foldBackgroundSwarmTasks, takeAttachedSwarmTasks } from './store/sessionStore'
 import { useUiStore, type View } from './store/uiStore'
 import { installShortcuts } from './shortcuts'
@@ -111,6 +111,8 @@ function readChatTopbarCollapsed(): boolean {
 
 function WindowTitlebar(): JSX.Element {
   const [maximized, setMaximized] = useState(false)
+  const sidebarHidden = useUiStore((s) => s.sidebarHidden)
+  const toggleSidebarHidden = useUiStore((s) => s.toggleSidebarHidden)
   useEffect(() => {
     let alive = true
     void window.api.isWindowMaximized().then((v) => {
@@ -126,7 +128,22 @@ function WindowTitlebar(): JSX.Element {
     <div className="window-titlebar flex shrink-0 items-center text-[13px] text-zinc-200/80">
       <div className="window-titlebar-drag flex min-w-0 flex-1 items-center gap-2 px-4">
         {/* 品牌只留侧栏那一处（2026-08 用户反馈"两个 Tran 重复"）：
-            标题栏保持纯拖拽区。 */}
+            标题栏保持纯拖拽区。侧栏完全隐藏时这里给一个回来的入口（Codex 风：
+            隐藏后顶部留一个迷你按钮）。 */}
+        {sidebarHidden && (
+          <button
+            type="button"
+            onClick={toggleSidebarHidden}
+            title="显示侧边栏（Alt+Q）"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-500 transition hover:bg-white/[0.08] hover:text-zinc-200"
+            style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
+              <path d="M9.5 4v16" stroke="currentColor" strokeWidth="1.7" />
+            </svg>
+          </button>
+        )}
       </div>
       <div className="window-controls flex h-full shrink-0 items-stretch">
         <button

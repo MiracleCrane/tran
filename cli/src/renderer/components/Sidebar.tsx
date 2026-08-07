@@ -1286,7 +1286,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   return (
     <div key="sidebar-expanded" className="sidebar-expand glass-sidebar flex h-full min-h-0 w-64 shrink-0 flex-col rounded-[18px] border">
       {/* brand + collapse（全窗口唯一品牌位，标题栏不再重复；文字挂常静流光，
-          2026-08 用户点名要的动效） */}
+          2026-08 用户点名要的动效）。头部两颗按钮：缩小（收成图标条）与
+          完全隐藏（连图标条都不留，Alt+Q 可回）。 */}
       <div className="flex items-center gap-2 px-4 pt-3">
         <AppLogo size={30} className="shrink-0" />
         <div className="flex-1 text-sm font-semibold">
@@ -1295,9 +1296,19 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         <button
           onClick={handleToggleSidebar}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
-          title="收起侧边栏"
+          title="缩小为图标条（Ctrl+B）"
         >
           <ChevronIcon collapsed={false} />
+        </button>
+        <button
+          onClick={() => useUiStore.getState().toggleSidebarHidden()}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
+          title="隐藏侧边栏（Alt+Q 唤回）"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M20 5v14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
         </button>
       </div>
 

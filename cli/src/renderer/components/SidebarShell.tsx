@@ -91,6 +91,7 @@ const PEEK_LEAVE_ANIM_MS = 170
 
 export default function SidebarShell(): JSX.Element {
   const collapsed = useUiStore((s) => s.sidebarCollapsed)
+  const hidden = useUiStore((s) => s.sidebarHidden)
   const width = useUiStore((s) => s.sidebarWidth)
   const hoverExpand = useUiStore((s) => s.sidebarHoverExpand)
   const [peeking, setPeeking] = useState(false)
@@ -153,6 +154,10 @@ export default function SidebarShell(): JSX.Element {
     },
     []
   )
+
+  // 完全隐藏（Codex 风）：连图标条都不渲染，dock 收成零宽——主区顺势铺满，
+  //  网格列动画（workspace-shell 的 grid-template-columns 过渡）给出滑走感。
+  if (hidden) return <div className="sidebar-dock w-0 shrink-0 overflow-hidden" />
 
   const peekOn = collapsed && hoverExpand
 

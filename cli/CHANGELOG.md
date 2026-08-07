@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.0.69 - 2026-08-07
+
+### 中文
+
+- 新增:**侧栏「隐藏/缩小」双档**（Codex 风）。缩小 = 收成图标条（Ctrl+B）；隐藏 = 连图标条都不留（Alt+Q，或侧栏头部的隐藏按钮），主区铺满，隐藏时标题栏左侧留一个迷你唤回按钮。
+- 重做:用户消息导航条改 Codex 同款——对话区**左缘**一列小横线（每条消息一节，当前节更亮更长），无框无底；hover 才浮出摘要列表。原来右侧的圆角条下线。
+- 修复:**「回到最新」按钮误现**——在底部时展开思考/工具卡，内容增高被误判成"用户上滚"。现在按 scrollTop 方向区分：只有真的向上滚才解除跟随。
+- 修复:输入框聚焦紫边的真正元凶——全局 `textarea:focus-visible` 紫色 outline（键盘聚焦才触发，之前的测试没模拟到）。输入框已豁免，CDP 实测消除。
+- 新增:markdown 代码块带头部的卡片——语言标签在左、「复制」按钮在右（点了一下进剪贴板）。
+- 新增:思考块正文轻量渲染（流式期保持纯文本保性能，收尾后渲染加粗/行内代码/链接）；**思考翻译边输出边翻**——展开时先翻当前快照，收尾自动补翻全文。
+- 优化:摘要行动词去「了」（读取文件/运行命令…）；思考块与工具卡间距微调到 3px 档；工具卡去框试验——不再套卡片盒，裸排版 + 展开区左侧发丝引导线。
+- 修复:CJK 加粗解析（「是**X**，」这种组合 CommonMark 不认，`**` 原样漏出）；链接 Codex 化——蓝色无下划线 + 站点 favicon（直连站点取图标，失败回退小箭头）。
+
+### English
+
+- New: sidebar hide/collapse as two distinct levels (Codex-style): collapse to the icon rail (Ctrl+B) or hide entirely (Alt+Q / header button) with a mini restore button in the titlebar.
+- Reworked: the user-message navigator is now Codex's left-edge dash strip — no frame, hover reveals summaries.
+- Fixed: the "back to latest" button appearing when cards expand at the bottom (scroll-direction now distinguishes real scroll-ups from content growth); the composer's purple focus ring root cause (a global `textarea:focus-visible` outline) is exempted for the composer.
+- New: code blocks get a header card (language label + copy button); thinking blocks get light inline rendering after streaming, and thinking translation starts from the expand-time snapshot while streaming, re-translating in full when the stream ends.
+- Tweaks: summary verbs dropped the trailing 了; bar spacing tuned; tool cards go frameless (experiment); CJK bold parsing fixed; links are Codex-blue with per-site favicons.
+
 ## v1.0.68 - 2026-08-07
 
 ### 中文

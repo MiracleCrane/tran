@@ -24,6 +24,10 @@ interface UiStore {
   setView: (view: View) => void
   sidebarCollapsed: boolean
   toggleSidebar: () => void
+  /** 完全隐藏（连图标条都不留，Codex 风）。Alt+Q 绑这档；collapsed 是收成
+   *  图标条那一档。 */
+  sidebarHidden: boolean
+  toggleSidebarHidden: () => void
   /**
    * 展开态侧栏的宽度（px）。拖右边缘可调，持久化到 localStorage——用户手动
    * 调过的尺寸，重启后弹回默认值会显得像 bug。收起态是固定的图标条宽度，
@@ -57,6 +61,15 @@ function overlayId(): string {
 }
 
 const SIDEBAR_WIDTH_KEY = 'tran.sidebarWidth'
+const SIDEBAR_HIDDEN_KEY = 'tran.sidebarHidden'
+
+function readSidebarHidden(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_HIDDEN_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 /** 默认 256px = 原先写死的 Tailwind w-64，改成可调后保持同一个初值。 */
 export const SIDEBAR_WIDTH_DEFAULT = 256
 export const SIDEBAR_WIDTH_MIN = 180
@@ -92,6 +105,19 @@ export const useUiStore = create<UiStore>((set) => ({
   setView: (view) => set({ view }),
   sidebarCollapsed: false,
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  /** 完全隐藏（Codex 风）：连图标条都不留。与 collapsed（收成图标条）是两档，
+   *  Alt+Q 绑定这档。 */
+  sidebarHidden: readSidebarHidden(),
+  toggleSidebarHidden: () =>
+    set((s) => {
+      const next = !s.sidebarHidden
+      try {
+        localStorage.setItem(SIDEBAR_HIDDEN_KEY, next ? '1' : '0')
+      } catch {
+        /* 同 sidebarWidth 的兜底 */
+      }
+      return { sidebarHidden: next }
+    }),
   sidebarWidth: readSidebarWidth(),
   setSidebarWidth: (width) => {
     const next = clampSidebarWidth(width)

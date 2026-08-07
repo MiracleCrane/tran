@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, type AnchorHTMLAttributes, type ImgHTMLAttributes, type MouseEvent } from 'react'
+import { memo, useEffect, useRef, useState, type AnchorHTMLAttributes, type ImgHTMLAttributes, type MouseEvent } from 'react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -147,16 +147,57 @@ function LinkRenderer({
     openPathPreview(cwd, path, openAttachmentPreview)
   }
 
+  /** 网站图标：直连站点 /favicon.ico（Codex 用的是 google s2/favicons，但那域名
+   *  在国内不通）。加载失败回退为通用外跳小图标——图标只是点缀，绝不能裂图。 */
+  const external = isExternalHref(href)
   return (
     <a
       {...props}
       href={href}
       onClick={handleClick}
       title={title}
-      className="text-accent underline decoration-accent/40 underline-offset-2 transition hover:decoration-accent"
+      className="text-[#3d9bff] no-underline transition hover:brightness-125"
     >
+      {external && <LinkFavicon href={href} />}
       {children}
     </a>
+  )
+}
+
+/** 站点图标：img 加载失败回退成通用外跳小箭头（裂图比没图标难看）。 */
+function LinkFavicon({ href }: { href: string }): JSX.Element | null {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return (
+      <svg
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        className="mr-0.5 inline-block align-[-0.1em]"
+        aria-hidden
+      >
+        <path
+          d="M9 4h11v11h-2.2V7.6L6 19.4 4.6 18 16.4 6.2H9V4Z"
+          fill="currentColor"
+        />
+      </svg>
+    )
+  }
+  let origin = ''
+  try {
+    origin = new URL(normalizeExternalHref(href)).origin
+  } catch {
+    return null
+  }
+  return (
+    <img
+      src={`${origin}/favicon.ico`}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="mr-0.5 inline-block h-[0.95em] w-[0.95em] rounded-[2px] align-[-0.1em]"
+    />
   )
 }
 
@@ -176,15 +217,107 @@ function ImgRenderer({ src, alt, node: _node, ...props }: ImgRendererProps): JSX
   )
 }
 
-const MD_COMPONENTS = { code: CodeRenderer, a: LinkRenderer, img: ImgRenderer }
+/** 代码块外框（2026-08，用户要求"能轻易复制、有框框好区分"）：
+ *  语言标签在左、复制按钮在右，下面才是代码本体。复制从渲染后的 DOM 读
+ *  textContent——highlight 之后 children 是一串 span，从 props 抠文本不可靠。 */
+function PreRenderer({ children, ...props }: any): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null)
+  const [copied, setCopied] = useState(false)
+  const codeProps = (Array.isArray(children) ? children[0] : children)?.props ?? {}
+  const lang = /language-([\w-]+)/.exec(codeProps.className ?? '')?.[1] ?? 'text'
+
+  const copy = async (): Promise<void> => {
+    const text = ref.current?.querySelector('code')?.textContent ?? ''
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    } catch {
+      /* 剪贴板不可用时静默 */
+    }
+  }
+
+  return (
+    <div ref={ref} className="md-code-block">
+      <div className="md-code-head">
+        <span className="md-code-lang">{lang}</span>
+        <button type="button" onClick={() => void copy()} className="md-code-copy">
+          {copied ? '✓ 已复制' : '复制'}
+        </button>
+      </div>
+      <pre {...props}>{children}</pre>
+    </div>
+  )
+}
+
+const MD_COMPONENTS = { code: CodeRenderer, a: LinkRenderer, img: ImgRenderer, pre: PreRenderer }
 /** #26：react-markdown 默认 urlTransform 白名单只有 https?/ircs?/mailto/xmpp，
  *  data: URI 被清空成 src=""。只放行 data:image/（图片 data URL），其余仍走默认过滤。 */
 function urlTransformAllowDataImage(url: string): string {
   return /^data:image\//i.test(url) ? url : defaultUrlTransform(url)
 }
-const MD_PLAIN = { remarkPlugins: [remarkGfm], urlTransform: urlTransformAllowDataImage, components: MD_COMPONENTS }
+
+/**
+ * CJK 加粗兜底（2026-08 用户反馈「**」原样漏出）。
+ *
+ * micromark 严格执行 CommonMark 侧翼规则：`**` 左侧是中文字、右侧是中文标点
+ * （如「是**「协作奖励计划」**，」）时，opening run 既不是 left- 也不是
+ * right-flanking，整段按纯文本输出。中英混排的中文对话里这是常态。
+ * 这里在 remark 阶段补一刀：text 节点里残留的 `**内容**` 手动切成 strong。
+ * 只碰 text 节点——代码 span、链接内部等早已是别的节点类型，不受影响。
+ */
+interface MdastTextNode {
+  type: string
+  value?: string
+  children?: MdastTextNode[]
+}
+
+function splitCjkStrong(value: string): MdastTextNode[] | null {
+  if (!value.includes('**')) return null
+  const re = /\*\*([^*]+)\*\*/g
+  const out: MdastTextNode[] = []
+  let last = 0
+  let match: RegExpExecArray | null
+  let hit = false
+  while ((match = re.exec(value)) !== null) {
+    hit = true
+    if (match.index > last) out.push({ type: 'text', value: value.slice(last, match.index) })
+    out.push({ type: 'strong', children: [{ type: 'text', value: match[1] }] })
+    last = match.index + match[0].length
+  }
+  if (!hit) return null
+  if (last < value.length) out.push({ type: 'text', value: value.slice(last) })
+  return out
+}
+
+function remarkCjkStrong(): (tree: MdastTextNode) => void {
+  return (tree) => {
+    const walk = (node: MdastTextNode): void => {
+      if (!node.children) return
+      const next: MdastTextNode[] = []
+      let changed = false
+      for (const child of node.children) {
+        if (child.type === 'text' && typeof child.value === 'string') {
+          const parts = splitCjkStrong(child.value)
+          if (parts) {
+            next.push(...parts)
+            changed = true
+            continue
+          }
+        }
+        walk(child)
+        next.push(child)
+      }
+      if (changed) node.children = next
+    }
+    walk(tree)
+  }
+}
+
+const MD_PLAIN = { remarkPlugins: [remarkGfm, remarkCjkStrong], urlTransform: urlTransformAllowDataImage, components: MD_COMPONENTS }
 const MD_HIGHLIGHTED = {
-  remarkPlugins: [remarkGfm],
+  remarkPlugins: [remarkGfm, remarkCjkStrong],
   rehypePlugins: [rehypeHighlight],
   urlTransform: urlTransformAllowDataImage,
   components: MD_COMPONENTS
@@ -213,3 +346,26 @@ function MessageTextImpl({
 
 const MessageText = memo(MessageTextImpl)
 export default MessageText
+
+/** 轻量行内 markdown（2026-08，思考块/译文用）：只渲染 加粗/斜体/行内代码/
+ *  链接/删除线，不做段落级排版——思考是写给自己的推理，full markdown 不值
+ *  那个成本。按行切开渲染，保留换行结构。 */
+export function InlineMarkdown({ children }: { children: string }): JSX.Element {
+  return (
+    <>
+      {children.split('\n').map((line, i) => (
+        <div key={i}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkCjkStrong]}
+            allowedElements={['strong', 'em', 'code', 'a', 'del']}
+            unwrapDisallowed
+            urlTransform={urlTransformAllowDataImage}
+            components={MD_COMPONENTS}
+          >
+            {line || ' '}
+          </ReactMarkdown>
+        </div>
+      ))}
+    </>
+  )
+}

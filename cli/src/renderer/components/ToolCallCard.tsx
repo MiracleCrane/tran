@@ -270,16 +270,19 @@ const ToolCallCard = memo(function ToolCallCard({
   if (block.name === 'AgentSwarm') return <SwarmCard block={block} />
 
   return (
+    // 2026-08 试验：工具调用不再套卡片框（用户："除了折叠总结块，bar 都先不
+    // 搞 bar 试试看"）——裸排版，与思考块同款；状态靠左边圆点+图标表达，
+    // 展开区用左侧发丝线引导，不再盒子里套盒子。
     <div
-      className={`tool-call-card my-0.5 overflow-hidden rounded-lg border bg-[#101116] ${
+      className={`tool-call-card my-[3px] overflow-hidden ${
         block.status === 'running' ? 'is-running' : ''
-      } ${isSubagent ? 'border-accent/35' : 'border-border-subtle'}`}
+      }`}
     >
       <button
         type="button"
         aria-expanded={!collapsed}
         onClick={() => setUserToggled(!collapsed)}
-        className="flex w-full items-center gap-2 bg-[#14151b] px-3 py-2 text-left transition-colors hover:bg-[#1b1c23]"
+        className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-white/[0.04]"
       >
         <span className={`h-2 w-2 shrink-0 rounded-full ${isSubagent ? 'bg-accent' : meta.dot} ${streaming ? 'animate-pulse' : ''}`} />
         {/* Codex 风工具图标（2026-08）：不同操作不同小图标，SVG 为 Codex 桌面版
@@ -324,7 +327,7 @@ const ToolCallCard = memo(function ToolCallCard({
       </button>
 
       <Collapse open={!collapsed}>
-        <div className="border-t border-border-subtle bg-[#0f1015] px-3 py-2.5">
+        <div className="ml-2 border-l border-white/[0.07] px-3 py-1.5">
           {block.name === 'Bash' && inputText && (
             <CodeBlock
               text={inputText}

@@ -4,7 +4,7 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import { probeCommit } from '../utils/streamProbe'
 import type { AssistantBlock, AssistantItem, UserAttachment, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
-import MessageText from './MessageText'
+import MessageText, { InlineMarkdown } from './MessageText'
 import { ToolGlyph } from './toolIcons'
 import { showImageContextMenu } from './ImageContextMenu'
 import { formatTimeFull, formatTimeShort, messageTime } from '../utils/messageTimes'
@@ -568,11 +568,18 @@ const ThinkingBlock = memo(function ThinkingBlock({
   const worthSummarizing = !streaming && text.length >= THINKING_SUMMARY_MIN_CHARS
   const note = useCheapNote(fetchThinkingNote, text, worthSummarizing).value
 
-  // 展开之后才翻译：思考过程大量是英文（模型内部推理用什么语言不受 Tran 控制），
-  // 一屏英文等于没法读。按需触发——展开是个明确动作，不展开就不花这一次调用。
+  // 展开即翻译（2026-08 用户要"边输出边翻译"）：流式期间翻展开那一刻的快照
+  // （只打一发，不逐帧烧额度），流式收尾后自动按全文再翻一发（内容 hash 变了
+  // 自然触发）。不展开不翻。
   const [showOriginal, setShowOriginal] = useState(false)
-  const wantsTranslation = open && !streaming && looksEnglish(text)
-  const translationState = useCheapNote(fetchThinkingTranslation, text, wantsTranslation)
+  const openSnapshotRef = useRef('')
+  useEffect(() => {
+    if (open) openSnapshotRef.current = text
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+  const wantsTranslation = open && looksEnglish(text)
+  const translateInput = streaming && openSnapshotRef.current ? openSnapshotRef.current : text
+  const translationState = useCheapNote(fetchThinkingTranslation, translateInput, wantsTranslation)
   // auto 在没配百度时会回落到付费的摘要 API——回落必须可见，否则就是悄悄花钱。
   const translateStatus = useThinkingTranslateStatus(wantsTranslation)
   const translated = translationState.value
@@ -583,7 +590,7 @@ const ThinkingBlock = memo(function ThinkingBlock({
   return (
     // 完全裸排版（Codex 风）：无框无竖条无底，唯一的动态信号是流式时
     // 标题的紫黄流光（flow-text）。.thinking-block 类名保留给 TRANSCRIPT_BAR_SELECTOR。
-    <div className="thinking-block my-0.5 py-0.5">
+    <div className="thinking-block my-[3px] py-0.5">
       <button
         type="button"
         aria-expanded={open}
@@ -644,7 +651,9 @@ const ThinkingBlock = memo(function ThinkingBlock({
             // 没有它的话，你在框里往回翻、一碰到边界就连带整个对话一起滚走。
             className="mt-1.5 max-h-[200px] overflow-auto overscroll-contain whitespace-pre-wrap pl-1.5 text-xs leading-relaxed text-zinc-500"
           >
-            {bodyText}
+            {/* 流式期间纯文本（每帧重渲 markdown 不值）；收尾后轻量行内渲染
+                ——加粗/行内代码/链接可见，不开段落级排版（2026-08 用户拍板）。 */}
+            {streaming ? bodyText : <InlineMarkdown>{bodyText}</InlineMarkdown>}
           </div>
         </>
       )}
@@ -691,27 +700,27 @@ const LatestButton = memo(function LatestButton({
  *  icon 对应 toolIcons.tsx 的键（Codex 原版 SVG）；tone 对应 styles.css 的
  *  seg-shimmer-* 微光类，每种动作一种淡色，扫一眼就能分出谁是谁。 */
 const TOOL_ACTIVITY_META: Record<string, { label: string; icon: string; tone: string }> = {
-  Bash: { label: '运行了命令', icon: 'bash', tone: 'bash' },
-  terminal: { label: '运行了命令', icon: 'bash', tone: 'bash' },
-  Edit: { label: '编辑了文件', icon: 'edit', tone: 'edit' },
-  patch: { label: '编辑了文件', icon: 'edit', tone: 'edit' },
-  edit_file: { label: '编辑了文件', icon: 'edit', tone: 'edit' },
-  Write: { label: '创建了文件', icon: 'edit', tone: 'edit' },
-  write_file: { label: '创建了文件', icon: 'edit', tone: 'edit' },
-  Read: { label: '读取了文件', icon: 'read', tone: 'read' },
-  read_file: { label: '读取了文件', icon: 'read', tone: 'read' },
-  Glob: { label: '查找了文件', icon: 'glob', tone: 'web' },
-  Grep: { label: '搜索了内容', icon: 'grep', tone: 'web' },
-  search: { label: '搜索了内容', icon: 'grep', tone: 'web' },
-  Agent: { label: '派发了子代理', icon: 'agent', tone: 'agent' },
-  AgentSwarm: { label: '派发了子代理', icon: 'agent', tone: 'agent' },
-  Task: { label: '派发了子代理', icon: 'agent', tone: 'agent' },
-  WebSearch: { label: '搜索了网页', icon: 'web', tone: 'web' },
-  web_search: { label: '搜索了网页', icon: 'web', tone: 'web' },
-  FetchURL: { label: '抓取了网页', icon: 'web', tone: 'web' },
-  WebFetch: { label: '抓取了网页', icon: 'web', tone: 'web' },
-  TodoList: { label: '更新了待办', icon: '', tone: 'todo' },
-  todo_list: { label: '更新了待办', icon: '', tone: 'todo' }
+  Bash: { label: '运行命令', icon: 'bash', tone: 'bash' },
+  terminal: { label: '运行命令', icon: 'bash', tone: 'bash' },
+  Edit: { label: '编辑文件', icon: 'edit', tone: 'edit' },
+  patch: { label: '编辑文件', icon: 'edit', tone: 'edit' },
+  edit_file: { label: '编辑文件', icon: 'edit', tone: 'edit' },
+  Write: { label: '创建文件', icon: 'edit', tone: 'edit' },
+  write_file: { label: '创建文件', icon: 'edit', tone: 'edit' },
+  Read: { label: '读取文件', icon: 'read', tone: 'read' },
+  read_file: { label: '读取文件', icon: 'read', tone: 'read' },
+  Glob: { label: '查找文件', icon: 'glob', tone: 'web' },
+  Grep: { label: '搜索内容', icon: 'grep', tone: 'web' },
+  search: { label: '搜索内容', icon: 'grep', tone: 'web' },
+  Agent: { label: '派发子代理', icon: 'agent', tone: 'agent' },
+  AgentSwarm: { label: '派发子代理', icon: 'agent', tone: 'agent' },
+  Task: { label: '派发子代理', icon: 'agent', tone: 'agent' },
+  WebSearch: { label: '搜索网页', icon: 'web', tone: 'web' },
+  web_search: { label: '搜索网页', icon: 'web', tone: 'web' },
+  FetchURL: { label: '抓取网页', icon: 'web', tone: 'web' },
+  WebFetch: { label: '抓取网页', icon: 'web', tone: 'web' },
+  TodoList: { label: '更新待办', icon: '', tone: 'todo' },
+  todo_list: { label: '更新待办', icon: '', tone: 'todo' }
 }
 
 interface ActivityEntry {
@@ -734,7 +743,7 @@ interface ActivitySegment {
 /**
  * 折叠摘要的分段结构（渲染见 ActivitySummary）。
  *
- * 原先直接返回一整条字符串 "思考 2 段 · 运行了命令 ×5 · 编辑了文件"：同色、同
+ * 原先直接返回一整条字符串 "思考 2 段 · 运行命令 ×5 · 编辑文件"：同色、同
  * 字重、挤在一行，扫一眼分不出哪段是思考、哪段是动作、各做了几次——用户反馈的
  * "区分度不够"就是这个。分段后每段带 Codex 原版小图标 + 一种淡色微光，
  * 思考段保持收敛（无图标、暗色）。
@@ -1445,10 +1454,27 @@ export default function Transcript({
     return 'auto'
   }
 
+  const prevScrollTopRef = useRef(0)
+  /** 最近一次滚动是不是"向上"（用户上滚 = true；内容增长/跟随下滚 = false）。 */
+  const scrollWentUpRef = useRef(false)
+  const handleScrollerScroll = (event: React.UIEvent<HTMLElement>): void => {
+    const st = event.currentTarget.scrollTop
+    scrollWentUpRef.current = st < prevScrollTopRef.current - 2
+    prevScrollTopRef.current = st
+  }
+
   const handleAtBottomStateChange = (nextAtBottom: boolean): void => {
     if (nextAtBottom) setReserveEligible(true)
     if (layoutTransitioningRef.current) {
       if (!nextAtBottom) setPinnedAtBottom(false)
+      return
+    }
+    // 2026-08 「最新按钮误现」修复：内容增长（思考/工具卡展开、流式新块）把
+    // 底部顶远时 Virtuoso 也报 not-at-bottom——但用户根本没滚。区分法：滚动
+    // 事件里 scrollTop 在减小才是用户上滚（见 onScroll 的记录）；否则视为
+    // 内容增长，保持钉住并直接补滚到底。
+    if (!nextAtBottom && !scrollWentUpRef.current) {
+      virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'auto' })
       return
     }
     setPinnedAtBottom(nextAtBottom)
@@ -1629,6 +1655,7 @@ export default function Transcript({
           setScrollElement((current) => (current === nextElement ? current : nextElement))
         }}
         isScrolling={handleTranscriptScrolling}
+        onScroll={handleScrollerScroll}
         rangeChanged={handleRangeChanged}
         itemContent={(index, row) => {
           // Per-row wrapper preserves the centered, padded column the old single

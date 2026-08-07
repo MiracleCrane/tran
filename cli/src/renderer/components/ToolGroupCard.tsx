@@ -41,7 +41,7 @@ const ToolGroupCard = memo(function ToolGroupCard({
 
   return (
     <div
-      className={`tool-call-card my-0.5 overflow-hidden rounded-lg border bg-[#101116] ${
+      className={`tool-call-card my-[3px] overflow-hidden rounded-lg border bg-[#101116] ${
         running ? 'is-running' : ''
       } ${hasError ? 'border-red-900/50' : 'border-border-subtle'}`}
     >
