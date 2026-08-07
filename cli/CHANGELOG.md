@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.67 - 2026-08-07
+
+### 中文
+
+- 修复:**peek 浮层半透明**（正文透上来像没压层）——浮层改实底。顺带挖出一个值得记录的坑：生产构建里 `@layer` 会被 esbuild 展平，"无层胜过层内"的保护在打包后不存在，纯拼选择器优先级；相关规则已按真实级联修正。实底后图标条不再需要隐形切换，衔接不再跳。
+- 新增:摘要行「思考 N 段」也带图标（火花）+ 灰紫收敛微光，与动作段同款但更淡。
+- 新增:待办卡与正文之间加分隔（间距 + 发丝线）。
+- 隐藏:系统消息卡（后台任务通知/cron 触发）不再渲染——完成状态由后台命令 chip 和待办横幅表达，对话流只留人说的话。
+- 优化:思考块与工具卡、卡与卡之间的间距收紧（my-1 → my-0.5，思考块 py-1 → py-0.5），不挤但更不松散。
+
+### English
+
+- Fixed: the peek overlay was translucent (content bleeding through) — it's now opaque. Notable root cause: production builds flatten `@layer` via esbuild, so "unlayered beats layered" assumptions silently break after packaging; affected rules were re-written for the real cascade. With the opaque overlay the rail no longer needs the invisible swap, so the handoff is seamless.
+- New: the "思考 N 段" summary segment gets a sparkle icon and a muted violet shimmer, matching but quieter than the action segments.
+- New: a divider (spacing + hairline) between the todo card and the conversation.
+- Hidden: system-message cards (background-task notifications / cron) no longer render — completion is surfaced by the task chip and the todo banner; the conversation keeps only human words.
+- Tightened spacing between thinking blocks and tool cards (my-1 → my-0.5, thinking padding py-1 → py-0.5).
+
 ## v1.0.66 - 2026-08-06
 
 ### 中文

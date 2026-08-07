@@ -271,7 +271,7 @@ const ToolCallCard = memo(function ToolCallCard({
 
   return (
     <div
-      className={`tool-call-card my-1 overflow-hidden rounded-lg border bg-[#101116] ${
+      className={`tool-call-card my-0.5 overflow-hidden rounded-lg border bg-[#101116] ${
         block.status === 'running' ? 'is-running' : ''
       } ${isSubagent ? 'border-accent/35' : 'border-border-subtle'}`}
     >

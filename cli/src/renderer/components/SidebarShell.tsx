@@ -173,12 +173,9 @@ export default function SidebarShell(): JSX.Element {
           伸进主区的扩展条，但合体布局里主区紧贴 dock（没有沟），扩展条会盖住
           主区左缘 16px 的点击——已撤。 */}
       {/* 图标条始终挂着：它决定在流的那一列有多宽，卸载会让 Sidebar 每次悬停
-          都重建、内部状态全丢。但浮出时必须**隐形**——浮层用的是半透明玻璃底，
-          图标条会从底下透上来，两层图标叠在一起（用户反馈的"缩略视图还在"）。
-          用 invisible 而不是条件渲染：元素还在，宽度与布局不变。 */}
-      <div className={peeking ? 'invisible' : ''}>
-        <Sidebar />
-      </div>
+          都重建、内部状态全丢。2026-08 起浮层改实底（.sidebar-peek > * 实色
+          背景），从左缘完整盖住图标条，不再需要 invisible 切换——衔接不再跳。 */}
+      <Sidebar />
       {peekOn && peeking && (
         <div className={`sidebar-peek ${leaving ? 'is-leaving' : ''}`} style={{ width: `${width}px` }}>
           <Sidebar forceExpanded />

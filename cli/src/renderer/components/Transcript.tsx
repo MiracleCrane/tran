@@ -297,8 +297,10 @@ function buildDisplayRows(roots: ItemNode[], shouldFold: (groupKey: string) => b
  * 1.25 张卡。点进一个老会话该看到的是当时的对话本身，不是一屏机器自言自语。
  * 这两类直接不渲染。
  *
- * 后台任务结果（notification，100 条）与 cron 触发（2 条）是另一回事：那是真
- * 发生过、用户会想知道的事，继续按克制的系统卡片呈现。
+ * 后台任务结果（notification）与 cron 触发（cron-fire）：2026-08 用户定夺——
+ * 也不显示（"系统消息有什么意义"）。完成状态有后台命令 chip 和待办横幅表达，
+ * 对话流里只留人说的话。SystemEnvelope/EnvelopeGroupRow 随之不再被触达，
+ * 组件保留（将来若要恢复展示，从 HIDDEN_ENVELOPE_RE 里摘掉即可）。
  *
  * 技能注入有两种形态，锚在 `^<` 的正则只盖得住第一种：
  *   `<kimi-skill-loaded name=...>`                          —— 标签开头
@@ -306,7 +308,7 @@ function buildDisplayRows(roots: ItemNode[], shouldFold: (groupKey: string) => b
  * 第二种此前整条漏网，被当成**用户说的话**把整篇技能文档渲染出来（实测 6 条）。
  */
 const HIDDEN_ENVELOPE_RE =
-  /^(?:<(?:system-reminder|kimi-skill-loaded)[\s>]|User activated the skill\b|Skill tool loaded instructions\b)/
+  /^(?:<(?:system-reminder|kimi-skill-loaded|notification|cron-fire)[\s>]|User activated the skill\b|Skill tool loaded instructions\b)/
 
 /** 值得保留的信封：后台任务通知与 cron 触发，渲染成系统卡片。 */
 const VISIBLE_ENVELOPE_RE = /^<(notification|cron-fire)[\s>]/
@@ -581,7 +583,7 @@ const ThinkingBlock = memo(function ThinkingBlock({
   return (
     // 完全裸排版（Codex 风）：无框无竖条无底，唯一的动态信号是流式时
     // 标题的紫黄流光（flow-text）。.thinking-block 类名保留给 TRANSCRIPT_BAR_SELECTOR。
-    <div className="thinking-block my-1 py-1">
+    <div className="thinking-block my-0.5 py-0.5">
       <button
         type="button"
         aria-expanded={open}
@@ -745,8 +747,9 @@ function summarizeActivity(blocks: AssistantBlock[]): ActivitySegment[] {
     else if (block.kind === 'tool') tools.set(block.name, (tools.get(block.name) ?? 0) + 1)
   }
   const segments: ActivitySegment[] = []
-  // 思考排最前：时间上它也确实发生在动作之前。
-  if (thinking > 0) segments.push({ kind: 'thinking', label: '思考', count: thinking })
+  // 思考排最前：时间上它也确实发生在动作之前。2026-08：思考段也要图标 +
+  // 微光（用户点名），只是色调比动作段更收敛（灰紫）。
+  if (thinking > 0) segments.push({ kind: 'thinking', label: '思考', count: thinking, icon: 'think', tone: 'think' })
   for (const [name, count] of tools) {
     const meta = TOOL_ACTIVITY_META[name]
     segments.push({
@@ -772,7 +775,13 @@ function ActivitySummary({ segments }: { segments: ActivitySegment[] }): JSX.Ele
               <ToolGlyph kind={seg.icon} size={11} />
             </span>
           )}
-          <span className={seg.kind === 'tool' ? `seg-shimmer seg-shimmer-${seg.tone ?? 'read'}` : 'text-zinc-500'}>
+          <span
+            className={
+              seg.kind === 'tool'
+                ? `seg-shimmer seg-shimmer-${seg.tone ?? 'read'}`
+                : 'seg-shimmer seg-shimmer-think'
+            }
+          >
             {seg.label}
           </span>
           {seg.count > 1 && (

@@ -3411,3 +3411,15 @@ div:has(textarea:focus) .composer-shortcut-hint {
 .seg-shimmer-web { background-image: linear-gradient(90deg, #6f96bd 0%, #9dc0e2 50%, #6f96bd 100%); }
 .seg-shimmer-agent { background-image: linear-gradient(90deg, #b08ac0 0%, #d5b3e2 50%, #b08ac0 100%); }
 .seg-shimmer-todo { background-image: linear-gradient(90deg, #6fae7f 0%, #9cd4ac 50%, #6fae7f 100%); }
+.seg-shimmer-think { background-image: linear-gradient(90deg, #8a8a9c 0%, #b3b3c8 50%, #8a8a9c 100%); }
+
+/* peek 浮层实底（2026-08）：半透明时正文（顶栏文字等）会透上来，看着像
+   "图层没压上"。注意：生产构建里 @layer 会被 esbuild 展平，层级保护不存在，
+   纯拼优先级——:root 前缀抬到 (0,3,1) 才压得住 flat 那条 (0,3,0)。
+   实底后图标条不再需要隐形——浮层从左缘完整盖住它，衔接不再跳。 */
+:root .app-shell-merged .sidebar-peek > * {
+  background: #14151b;
+}
+:root[data-theme='charcoal'] .app-shell-merged .sidebar-peek > * {
+  background: #1b1b1b;
+}

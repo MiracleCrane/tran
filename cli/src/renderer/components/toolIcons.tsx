@@ -32,6 +32,13 @@ const ICONS: Record<string, { viewBox: string; html: string }> = {
   }
 }
 
+/** 思考段图标（2026-08 补）：Codex 图标集里没有思考类，手绘一枚四角星/火花。
+ *  只给摘要行的「思考 N 段」用。 */
+ICONS['think'] = {
+  viewBox: '0 0 20 20',
+  html: '<path d="M10 2.5c.35 3.9 2.1 5.65 6 6-3.9.35-5.65 2.1-6 6-.35-3.9-2.1-5.65-6-6 3.9-.35 5.65-2.1 6-6Z" fill="currentColor"/><path d="M15.2 12.6c.18 1.95 1.05 2.82 3 3-1.95.18-2.82 1.05-3 3-.18-1.95-1.05-2.82-3-3 1.95-.18 2.82-1.05 3-3Z" fill="currentColor" opacity="0.65"/>'
+}
+
 export function ToolGlyph({ kind, size = 13 }: { kind: string; size?: number }): JSX.Element {
   const icon = ICONS[kind]
   if (!icon) return <></>
