@@ -1206,6 +1206,15 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
         bg.planEntries = Array.isArray(entries) ? entries : []
         // #23 陈旧度时钟随缓冲走，attach 后 plan 卡才知道这份快照有多新。
         bg.planUpdatedAt = Date.now()
+      } else if (subtype === 'steered_turn') {
+        // kimi 自发唤醒轮（后台任务完成 steer）的起止。收尾时把缓冲里的流式
+        // 条目封口——steered 轮没有 result 事件,不封的话 attach 回来那条
+        // 消息会永远挂着流式态。running 本身由 running-changed 推送管。
+        if ((msg as unknown as { running?: boolean }).running !== true) {
+          bg.items = bg.items.map((i) =>
+            i.kind === 'assistant' && i.streaming ? { ...i, streaming: false } : i
+          )
+        }
       } else if (subtype === 'goal') {
         const g = (msg as unknown as { goal?: GoalInfo | null }).goal
         bg.goal = g ?? null
@@ -3021,6 +3030,31 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           // ACP plan：kimi 全量推送待办清单，直接整体替换（实时更新）。
           const entries = (msg as unknown as { entries?: PlanEntry[] }).entries
           set({ planEntries: Array.isArray(entries) ? entries : [], planUpdatedAt: Date.now() })
+        } else if (subtype === 'steered_turn') {
+          // kimi 自发唤醒轮（后台任务/子代理完成 steer，无客户端 prompt）。
+          // status.running 平时"以事件流为准"（sendMessage/result 驱动），
+          // steered 轮两头都没有那两个事件，只能靠这条专用消息点亮/收尾。
+          const m = msg as unknown as { running?: boolean; startedAt?: number }
+          if (m.running === true) {
+            set((s) =>
+              s.status.running
+                ? {}
+                : { status: { ...s.status, running: true, startedAt: m.startedAt ?? Date.now(), error: undefined } }
+            )
+          } else {
+            // 收尾对齐 result 分支的兜底：清流式态 + 封悬挂工具块。队列不动
+            //（pendingQueue 属于真实 prompt 生命周期,由 result 分支管理）。
+            set((s) => ({
+              status: { ...s.status, running: s.pendingQueue.length > 0, startedAt: undefined, stall: undefined },
+              items: sealHungToolBlocks(
+                s.items.map((i) => (i.kind === 'assistant' && i.streaming ? { ...i, streaming: false } : i)),
+                true
+              ),
+              currentStreamingMsgId: null
+            }))
+            // steered 轮很可能动了待办/产出了结果：补拉一次真值（零 token）。
+            void get().refreshTodos()
+          }
         } else if (subtype === 'context_usage') {
           // 隐藏 /usage 轮解析出的上下文用量（UsageRings 第三环）。
           const usage = (msg as unknown as { contextUsage?: ContextUsage }).contextUsage

@@ -31,8 +31,10 @@ export function useCheapNote(
 
   // input 变化先清掉旧说明：请求是异步的，不清的话旧输入的说明会挂在新输入上，
   // 直到新请求返回（失败则永远挂着）。
+  // 已经是空态时原样返回 prev（React 引用相等即跳过重渲染）：流式期间 input
+  // 每个 chunk 都在变，不这么做等于给每个思考块每帧多一次无效重渲染。
   useEffect(() => {
-    setState({ value: null, settled: false })
+    setState((prev) => (prev.value === null && !prev.settled ? prev : { value: null, settled: false }))
   }, [input])
 
   useEffect(() => {

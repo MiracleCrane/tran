@@ -545,10 +545,24 @@ const ThinkingBlock = memo(function ThinkingBlock({
    * 注意这里的 scrollTop 赋值会触发下面的 onScroll，届时算出的距底距离≈0，
    * 跟随状态保持 true，不会自己把自己关掉。
    */
+  // rAF 合帧（2026-08 卡顿治理）：原先每个 chunk 同步赋 scrollTop，等于每帧
+  // 强制一次全文回流；长思考 + 高频 chunk 时这是主要的掉帧来源之一。改成
+  // 一帧内多个 chunk 合并成一次滚动。
+  const followFrameRef = useRef<number | null>(null)
   useEffect(() => {
-    const body = bodyRef.current
-    if (open && streaming && body && followBodyRef.current) body.scrollTop = body.scrollHeight
+    if (!(open && streaming) || followFrameRef.current !== null) return
+    followFrameRef.current = window.requestAnimationFrame(() => {
+      followFrameRef.current = null
+      const body = bodyRef.current
+      if (body && followBodyRef.current) body.scrollTop = body.scrollHeight
+    })
   }, [text, open, streaming])
+  useEffect(
+    () => () => {
+      if (followFrameRef.current !== null) window.cancelAnimationFrame(followFrameRef.current)
+    },
+    []
+  )
 
   // 重新展开（或换到新的一段思考）时恢复跟随：上一次的"我在往回看"不该粘住。
   useEffect(() => {
@@ -585,7 +599,9 @@ const ThinkingBlock = memo(function ThinkingBlock({
   const translated = translationState.value
 
   if (!text) return <></>
-  const preview = note ?? text.replace(/\s+/g, ' ').trim().slice(0, 60)
+  // 预览只在收起态渲染；展开时不算（原先流式期间每帧对**全文**跑一遍 \s+ 正则,
+  // 纯浪费）。计算也只吃前 400 字——60 字预览用不到更多。
+  const preview = open ? '' : (note ?? text.slice(0, 400).replace(/\s+/g, ' ').trim().slice(0, 60))
   const bodyText = translated && !showOriginal ? translated : text
   return (
     // 完全裸排版（Codex 风）：无框无竖条无底，唯一的动态信号是流式时

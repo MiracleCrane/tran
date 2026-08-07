@@ -340,6 +340,15 @@ function readDiskTasks(sessionId: string): KimiTaskInfo[] {
   return []
 }
 
+/** 该会话是否有仍在跑的后台任务（磁盘同步查，几次 readdir 的量级）。
+ *  隐藏轮（/usage、/mcp、待办催更）开跑前的守卫用：后台任务完成时 kimi 会把
+ *  通知 steer 进**当时活跃的 turn**——若那恰是隐藏轮，整段唤醒内容会被
+ *  hiddenTurn 标志吞掉（用户看到的就是"跑完了也没反应"）。有任务在跑就
+ *  别开隐藏轮，把 steer 的落点让给正常空闲态。 */
+export function hasRunningDiskTasks(sessionId: string): boolean {
+  return readDiskTasks(sessionId).some((t) => (t.status ?? '').toLowerCase() === 'running')
+}
+
 /** 拉取某会话的全部 tasks：REST（web server 托管任务）+ 磁盘（ACP 后台任务，
  *  #34）按 id 合并，REST 优先。server 不可用且无磁盘记录时返回 null（降级）。 */
 export async function getSessionTasks(sessionId: string): Promise<KimiTaskInfo[] | null> {

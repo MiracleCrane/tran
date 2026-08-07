@@ -25,6 +25,7 @@ import {
   type AcpRpcMessage
 } from './AcpClient'
 import { resolveWindowsKimiCommand } from '../windowsKimi'
+import { hasRunningDiskTasks } from '../kimiServerApi'
 import { recordSessionTitle, removeSessionTitle } from '../sessionTitles'
 import { generateAiTitle } from '../aiTitles'
 import { deleteKimiSession } from '../sessionDelete'
@@ -121,6 +122,16 @@ interface ActiveKimiSession {
   stallAbort?: (error: Error) => void
   /** #41 权限/elicitation 等待中：是在等用户不是 agent 卡死，静默监督暂停。 */
   waitingOnUser: boolean
+  /** Steered 轮（kimi 自发唤醒）进行中。后台任务/子代理完成时 kimi 会自己
+   *  注入通知并开新一轮（实证 turn.steer，全历史 91 例零例外）——这一轮没有
+   *  对应的客户端 prompt，session.running 恒 false，必须单独跟踪才能点亮
+   *  running 状态、并在结束时封口流式消息。 */
+  steeredActive?: boolean
+  /** 最近一次真实 turn 收尾时刻（0=从未）。steered 检测的防误触窗口用。 */
+  lastTurnEndedAt: number
+  /** Steered 轮的静默收尾定时器（无 prompt 响应可等，只能按事件静默判结束；
+   *  判早了也无害——下一个事件会重新点亮，自愈）。 */
+  steeredTimer?: NodeJS.Timeout
   /** #3 恢复闸门：ACP 断连自动恢复窗口（退避重连 + session/load）内挂闸。
    *  期间该会话不发起任何新 turn——新进程还没 session/load 过这个
    *  acpSessionId，直接 session/prompt 会以 "session not found" 报错；也不会
@@ -210,6 +221,14 @@ const TURN_STALL_CHECK_MS = 60_000
  *  弹窗可能永久丢失（有重投递兜底，仍防万一）——超过此上限视同僵尸，走
  *  自动 cancel 路径，避免会话永久忙碌。 */
 const WAITING_ON_USER_ABORT_MS = 24 * 60 * 60_000
+
+/** Steered 轮（kimi 自发唤醒，见 touchSteeredTurn）静默判结束的窗口。
+ *  取 45s：LLM 思考间隙十几秒常见，长工具运行会有 tool_call_update 续命；
+ *  判早了下一个事件会重新点亮（自愈），只是 running 指示闪一下。 */
+const STEERED_TURN_IDLE_MS = 45_000
+/** turn 收尾后这么久内不做 steered 首触发：cancel/正常结束后的迟到尾巴事件
+ *  会被误判成自发唤醒（interrupt 之后 running 指示凭空复燃 45s）。 */
+const STEERED_DETECT_GRACE_MS = 3_000
 
 /** M2 pendingNotifications 淘汰参数：正常注册竞争窗口只有一两个微任务的长度，
  *  缓冲到达上限只可能是"会话已死、通知永远等不到注册"的泄漏形态。 */
@@ -333,6 +352,7 @@ export class KimiBackend {
       queryText: '',
       turnStartedAt: 0,
       lastEventAt: 0,
+      lastTurnEndedAt: 0,
       stallWarnedAt: 0,
       waitingOnUser: false
     }
@@ -547,6 +567,55 @@ export class KimiBackend {
       session.acpSessionId,
       running && session.turnStartedAt ? session.turnStartedAt : undefined
     )
+  }
+
+  /**
+   * Steered 轮跟踪：后台任务/子代理完成时 kimi 会自己注入通知并开新一轮
+   * （wire 实证 turn.steer；本机全历史 91 例完成通知全部即时唤醒，零例外）。
+   * 这一轮没有客户端 prompt，之前的表现就是"内容凭空流进来但界面不显示运行中、
+   * 结束后流式态也不封口"。这里在无 prompt 期间检测到内容事件即视为 steered
+   * 轮开始：点亮 running（侧栏推送 + system/steered_turn 走事件流给当前会话的
+   * status.running），事件静默超时后收尾。
+   *
+   * 收尾只能按静默判（ACP 没有 agent 自发轮的结束信号）：判早了无害——
+   * 下一个事件会重新点亮，自愈；真实 prompt 开始时静默清旗（真实轮的
+   * 生命周期接管一切）。
+   */
+  private touchSteeredTurn(session: ActiveKimiSession): void {
+    if (!session.steeredActive) {
+      session.steeredActive = true
+      session.turnStartedAt = Date.now()
+      this.emitRunning(session, true)
+      this.h.onMessage(session.id, {
+        type: 'system',
+        subtype: 'steered_turn',
+        running: true,
+        startedAt: session.turnStartedAt
+      } as unknown as SDKMessage)
+      log('kimi', `steered turn detected (agent self-wake) session=${session.id}`)
+    }
+    if (session.steeredTimer) clearTimeout(session.steeredTimer)
+    session.steeredTimer = setTimeout(() => this.endSteeredTurn(session), STEERED_TURN_IDLE_MS)
+    session.steeredTimer.unref?.()
+  }
+
+  private endSteeredTurn(session: ActiveKimiSession, emit = true): void {
+    if (session.steeredTimer) {
+      clearTimeout(session.steeredTimer)
+      session.steeredTimer = undefined
+    }
+    if (!session.steeredActive) return
+    session.steeredActive = false
+    if (!emit || session.closed) return
+    // 封口流式消息 + 通知渲染层收尾（清 running/streaming 态）。
+    this.sealStreamMessage(session)
+    session.turnStartedAt = 0
+    this.emitRunning(session, false)
+    this.h.onMessage(session.id, {
+      type: 'system',
+      subtype: 'steered_turn',
+      running: false
+    } as unknown as SDKMessage)
   }
 
   /** #41 静默监督（仅用户轮；隐藏轮保持 60s 硬超时不变）：每分钟检查一次该
@@ -937,6 +1006,9 @@ export class KimiBackend {
     }
     const next = session.queue.shift()
     if (!next) return
+    // 真实轮接管：steered 轮静默清旗（不发收尾消息——真实轮的生命周期会
+    // 管理 running/封口，这里再发一次 running=false 反而会闪断指示）。
+    this.endSteeredTurn(session, false)
     session.running = true
     session.turn += 1
     session.turnHadToolCall = false
@@ -960,6 +1032,7 @@ export class KimiBackend {
     } finally {
       session.running = false
       session.turnStartedAt = 0
+      session.lastTurnEndedAt = Date.now()
       session.waitingOnUser = false
       this.disarmStallWatch(session)
       this.emitRunning(session, false)
@@ -1098,6 +1171,10 @@ export class KimiBackend {
     if (session.closed || !session.acpSessionId || session.hiddenTurn) return
     // #3 恢复闸门：恢复窗口内直接放弃（隐藏轮是"有则更好"，不排队等闸门）。
     if (session.running || session.queue.length || session.recoveryGate) return
+    // 后台任务在跑（或 steered 轮进行中）就不开隐藏轮：任务完成通知会被 kimi
+    // steer 进当时活跃的 turn，落在隐藏轮里整段唤醒就被吞了（hasRunningDiskTasks
+    // 的注释）。用量刷新是纯装饰性信息，等任务收尾后的 afterTurn 再补不迟。
+    if (session.steeredActive || hasRunningDiskTasks(session.acpSessionId)) return
     session.hiddenTurn = true
     session.hiddenText = ''
     try {
@@ -1153,6 +1230,10 @@ export class KimiBackend {
     // 会话不空闲就放弃。不排队、不重试：催更是"有则更好"，抢 FIFO 会拖慢用户
     // 自己的那一轮，而下一次后台任务收尾还会再有机会。#3 恢复窗口内同理放弃。
     if (session.running || session.hiddenTurn || session.queue.length || session.recoveryGate) return false
+    // steered 轮进行中/还有任务在跑：kimi 的自动唤醒正在（或即将）处理完成
+    // 通知，催更这时候只会撞车（2026-08 实证 kimi 对任务完成 100% 自动 steer，
+    // 催更从"必需品"降级为兜底）。
+    if (session.steeredActive || hasRunningDiskTasks(session.acpSessionId)) return false
 
     session.hiddenTurn = true
     session.hiddenText = ''
@@ -1205,6 +1286,8 @@ export class KimiBackend {
     if (session.closed || !session.acpSessionId || session.hiddenTurn) return
     // #3 恢复闸门：恢复窗口内直接放弃（同 runHiddenUsageTurn）。
     if (session.running || session.queue.length || session.recoveryGate) return
+    // 后台任务在跑就不开（同 runHiddenUsageTurn：别让唤醒 steer 落进隐藏轮被吞）。
+    if (session.steeredActive || hasRunningDiskTasks(session.acpSessionId)) return
     session.hiddenTurn = true
     session.hiddenText = ''
     try {
@@ -1632,6 +1715,24 @@ export class KimiBackend {
     if (session.hiddenTurn) {
       if (type === 'agent_message_chunk') session.hiddenText += textFromContentBlock(update.content)
       return
+    }
+    // Steered 轮检测：没有客户端 prompt 在跑却来了内容事件 = kimi 自发唤醒
+    // （后台任务/子代理完成通知触发）。配置类推送（plan 已在上面返回、
+    // available_commands/usage/mode 等）不算——空闲时它们本来就会来。
+    // 两个防误触：
+    // - turn 刚收尾 3s 内不触发（cancel/结束后的迟到尾巴事件；真 steer 被这
+    //   窗口错过也无妨，下一个事件会再触发，自愈）；
+    // - tool_call_update 只用于已激活时续命，不做首触发（尾巴事件几乎全是
+    //   已知工具的终态更新）。
+    if (
+      !session.running &&
+      (type === 'agent_message_chunk' ||
+        type === 'agent_thought_chunk' ||
+        type === 'tool_call' ||
+        (session.steeredActive && type === 'tool_call_update')) &&
+      (session.steeredActive || Date.now() - session.lastTurnEndedAt > STEERED_DETECT_GRACE_MS)
+    ) {
+      this.touchSteeredTurn(session)
     }
     if (type === 'agent_message_chunk') {
       const text = textFromContentBlock(update.content)

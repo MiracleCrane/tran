@@ -159,11 +159,11 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
   const done = entries.filter((e) => e.status === 'completed').length
   const allDone = done === entries.length
 
-  // 后台任务已收尾但待办还停在未完成 + 会话空闲 = agent 还不知道。
-  // kimi 的后台任务完成通知只在「下一轮」注入（源码原文：
-  // "The completion arrives automatically in a later turn."），所以在用户
-  // 发下一条消息之前，待办物理上不可能自己更新。Tran 靠磁盘任务记录能比
-  // agent 先知道，这里就是把这个时间差告诉用户。
+  // 后台任务已收尾但待办还停在未完成 + 会话空闲。
+  // 2026-08 修正认知：kimi 会把完成通知 steer 进会话并**自动开新一轮**
+  // （wire 实证全历史 91 例零例外），所以正常情况下 AI 自己就会接续更新——
+  // 横幅只是告诉用户"已收尾、AI 接续中"；若长时间不动（steer 丢失/接续轮
+  // 没动待办），提示用户发条消息即可，不再声称"必须等你发消息"。
   //
   // 2026-08 误报修复：swarmTasks 里躺着全部历史任务，「存在一个已收尾任务」
   // 几乎永远为真，横幅变成常驻。加 30 分钟新鲜度窗口——只有**刚刚**收尾的
@@ -265,7 +265,7 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
             <span>
               {autoNudge
                 ? '后台任务已结束，Tran 正在替你请求一次待办更新…'
-                : '后台任务已结束，但待办还停在未完成 —— AI 要等你发下一条消息才会收到完成通知并更新。'}
+                : '后台任务已结束，AI 会自动接续处理并更新待办；若长时间没有动静，发一条消息即可。'}
             </span>
           </div>
         )}
