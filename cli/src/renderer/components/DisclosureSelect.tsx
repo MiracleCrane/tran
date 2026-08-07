@@ -30,7 +30,8 @@ export default function DisclosureSelect({
   placement = 'bottom',
   disabled = false,
   title,
-  compact = false
+  compact = false,
+  naked = false
 }: {
   value: string
   options: DisclosureOption[]
@@ -43,6 +44,9 @@ export default function DisclosureSelect({
   title?: string
   /** 紧凑模式（Composer 底部药丸）：更小内边距与圆角。 */
   compact?: boolean
+  /** 无框模式（2026-08，Codex 风）：收起时触发器裸奔（无边无底，与周围
+   *  浑然一体），展开时面板照常出现。 */
+  naked?: boolean
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [elevated, setElevated] = useState(false)
@@ -122,7 +126,11 @@ export default function DisclosureSelect({
           shoving it; trigger + options share it, so opening reads as the frame
           itself growing, not a second frame appearing. */}
       <div
-        className={`glass-panel-soft disclosure-select-panel absolute inset-x-0 ${
+        className={`${
+          naked && !open
+            ? 'border border-transparent bg-transparent'
+            : 'glass-panel-soft disclosure-select-panel'
+        } absolute inset-x-0 ${
           compact ? 'rounded-xl p-1' : 'rounded-2xl p-1.5'
         } ${
           elevated ? 'z-[90]' : 'z-50'

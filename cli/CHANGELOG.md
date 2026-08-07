@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.68 - 2026-08-07
+
+### 中文
+
+- 重做:输入框工具栏去框化（Codex 风浑然一体）。权限/effort/模型三个下拉收起时无边无底（裸文本+图标，点开照常浮出面板）；附件、停止、模板按钮去边框;发送按钮改成圆形箭头钮——有内容时浅色实底黑箭头,空时幽灵灰,不再是紫色长条。
+
+### English
+
+- Reworked: the composer toolbar is now frameless (Codex-style). The permission/effort/model selects render as naked text+icon until opened; attach/stop/template buttons lost their boxes; send is a circular arrow button — solid light with a dark arrow when there's content, ghost gray when empty.
+
 ## v1.0.67 - 2026-08-07
 
 ### 中文

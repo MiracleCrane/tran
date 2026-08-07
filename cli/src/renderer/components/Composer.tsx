@@ -1199,7 +1199,7 @@ export default function Composer(): JSX.Element {
               type="button"
               onClick={() => void pickAttachment()}
               disabled={!meta || pickingFile}
-              className="glass-control flex h-7 w-7 items-center justify-center rounded-md text-zinc-300 transition hover:bg-white/[0.09] disabled:opacity-40"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-40"
               title={pickingFile ? '正在打开文件选择器…' : '添加附件(从工作目录选择文件)'}
             >
               {pickingFile ? (
@@ -1244,6 +1244,7 @@ export default function Composer(): JSX.Element {
                   }}
                   placement="top"
                   compact
+                  naked
                   disabled={meta.permissionMode === 'plan'}
                   title={meta.permissionMode === 'plan' ? '计划模式下权限由计划接管' : undefined}
                   triggerLeading={
@@ -1264,6 +1265,7 @@ export default function Composer(): JSX.Element {
                   }}
                   placement="top"
                   compact
+                  naked
                   triggerLeading={
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="shrink-0 text-zinc-400">
                       <path d="M5 20V14M12 20V8M19 20V4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -1279,25 +1281,34 @@ export default function Composer(): JSX.Element {
                   onChange={(v) => void setModel(v)}
                   placement="top"
                   compact
+                  naked
                   className="min-w-28"
                 />
               )}
               {running && (
                 <button
                   onClick={() => void interrupt()}
-                  className="h-7 shrink-0 rounded-md border border-red-900/60 bg-red-950/40 px-2.5 text-[11px] font-medium text-red-300 hover:bg-red-950/60"
+                  className="h-7 shrink-0 rounded-md px-2 text-[11px] font-medium text-red-400/90 transition hover:bg-red-950/40 hover:text-red-300"
                   title="中断当前处理"
                 >
                   停止
                 </button>
               )}
+              {/* 发送：Codex 风圆形按钮。可发时浅色实底（黑箭头），不可发时
+                  幽灵灰。不再用紫色长条——工具栏要浑然一体（2026-08）。 */}
               <button
                 onClick={() => void submit()}
                 disabled={!text.trim() && attachments.length === 0}
-                className="composer-send accent-soft-button h-7 shrink-0 rounded-md px-3 text-[11px] font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                title="发送"
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition disabled:cursor-not-allowed ${
+                  !text.trim() && attachments.length === 0
+                    ? 'bg-white/[0.05] text-zinc-600'
+                    : 'bg-zinc-200 text-zinc-900 hover:bg-white'
+                }`}
               >
-                <span className="send-sheen" aria-hidden />
-                <span className="relative">发送</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               </button>
               <button
                 type="button"
@@ -1305,7 +1316,7 @@ export default function Composer(): JSX.Element {
                   setSlashContext(null)
                   setShowTemplates((open) => !open)
                 }}
-                className={`glass-control composer-template-button flex h-7 items-center justify-center rounded-md px-2 text-[11px] text-zinc-300 transition ${
+                className={`composer-template-button flex h-7 items-center justify-center rounded-md px-1.5 text-[11px] text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 ${
                   showTemplates ? 'is-open' : ''
                 }`}
                 title="Prompt 模板"
