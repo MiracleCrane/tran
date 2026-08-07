@@ -1662,13 +1662,15 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               curve + per-item stagger give the non-linear pop.
               peek 浮出（forceExpanded）时强制展开工具区：peek 的意义就是快速
               触达这四个入口，用户在展开态收起过「工具」不该让浮出态也收起
-              （2026-08 用户反馈）。 */}
+              （2026-08 用户反馈）。navHidden 同样要豁免 forceExpanded——否则
+              Collapse 开了、条目还是 opacity 0，就是一个空盒子（v1.0.65 实测 bug）。 */}
           <Collapse open={forceExpanded || !navCollapsed}>
             <div className="mt-1">
               {NAV_ITEMS.map((item, i) => {
                 const on = view === item.view
                 const isWslItem = item.view === 'wslHealth'
                 const isProviderItem = item.view === 'providers'
+                const navHidden = navCollapsed && !forceExpanded
                 const button = (
                   <button
                     key={item.view}
@@ -1680,9 +1682,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                     onPointerMove={handleSidebarPointerGlow}
                     className={`${navCls(on)} ${!isWslItem && i > 0 ? 'mt-1' : ''}`}
                     style={{
-                      '--sidebar-tab-stagger': navCollapsed ? '0ms' : `${i * 55}ms`,
-                      opacity: navCollapsed ? 0 : 1,
-                      transform: navCollapsed ? 'translateY(-6px)' : 'translateY(0)'
+                      '--sidebar-tab-stagger': navHidden ? '0ms' : `${i * 55}ms`,
+                      opacity: navHidden ? 0 : 1,
+                      transform: navHidden ? 'translateY(-6px)' : 'translateY(0)'
                     } as CSSProperties}
                     disabled={(isWslItem && !wslNavInteractive) || (isProviderItem && !showProviderNav)}
                     tabIndex={(isWslItem && !wslNavInteractive) || (isProviderItem && !showProviderNav) ? -1 : 0}

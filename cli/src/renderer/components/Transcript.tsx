@@ -5,6 +5,7 @@ import { useUiStore } from '../store/uiStore'
 import { probeCommit } from '../utils/streamProbe'
 import type { AssistantBlock, AssistantItem, UserAttachment, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
 import MessageText from './MessageText'
+import { ToolGlyph } from './toolIcons'
 import { showImageContextMenu } from './ImageContextMenu'
 import { formatTimeFull, formatTimeShort, messageTime } from '../utils/messageTimes'
 import { initSentImageRecording, loadSentImages, matchHistoryImages } from '../utils/sentImages'
@@ -334,7 +335,12 @@ function envelopeStatusOf(text: string): EnvelopeStatus | null {
 
 function SystemEnvelope({ text }: { text: string }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
-  const title = /title="([^"]*)"/.exec(text)?.[1]
+  // 标题优先级：XML title 属性 → 通知正文的 "Title: xxx" 行（后台任务通知
+  // 的标题在这里，拿不到就只显示「系统消息」这种没信息量的词——2026-08 用户
+  // 反馈"这卡片有什么意义"）→ cron 标记 → 兜底。
+  const title =
+    /title="([^"]*)"/.exec(text)?.[1] ??
+    /^Title:\s*(.+)$/m.exec(text)?.[1]
   const kind = envelopeStatusOf(text)
   const label = title ?? (text.startsWith('<cron-fire') ? '定时任务触发' : '系统消息')
   return (
@@ -649,7 +655,11 @@ const ThinkingBlock = memo(function ThinkingBlock({
  *  underlying item keeps its reference when unchanged. */
 /** 完成轮活动摘要里工具名 → 中文动作（纯规则统计，不调 API）。 */
 /** 「回到最新」按钮：自己订阅 running——主组件刻意不订阅它（turn 起止会
- *  引发全列表重渲染，见 Transcript 顶部注释），按钮独立重渲染代价为零。 */
+ *  引发全列表重渲染，见 Transcript 顶部注释），按钮独立重渲染代价为零。
+ *
+ *  形态（2026-08 重做）：干净的圆形按钮 + 居中 V 形箭头（Codex 风）。
+ *  输出中不在箭头上玩花样（上次把 flow-text 套 SVG 上渲成了残圈），
+ *  而是整圈外面挂一圈缓慢的扩散脉冲环——动态感在按钮外圈，箭头永远干净。 */
 const LatestButton = memo(function LatestButton({
   onJump
 }: {
@@ -662,51 +672,44 @@ const LatestButton = memo(function LatestButton({
         onClick={() => onJump(running ? 'auto' : 'smooth')}
         title="回到最新"
         aria-label="回到最新"
-        className="glass-control flex h-8 items-center gap-1 rounded-full px-2.5 text-xs text-zinc-400 transition hover:text-zinc-200"
+        className="glass-control relative flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 transition hover:text-zinc-200"
       >
-        {/* 箭头用 SVG 居中：文本字形 ↓ 的基线偏移在圆钮里怎么调都是歪的
-            （2026-08 用户反馈）。输出中挂紫黄流光 = 动态。 */}
-        <span
-          aria-hidden
-          className={`flex h-3.5 w-3.5 items-center justify-center ${running ? 'flow-text flow-text-violet' : ''}`}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </span>
-        <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-150 group-hover/latest:max-w-[2.5rem] group-hover/latest:opacity-100">
-          最新
-        </span>
+        {running && <span aria-hidden className="latest-pulse-ring" />}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </button>
     </div>
   )
 })
 
-/** 完成轮活动摘要里工具名 → 中文动作（纯规则统计，不调 API）。
+/** 完成轮活动摘要里工具名 → 中文动作 + 图标 + 微光色调（纯规则统计，不调 API）。
  *  覆盖两套命名：渲染层规范名（Bash/Read…）和 wire 原始名（terminal/read_file…）
- *  ——后者漏配会直接露出「使用了 read_file」这种中英混排（2026-08 用户反馈丑）。 */
-const TOOL_ACTIVITY_LABEL: Record<string, string> = {
-  Bash: '运行了命令',
-  terminal: '运行了命令',
-  Edit: '编辑了文件',
-  patch: '编辑了文件',
-  edit_file: '编辑了文件',
-  Write: '创建了文件',
-  write_file: '创建了文件',
-  Read: '读取了文件',
-  read_file: '读取了文件',
-  Glob: '查找了文件',
-  Grep: '搜索了内容',
-  search: '搜索了内容',
-  Agent: '派发了子代理',
-  AgentSwarm: '派发了子代理',
-  Task: '派发了子代理',
-  WebSearch: '搜索了网页',
-  web_search: '搜索了网页',
-  FetchURL: '抓取了网页',
-  WebFetch: '抓取了网页',
-  TodoList: '更新了待办',
-  todo_list: '更新了待办'
+ *  ——后者漏配会直接露出「使用了 read_file」这种中英混排（2026-08 用户反馈丑）。
+ *  icon 对应 toolIcons.tsx 的键（Codex 原版 SVG）；tone 对应 styles.css 的
+ *  seg-shimmer-* 微光类，每种动作一种淡色，扫一眼就能分出谁是谁。 */
+const TOOL_ACTIVITY_META: Record<string, { label: string; icon: string; tone: string }> = {
+  Bash: { label: '运行了命令', icon: 'bash', tone: 'bash' },
+  terminal: { label: '运行了命令', icon: 'bash', tone: 'bash' },
+  Edit: { label: '编辑了文件', icon: 'edit', tone: 'edit' },
+  patch: { label: '编辑了文件', icon: 'edit', tone: 'edit' },
+  edit_file: { label: '编辑了文件', icon: 'edit', tone: 'edit' },
+  Write: { label: '创建了文件', icon: 'edit', tone: 'edit' },
+  write_file: { label: '创建了文件', icon: 'edit', tone: 'edit' },
+  Read: { label: '读取了文件', icon: 'read', tone: 'read' },
+  read_file: { label: '读取了文件', icon: 'read', tone: 'read' },
+  Glob: { label: '查找了文件', icon: 'glob', tone: 'web' },
+  Grep: { label: '搜索了内容', icon: 'grep', tone: 'web' },
+  search: { label: '搜索了内容', icon: 'grep', tone: 'web' },
+  Agent: { label: '派发了子代理', icon: 'agent', tone: 'agent' },
+  AgentSwarm: { label: '派发了子代理', icon: 'agent', tone: 'agent' },
+  Task: { label: '派发了子代理', icon: 'agent', tone: 'agent' },
+  WebSearch: { label: '搜索了网页', icon: 'web', tone: 'web' },
+  web_search: { label: '搜索了网页', icon: 'web', tone: 'web' },
+  FetchURL: { label: '抓取了网页', icon: 'web', tone: 'web' },
+  WebFetch: { label: '抓取了网页', icon: 'web', tone: 'web' },
+  TodoList: { label: '更新了待办', icon: '', tone: 'todo' },
+  todo_list: { label: '更新了待办', icon: '', tone: 'todo' }
 }
 
 interface ActivityEntry {
@@ -720,6 +723,10 @@ interface ActivitySegment {
   label: string
   /** >1 才显示次数。 */
   count: number
+  /** toolIcons.tsx 的图标键（空 = 不显示图标）。 */
+  icon?: string
+  /** seg-shimmer-* 的微光色调（仅 tool 段有）。 */
+  tone?: string
 }
 
 /**
@@ -727,9 +734,8 @@ interface ActivitySegment {
  *
  * 原先直接返回一整条字符串 "思考 2 段 · 运行了命令 ×5 · 编辑了文件"：同色、同
  * 字重、挤在一行，扫一眼分不出哪段是思考、哪段是动作、各做了几次——用户反馈的
- * "区分度不够"就是这个。改成结构化分段后交给渲染层拉开层次：**做了什么**要突出
- * （那是这段活动的实质），**想了什么**要收敛（那只是过程），次数用更小更暗的字号
- * 挂在后面，不跟动作名抢注意力。
+ * "区分度不够"就是这个。分段后每段带 Codex 原版小图标 + 一种淡色微光，
+ * 思考段保持收敛（无图标、暗色）。
  */
 function summarizeActivity(blocks: AssistantBlock[]): ActivitySegment[] {
   let thinking = 0
@@ -742,23 +748,33 @@ function summarizeActivity(blocks: AssistantBlock[]): ActivitySegment[] {
   // 思考排最前：时间上它也确实发生在动作之前。
   if (thinking > 0) segments.push({ kind: 'thinking', label: '思考', count: thinking })
   for (const [name, count] of tools) {
-    segments.push({ kind: 'tool', label: TOOL_ACTIVITY_LABEL[name] ?? `使用了 ${name}`, count })
+    const meta = TOOL_ACTIVITY_META[name]
+    segments.push({
+      kind: 'tool',
+      label: meta?.label ?? `使用了 ${name}`,
+      count,
+      ...(meta?.icon ? { icon: meta.icon } : {}),
+      ...(meta?.tone ? { tone: meta.tone } : {})
+    })
   }
   return segments
 }
 
-/** 折叠摘要的一行渲染：动作亮、思考暗、次数最暗，分隔点几乎不可见。 */
+/** 折叠摘要的一行渲染：每段「图标 + 淡色微光动作名 + 次数」，段间靠间距
+ *  自然分开（2026-08：不要「·」——那玩意儿小到根本看不见还显脏）。 */
 function ActivitySummary({ segments }: { segments: ActivitySegment[] }): JSX.Element {
   return (
-    <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-      {segments.map((seg, i) => (
-        <span key={`${seg.kind}-${seg.label}`} className="inline-flex items-baseline gap-1">
-          {i > 0 && (
-            <span className="mr-0.5 text-zinc-700" aria-hidden>
-              ·
+    <span className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
+      {segments.map((seg) => (
+        <span key={`${seg.kind}-${seg.label}`} className="inline-flex items-center gap-1">
+          {seg.icon && (
+            <span className="text-zinc-500">
+              <ToolGlyph kind={seg.icon} size={11} />
             </span>
           )}
-          <span className={seg.kind === 'tool' ? 'text-zinc-300' : 'text-zinc-500'}>{seg.label}</span>
+          <span className={seg.kind === 'tool' ? `seg-shimmer seg-shimmer-${seg.tone ?? 'read'}` : 'text-zinc-500'}>
+            {seg.label}
+          </span>
           {seg.count > 1 && (
             <span className="text-[10px] tabular-nums text-zinc-600">
               {seg.kind === 'thinking' ? `${seg.count} 段` : `×${seg.count}`}

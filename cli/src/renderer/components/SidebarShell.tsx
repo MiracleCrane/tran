@@ -86,13 +86,18 @@ function ResizeHandle(): JSX.Element {
  */
 const PEEK_OPEN_DELAY_MS = 140
 const PEEK_CLOSE_DELAY_MS = 260
+/** 退场动画时长，与 styles.css 的 sidebar-peek-out 一致。 */
+const PEEK_LEAVE_ANIM_MS = 170
 
 export default function SidebarShell(): JSX.Element {
   const collapsed = useUiStore((s) => s.sidebarCollapsed)
   const width = useUiStore((s) => s.sidebarWidth)
   const hoverExpand = useUiStore((s) => s.sidebarHoverExpand)
   const [peeking, setPeeking] = useState(false)
+  /** 退场中：面板还挂着但正在播淡出动画，播完才卸载（2026-08：消失太突兀）。 */
+  const [leaving, setLeaving] = useState(false)
   const peekTimerRef = useRef<number | null>(null)
+  const leaveTimerRef = useRef<number | null>(null)
 
   const clearPeekTimer = (): void => {
     if (peekTimerRef.current !== null) {
@@ -100,27 +105,54 @@ export default function SidebarShell(): JSX.Element {
       peekTimerRef.current = null
     }
   }
+  const clearLeaveTimer = (): void => {
+    if (leaveTimerRef.current !== null) {
+      window.clearTimeout(leaveTimerRef.current)
+      leaveTimerRef.current = null
+    }
+  }
 
   const schedulePeek = (next: boolean): void => {
     clearPeekTimer()
-    peekTimerRef.current = window.setTimeout(
-      () => {
+    clearLeaveTimer()
+    if (next) {
+      // 重新进入：立刻退出退场态（动画反向衔接），按进入延迟打开。
+      peekTimerRef.current = window.setTimeout(() => {
         peekTimerRef.current = null
-        setPeeking(next)
-      },
-      next ? PEEK_OPEN_DELAY_MS : PEEK_CLOSE_DELAY_MS
-    )
+        setLeaving(false)
+        setPeeking(true)
+      }, PEEK_OPEN_DELAY_MS)
+      return
+    }
+    peekTimerRef.current = window.setTimeout(() => {
+      peekTimerRef.current = null
+      if (!peeking) return
+      setLeaving(true)
+      leaveTimerRef.current = window.setTimeout(() => {
+        leaveTimerRef.current = null
+        setPeeking(false)
+        setLeaving(false)
+      }, PEEK_LEAVE_ANIM_MS)
+    }, PEEK_CLOSE_DELAY_MS)
   }
 
   // 展开之后残留的 peek 会盖在正文上，必须清掉（连同在途的定时器）。
   useEffect(() => {
     if (!collapsed || !hoverExpand) {
       clearPeekTimer()
+      clearLeaveTimer()
       setPeeking(false)
+      setLeaving(false)
     }
   }, [collapsed, hoverExpand])
 
-  useEffect(() => clearPeekTimer, [])
+  useEffect(
+    () => () => {
+      clearPeekTimer()
+      clearLeaveTimer()
+    },
+    []
+  )
 
   const peekOn = collapsed && hoverExpand
 
@@ -148,7 +180,7 @@ export default function SidebarShell(): JSX.Element {
         <Sidebar />
       </div>
       {peekOn && peeking && (
-        <div className="sidebar-peek" style={{ width: `${width}px` }}>
+        <div className={`sidebar-peek ${leaving ? 'is-leaving' : ''}`} style={{ width: `${width}px` }}>
           <Sidebar forceExpanded />
         </div>
       )}

@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.0.66 - 2026-08-06
+
+### 中文
+
+- 修复:**peek 浮出时「工具」区是空盒子**——上版强制展开只开了容器，条目还按收起态渲染成透明。现在浮出时条目正常显示。
+- 修复:peek 浮层被 Git 顶栏压住——z-index 60 → 120。
+- 修复:**图标条中段悬停不触发浮出**。真凶是整条图标条被设成了窗口拖拽区（`-webkit-app-region: drag`），拖拽区吞掉真实鼠标的悬停事件,只有按钮（no-drag）能触发——正好对应"只有上面和下面能用"。图标条已移出拖拽区。
+- 修复:peek 消失太突兀——加退场动画（淡出 + 轻左滑 170ms）。
+- 重做:「回到最新」按钮——干净圆钮 + 居中箭头（上次把流光套 SVG 上渲成了残圈）；输出中按钮外圈挂缓慢扩散的紫色脉冲环,动态感在外圈、箭头永远干净。
+- 重做:折叠活动摘要行——每段带 Codex 原版小图标 + 自己的淡色微光（读文件天青/编辑紫/命令琥珀/搜索蓝/子代理紫红/待办绿），慢速低对比扫过;"·"分隔点删除,靠间距自然分开。
+- 修复:系统消息卡不再只有"系统消息"四个字——从通知正文挖真实标题（如"打包发布 v1.0.64 ✓ 完成"）。
+- 优化:输入框聚焦的紫色描边（三层叠加还带呼吸）全撤——改成中性提亮 + 底缘一线极淡 accent,聚焦是个状态不该一直招手。
+
+### English
+
+- Fixed: peek showed an empty tools box (container opened, items stayed invisible); peek z-index raised above the Git topbar; the rail's dead hover zone was caused by the whole rail being a window drag region (drags swallow real-mouse hover) — the rail is no longer a drag region; peek now fades/slides out instead of vanishing.
+- Reworked: the "back to latest" button is a clean circle with a centered chevron, and while streaming it gets a slow pulsing ring instead of the broken gradient text.
+- Reworked: collapsed activity summary segments carry Codex's original icons plus a faint per-action shimmer (read/edit/bash/web/agent/todo each get their own muted hue); dot separators removed.
+- Fixed: system-message cards now surface the real title from the notification body instead of a bare "系统消息".
+- Changed: the composer's purple focus ring (three stacked layers, breathing) replaced by a neutral brighten plus a whisper of accent at the bottom edge.
+
 ## v1.0.65 - 2026-08-06
 
 ### 中文

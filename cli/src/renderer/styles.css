@@ -445,12 +445,16 @@ textarea:focus-visible {
     background-image: none;
   }
 
-  /* 窗口拖拽区拆成两半：标题栏本身 + 侧栏顶部品牌行。
+  /* 窗口拖拽区：标题栏本身 + 展开侧栏的顶部品牌行。
      不做的话，合体后侧栏占据了窗口左上角，那一片按住拖不动窗口——
      而左上角恰恰是大多数人下意识去拖的位置。
-     里面的按钮必须显式 no-drag，否则落在拖拽区内的按钮点不动。 */
-  .app-shell-merged .sidebar-expand > :first-child,
-  .app-shell-merged .sidebar-collapse {
+     里面的按钮必须显式 no-drag，否则落在拖拽区内的按钮点不动。
+
+     2026-08：收起的图标条（.sidebar-collapse）从拖拽区里拿掉了。drag 区域
+     会吞掉真实鼠标的悬停事件——表现是只有图标按钮（no-drag）能触发 peek，
+     中间空白带全死了（用户反馈"只有上面和下面能悬停出来"）。窗口拖拽改由
+     标题栏承担。 */
+  .app-shell-merged .sidebar-expand > :first-child {
     -webkit-app-region: drag;
   }
 
@@ -494,16 +498,34 @@ textarea:focus-visible {
   }
 
   /* 收起态悬停浮出的完整面板：盖在正文之上，不推开布局。
-     left:0 贴着图标条的左边缘起画，宽度由内联 style 给（跟随用户调过的宽度）。 */
+     left:0 贴着图标条的左边缘起画，宽度由内联 style 给（跟随用户调过的宽度）。
+     z-index 提到 120（2026-08）：60 时 Git 顶栏（z-70 一带）会盖在浮层上面。 */
   .sidebar-peek {
     position: absolute;
     top: 0;
     bottom: 0;
     left: 0;
-    z-index: 60;
+    z-index: 120;
     display: flex;
     animation: sidebar-peek-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
     filter: drop-shadow(0 18px 48px rgba(0, 0, 0, 0.55));
+  }
+
+  /* 浮出退场：淡出 + 轻左滑，不再凭空消失（2026-08 用户反馈太突兀）。 */
+  .sidebar-peek.is-leaving {
+    animation: sidebar-peek-out 170ms ease-in both;
+    pointer-events: none;
+  }
+
+  @keyframes sidebar-peek-out {
+    from {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateX(-8px);
+    }
   }
 
   /* 浮层里的那份面板要撑满外壳给的宽度，覆盖它自身的 w-64。 */
@@ -2749,8 +2771,12 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   background: rgba(139, 92, 246, 0.12) !important;
 }
 
-/* Composer 聚焦：独立 ring 元素承载光晕，只过渡 opacity。
- *  glass-panel 有 overflow:hidden，外发光会被裁剪，故用内阴影。 */
+/* Composer 聚焦：独立 ring 元素承载光晕，只过渡透明度。
+ *  glass-panel 有 overflow:hidden，外发光会被裁剪，故用内阴影。
+ *
+ * 2026-08 改版：去掉整圈紫色描边（太扎眼，用户反馈）。聚焦提示改成
+ * 中性提亮——边框亮度升一档 + 底部一条极淡的 accent 过渡线：知道它
+ * 醒了，但不抢戏。 */
 .composer-panel {
   position: relative;
 }
@@ -2763,8 +2789,8 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   pointer-events: none;
   opacity: 0;
   box-shadow:
-    inset 0 0 0 1px rgba(139, 92, 246, 0.45),
-    inset 0 0 18px rgba(139, 92, 246, 0.08);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(139, 92, 246, 0.35);
   transition: opacity var(--motion-med) var(--easing-out);
 }
 
@@ -2847,11 +2873,12 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   animation: tran-sheen 1.6s linear infinite;
 }
 
-/* Composer 聚焦：静态渐变描边（mask 裁成 1.5px 描边层）+ 呼吸微光（opacity）。 */
+/* Composer 聚焦描边（mask 裁成 1.5px 描边层）。
+ * 2026-08：紫色呼吸渐变描边撤了（太扎眼）——聚焦 = 中性细边提亮 +
+ * 底缘一线极淡 accent（见 .composer-focus-ring 的 box-shadow），不再呼吸。 */
 .composer-panel:focus-within .composer-focus-ring {
   padding: 1.5px;
-  background-image: linear-gradient(100deg, rgba(139, 92, 246, 0.35), rgba(167, 139, 250, 0.85), rgba(139, 92, 246, 0.35));
-  animation: tran-glow-breathe 2.8s ease-in-out infinite;
+  background-image: linear-gradient(100deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.06));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
@@ -3242,8 +3269,9 @@ div:has(textarea:focus) .composer-shortcut-hint {
       background-color var(--motion-med) var(--easing-out);
   }
   :root[data-ui='flat'] .composer-panel:focus-within {
-    border-color: rgba(139, 92, 246, 0.32);
-    background: rgba(255, 255, 255, 0.038);
+    /* 2026-08：聚焦不再用紫色描边，中性提亮 + 微抬底。 */
+    border-color: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.045);
   }
   :root[data-ui='flat'] .composer-focus-ring {
     display: none;
@@ -3346,3 +3374,40 @@ div:has(textarea:focus) .composer-shortcut-hint {
 :root:has(.sidebar-collapse) .main-surface {
   box-shadow: none !important;
 }
+
+/* 「回到最新」按钮的输出中脉冲环（LatestButton）：一圈 accent 色细环缓慢
+   扩散淡出，表达"正在输出"，箭头本体保持干净。 */
+.latest-pulse-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 1px solid rgba(139, 92, 246, 0.55);
+  animation: latest-pulse 1.8s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes latest-pulse {
+  from {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+}
+
+/* 折叠活动摘要的分段微光（2026-08 用户要求）：每个动作类型一种淡淡的颜色
+   呼吸扫过，比 flow-text 慢、对比度低——有生命感但不刺眼。 */
+.seg-shimmer {
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: flow-text-sweep 3.6s linear infinite;
+}
+.seg-shimmer-read { background-image: linear-gradient(90deg, #7ba7bc 0%, #a8d4e6 50%, #7ba7bc 100%); }
+.seg-shimmer-edit { background-image: linear-gradient(90deg, #9d8fc0 0%, #c3b6e8 50%, #9d8fc0 100%); }
+.seg-shimmer-bash { background-image: linear-gradient(90deg, #c0a05c 0%, #e6cf9a 50%, #c0a05c 100%); }
+.seg-shimmer-web { background-image: linear-gradient(90deg, #6f96bd 0%, #9dc0e2 50%, #6f96bd 100%); }
+.seg-shimmer-agent { background-image: linear-gradient(90deg, #b08ac0 0%, #d5b3e2 50%, #b08ac0 100%); }
+.seg-shimmer-todo { background-image: linear-gradient(90deg, #6fae7f 0%, #9cd4ac 50%, #6fae7f 100%); }
