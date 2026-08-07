@@ -1035,6 +1035,13 @@ export default function Transcript({
   // the bottom, followOutput pins to the newest content; scroll up to read and
   // it stops following until the ↓ button returns you.
   const [atBottom, setAtBottom] = useState(true)
+  /**
+   * 「回到最新」按钮的显示状态——与 atBottom（钉住/跟随）**刻意分开**。
+   * 2026-08 重做：原先按钮直接用 `!atBottom`，而点击/悬停 bar 会主动解除钉住
+   * （#8b），结果人还贴在底部、只是点了下折叠，按钮就蹦出来。现在钉住只管
+   * 跟不跟随，按钮只管"视口是否真的离开了底部"。
+   */
+  const [showLatest, setShowLatest] = useState(false)
   const [deferHighlight, setDeferHighlight] = useState(true)
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null)
   /** #48 视口顶部附近对应的导航条目 id（高亮）。 */
@@ -1188,6 +1195,9 @@ export default function Transcript({
   const setPinnedAtBottom = (nextAtBottom: boolean): void => {
     atBottomRef.current = nextAtBottom
     setAtBottom(nextAtBottom)
+    // 重新钉住 = 回到底部跟随，按钮必然该收；解除钉住则**不**反过来亮按钮
+    // ——解除可能只是点了下 bar，人还在底部（按钮由几何距离/atBottomStateChange 管）。
+    if (nextAtBottom) setShowLatest(false)
   }
 
   // "↓ 最新"按钮的钉住路径：滚到底并显式重新钉住跟随。悬停/点击解除跟随后
@@ -1323,6 +1333,13 @@ export default function Transcript({
 
     const updateReserveEligibility = (): void => {
       refreshReserveEligibleFromScroller(scrollElement)
+      // 「回到最新」按钮按真实几何刷新：离底且未钉住才显示。钉住时的瞬时
+      // 离底（内容增长、补滚在途）不算——马上会被跟随收敛，闪按钮只会晃眼。
+      // 不能只靠 atBottomStateChange：它只在转变沿触发，补滚把内部状态拉回
+      // at-bottom 之后用户再上滚，false 沿已经消费过、不会再报。
+      const distanceFromBottom =
+        scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight
+      setShowLatest(distanceFromBottom > FOLLOW_RESUME_AT_BOTTOM_THRESHOLD_PX && !atBottomRef.current)
       // #50 滚动即重算导航高亮（rAF 节流；短距 smooth 跳不触发 rangeChanged，
       // 只靠 rangeChanged 会漏更新）。
       scheduleActiveUserNavUpdate()
@@ -1469,15 +1486,25 @@ export default function Transcript({
       if (!nextAtBottom) setPinnedAtBottom(false)
       return
     }
-    // 2026-08 「最新按钮误现」修复：内容增长（思考/工具卡展开、流式新块）把
-    // 底部顶远时 Virtuoso 也报 not-at-bottom——但用户根本没滚。区分法：滚动
-    // 事件里 scrollTop 在减小才是用户上滚（见 onScroll 的记录）；否则视为
-    // 内容增长，保持钉住并直接补滚到底。
-    if (!nextAtBottom && !scrollWentUpRef.current) {
-      virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'auto' })
-      return
+    // 2026-08 重做「最新按钮误现」修复（第一版三处误伤，全在流式期间暴露）：
+    // 1. 补滚只在**仍钉住**时做——点击/悬停 bar 主动解除跟随（#8b）后内容一
+    //    增长就强拉回底，等于展开了也白展开，正在读的东西被抽走；
+    // 2. "用户上滚"必须有真实输入佐证（scrollIntentActive：滚轮/指针/触摸都会
+    //    标记）——流式中上一个块自动收起时内容变矮，浏览器钳制 scrollTop 也表现
+    //    为"scrollTop 变小"，光看方向会把自动收起误判成上滚，跟随莫名断掉；
+    // 3. 跟随锁生效期间不补滚（点击选中文本被拽走就是锁防的场景），锁过期后
+    //    followOutput 会在下一次内容变化时自己接上。
+    if (!nextAtBottom && atBottomRef.current) {
+      const userScrolledUp = scrollWentUpRef.current && scrollIntentActiveRef.current
+      if (!userScrolledUp) {
+        if (window.performance.now() >= followOutputLockedUntilRef.current) {
+          virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'auto' })
+        }
+        return
+      }
     }
     setPinnedAtBottom(nextAtBottom)
+    setShowLatest(!nextAtBottom)
   }
 
   useEffect(() => {
@@ -1706,7 +1733,7 @@ export default function Transcript({
       {/* 回到最新：底部居中（Codex 风，2026-08 用户点名）。输出中箭头挂
           紫黄流光（动态=正在干活），非输出静态箭头。按钮带 data-follow-no-lock：
           点它不吃 pointerdown 的跟随锁，否则流式期间永远差一截到不了底。 */}
-      {!layoutTransitioning && !atBottom && (
+      {!layoutTransitioning && showLatest && (
         <LatestButton onJump={pinToBottom} />
       )}
     </div>

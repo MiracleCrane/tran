@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.70 - 2026-08-07
+
+### 中文
+
+- 重做:**贴底跟随 / 「回到最新」按钮状态机**。v1.0.69 的「误现修复」有三处误伤,全在输出中暴露:
+  - 输出中点开思考/工具卡会被强行拽回底部(补滚不看"用户已主动解除跟随")——现在只有仍处于钉住态才补滚,展开阅读时视图钉在原地;
+  - 输出中上一个块自动收起时,浏览器钳制 scrollTop 被误判成"用户上滚",跟随莫名断掉——现在判"上滚"必须有真实输入佐证(滚轮/指针/触摸),纯内容收缩不算;
+  - 贴底点一下折叠,「最新」按钮凭空出现——按钮显示与钉住状态解耦,只看视口是否真的离开了底部。
+  另外补滚现在尊重跟随锁:点击选中文本的瞬间不再被拽走。
+
+### English
+
+- Reworked: the stick-to-bottom / "back to latest" state machine. The v1.0.69 fix had three regressions, all during streaming: expanding a card yanked you back to the bottom (compensation scroll now respects an explicit un-pin), auto-collapsing blocks were misread as user scroll-ups killing follow (a scroll-up now requires real input evidence), and clicking a bar at the bottom made the button appear (button visibility is now decoupled from the pin state and follows actual viewport geometry). Compensation scrolling also honors the follow lock, so click-to-select no longer drags the view.
+
 ## v1.0.69 - 2026-08-07
 
 ### 中文
