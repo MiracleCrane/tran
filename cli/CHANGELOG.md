@@ -4,13 +4,19 @@
 
 ### 中文
 
+- 新增:**AI 自动唤醒可见化**。实证发现 kimi 在后台任务/子代理完成时会自动注入通知并让主代理接续干活(全历史 91 例零例外)——但这一轮之前在 Tran 里"三无":不显示运行中、流式态不封口、待办不补拉。现在自动唤醒轮会点亮运行指示,静默收尾时封口并补拉待办真值。
+- 修复:**唤醒内容被隐藏轮吞掉**——kimi 的完成通知会注入当时活跃的 turn,若恰逢 Tran 的隐藏查询轮(/usage、/mcp),整段唤醒内容会消失("跑完了也没反应"的真凶)。现在后台任务运行期间不再开隐藏轮。
+- 优化:待办自动催更降级为兜底(kimi 自己会唤醒),有任务在跑时不再触发;待办卡横幅文案随之修正。
+- 优化:思考块流式性能——折叠预览正则只在收起态计算且只取前 400 字、跟随滚动改 rAF 合帧、便宜摘要 hook 去掉每帧的无效状态更新(边思考边翻译的卡顿来源)。
 - 优化:思考块与折叠摘要行前面的折叠箭头，从文本字形（▸/▾，又小又糊）换成 12px V 形图标，收起时旋转 -90° 带过渡。
 
 ### English
 
+- New: agent self-wake made visible. kimi auto-resumes the main agent when background tasks/subagents finish (91/91 in wire logs); Tran now lights the running indicator for these steered turns, seals streaming state on quiescence, and re-pulls todos.
+- Fixed: wake-up turns being swallowed by hidden query turns (/usage, /mcp) — hidden turns are now skipped while background tasks are running.
+- Changed: the todo auto-nudge is demoted to a fallback; thinking-block streaming got cheaper per frame (bounded preview regex, rAF-batched follow scroll, no-op state updates skipped).
 - Changed: fold indicators in thinking blocks and activity summaries are now a 12px chevron with a rotate transition, replacing the tiny text glyphs.
 
-## v1.0.70 - 2026-08-07
 ## v1.0.70 - 2026-08-07
 
 ### 中文
