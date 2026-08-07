@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.71 - 2026-08-07
+
+### 中文
+
+- 优化:思考块与折叠摘要行前面的折叠箭头，从文本字形（▸/▾，又小又糊）换成 12px V 形图标，收起时旋转 -90° 带过渡。
+
+### English
+
+- Changed: fold indicators in thinking blocks and activity summaries are now a 12px chevron with a rotate transition, replacing the tiny text glyphs.
+
+## v1.0.70 - 2026-08-07
 ## v1.0.70 - 2026-08-07
 
 ### 中文

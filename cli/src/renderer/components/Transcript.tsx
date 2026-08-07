@@ -597,7 +597,7 @@ const ThinkingBlock = memo(function ThinkingBlock({
         onClick={() => setUserToggled(!open)}
         className="flex w-full cursor-pointer select-none items-center gap-1.5 text-left text-xs font-medium text-zinc-500 hover:text-zinc-400"
       >
-        <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
+        <FoldChevron open={open} />
         {/* 进行中用紫黄流光扫过文字本身，不再在前面挂一颗转圈的月亮：
             动效落在正在变化的东西上，比额外加一个装饰件干净。 */}
         <span className={`shrink-0 ${streaming ? 'flow-text flow-text-violet' : ''}`}>
@@ -660,6 +660,23 @@ const ThinkingBlock = memo(function ThinkingBlock({
     </div>
   )
 })
+
+/** 折叠指示（2026-08：文本字形 ▸/▾ 太小太糊，用户反馈）：12px V 形图标，
+ *  收起时旋转 -90° 带过渡——比瞬时换字形顺眼。 */
+function FoldChevron({ open }: { open: boolean }): JSX.Element {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className={`shrink-0 text-zinc-600 transition-transform duration-150 ${open ? '' : '-rotate-90'}`}
+    >
+      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
 
 /** Takes `item` (not the wrapping forest node) precisely so React.memo's shallow
  *  compare can short-circuit: the forest node is rebuilt every frame, but the
@@ -823,7 +840,7 @@ const ActivityGroupRow = memo(function ActivityGroupRow({
         onClick={() => setOpen((v) => !v)}
         className="flex w-fit cursor-pointer select-none items-center gap-1.5 rounded-lg bg-white/[0.03] px-2 py-1 text-left text-xs text-zinc-500 transition hover:bg-white/[0.055] hover:text-zinc-400"
       >
-        <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
+        <FoldChevron open={open} />
         <ActivitySummary segments={summarizeActivity(entries.map((e) => e.block))} />
       </button>
       {open && entries.map(renderBlock)}
@@ -857,7 +874,7 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
         onClick={() => setUserToggled(!open)}
         className="flex w-fit cursor-pointer select-none items-center gap-1.5 rounded-lg bg-white/[0.03] px-2 py-1 text-left text-xs text-zinc-500 transition hover:bg-white/[0.055] hover:text-zinc-400"
       >
-        <span className="shrink-0 text-[10px] text-zinc-600">{open ? '▾' : '▸'}</span>
+        <FoldChevron open={open} />
         <ActivitySummary segments={summarizeActivity(blocks)} />
       </button>
       {open &&
