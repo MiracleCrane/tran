@@ -138,14 +138,16 @@ export default function SidebarShell(): JSX.Element {
   }
 
   // 展开之后残留的 peek 会盖在正文上，必须清掉（连同在途的定时器）。
+  // 隐藏态（hidden）的 peek 由隐藏分支自己管理，这里不插手。
   useEffect(() => {
+    if (hidden) return
     if (!collapsed || !hoverExpand) {
       clearPeekTimer()
       clearLeaveTimer()
       setPeeking(false)
       setLeaving(false)
     }
-  }, [collapsed, hoverExpand])
+  }, [collapsed, hoverExpand, hidden])
 
   useEffect(
     () => () => {
@@ -157,7 +159,30 @@ export default function SidebarShell(): JSX.Element {
 
   // 完全隐藏（Codex 风）：连图标条都不渲染，dock 收成零宽——主区顺势铺满，
   //  网格列动画（workspace-shell 的 grid-template-columns 过渡）给出滑走感。
-  if (hidden) return <div className="sidebar-dock w-0 shrink-0 overflow-hidden" />
+  //  但左缘留一条 10px 的隐形触发带：悬停浮出完整侧栏（peek），移开自动收回
+  //  （2026-08 用户：隐藏了鼠标悬停也要能出来）。
+  if (hidden) {
+    return (
+      <div className="sidebar-dock relative w-0 shrink-0">
+        <div
+          className="absolute inset-y-0 left-0 z-[110] w-2.5"
+          title="悬停展开侧栏"
+          onPointerEnter={() => schedulePeek(true)}
+          onPointerLeave={() => schedulePeek(false)}
+        />
+        {peeking && (
+          <div
+            className={`sidebar-peek ${leaving ? 'is-leaving' : ''}`}
+            style={{ width: `${width}px` }}
+            onPointerEnter={() => schedulePeek(true)}
+            onPointerLeave={() => schedulePeek(false)}
+          >
+            <Sidebar forceExpanded />
+          </div>
+        )}
+      </div>
+    )
+  }
 
   const peekOn = collapsed && hoverExpand
 

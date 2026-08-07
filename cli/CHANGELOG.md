@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.73 - 2026-08-07
+
+### 中文
+
+- 新增:侧栏双档定稿——**Alt+Q 完全隐藏、Alt+W 缩小成图标条**（Ctrl+B 保留）；默认启动即收起为图标条；**完全隐藏时鼠标悬停窗口左缘浮出完整侧栏**（10px 隐形触发带，移开自动收回）。
+- 重做:用户消息导航条回到右缘，保留 Codex 小横线样式（当前节更亮更长，hover 出摘要）。
+- 优化:工具卡彻底裸排版——淡底也去了，纯"圆点+图标+文字"，运行中才留一丝紫色底；卡片/思考块间距定档 3px。
+- 优化:折叠箭头换 12px V 形图标 + 旋转过渡（继承 v1.0.71）。
+
+### English
+
+- Sidebar dual mode finalized: Alt+Q hides completely, Alt+W collapses to the icon rail (Ctrl+B kept); starts collapsed by default; hovering the window's left edge while hidden reveals the full sidebar as an overlay.
+- The user-message navigator moved back to the right edge, keeping the Codex dash style.
+- Tool cards are now fully naked (no fill at all; only a whisper of violet while running); spacing settled at 3px; fold chevrons carried over from v1.0.71.
+
+## v1.0.72 - 2026-08-07
 ## v1.0.72 - 2026-08-07
 
 ### 中文

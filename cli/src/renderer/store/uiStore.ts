@@ -100,11 +100,32 @@ function readSidebarWidth(): number {
   }
 }
 
+/** 收起（图标条）状态持久化：默认收起（2026-08 用户指定"默认全部收起"）。 */
+const SIDEBAR_COLLAPSED_KEY = 'tran.sidebarCollapsed'
+
+function readSidebarCollapsed(): boolean {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
+    return raw === null ? true : raw === '1'
+  } catch {
+    return true
+  }
+}
+
 export const useUiStore = create<UiStore>((set) => ({
   view: 'chat',
   setView: (view) => set({ view }),
-  sidebarCollapsed: false,
-  toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  sidebarCollapsed: readSidebarCollapsed(),
+  toggleSidebar: () =>
+    set((s) => {
+      const next = !s.sidebarCollapsed
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0')
+      } catch {
+        /* 同 sidebarWidth 的兜底 */
+      }
+      return { sidebarCollapsed: next }
+    }),
   /** 完全隐藏（Codex 风）：连图标条都不留。与 collapsed（收成图标条）是两档，
    *  Alt+Q 绑定这档。 */
   sidebarHidden: readSidebarHidden(),

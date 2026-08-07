@@ -191,9 +191,9 @@ export function buildShortcuts(): ShortcutAction[] {
   const list: ShortcutAction[] = [
     {
       id: 'toggleSidebar',
-      label: '收起 / 展开侧栏（图标条）',
-      // Ctrl+B 是 VS Code / Codex 的通用肌肉记忆：收成图标条。
-      keys: ['Ctrl+B'],
+      label: '缩小 / 展开侧栏（图标条）',
+      // Alt+W 缩小（用户指定 2026-08）；Ctrl+B 是 VS Code / Codex 的肌肉记忆。
+      keys: ['Alt+W', 'Ctrl+B'],
       // 侧栏开合在输入时也该能用：不影响文本，纯视图动作。
       allowInInput: true,
       run: () => ui().toggleSidebar()

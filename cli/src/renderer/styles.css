@@ -3107,12 +3107,12 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
     gap: 0;
   }
 
-  /* 3. 卡片＝底色块。统一 10px 圆角，零描边；运行中才给强调底 */
+  /* 3. 工具卡彻底裸排版（2026-08 用户定夺）：无底无框，和思考块同一语言；
+     只有运行中给一丝紫色底作信号。 */
   :root[data-ui='flat'] .tool-call-card {
     border: 0;
     box-shadow: none;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.026);
+    background: transparent;
   }
   :root[data-ui='flat'] .tool-call-card.is-running {
     background: rgba(139, 92, 246, 0.07);

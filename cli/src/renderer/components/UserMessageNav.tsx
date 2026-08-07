@@ -25,9 +25,10 @@ export default function UserMessageNav({
   if (entries.length === 0) return null
   return (
     // data-user-msg-nav：Transcript 的 wheel 捕获据此豁免导航条自身的滚动。
-    <div data-user-msg-nav className="group absolute left-1 top-1/2 z-10 -translate-y-1/2">
-      {/* 常态：一列小横线（Codex 同款）。无框无底，嵌在对话区左缘。 */}
-      <div className="flex max-h-[60vh] flex-col items-start gap-[5px] overflow-hidden py-2 group-hover:opacity-0">
+    // 位置回右缘（2026-08 用户：学 Codex 的是虚线样式，不是位置）。
+    <div data-user-msg-nav className="group absolute right-1.5 top-1/2 z-10 -translate-y-1/2">
+      {/* 常态：一列小横线（Codex 同款样式）。无框无底，嵌在对话区右缘。 */}
+      <div className="flex max-h-[60vh] flex-col items-end gap-[5px] overflow-hidden py-2 group-hover:opacity-0">
         {entries.map((entry) => (
           <button
             key={entry.id}
@@ -43,8 +44,8 @@ export default function UserMessageNav({
           />
         ))}
       </div>
-      {/* hover 展开：摘要列表（浮在条带右侧），条目多时内部滚动。 */}
-      <div className="pointer-events-none absolute left-3 top-1/2 hidden max-h-[60vh] w-56 -translate-y-1/2 overflow-y-auto rounded-xl border border-white/[0.08] bg-zinc-950/85 p-1.5 opacity-0 shadow-xl shadow-black/40 backdrop-blur transition-opacity group-hover:pointer-events-auto group-hover:block group-hover:opacity-100">
+      {/* hover 展开：摘要列表（浮在条带左侧），条目多时内部滚动。 */}
+      <div className="pointer-events-none absolute right-3 top-1/2 hidden max-h-[60vh] w-56 -translate-y-1/2 overflow-y-auto rounded-xl border border-white/[0.08] bg-zinc-950/85 p-1.5 opacity-0 shadow-xl shadow-black/40 backdrop-blur transition-opacity group-hover:pointer-events-auto group-hover:block group-hover:opacity-100">
         {entries.map((entry, i) => (
           <button
             key={entry.id}
