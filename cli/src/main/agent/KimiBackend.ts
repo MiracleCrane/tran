@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { kimiSessionsRoot } from '../kimiHome'
 import type {
@@ -132,6 +132,21 @@ interface ActiveKimiSession {
   /** Steered 轮的静默收尾定时器（无 prompt 响应可等，只能按事件静默判结束；
    *  判早了也无害——下一个事件会重新点亮，自愈）。 */
   steeredTimer?: NodeJS.Timeout
+  /** Wire 回放（见 maybeStartWireWatch）：kimi 对 post-turn steered 轮零 ACP
+   *  推送（2026-08 直连 kimi acp 实证：turn 结束后后台任务完成、wire 里唤醒轮
+   *  跑完，45s 内 stdio 一个字节都没有）——唯一数据源是磁盘 wire.jsonl。 */
+  wireWatchTimer?: NodeJS.Timeout
+  /** wire.jsonl 绝对路径缓存（null=已确认找不到，别再扫）。 */
+  wirePath?: string | null
+  /** 已消费到的字节偏移（只回放 watch 启动之后新增的行）。 */
+  wireOffset?: number
+  /** wire 状态机：当前处于 steered 轮内容段（turn.steer 之后、下个
+   *  turn.prompt 之前）。客户端轮（含隐藏轮）的行一律不回放。 */
+  wireInSteer?: boolean
+  /** 最近一次 wire 新行时间（静默收尾/停表判定）。 */
+  wireLastActivityAt?: number
+  /** 最近处理的 wire 行是否 step.end（静默 + step.end = steered 轮真结束）。 */
+  wireLastWasStepEnd?: boolean
   /** #3 恢复闸门：ACP 断连自动恢复窗口（退避重连 + session/load）内挂闸。
    *  期间该会话不发起任何新 turn——新进程还没 session/load 过这个
    *  acpSessionId，直接 session/prompt 会以 "session not found" 报错；也不会
@@ -229,6 +244,17 @@ const STEERED_TURN_IDLE_MS = 45_000
 /** turn 收尾后这么久内不做 steered 首触发：cancel/正常结束后的迟到尾巴事件
  *  会被误判成自发唤醒（interrupt 之后 running 指示凭空复燃 45s）。 */
 const STEERED_DETECT_GRACE_MS = 3_000
+
+/** Wire 回放轮询间隔：steered 轮的思考/正文/工具卡从 wire.jsonl 增量读出，
+ *  1s 粒度对"后台任务完成 → 界面出现唤醒内容"的感知延迟足够。 */
+const WIRE_POLL_MS = 1_000
+/** steered 轮收尾判定：最后一行是 step.end 且这么久没有新行。kimi 的 loop
+ *  在 step.end 后开下一步是同毫秒级（wire 实证），4s 静默 + step.end 稳判
+ *  结束；判早了下一行会重新点亮（自愈）。 */
+const WIRE_STEER_SEAL_QUIET_MS = 4_000
+/** 任务清零后 watch 再挂这么久才停：completion → turn.steer 写盘有毫秒级
+ *  间隙，立即停表会漏掉最后一个唤醒。 */
+const WIRE_WATCH_LINGER_MS = 10_000
 
 /** M2 pendingNotifications 淘汰参数：正常注册竞争窗口只有一两个微任务的长度，
  *  缓冲到达上限只可能是"会话已死、通知永远等不到注册"的泄漏形态。 */
@@ -430,6 +456,7 @@ export class KimiBackend {
     if (!session) return
     session.closed = true
     this.disarmStallWatch(session)
+    this.stopWireWatch(session)
     if (session.acpSessionId) {
       // 空壳治理：Tran 新建但没发过消息的会话，离开时直接从磁盘删掉。
       this.discardEmptyShell(session)
@@ -572,13 +599,14 @@ export class KimiBackend {
   /**
    * Steered 轮跟踪：后台任务/子代理完成时 kimi 会自己注入通知并开新一轮
    * （wire 实证 turn.steer；本机全历史 91 例完成通知全部即时唤醒，零例外）。
-   * 这一轮没有客户端 prompt，之前的表现就是"内容凭空流进来但界面不显示运行中、
-   * 结束后流式态也不封口"。这里在无 prompt 期间检测到内容事件即视为 steered
-   * 轮开始：点亮 running（侧栏推送 + system/steered_turn 走事件流给当前会话的
-   * status.running），事件静默超时后收尾。
+   * 这一轮没有客户端 prompt，且 kimi 对它**零 ACP 推送**（2026-08 直连探针
+   * 实证）——主触发方是 wire 回放（pollWire 读到 turn.steer / steered 段事件
+   * 时调用）；handleSessionUpdate 里的 ACP 侧检测仅剩兜底价值（turn 尾巴期
+   * 的迟到事件）。点亮 running（侧栏推送 + system/steered_turn 走事件流给
+   * 当前会话的 status.running），事件静默超时后收尾。
    *
-   * 收尾只能按静默判（ACP 没有 agent 自发轮的结束信号）：判早了无害——
-   * 下一个事件会重新点亮，自愈；真实 prompt 开始时静默清旗（真实轮的
+   * 收尾按 wire 静默 + step.end 判（pollWire），45s 定时器兜底：判早了无害
+   * ——下一个事件会重新点亮，自愈；真实 prompt 开始时静默清旗（真实轮的
    * 生命周期接管一切）。
    */
   private touchSteeredTurn(session: ActiveKimiSession): void {
@@ -616,6 +644,193 @@ export class KimiBackend {
       subtype: 'steered_turn',
       running: false
     } as unknown as SDKMessage)
+  }
+
+  /**
+   * Wire 回放：steered 轮内容的唯一数据源。
+   *
+   * 实证链（2026-08，直连 `kimi acp` 的对照探针）：
+   * 1. 后台任务/子代理完成时 kimi 内部 100% turn.steer 自动唤醒（历史 91 例 +
+   *    实测 2 例，零例外），唤醒轮的思考/工具/正文全部写进 wire.jsonl；
+   * 2. 但 ACP stdio 对这轮**零推送**——turn 结束后监听 45s，session/update
+   *    一条都没有。所以"从 ACP 事件检测 steered 轮"（v1.0.72 的做法）对
+   *    post-turn 唤醒永远不会触发，内容只能从磁盘拉。
+   *
+   * 生命周期：真实轮收尾且还有后台任务在跑 → 启动 1s 轮询；真实轮开始 →
+   * 停表（该轮期间的 wire 行属于客户端轮，ACP 正常推送，回放会双写）；
+   * 任务清零且静默 → 停表。回放经 emitThinking/emitAssistantDelta/emitToolUse
+   * 走正常流式管道，渲染层零改动。
+   */
+  private maybeStartWireWatch(session: ActiveKimiSession): void {
+    if (session.closed || session.running || session.hiddenTurn || session.wireWatchTimer) return
+    if (!session.acpSessionId || !hasRunningDiskTasks(session.acpSessionId)) return
+    const path = this.resolveWirePath(session)
+    if (!path) return
+    try {
+      session.wireOffset = statSync(path).size
+    } catch {
+      return
+    }
+    session.wireInSteer = false
+    session.wireLastActivityAt = Date.now()
+    session.wireLastWasStepEnd = false
+    session.wireWatchTimer = setInterval(() => this.pollWire(session), WIRE_POLL_MS)
+    session.wireWatchTimer.unref?.()
+    log('kimi', `wire watch armed session=${session.id} offset=${session.wireOffset}`)
+  }
+
+  private stopWireWatch(session: ActiveKimiSession): void {
+    if (!session.wireWatchTimer) return
+    clearInterval(session.wireWatchTimer)
+    session.wireWatchTimer = undefined
+    session.wireInSteer = false
+  }
+
+  /** $KIMI_CODE_HOME/sessions/<wd_*>/<acpSessionId>/agents/main/wire.jsonl。
+   *  扫描一次缓存结果；null 记忆"找不到"（目录形态异常时别每秒重扫）。 */
+  private resolveWirePath(session: ActiveKimiSession): string | null {
+    if (session.wirePath !== undefined) return session.wirePath
+    const acpSessionId = session.acpSessionId
+    session.wirePath = null
+    if (acpSessionId && /^[\w-]+$/.test(acpSessionId)) {
+      try {
+        const root = kimiSessionsRoot()
+        for (const wd of readdirSync(root)) {
+          const candidate = join(root, wd, acpSessionId, 'agents', 'main', 'wire.jsonl')
+          if (existsSync(candidate)) {
+            session.wirePath = candidate
+            break
+          }
+        }
+      } catch {
+        /* sessions root 不可读：保持 null */
+      }
+    }
+    return session.wirePath
+  }
+
+  private pollWire(session: ActiveKimiSession): void {
+    if (session.closed || this.sessions.get(session.id) !== session) {
+      this.stopWireWatch(session)
+      return
+    }
+    // 真实轮（含隐藏轮）接管：期间的 wire 行是客户端轮的，ACP 会正常推送，
+    // 回放就是双写。drain 收尾时会用新偏移重新挂表。
+    if (session.running || session.hiddenTurn) {
+      this.stopWireWatch(session)
+      return
+    }
+    const path = session.wirePath
+    if (!path) {
+      this.stopWireWatch(session)
+      return
+    }
+    let size: number
+    try {
+      size = statSync(path).size
+    } catch {
+      return
+    }
+    if (size < (session.wireOffset ?? 0)) session.wireOffset = 0
+    if (size > (session.wireOffset ?? 0)) {
+      const start = session.wireOffset ?? 0
+      let buffer: Buffer
+      try {
+        const fd = openSync(path, 'r')
+        try {
+          buffer = Buffer.alloc(size - start)
+          const read = readSync(fd, buffer, 0, buffer.length, start)
+          buffer = buffer.subarray(0, read)
+        } finally {
+          closeSync(fd)
+        }
+      } catch {
+        return
+      }
+      // 只消费到最后一个完整行：尾部半行（写入中）连同多字节边界留给下次。
+      const lastNewline = buffer.lastIndexOf(0x0a)
+      if (lastNewline < 0) return
+      session.wireOffset = start + lastNewline + 1
+      session.wireLastActivityAt = Date.now()
+      for (const line of buffer.subarray(0, lastNewline).toString('utf8').split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        try {
+          this.replayWireLine(session, JSON.parse(trimmed) as Record<string, unknown>)
+        } catch {
+          /* 半行/坏行：跳过 */
+        }
+      }
+    }
+    const quietMs = Date.now() - (session.wireLastActivityAt ?? 0)
+    // steered 轮收尾：最后一行 step.end + 静默窗口 → 封口（endSteeredTurn 会
+    // seal 流式消息、灭 running、触发渲染层 refreshTodos）。
+    if (session.steeredActive && session.wireInSteer && session.wireLastWasStepEnd && quietMs >= WIRE_STEER_SEAL_QUIET_MS) {
+      session.wireInSteer = false
+      this.endSteeredTurn(session)
+    }
+    // 停表：没有 steered 轮在跑、任务清零、且静默过 linger 窗口。
+    if (
+      !session.steeredActive &&
+      !session.wireInSteer &&
+      quietMs >= WIRE_WATCH_LINGER_MS &&
+      (!session.acpSessionId || !hasRunningDiskTasks(session.acpSessionId))
+    ) {
+      this.stopWireWatch(session)
+    }
+  }
+
+  /** 单条 wire 行 → 渲染层消息。只回放 steered 段（turn.steer 之后、下个
+   *  turn.prompt 之前）；内容形状 2026-08 实证：content.part 是全量文本
+   *  （非增量），think 正文 kimi 不落盘（空串，跳过），tool.call 带
+   *  name/args，tool.result 带 result.output。 */
+  private replayWireLine(session: ActiveKimiSession, entry: Record<string, unknown>): void {
+    const type = asString(entry.type)
+    if (type === 'turn.prompt') {
+      session.wireInSteer = false
+      session.wireLastWasStepEnd = false
+      return
+    }
+    if (type === 'turn.steer') {
+      session.wireInSteer = true
+      session.wireLastWasStepEnd = false
+      this.touchSteeredTurn(session)
+      return
+    }
+    if (type !== 'context.append_loop_event' || !session.wireInSteer) return
+    const event = asRecord(entry.event)
+    if (!event) return
+    const eventType = asString(event.type)
+    session.wireLastWasStepEnd = eventType === 'step.end'
+    // steered 轮进行中：每个事件都给 45s 兜底定时器续命 + 保持 running。
+    this.touchSteeredTurn(session)
+    if (eventType === 'content.part') {
+      const part = asRecord(event.part)
+      if (!part) return
+      const partType = asString(part.type)
+      if (partType === 'text') {
+        const text = asString(part.text)
+        if (text) this.emitAssistantDelta(session, undefined, text)
+      } else if (partType === 'think') {
+        const think = asString(part.think)
+        if (think) this.emitThinking(session, think)
+      }
+      return
+    }
+    if (eventType === 'tool.call') {
+      const toolUseId = asString(event.toolCallId) ?? asString(event.uuid) ?? cryptoId()
+      this.sealStreamMessage(session)
+      this.emitToolUse(session, toolUseId, asString(event.name) ?? 'Tool', asRecord(event.args) ?? {})
+      return
+    }
+    if (eventType === 'tool.result') {
+      const toolUseId = asString(event.toolCallId)
+      if (!toolUseId || session.toolResults.has(toolUseId)) return
+      session.toolResults.add(toolUseId)
+      const result = asRecord(event.result)
+      const output = asString(result?.output) ?? (result ? JSON.stringify(result) : '')
+      this.emitToolResult(session, toolUseId, output, Boolean(result?.error))
+    }
   }
 
   /** #41 静默监督（仅用户轮；隐藏轮保持 60s 硬超时不变）：每分钟检查一次该
@@ -917,6 +1132,9 @@ export class KimiBackend {
     // elicitation 请求按原事件形态重投——原弹窗随旧渲染层丢失，不重投的话
     // kimi 侧一直等应答，会话看起来永久忙碌。
     this.redeliverPendingPermissions(session)
+    // resume 场景：上次运行留下的后台任务可能还在跑（甚至 Tran 关着的时候
+    // 完成、kimi 进程没了没人唤醒）——就绪即挂表，有任务就能接住唤醒轮。
+    this.maybeStartWireWatch(session)
     void this.drain(session)
     // 会话打开即刷新上下文用量 + MCP server 状态（串行隐藏轮；有轮在跑则
     // turn 末的 afterTurn 会补 /usage，这里只在空转时触发，保持串行）。
@@ -1007,8 +1225,10 @@ export class KimiBackend {
     const next = session.queue.shift()
     if (!next) return
     // 真实轮接管：steered 轮静默清旗（不发收尾消息——真实轮的生命周期会
-    // 管理 running/封口，这里再发一次 running=false 反而会闪断指示）。
+    // 管理 running/封口，这里再发一次 running=false 反而会闪断指示）；
+    // wire 回放同时停表（本轮的 wire 行由 ACP 正常推送，回放即双写）。
     this.endSteeredTurn(session, false)
+    this.stopWireWatch(session)
     session.running = true
     session.turn += 1
     session.turnHadToolCall = false
@@ -1036,6 +1256,9 @@ export class KimiBackend {
       session.waitingOnUser = false
       this.disarmStallWatch(session)
       this.emitRunning(session, false)
+      // 后台任务还在跑：挂 wire 回放，接住任务完成后的 steered 唤醒轮
+      // （kimi 对这种轮零 ACP 推送，见 maybeStartWireWatch）。
+      this.maybeStartWireWatch(session)
       session.currentMessageId = undefined
       session.streamedText = ''
       session.streamStarted = false
@@ -2120,6 +2343,7 @@ export class KimiBackend {
     // 封停标记：等恢复闸门的 drain / 在途隐藏轮放闸后见 closed 即收场，不会对
     // 一个已经拆掉的会话继续发 prompt 或投递消息。
     session.closed = true
+    this.stopWireWatch(session)
     this.sessions.delete(session.id)
     if (session.acpSessionId && this.acpToSession.get(session.acpSessionId) === session.id) {
       this.acpToSession.delete(session.acpSessionId)

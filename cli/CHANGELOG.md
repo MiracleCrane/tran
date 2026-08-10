@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.74 - 2026-08-10
+
+### 中文
+
+- 修复:**自动唤醒轮真正显示出来了**。v1.0.72 的方案建立在"唤醒内容会从 ACP 推过来"的假设上——实测直连 `kimi acp` 对照验证:后台任务完成后 kimi 内部确实自动唤醒并跑完了整轮(wire.jsonl 全程可见),但 **ACP stdio 对这一轮零推送**(45 秒监听一个字节都没有),所以界面上永远什么都不会出现。现在 Tran 在回合结束且还有后台任务在跑时,直接增量读会话的 wire.jsonl,把唤醒轮的思考、工具卡(含结果)和正文经正常流式管道回放进对话——后台命令、非阻塞子代理、待办更新三条路都实机验证过:运行指示点亮、工具卡完整、结尾定稿、待办卡自动刷新勾选。
+- 真实轮开始时回放即停(该轮内容由 ACP 正常推送,不会双写);会话恢复时若有上次遗留的后台任务也会自动挂表接住唤醒。
+
+### English
+
+- Fixed: steered wake-up turns are now actually rendered. A controlled probe against `kimi acp` proved the v1.0.72 assumption wrong — kimi completes the wake-up turn internally (fully visible in wire.jsonl) but pushes zero ACP updates for it. Tran now tails the session's wire.jsonl while background tasks are running and replays the steered turn (thinking, tool cards with results, text) through the normal streaming pipeline. Verified end-to-end for background commands, non-blocking subagents, and todo updates.
+- The replay stops the moment a real client turn starts (no double-rendering), and re-arms on session resume when tasks from a previous run are still going.
+
 ## v1.0.73 - 2026-08-07
 
 ### 中文
@@ -15,7 +27,6 @@
 - The user-message navigator moved back to the right edge, keeping the Codex dash style.
 - Tool cards are now fully naked (no fill at all; only a whisper of violet while running); spacing settled at 3px; fold chevrons carried over from v1.0.71.
 
-## v1.0.72 - 2026-08-07
 ## v1.0.72 - 2026-08-07
 
 ### 中文
