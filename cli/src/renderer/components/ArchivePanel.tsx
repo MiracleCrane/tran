@@ -19,6 +19,11 @@ export default function ArchivePanel(): JSX.Element {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
+  // 会话列表是否成功加载过一次。未加载成功时绝不把归档项判成「已不存在」——
+  // 否则 listSessions 失败（sessions 保持 []）会让所有归档会话都被误判，
+  // 用户点「清除标记」实为 unarchive，真实会话被无声恢复。
+  const [listLoaded, setListLoaded] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const refresh = useCallback(async (): Promise<void> => {
     await loadArchived()
@@ -26,8 +31,10 @@ export default function ArchivePanel(): JSX.Element {
       // 归档页看全部项目（scope:all），上限放大避免漏网。
       const list = await window.api.listSessions('', { scope: 'all', limit: 500 })
       setSessions(list)
+      setListLoaded(true)
     } catch {
-      /* 列表拉不到就只按 id 显示 */
+      // 列表拉不到：保持 listLoaded=false，只按 id 列出归档项，不判「不存在」。
+      setListLoaded(false)
     }
   }, [loadArchived])
 
@@ -36,9 +43,10 @@ export default function ArchivePanel(): JSX.Element {
   }, [refresh])
 
   const archived = sessions.filter((s) => archivedIds && s.sessionId in archivedIds)
-  const missingIds = Object.keys(archivedIds ?? {}).filter(
-    (id) => !sessions.some((s) => s.sessionId === id)
-  )
+  // 只有列表成功加载后，才把「归档标记在、但列表里查无此会话」判为已删除。
+  const missingIds = listLoaded
+    ? Object.keys(archivedIds ?? {}).filter((id) => !sessions.some((s) => s.sessionId === id))
+    : []
 
   const toggle = (id: string): void => {
     setSelected((prev) => {
@@ -66,14 +74,28 @@ export default function ArchivePanel(): JSX.Element {
 
   const deleteSelected = async (): Promise<void> => {
     setBusy(true)
+    setActionError(null)
+    const failed: string[] = []
     for (const id of selected) {
       const s = sessions.find((item) => item.sessionId === id)
-      await window.api.deleteSession(id, s?.cwd ?? '', s?.runtimeBackend).catch(() => {})
-      await unarchive(id)
+      // 删除成功才取消归档。deleteSession 以 {ok:false} 返回失败而不是抛异常，
+      // 此前只 .catch 兜异常、无视 ok，删除失败仍 unarchive → 用户确认「永久
+      // 删除」的会话反而回到侧栏。现在失败就保留归档标记并汇报。
+      const result = await window.api
+        .deleteSession(id, s?.cwd ?? '', s?.runtimeBackend)
+        .catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
+      if (result && result.ok) {
+        await unarchive(id)
+      } else {
+        failed.push(s?.summary || id)
+      }
     }
     setSelected(new Set())
     setConfirming(false)
     setBusy(false)
+    if (failed.length > 0) {
+      setActionError(`${failed.length} 个会话删除失败，已保留在归档中：${failed.slice(0, 3).join('、')}${failed.length > 3 ? '…' : ''}`)
+    }
     void refresh()
   }
 
@@ -97,6 +119,12 @@ export default function ArchivePanel(): JSX.Element {
         <p className="text-[11px] leading-relaxed text-zinc-500">
           归档只是从侧栏列表藏起来，数据原地不动。在这里可以恢复（回到列表）或多选后彻底删除。
         </p>
+
+        {actionError && (
+          <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-3 py-2 text-[11px] text-red-300">
+            {actionError}
+          </div>
+        )}
 
         {selected.size > 0 && (
           <div className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-[11px] text-zinc-400">

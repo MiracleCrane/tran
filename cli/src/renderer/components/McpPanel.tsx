@@ -92,11 +92,16 @@ export default function McpPanel(): JSX.Element {
   }, [fetchServers, starting])
 
   // While any server is still connecting, poll until it settles.
+  // 用递增计数触发重排：只依赖 servers 的话，某次 fetch 失败 setServers 不执行、
+  // servers 引用不变，effect 不再重排定时器，轮询会永久停在「连接中」。
+  const [pollTick, setPollTick] = useState(0)
   useEffect(() => {
     if (!servers.some((s) => s.status === 'pending')) return
-    const t = setTimeout(() => void fetchServers(), 2000)
+    const t = setTimeout(() => {
+      void fetchServers().finally(() => setPollTick((n) => n + 1))
+    }, 2000)
     return () => clearTimeout(t)
-  }, [servers, fetchServers])
+  }, [servers, pollTick, fetchServers])
 
   const toggle = useCallback(
     async (server: McpServerEntry, next: boolean): Promise<void> => {

@@ -15,24 +15,33 @@ const ElicitationCard = memo(function ElicitationCard(): JSX.Element | null {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [answered, setAnswered] = useState<string | null>(null)
   const dismissTimerRef = useRef<number | null>(null)
+  // 已点选、但延迟应答还没发出去的答案。切换问题/卸载时必须把它 flush 出去，
+  // 否则用户点了答案、1.2s 内切走会话，定时器被清 → 答案永不回传，turn 卡死。
+  const pendingAnswerRef = useRef<{ toolUseID: string; optionId: string } | null>(null)
+  const answerElicitationRef = useRef(answerElicitation)
+  answerElicitationRef.current = answerElicitation
 
-  // 切换到下一条问题时重置选择/已答态，并清掉上一条的延迟应答定时器——
-  // 问题被外部撤换后再让旧定时器去应答旧 toolUseID 没有意义。
-  useEffect(() => {
+  const flushPending = (): void => {
     if (dismissTimerRef.current !== null) {
       window.clearTimeout(dismissTimerRef.current)
       dismissTimerRef.current = null
     }
+    const pending = pendingAnswerRef.current
+    if (pending) {
+      pendingAnswerRef.current = null
+      void answerElicitationRef.current(pending.toolUseID, pending.optionId)
+    }
+  }
+
+  // 切换到下一条问题时：先把上一条尚未发出的答案补发（而不是丢弃），再重置态。
+  useEffect(() => {
+    flushPending()
     setSelected(new Set())
     setAnswered(null)
   }, [req?.toolUseID])
 
-  useEffect(
-    () => () => {
-      if (dismissTimerRef.current !== null) window.clearTimeout(dismissTimerRef.current)
-    },
-    []
-  )
+  // 卸载（切视图/关窗）时也补发，避免在途答案随组件消失。
+  useEffect(() => () => flushPending(), [])
 
   if (!req) return null
   const multi = !!req.multiSelect
@@ -56,8 +65,15 @@ const ElicitationCard = memo(function ElicitationCard(): JSX.Element | null {
   const answer = (optionId: string): void => {
     if (answered) return
     setAnswered(optionId)
+    // 记进 ref：定时器正常触发会发它，切换/卸载时 flushPending 也会发它。
+    pendingAnswerRef.current = { toolUseID: req.toolUseID, optionId }
     dismissTimerRef.current = window.setTimeout(() => {
-      void answerElicitation(req.toolUseID, optionId)
+      dismissTimerRef.current = null
+      const pending = pendingAnswerRef.current
+      if (pending) {
+        pendingAnswerRef.current = null
+        void answerElicitation(pending.toolUseID, pending.optionId)
+      }
     }, ANSWERED_DISMISS_MS)
   }
 

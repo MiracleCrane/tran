@@ -2408,6 +2408,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         sessions,
         sessionsHasMore: scope === 'all' ? false : sessions.length === SESSION_PAGE_SIZE
       })
+    } catch (e) {
+      // 所有调用点都是 `void refreshSessions()`：不吞掉异常会变成未处理
+      // rejection（IPC 超时/主进程忙一次就触发）。列表静默停在旧数据即可，
+      // finally 会复位 loading，不会卡转圈。
+      console.warn('[sessionStore] refreshSessions failed:', e)
     } finally {
       if (sessionListRequestSeq === requestSeq) set({ sessionsLoading: false })
     }
@@ -2468,6 +2473,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           sessionsHasMore: page.length === SESSION_PAGE_SIZE
         }
       })
+    } catch (e) {
+      // 同 refreshSessions：调用点多为 `void`，吞掉异常避免未处理 rejection。
+      console.warn('[sessionStore] loadMoreSessions failed:', e)
     } finally {
       if (loadMoreSessionsRequestSeq === requestSeq) set({ sessionsLoading: false })
     }
