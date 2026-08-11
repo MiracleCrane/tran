@@ -18,7 +18,7 @@ import {
   setActiveSummaryProfile
 } from './settings'
 import { saveMcpServer, deleteMcpServer } from './mcpConfig'
-import { startBrowserBridge, stopBrowserBridge, getBrowserBridgeStatus } from './browserBridge'
+import { startBrowserBridge, stopBrowserBridge, getBrowserBridgeStatus, callBrowserTool } from './browserBridge'
 import {
   listProviders,
   getActiveProvider,
@@ -122,6 +122,7 @@ import type {
   SessionTodosResult,
   PlanUsageResult,
   BrowserBridgeStatus,
+  BrowserToolResult,
   DeepseekBalanceResult,
   SummaryProfile
 } from '../shared/ipc'
@@ -689,6 +690,18 @@ export function registerIpc(
   ipcMain.handle('forge:getAppVersion', async (): Promise<string> => app.getVersion())
   ipcMain.handle('forge:getBrowserBridgeStatus', async (): Promise<BrowserBridgeStatus> =>
     getBrowserBridgeStatus())
+  // 浏览器工具直调（第 2 步验证用；第 3 步 MCP server 走 WS 不经这里）。
+  // 错误以 {ok:false} 返回而不是抛出：渲染层拿到的 invoke 异常会丢失细节。
+  ipcMain.handle(
+    'forge:browserToolCall',
+    async (_e, tool: string, args?: unknown): Promise<BrowserToolResult> => {
+      try {
+        return { ok: true, result: await callBrowserTool(requireString(tool, 'tool'), args) }
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    }
+  )
   ipcMain.handle('forge:checkForUpdates', async (): Promise<UpdateCheckResult> => checkForUpdates())
   ipcMain.handle(
     'forge:downloadAndInstallUpdate',

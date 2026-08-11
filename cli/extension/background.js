@@ -144,11 +144,183 @@ function handleMessage(socket, msg) {
   }
 }
 
-/** 工具分发。第 1 步只有 ping；第 2 步在这里补 tabs_list / navigate / read_page。 */
+// ---- 工具实现 ----
+
+/** 只放行普通网页地址：chrome://、file:// 等交给用户自己操作。 */
+function assertNavigableUrl(url) {
+  if (typeof url !== 'string' || (!/^https?:\/\//i.test(url) && url !== 'about:blank')) {
+    throw new Error('只支持 http/https URL（chrome://、file:// 等请手动打开）')
+  }
+  return url
+}
+
+/** tabId 缺省时取当前聚焦窗口的活动标签页。 */
+async function resolveTab(tabId) {
+  if (typeof tabId === 'number') {
+    try {
+      return await chrome.tabs.get(tabId)
+    } catch {
+      throw new Error(`标签页 ${tabId} 不存在（可能已关闭，先用 tabs_list 刷新）`)
+    }
+  }
+  const [focused] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+  if (focused) return focused
+  const [any] = await chrome.tabs.query({ active: true })
+  if (any) return any
+  throw new Error('没有活动标签页')
+}
+
+/** 轮询等页面加载完（先歇 300ms 让 status 翻到 loading）；超时不报错，
+ *  返回当下状态由调用方判断。 */
+async function waitForTabComplete(tabId, timeoutMs) {
+  const start = Date.now()
+  await new Promise((r) => setTimeout(r, 300))
+  while (Date.now() - start < timeoutMs) {
+    let tab
+    try {
+      tab = await chrome.tabs.get(tabId)
+    } catch {
+      return // 标签页没了（导航触发关闭等），交给调用方 get 时报错
+    }
+    if (tab.status === 'complete') return
+    await new Promise((r) => setTimeout(r, 400))
+  }
+}
+
+function tabInfo(t) {
+  return { id: t.id, title: t.title || '', url: t.url || '', active: t.active, windowId: t.windowId, status: t.status }
+}
+
+/**
+ * 注入到页面里执行：正文文本 + 可交互元素编号快照。
+ * 必须自包含（chrome.scripting 序列化后在页面 isolated world 里跑）。
+ * ref → 元素的映射存 window.__tranRefs，供后续 click/type 工具用；
+ * 页面导航后自动失效，click 侧要自行校验。
+ */
+function extractPageContent(maxChars) {
+  const INTERACTIVE =
+    'a[href], button, input, select, textarea, summary, ' +
+    '[role="button"], [role="link"], [role="tab"], [role="menuitem"], ' +
+    '[role="combobox"], [role="checkbox"], [role="radio"], [contenteditable="true"], [onclick]'
+  const refs = {}
+  const items = []
+  let n = 0
+  for (const el of document.querySelectorAll(INTERACTIVE)) {
+    const rect = el.getBoundingClientRect()
+    if (rect.width === 0 && rect.height === 0) continue
+    const style = getComputedStyle(el)
+    if (style.visibility === 'hidden' || style.display === 'none') continue
+    n += 1
+    refs[n] = el
+    const tag = el.tagName.toLowerCase()
+    let desc
+    if (tag === 'input') {
+      desc =
+        `<input type=${el.type || 'text'}>` +
+        (el.placeholder ? ` placeholder="${el.placeholder.slice(0, 60)}"` : '') +
+        (el.value ? ` value="${String(el.value).slice(0, 60)}"` : '')
+    } else if (tag === 'select') {
+      const opts = Array.from(el.options).slice(0, 8).map((o) => o.text.trim()).join(' | ')
+      desc = `<select> 选项[${opts}]`
+    } else if (tag === 'textarea') {
+      desc = '<textarea>' + (el.placeholder ? ` placeholder="${el.placeholder.slice(0, 60)}"` : '')
+    } else {
+      const label = (el.getAttribute('aria-label') || el.innerText || el.title || '')
+        .trim().replace(/\s+/g, ' ').slice(0, 80)
+      const href = tag === 'a' ? (el.getAttribute('href') || '') : ''
+      desc =
+        `<${tag}> "${label}"` +
+        (href && !href.startsWith('javascript:') ? ` → ${href.slice(0, 100)}` : '')
+    }
+    items.push(`ref_${n} ${desc}`)
+    if (n >= 300) break
+  }
+  window.__tranRefs = refs
+
+  let text = document.body ? document.body.innerText : ''
+  text = text.replace(/\n{3,}/g, '\n\n')
+  const head = `[页面] ${document.title} — ${location.href}`
+  const itemsBlock = items.length
+    ? `\n\n[可交互元素]（后续 click/type 按 ref 编号定位）\n${items.join('\n')}`
+    : ''
+  let budget = maxChars - head.length - itemsBlock.length - 40
+  if (budget < 500) budget = 500
+  const truncated = text.length > budget
+  if (truncated) text = text.slice(0, budget)
+  return {
+    snapshot: `${head}\n\n[正文]\n${text}${truncated ? '\n…（正文已截断）' : ''}${itemsBlock}`,
+    refCount: n,
+    textTruncated: truncated
+  }
+}
+
+const NAVIGATE_TIMEOUT_MS = 15000
+const READ_PAGE_DEFAULT_MAX_CHARS = 30000
+
 async function handleToolCall(msg) {
+  const args = msg.args || {}
   switch (msg.tool) {
     case 'ping':
       return { pong: true, extensionVersion: EXTENSION_VERSION }
+
+    case 'tabs_list': {
+      const tabs = await chrome.tabs.query({})
+      return { tabs: tabs.map(tabInfo) }
+    }
+
+    case 'tab_open': {
+      const url = args.url ? assertNavigableUrl(args.url) : 'about:blank'
+      const tab = await chrome.tabs.create({ url, active: args.background !== true })
+      await waitForTabComplete(tab.id, NAVIGATE_TIMEOUT_MS)
+      return tabInfo(await chrome.tabs.get(tab.id))
+    }
+
+    case 'tab_activate': {
+      const tab = await resolveTab(args.tabId)
+      await chrome.tabs.update(tab.id, { active: true })
+      await chrome.windows.update(tab.windowId, { focused: true })
+      return tabInfo(await chrome.tabs.get(tab.id))
+    }
+
+    case 'tab_close': {
+      if (typeof args.tabId !== 'number') throw new Error('tab_close 必须指定 tabId（防误关当前页）')
+      const tab = await resolveTab(args.tabId)
+      await chrome.tabs.remove(tab.id)
+      return { closed: tab.id }
+    }
+
+    case 'navigate': {
+      const url = assertNavigableUrl(args.url)
+      const tab = await resolveTab(args.tabId)
+      await chrome.tabs.update(tab.id, { url })
+      await waitForTabComplete(tab.id, NAVIGATE_TIMEOUT_MS)
+      const done = await chrome.tabs.get(tab.id)
+      return { ...tabInfo(done), loaded: done.status === 'complete' }
+    }
+
+    case 'read_page': {
+      const tab = await resolveTab(args.tabId)
+      const maxChars =
+        typeof args.maxChars === 'number' && args.maxChars > 0
+          ? args.maxChars
+          : READ_PAGE_DEFAULT_MAX_CHARS
+      let results
+      try {
+        results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: extractPageContent,
+          args: [maxChars]
+        })
+      } catch (e) {
+        throw new Error(
+          `无法读取该页面：${e && e.message ? e.message : e}（chrome:// 应用商店等受保护页面不允许注入）`
+        )
+      }
+      const first = results && results[0]
+      if (!first || !first.result) throw new Error('页面脚本没有返回内容')
+      return { tabId: tab.id, url: tab.url, title: tab.title, ...first.result }
+    }
+
     default:
       throw new Error(`未知工具: ${msg.tool}`)
   }

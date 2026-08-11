@@ -239,6 +239,7 @@ const api: ForgeApi = {
   },
 
   getBrowserBridgeStatus: () => ipcRenderer.invoke('forge:getBrowserBridgeStatus'),
+  browserToolCall: (tool, args) => ipcRenderer.invoke('forge:browserToolCall', tool, args),
   onBrowserBridgeStatus: (cb) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: BrowserBridgeStatus): void =>
       cb(payload)

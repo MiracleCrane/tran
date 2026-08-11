@@ -997,7 +997,14 @@ export interface ForgeApi {
   /** --- 浏览器控制（Chrome 扩展桥） --- */
   getBrowserBridgeStatus(): Promise<BrowserBridgeStatus>
   onBrowserBridgeStatus(cb: (status: BrowserBridgeStatus) => void): () => void
+  /** 直调一个浏览器工具（tabs_list / navigate / read_page …），经桥转发给扩展。 */
+  browserToolCall(tool: string, args?: unknown): Promise<BrowserToolResult>
 }
+
+/** 浏览器工具调用结果（错误不抛异常，以 ok:false 携带原因）。 */
+export type BrowserToolResult =
+  | { ok: true; result: unknown }
+  | { ok: false; error: string }
 
 /** 浏览器桥状态：Tran 侧 WS 服务 + Chrome 扩展连接情况。 */
 export interface BrowserBridgeStatus {
