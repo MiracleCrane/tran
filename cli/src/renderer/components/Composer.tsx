@@ -381,10 +381,17 @@ export default function Composer(): JSX.Element {
   // 没有——在 A 会话加了附件不发、切到 B，附件会跟着 B 一起发出去。切换时
   // 清空，并递增 seq 作废在途的异步读取（readFiles / FileReader），
   // 否则切换后才 resolve 的那批会把上一个会话的文件追加进来。
+  //
+  // 但只认「bridge sessionId 变化」为真正切会话：新会话首条消息的 init 到达会
+  // 让 draftKey 从 bridge id 迁到 sdk id（同一会话），不能借此清掉用户在这
+  // 1~3s 窗口里刚加的附件。草稿文本有专门的迁移 effect，附件走这里的守卫。
+  const prevBridgeSessionRef = useRef(meta?.sessionId)
   useEffect(() => {
+    if (prevBridgeSessionRef.current === meta?.sessionId) return
+    prevBridgeSessionRef.current = meta?.sessionId
     setAttachments([])
     ++attachmentActionSeqRef.current
-  }, [draftKey])
+  }, [draftKey, meta?.sessionId])
   const dragDepth = useRef(0)
   const [dragActive, setDragActive] = useState(false)
   // 附件添加失败提示（选择器/拖拽/粘贴共用）：超限图片等被主进程跳过的文件
