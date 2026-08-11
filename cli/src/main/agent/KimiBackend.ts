@@ -147,6 +147,8 @@ interface ActiveKimiSession {
   wireLastActivityAt?: number
   /** 最近处理的 wire 行是否 step.end（静默 + step.end = steered 轮真结束）。 */
   wireLastWasStepEnd?: boolean
+  /** 最近一次 hasRunningDiskTasks 磁盘扫描时刻（停表判定的节流，见 pollWire）。 */
+  wireTasksCheckedAt?: number
   /** #3 恢复闸门：ACP 断连自动恢复窗口（退避重连 + session/load）内挂闸。
    *  期间该会话不发起任何新 turn——新进程还没 session/load 过这个
    *  acpSessionId，直接 session/prompt 会以 "session not found" 报错；也不会
@@ -248,6 +250,10 @@ const STEERED_DETECT_GRACE_MS = 3_000
 /** Wire 回放轮询间隔：steered 轮的思考/正文/工具卡从 wire.jsonl 增量读出，
  *  1s 粒度对"后台任务完成 → 界面出现唤醒内容"的感知延迟足够。 */
 const WIRE_POLL_MS = 1_000
+/** 停表判定里 hasRunningDiskTasks 的节流间隔：那是一次同步磁盘扫描（sessions
+ *  根 readdir + 逐任务文件读），长静默期（子代理跑几十分钟没新行）每秒扫一次
+ *  纯属浪费——5s 一次足够，其余 tick 视作"任务还在跑"。 */
+const WIRE_TASKS_CHECK_THROTTLE_MS = 5_000
 /** steered 轮收尾判定：最后一行是 step.end 且这么久没有新行。kimi 的 loop
  *  在 step.end 后开下一步是同毫秒级（wire 实证），4s 静默 + step.end 稳判
  *  结束；判早了下一行会重新点亮（自愈）。 */
@@ -687,26 +693,26 @@ export class KimiBackend {
   }
 
   /** $KIMI_CODE_HOME/sessions/<wd_*>/<acpSessionId>/agents/main/wire.jsonl。
-   *  扫描一次缓存结果；null 记忆"找不到"（目录形态异常时别每秒重扫）。 */
+   *  只缓存"找到了"；找不到/读失败不记忆——原先把 null 也记住，首次扫描
+   *  恰逢杀软/索引器占住目录（EPERM/EBUSY 瞬时）就会把该会话的 wire 回放
+   *  永久禁用。重扫只发生在 arm 时（每轮收尾一次），不在每秒的 tick 里。 */
   private resolveWirePath(session: ActiveKimiSession): string | null {
-    if (session.wirePath !== undefined) return session.wirePath
+    if (session.wirePath) return session.wirePath
     const acpSessionId = session.acpSessionId
-    session.wirePath = null
-    if (acpSessionId && /^[\w-]+$/.test(acpSessionId)) {
-      try {
-        const root = kimiSessionsRoot()
-        for (const wd of readdirSync(root)) {
-          const candidate = join(root, wd, acpSessionId, 'agents', 'main', 'wire.jsonl')
-          if (existsSync(candidate)) {
-            session.wirePath = candidate
-            break
-          }
+    if (!acpSessionId || !/^[\w-]+$/.test(acpSessionId)) return null
+    try {
+      const root = kimiSessionsRoot()
+      for (const wd of readdirSync(root)) {
+        const candidate = join(root, wd, acpSessionId, 'agents', 'main', 'wire.jsonl')
+        if (existsSync(candidate)) {
+          session.wirePath = candidate
+          return candidate
         }
-      } catch {
-        /* sessions root 不可读：保持 null */
       }
+    } catch {
+      /* sessions root 暂不可读：下次 arm 再试 */
     }
-    return session.wirePath
+    return null
   }
 
   private pollWire(session: ActiveKimiSession): void {
@@ -770,13 +776,15 @@ export class KimiBackend {
       this.endSteeredTurn(session)
     }
     // 停表：没有 steered 轮在跑、任务清零、且静默过 linger 窗口。
-    if (
-      !session.steeredActive &&
-      !session.wireInSteer &&
-      quietMs >= WIRE_WATCH_LINGER_MS &&
-      (!session.acpSessionId || !hasRunningDiskTasks(session.acpSessionId))
-    ) {
-      this.stopWireWatch(session)
+    // 磁盘扫描节流：条件不满足或未到检查间隔时不碰磁盘（视作"还在跑"）。
+    if (!session.steeredActive && !session.wireInSteer && quietMs >= WIRE_WATCH_LINGER_MS) {
+      const now = Date.now()
+      if (now - (session.wireTasksCheckedAt ?? 0) >= WIRE_TASKS_CHECK_THROTTLE_MS) {
+        session.wireTasksCheckedAt = now
+        if (!session.acpSessionId || !hasRunningDiskTasks(session.acpSessionId)) {
+          this.stopWireWatch(session)
+        }
+      }
     }
   }
 
@@ -1224,9 +1232,12 @@ export class KimiBackend {
     }
     const next = session.queue.shift()
     if (!next) return
-    // 真实轮接管：steered 轮静默清旗（不发收尾消息——真实轮的生命周期会
-    // 管理 running/封口，这里再发一次 running=false 反而会闪断指示）；
-    // wire 回放同时停表（本轮的 wire 行由 ACP 正常推送，回放即双写）。
+    // 真实轮接管：先把 steered 轮敞着的流式消息封口——不封的话新一轮的
+    // delta 会经 ensureStreamMessage 的早退续写进同一条消息，两轮内容并成
+    // 一条（lastTurnText 也会混入 steered 文本）。然后静默清旗（不发
+    // running=false——真实轮马上点亮 running，闪断没有意义）；wire 回放
+    // 同时停表（本轮的 wire 行由 ACP 正常推送，回放即双写）。
+    if (session.steeredActive) this.sealStreamMessage(session)
     this.endSteeredTurn(session, false)
     this.stopWireWatch(session)
     session.running = true
@@ -2153,6 +2164,14 @@ export class KimiBackend {
       } as unknown as SDKMessage)
       return
     }
+    // M3 同款守卫（与上面 elicitation 分支对齐）：查不到会话就没有任何 UI 能
+    // 应答这个审批，存进 map 只会让 kimi 侧永远等不到回应、条目泄漏到 client
+    // 关闭——如实回 cancelled。触发场景：关会话瞬间 in-flight 工具恰好发来
+    // request_permission（session/cancel 是异步通知，请求先到就绕过了清理）。
+    if (!session) {
+      client.respond(requestId, { outcome: { outcome: 'cancelled' } })
+      return
+    }
     const permissionPayload: PermissionRequestPayload = {
       toolUseID,
       toolName: toolName(toolCall),
@@ -2163,7 +2182,7 @@ export class KimiBackend {
       client,
       requestId,
       options,
-      ...(session ? { sessionId: session.id } : {}),
+      sessionId: session.id,
       ...(acpSessionId ? { acpSessionId } : {}),
       permissionPayload
     })
@@ -2175,6 +2194,14 @@ export class KimiBackend {
     // L4：先置位——在途 ensureClient 建成的 client 会在代际校验处当场关掉。
     this.disposed = true
     for (const session of this.sessions.values()) {
+      // 置位 closed + 拆掉 steered/wire 定时器：不置的话 steeredTimer 最长
+      // 45s 后还会向已销毁的桥接 emit 收尾消息（靠 ipc 层守卫兜住，但属噪声）。
+      session.closed = true
+      if (session.steeredTimer) {
+        clearTimeout(session.steeredTimer)
+        session.steeredTimer = undefined
+      }
+      this.stopWireWatch(session)
       this.disarmStallWatch(session)
       // #3：退出路径放开所有恢复闸门，不留永久挂起的等待者。
       this.releaseRecoveryGate(session)

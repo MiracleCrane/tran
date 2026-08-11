@@ -174,7 +174,11 @@ export class AcpClient {
       }
       try {
         if (process.platform === 'win32' && child.pid) {
-          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }).unref()
+          // 'error' 事件必须挂监听：spawn 失败（杀软 EPERM/PATH 异常）是异步
+          // 事件，外层 try/catch 抓不到，没监听器会直接掀掉主进程。
+          const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true })
+          killer.on('error', () => { /* 关闭路径尽力而为 */ })
+          killer.unref()
         } else {
           child.kill('SIGTERM')
         }

@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.0.75 - 2026-08-11
+
+### 中文
+
+- 新增:**Skill/斜杠命令专属卡片**(对齐 Codex 的 Handoff 卡)。以 `/命令` 开头且命中 kimi 可用命令列表的消息不再是普通气泡,而是渐变卡片:闪电图标 + 等宽命令名 + Skill 徽章 + 参数正文 + 命令描述副标题。实机验证 `/status` 全流程。
+- 修复:**斜杠菜单回车补全后再按回车发不出去**——补全用 rAF 设光标,可能跑在 React 提交新值之前,`select` 事件读到旧值把菜单带着陈旧上下文重新打开,下一个回车变成二次补全。改为布局副作用中设光标(保证在新值落进 DOM 之后)。另外零匹配时回车不再被空菜单吞掉,会关掉菜单照常发送。
+- 修复:**主进程崩溃隐患**——Windows 上 `taskkill` 进程树清理未挂 `error` 监听,spawn 失败(杀软拦截/PATH 异常)是异步事件,`try/catch` 抓不到,会直接掀掉整个主进程。两处(ACP 关闭、kimi web 关闭)都已修。
+- 修复:会话重建(改模型/配置后发消息)期间切走会话,消息会被发进**切到的那个会话**、且它的状态被旧会话覆盖——现在检测到切走后,消息折进原会话的后台缓冲并仍送达原桥接,当前会话状态一字不动;重建失败路径同样不再覆盖当前会话的 meta。
+- 修复:懒起会话("+新建对话"后第一条消息)期间切走,消息静默被吞(转录里躺着一条从未送达的消息)——现在照常送达原会话。
+- 修复:桥接进程死亡(agent:ended)时流式残留不封口——光标块永远闪、悬挂工具卡永远转圈;现在走与正常回合收尾相同的封口。
+- 修复:关会话瞬间到达的工具审批请求成为"无主弹窗"(kimi 侧永远等不到应答)——现在如实回 cancelled(与 AskUserQuestion 分支对齐)。
+- 修复:唤醒轮流式输出中途用户发新消息,两轮内容会并成一条 assistant 消息——真实轮接管时先封口 steered 流式消息。
+- 修复:待办自动催更的三处失灵——已收尾任务无 30 分钟新鲜度窗口(重启后老任务重新触发)、催更配额在静置窗口内被取消时照样扣掉(那批任务永远不会再催)、去重键用了会话重建后会变的桥接 id。
+- 修复:多张 Swarm 卡互串——每张卡按任务描述匹配出自己那批子代理,不再显示全会话任务并集。
+- 优化:wire 回放的磁盘扫描节流(长静默期从每秒一次降到 5 秒一次)、kimi server 探测加 10 秒 TTL(原先有任务在跑时每 2 秒全量发现+HTTP 探测)、wire 路径解析失败不再永久禁用回放(原先首扫恰逢杀软占目录就整个会话失效)。
+
+### English
+
+- Added: dedicated Skill/slash-command cards (Codex Handoff style) — messages starting with a known `/command` render as a gradient card with icon, monospace command name, Skill badge, args body, and description subtitle.
+- Fixed: pressing Enter after slash-menu completion re-completed instead of sending (caret was set via rAF racing React's value commit; now set in a layout effect). Enter with zero menu matches no longer gets swallowed.
+- Fixed: potential main-process crash — `taskkill` tree-kill spawns had no 'error' listener; an async spawn failure would take down Electron. Both call sites fixed.
+- Fixed: switching sessions during a bridge rebuild or lazy start no longer sends your message into the wrong session, clobbers the foreground session's state, or silently drops the message — it's folded into the original session's background buffer and still delivered.
+- Fixed: streaming residue is now sealed when the bridge dies (agent:ended); orphaned permission requests arriving while a session closes are answered with cancelled; a real turn taking over mid-steered-stream no longer merges two turns into one message.
+- Fixed: todo auto-nudge freshness window, quota accounting on cancel, and dedup key; Swarm cards no longer show the union of all session subagents.
+- Perf: throttled wire-replay disk scans, 10s TTL on kimi server probing, and wire path resolution failures are no longer memoized forever.
+
 ## v1.0.74 - 2026-08-10
 
 ### 中文

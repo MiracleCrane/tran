@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { ToolBlock } from '../types'
 import type { KimiTaskInfo } from '../../shared/ipc'
@@ -58,12 +58,32 @@ function parseSwarmInput(block: ToolBlock): { description?: string; items: strin
   return { items: [] }
 }
 
+/** 子代理任务是否属于本次调用：任务 description 与某个 item 文本互为前缀
+ *  即算（两边都可能被截断/加前后缀）。 */
+function taskMatchesItems(task: KimiTaskInfo, items: string[]): boolean {
+  const desc = (task.description ?? '').trim()
+  if (!desc) return false
+  return items.some((item) => {
+    const t = item.trim()
+    return t !== '' && (desc === t || desc.startsWith(t) || t.startsWith(desc))
+  })
+}
+
 export default function SwarmCard({ block }: { block: ToolBlock }): JSX.Element {
   const swarmTasks = useSessionStore((s) => s.swarmTasks)
   const [collapsed, setCollapsed] = useState(false)
-  const { description, items } = parseSwarmInput(block)
+  const { description, items } = useMemo(
+    () => parseSwarmInput(block),
+    [block.input, block.result]
+  )
 
-  const subagents = (swarmTasks ?? []).filter((t: KimiTaskInfo) => t.kind === 'subagent')
+  const allSubagents = (swarmTasks ?? []).filter((t: KimiTaskInfo) => t.kind === 'subagent')
+  // server tasks 是**全会话**的并集（含历史 Swarm 调用的任务）。有 items 时按
+  // 描述匹配出本次调用自己的那批；一个都对不上（server 重启、描述被改写）就
+  // 退回静态 items，绝不把别的调用的任务画进来。没有 items（流式早期或解析
+  // 失败）才用并集兜底——那时通常也只有当前这一批在跑。
+  const matched = items.length ? allSubagents.filter((t) => taskMatchesItems(t, items)) : []
+  const subagents = items.length ? matched : allSubagents
   // 行数据：server tasks 可用用 server（带独立状态）；否则 rawInput items + 工具状态。
   const rows: SwarmRow[] = subagents.length
     ? subagents.map((t, i) => ({

@@ -560,6 +560,23 @@ export default function Composer(): JSX.Element {
     updateSlashContext(textarea.value, textarea.selectionStart)
   }
 
+  // 补全后待设置的光标位。不能用 requestAnimationFrame：rAF 可能跑在 React
+  // 提交新 value 之前，setSelectionRange 在旧值上触发 'select' 事件，
+  // refreshSlashContextFromTextarea 读到旧 DOM 值把菜单重新打开（带着陈旧的
+  // start/end），下一个回车就变成二次补全而不是发送。布局副作用保证在新
+  // value 落进 DOM 之后再动光标。
+  const pendingCaretRef = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    if (pendingCaretRef.current === null) return
+    const caret = pendingCaretRef.current
+    pendingCaretRef.current = null
+    const textarea = textareaRef.current
+    if (textarea) {
+      textarea.focus()
+      textarea.setSelectionRange(caret, caret)
+    }
+  }, [text])
+
   const applySlashCommand = (command: SlashCommandItem): void => {
     if (!slashContext) return
     const before = text.slice(0, slashContext.start)
@@ -570,10 +587,7 @@ export default function Composer(): JSX.Element {
 
     setText(nextText)
     setSlashContext(null)
-    window.requestAnimationFrame(() => {
-      textareaRef.current?.focus()
-      textareaRef.current?.setSelectionRange(nextCaret, nextCaret)
-    })
+    pendingCaretRef.current = nextCaret
   }
 
   const applyPromptTemplate = (template: PromptTemplate): void => {
@@ -830,9 +844,13 @@ export default function Composer(): JSX.Element {
       }
 
       if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault()
-        if (activeSlashCommand) applySlashCommand(activeSlashCommand)
-        return
+        if (activeSlashCommand) {
+          e.preventDefault()
+          applySlashCommand(activeSlashCommand)
+          return
+        }
+        // 零匹配时菜单只是个空壳：回车应当关掉它并照常发送，而不是被吞。
+        setSlashContext(null)
       }
     }
 

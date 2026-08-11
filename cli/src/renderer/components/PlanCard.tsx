@@ -19,6 +19,9 @@ const NUDGE_DELAY_MS = 4000
 /** 一个会话最多催几次。催更是"有则更好"，连着发就是刷屏——用户看到的是
  *  Tran 自己在跟 AI 聊天。宁可少催一次。 */
 const NUDGE_MAX_PER_SESSION = 2
+/** 「刚收尾」的判定窗口：横幅与自动催更共用。swarmTasks 里躺着全部历史任务，
+ *  不加窗口的话「存在已收尾任务」几乎永远为真。 */
+const SETTLED_NOTICE_WINDOW_MS = 30 * 60 * 1000
 
 /** 已催过的任务：sessionId → 那些"收尾时催过一次"的任务 id + 已催次数。
  *
@@ -117,7 +120,11 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
   const settledTaskKey = (swarmTasks ?? [])
     .filter((t) => {
       const s = (t.status ?? '').toLowerCase()
-      return s === 'completed' || s === 'failed' || s === 'stopped'
+      if (s !== 'completed' && s !== 'failed' && s !== 'stopped') return false
+      // 与下面横幅同一条新鲜度规则：只认「刚收尾」的任务。老任务早被后续
+      // turn 通知过了，重启/重挂载后不该再被拿来触发催更。
+      const ms = t.completedAt ? Date.parse(t.completedAt) : NaN
+      return Number.isFinite(ms) && Date.now() - ms <= SETTLED_NOTICE_WINDOW_MS
     })
     .map((t) => t.id)
     .sort()
@@ -125,20 +132,27 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
 
   useEffect(() => {
     if (!autoNudge || !bridgeSessionId || running || !hasUnfinished || !settledTaskKey) return
-    const state = nudgeState.get(bridgeSessionId) ?? { ids: new Set<string>(), count: 0 }
-    nudgeState.set(bridgeSessionId, state)
+    // 记账键用 ACP 会话 id：bridge 重建（改模型/改配置）会换 bridgeSessionId，
+    // 用它做键的话同一批任务在重建后会被重新催一遍。
+    const stateKey = sdkSessionId ?? bridgeSessionId
+    const state = nudgeState.get(stateKey) ?? { ids: new Set<string>(), count: 0 }
+    nudgeState.set(stateKey, state)
     if (state.count >= NUDGE_MAX_PER_SESSION) return
     // 只为「这次新收尾、以前没催过」的任务催一轮；老任务再怎么进出列表都不算。
     const fresh = settledTaskKey.split(',').filter((id) => !state.ids.has(id))
     if (fresh.length === 0) return
-    fresh.forEach((id) => state.ids.add(id))
-    state.count += 1
     let cancelled = false
     const timer = window.setTimeout(() => {
+      // 名单与配额在真正发出后才记账：原先调度时就记，静置窗口内用户自己
+      // 发了消息（催更被清理取消），账却已经扣掉——那批任务永远不会被催。
+      const freshNow = fresh.filter((id) => !state.ids.has(id))
+      if (freshNow.length === 0 || state.count >= NUDGE_MAX_PER_SESSION) return
       void window.api
         .nudgeTodos(bridgeSessionId)
         .then((sent) => {
           if (cancelled || !sent) return
+          freshNow.forEach((id) => state.ids.add(id))
+          state.count += 1
           setNudgedAt(Date.now())
           // 催更那一轮的 plan 帧会自己推过来；再补拉一次兜底（模型改了待办但
           // plan 帧没推的情况）。
@@ -152,7 +166,7 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [autoNudge, bridgeSessionId, running, hasUnfinished, settledTaskKey, refreshTodos])
+  }, [autoNudge, bridgeSessionId, sdkSessionId, running, hasUnfinished, settledTaskKey, refreshTodos])
 
   if (entries.length === 0) return null
 
@@ -168,7 +182,6 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
   // 2026-08 误报修复：swarmTasks 里躺着全部历史任务，「存在一个已收尾任务」
   // 几乎永远为真，横幅变成常驻。加 30 分钟新鲜度窗口——只有**刚刚**收尾的
   // 任务才提示；老任务早就被后续 turn 通知过了，再挂横幅只是噪声。
-  const SETTLED_NOTICE_WINDOW_MS = 30 * 60 * 1000
   const settledBackgroundTask =
     !running &&
     hasUnfinished &&

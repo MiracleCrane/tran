@@ -149,7 +149,11 @@ function killServerChild(): void {
   if (!child || child.exitCode !== null) return
   try {
     if (process.platform === 'win32' && child.pid) {
-      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }).unref()
+      // 'error' 事件必须挂监听：spawn 失败是异步事件，外层 try/catch 抓不到，
+      // 没监听器会直接掀掉主进程。
+      const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true })
+      killer.on('error', () => { /* 退出路径尽力而为 */ })
+      killer.unref()
     } else {
       child.kill('SIGTERM')
     }
@@ -238,20 +242,28 @@ async function spawnServer(): Promise<ServerHandle | null> {
  */
 const SPAWN_COOLDOWN_MS = 5 * 60 * 1000
 let spawnFailedAt = 0
+/** 探测成功的 TTL：前台会话有任务在跑时 getSessionTasks 每 2s 轮询一次，
+ *  不缓存等于每 2s 一次 instances 全量读 + HTTP 探测。窗口内 server 死掉的话
+ *  调用方请求会失败，下个窗口重新探测，自愈。 */
+const PROBE_OK_TTL_MS = 10_000
+let lastProbeOkAt = 0
 
 /** 拿可用的 server 句柄：先探测现有实例（instances 发现，回退默认端口），不行就自己拉起一次。 */
 export async function ensureKimiServer(): Promise<ServerHandle | null> {
   const token = readToken()
   if (!token) return null
+  if (cachedHandle && Date.now() - lastProbeOkAt < PROBE_OK_TTL_MS) return cachedHandle
   const inst = discoverInstance()
   const baseUrl = `http://${inst?.host ?? '127.0.0.1'}:${inst?.port ?? DEFAULT_PORT}`
   if (await probe(baseUrl, token)) {
     cachedHandle = { baseUrl, token }
     spawnFailedAt = 0
+    lastProbeOkAt = Date.now()
     return cachedHandle
   }
   if (cachedHandle && (await probe(cachedHandle.baseUrl, cachedHandle.token))) {
     spawnFailedAt = 0
+    lastProbeOkAt = Date.now()
     return cachedHandle
   }
   // 冷却期内不再尝试拉起：探测已经做过了（上面两步），server 真起来了会
@@ -268,6 +280,7 @@ export async function ensureKimiServer(): Promise<ServerHandle | null> {
   if (handle) {
     cachedHandle = handle
     spawnFailedAt = 0
+    lastProbeOkAt = Date.now()
   } else {
     spawnFailedAt = Date.now()
     log('kimi-server', `拉起失败，${SPAWN_COOLDOWN_MS / 60000} 分钟内不再重试`)

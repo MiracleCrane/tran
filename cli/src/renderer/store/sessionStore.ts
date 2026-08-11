@@ -1761,6 +1761,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (!value && atts.length === 0) return
     // Ctrl+S 插队标记（气泡显示"插队"徽章）。
     const cutInProps = opts?.cutIn ? { cutIn: true } : {}
+    // 发送那一刻的模式面板快照：下面可能有 await（会话重建/懒起落地），期间
+    // 用户切了会话的话 get() 读到的是**别的会话**的面板状态。
+    const modePanelAtSend = get().modePanel
+    // 重建 await 期间用户切走了：全局 state 已属于别的会话，消息改走后台
+    // 缓冲直达（见下）。
+    let backgroundedDuringRebuild = false
 
     const needsSessionRefresh =
       (get().sessionConfigDirty || get().sessionModelDirty || get().bridgeEnded) &&
@@ -1797,31 +1803,52 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         // 旧桥接已被新 resume 会话取代（同一 acpSessionId 不能双注册）：显式销毁，
         // 不用后台化语义的 closeSession。
         await window.api.destroySession(oldSessionId).catch(() => {})
-        set({ sessionConfigDirty: false, sessionModelDirty: refreshingModel, bridgeEnded: false })
-        meta = get().meta
-        if (!meta) return
+        if (get().meta?.sessionId === newId) {
+          set({ sessionConfigDirty: false, sessionModelDirty: refreshingModel, bridgeEnded: false })
+          meta = get().meta
+          if (!meta) return
+        } else {
+          // await 期间用户切走了：现在的全局 state 属于**另一个**会话，一个
+          // 字段都不能动（原实现在这里无条件 set + 重读 meta，会把本条消息
+          // 发进切到的那个会话）。消息仍属于原会话——重建出的新桥接就是它
+          // 的，继续用 nextMeta 走后台直达路径。
+          backgroundedDuringRebuild = true
+          meta = nextMeta
+        }
       } catch (error: unknown) {
-        set((s) => ({
-          meta: oldMeta,
-          status: {
-            ...s.status,
-            error: error instanceof Error ? error.message : String(error)
+        if (get().meta?.sessionId === newId) {
+          set((s) => ({
+            meta: oldMeta,
+            status: {
+              ...s.status,
+              error: error instanceof Error ? error.message : String(error)
+            }
+          }))
+        } else {
+          // 切走后才失败：旧桥接还活着（失败路径没销毁），把已折进后台缓冲
+          // 的快照改挂回旧桥接并记下错误；当前会话的 state 不碰。
+          const bg = backgroundSessions.get(newId)
+          if (bg) {
+            backgroundSessions.delete(newId)
+            bg.bridgeSessionId = oldSessionId
+            bg.error = error instanceof Error ? error.message : String(error)
+            backgroundSessions.set(oldSessionId, bg)
           }
-        }))
+        }
         return
       }
     }
 
     if (meta.sdkSessionId) deleteSessionHistoryCache(meta.cwd, meta.sdkSessionId)
     // 目标模式：goalEnabled 且无进行中的目标时，用本条消息文本创建目标（本条即第 1 轮）。
-    if (get().modePanel.goalEnabled && value) {
+    if (!backgroundedDuringRebuild && modePanelAtSend.goalEnabled && value) {
       const currentGoal = get().goal
       if (!currentGoal || (currentGoal.status !== 'active' && currentGoal.status !== 'paused')) {
         void window.api.goalStart(meta.sessionId, { objective: value }).catch(() => {})
       }
     }
     // Swarm 模式：发送时在用户文本前隐藏拼接指令前缀（气泡显示原文 + Swarm 徽章）。
-    const swarmOn = get().modePanel.swarmEnabled
+    const swarmOn = modePanelAtSend.swarmEnabled
     const wireValue = swarmOn ? SWARM_PROMPT_PREFIX + value : value
     const swarmProps = swarmOn ? { swarm: true } : {}
     // Build the wire content: plain text, or content blocks when there are
@@ -1854,6 +1881,31 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       : undefined
     const attProps = displayAttachments ? { attachments: displayAttachments } : {}
 
+    if (backgroundedDuringRebuild) {
+      // 条目折进原会话的后台缓冲（切回就能看到），发送走桥接 id 直达——
+      // 后续事件流由 ingestAgentEvent 的后台分流继续折进同一个缓冲。
+      const bg = backgroundSessions.get(meta.sessionId)
+      if (bg) {
+        bg.items = [
+          ...bg.items,
+          { id: uid(), kind: 'user', text: value, parentToolUseId: null, ...attProps, ...swarmProps, ...cutInProps }
+        ]
+        bg.running = true
+        invalidateBackgroundHistoryCache(bg)
+      }
+      markSdkSessionRunning(meta.sdkSessionId, true)
+      const bridgeId = meta.sessionId
+      await window.api.sendMessage(bridgeId, content).catch(() => {
+        const bgNow = backgroundSessions.get(bridgeId)
+        if (bgNow) {
+          bgNow.running = false
+          bgNow.error = '消息发送失败'
+        }
+        markSdkSessionRunning(meta?.sdkSessionId, false)
+      })
+      return
+    }
+
     // Always push to the SDK (it queues internally); the UI placement differs.
     // Queue (hover) only when the MAIN agent is genuinely busy — not when it's
     // merely waiting on a backgrounded subagent (then it's free for new input).
@@ -1882,7 +1934,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const deferredStart = takePendingSessionStart(meta.sessionId)
       if (deferredStart) await deferredStart()
       await sessionStartPromises.get(meta.sessionId)
-      if (get().meta?.sessionId !== meta.sessionId) return
+      // 懒起 await 期间切走会话：消息已进转录（随快照进了后台缓冲），这里
+      // 照发——桥接 id 明确指向原会话，不发才是把消息吞掉（原实现在此直接
+      // return，转录里躺着一条从未送达的消息）。
       await window.api.sendMessage(meta.sessionId, content)
     } catch (error: unknown) {
       if (get().meta?.sessionId !== meta.sessionId) return
@@ -2971,8 +3025,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const endedError = isUserStopDiagnostic(e.error) ? undefined : e.error
       // #5 会话关闭：移出运行中列表。
       markSdkSessionRunning(get().meta?.sdkSessionId, false)
+      // 桥接死在流式中途（进程崩溃/被杀）不会再有 result 事件来收尾：先把
+      // 积压 delta 冲进 items，再走与 result 相同的封口。不封的话流式光标
+      // 永远闪、悬挂的工具卡永远转圈。
+      flushPendingStreamDeltas()
       set((s) => ({
         bridgeEnded: true,
+        items: sealHungToolBlocks(
+          s.items.map((i) => (i.kind === 'assistant' && i.streaming ? { ...i, streaming: false } : i)),
+          true
+        ),
+        currentStreamingMsgId: null,
         status: { ...s.status, running: false, startedAt: undefined, stall: undefined, error: endedError ?? s.status.error }
       }))
       scheduleSessionsRefresh(get)

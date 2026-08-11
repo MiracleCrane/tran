@@ -9,6 +9,7 @@ import { ToolGlyph } from './toolIcons'
 import { showImageContextMenu } from './ImageContextMenu'
 import { formatTimeFull, formatTimeShort, messageTime } from '../utils/messageTimes'
 import { initSentImageRecording, loadSentImages, matchHistoryImages } from '../utils/sentImages'
+import SkillCard, { matchSkillInvocation } from './SkillCard'
 import ToolCallCard from './ToolCallCard'
 import ToolGroupCard from './ToolGroupCard'
 import CompactionDivider from './CompactionDivider'
@@ -422,6 +423,7 @@ const UserMessage = memo(function UserMessage({
   const atts = item.attachments ?? hydratedAttachments ?? []
   const at = messageTime(item.id)
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
+  const slashSkills = useSessionStore((s) => s.slashCommands)
   const openAttachmentPreview = useUiStore((s) => s.openAttachmentPreview)
   // kimi CLI 系统信封（后台任务通知等）：渲染成系统卡片而不是原始 XML 气泡。
   // 噪音信封正常情况下已被 buildDisplayRows 滤掉，这里是兜底——万一有别的
@@ -429,6 +431,21 @@ const UserMessage = memo(function UserMessage({
   if (item.text && isHiddenEnvelope({ item } as ItemNode)) return <></>
   if (item.text && VISIBLE_ENVELOPE_RE.test(item.text.trimStart())) {
     return <SystemEnvelope text={item.text} />
+  }
+  // 斜杠命令（skill）调用：Codex 风格专属卡片替代普通气泡（纯文本消息才走；
+  // 带附件的保持原气泡，附件展示不进卡片）。
+  const skillInvocation = atts.length === 0 ? matchSkillInvocation(item.text, slashSkills) : null
+  if (skillInvocation) {
+    return (
+      <div className="tran-user-msg group/msg relative flex justify-end">
+        <SkillCard invocation={skillInvocation} {...(item.cutIn ? { cutIn: true } : {})} />
+        {at !== undefined && (
+          <div className="tran-msg-time tran-msg-time-gutter-left" title={formatTimeFull(at)}>
+            {formatTimeShort(at)}
+          </div>
+        )}
+      </div>
+    )
   }
   const handleAttachmentClick = (
     event: MouseEvent<HTMLButtonElement>,
