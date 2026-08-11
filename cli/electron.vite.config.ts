@@ -7,7 +7,10 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
-        input: { index: resolve(__dirname, 'src/main/index.ts') }
+        input: { index: resolve(__dirname, 'src/main/index.ts') },
+        // ws 的可选原生加速依赖：留成运行时 require，ws 内部 try/catch
+        // 会在缺失时退回纯 JS 实现；打进 bundle 反而变成硬依赖报错。
+        external: ['bufferutil', 'utf-8-validate']
       }
     }
   },

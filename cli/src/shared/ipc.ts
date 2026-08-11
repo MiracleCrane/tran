@@ -753,6 +753,10 @@ export interface ForgeApi {
     cwd: string,
     backend?: ClaudeExecutionBackend
   ): Promise<{ ok: boolean; error?: string }>
+  /** 会话归档（Tran 侧标记，数据不动）：id → 归档时间戳（ms）。 */
+  getArchivedSessions(): Promise<Record<string, number>>
+  archiveSession(sessionId: string): Promise<void>
+  unarchiveSession(sessionId: string): Promise<void>
   /** Read a subagent's own conversation transcript (for the monitor popover). */
   getSubagentMessages(sessionId: string, agentId: string, cwd: string): Promise<HistoryMessage[]>
 
@@ -989,6 +993,21 @@ export interface ForgeApi {
    *  不带参数 = 全停（窗口卸载用）。 */
   unsubscribeSwarmTasks(sessionId?: string): Promise<void>
   onSwarmTasks(cb: (e: SwarmTasksEvent) => void): () => void
+
+  /** --- 浏览器控制（Chrome 扩展桥） --- */
+  getBrowserBridgeStatus(): Promise<BrowserBridgeStatus>
+  onBrowserBridgeStatus(cb: (status: BrowserBridgeStatus) => void): () => void
+}
+
+/** 浏览器桥状态：Tran 侧 WS 服务 + Chrome 扩展连接情况。 */
+export interface BrowserBridgeStatus {
+  /** WS 服务是否在监听（端口全被占/启动失败时为 false）。 */
+  running: boolean
+  port: number | null
+  /** 用户粘进扩展 options 的配对码，形如 tran1:<端口>:<token>。 */
+  pairingCode: string | null
+  extensionConnected: boolean
+  extensionVersion: string | null
 }
 
 declare global {

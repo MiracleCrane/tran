@@ -12,6 +12,8 @@ extraResources:
     to: desktopShortcutIcon.ico
   - from: build/icon.ico
     to: icon.ico
+  - from: extension
+    to: browser-extension
 asar: true
 compression: maximum
 electronLanguages:

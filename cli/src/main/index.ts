@@ -33,6 +33,13 @@ const WINDOW_FRAME_COLOR = WINDOW_BACKGROUND_COLOR
 const RENDERER_DIAGNOSTICS =
   !app.isPackaged || process.env['FORGE_RENDER_DIAGNOSTICS'] === '1'
 const AUTO_UPDATE_CHECK_DELAY_MS = 3500
+/** dev 专用：TRAN_USER_DATA_DIR 重定向 userData。正式版与 dev 共用
+ *  Roaming/Tran，单实例锁绑定 userData 路径——用户开着正式版时 dev 实例
+ *  会静默退出。测试时指到独立目录即可并行运行（须在拿锁之前设置）。 */
+if (!app.isPackaged && process.env['TRAN_USER_DATA_DIR']) {
+  app.setPath('userData', process.env['TRAN_USER_DATA_DIR'])
+}
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
 if (!app.isPackaged) {

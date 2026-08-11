@@ -25,6 +25,7 @@ const SkillsPanel = lazy(() => import('./components/SkillsPanel'))
 const SettingsPanel = lazy(() => import('./components/SettingsPanel'))
 const TranslatePanel = lazy(() => import('./components/TranslatePanel'))
 const HelpPanel = lazy(() => import('./components/HelpPanel'))
+const ArchivePanel = lazy(() => import('./components/ArchivePanel'))
 const WslHealthPanel = lazy(() => import('./components/WslHealthPanel'))
 
 const LAZY_PANELS = {
@@ -34,7 +35,8 @@ const LAZY_PANELS = {
   settings: SettingsPanel,
   translate: TranslatePanel,
   help: HelpPanel,
-  wslHealth: WslHealthPanel
+  wslHealth: WslHealthPanel,
+  archived: ArchivePanel
 } as const
 
 /** 面板 chunk 加载中的占位。本地文件读取通常一帧就完成，所以刻意做得很轻——

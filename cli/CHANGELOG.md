@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.80 - 2026-08-11
+
+### 中文
+
+- 新增:**会话归档**。侧栏会话行新增 📥 归档按钮——从列表收起但数据原地不动；左侧「工具 → 归档」页里能找回（点标题恢复并打开）、多选批量恢复或彻底删除（真删走原有删除链路，不可恢复，有二次确认）。侧栏单行删除保留。
+- 修复:下拉展开面板宽度被触发器压扁（选项挤成一列单字）——触发器保持自适应,展开面板按内容撑开（上限 17rem）。
+
+### English
+
+- New: session archiving. A 📥 button on each sidebar session row hides it without touching data; the new Archive page (tools nav) restores, or multi-selects for permanent deletion (with confirmation). Single-row delete stays.
+- Fixed: opened dropdown panels were squeezed to the trigger's width (options collapsed to single characters); panels now size to content (capped at 17rem) while triggers stay content-sized.
+
+## v1.0.79 - 2026-08-11
 ## v1.0.79 - 2026-08-11
 
 ### 中文

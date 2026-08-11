@@ -8,6 +8,7 @@ import type {
   GitCommit,
   GitStatus,
   SwarmTasksEvent,
+  BrowserBridgeStatus,
   UpdateCheckResult,
   UpdateDownloadProgress,
   SessionRunningChangedPayload
@@ -46,6 +47,9 @@ const api: ForgeApi = {
     ipcRenderer.invoke('forge:renameSession', sessionId, title, cwd, backend),
   deleteSession: (sessionId, cwd, backend) =>
     ipcRenderer.invoke('forge:deleteSession', sessionId, cwd, backend),
+  getArchivedSessions: () => ipcRenderer.invoke('forge:getArchivedSessions'),
+  archiveSession: (sessionId) => ipcRenderer.invoke('forge:archiveSession', sessionId),
+  unarchiveSession: (sessionId) => ipcRenderer.invoke('forge:unarchiveSession', sessionId),
   getSubagentMessages: (sessionId, agentId, cwd) =>
     ipcRenderer.invoke('forge:getSubagentMessages', sessionId, agentId, cwd),
   listMcpServers: (sessionId) => ipcRenderer.invoke('forge:listMcpServers', sessionId),
@@ -232,6 +236,14 @@ const api: ForgeApi = {
     const listener = (_event: Electron.IpcRendererEvent, payload: SwarmTasksEvent): void => cb(payload)
     ipcRenderer.on('forge:swarm-tasks', listener)
     return () => ipcRenderer.removeListener('forge:swarm-tasks', listener)
+  },
+
+  getBrowserBridgeStatus: () => ipcRenderer.invoke('forge:getBrowserBridgeStatus'),
+  onBrowserBridgeStatus: (cb) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: BrowserBridgeStatus): void =>
+      cb(payload)
+    ipcRenderer.on('forge:browser-bridge-status', listener)
+    return () => ipcRenderer.removeListener('forge:browser-bridge-status', listener)
   }
 }
 

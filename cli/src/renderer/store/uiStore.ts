@@ -13,6 +13,7 @@ export type View =
   | 'settings'
   | 'wslHealth'
   | 'help'
+  | 'archived'
 
 export interface BlockingOverlayState {
   id: string

@@ -9,6 +9,7 @@ import ProjectSwitcher from './ProjectSwitcher'
 import type { ClaudeExecutionBackend, SessionListItem, SessionPreview } from '../../shared/ipc'
 import { normalizeCwdForCompare } from '../../shared/paths'
 import { relTime } from '../utils/format'
+import { useArchiveStore } from '../store/archiveStore'
 import { onForgeEvent, emitForgeEvent } from '../events'
 
 type SessionGroupMode = 'time' | 'project'
@@ -213,6 +214,12 @@ const SearchIcon = (): JSX.Element => (
     <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
   </svg>
 )
+const ArchiveIcon = (): JSX.Element => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+    <rect x="3" y="4" width="18" height="5" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+    <path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+  </svg>
+)
 const EditIcon = (): JSX.Element => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
     <path
@@ -342,6 +349,7 @@ const LanguageIcon = (): JSX.Element => (
 const NAV_ITEMS: { view: View; label: string; icon: () => JSX.Element }[] = [
   { view: 'skills', label: '技能', icon: SkillsIcon },
   { view: 'translate', label: 'AI 辅助', icon: LanguageIcon },
+  { view: 'archived', label: '归档', icon: ArchiveIcon },
   { view: 'settings', label: '设置', icon: GearIcon },
   { view: 'help', label: '说明', icon: HelpIcon }
 ]
@@ -355,6 +363,13 @@ const NAV_ITEMS: { view: View; label: string; icon: () => JSX.Element }[] = [
 export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boolean } = {}): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
   const sessions = useSessionStore((s) => s.sessions)
+  // 归档（2026-08）：侧栏过滤 + 行内归档按钮的数据源；挂载即加载一次。
+  const archivedIds = useArchiveStore((s) => s.archivedIds)
+  const loadArchived = useArchiveStore((s) => s.loadArchived)
+  const archiveSession = useArchiveStore((s) => s.archive)
+  useEffect(() => {
+    void loadArchived()
+  }, [loadArchived])
   // #5b 运行中会话标识：并行契约新增字段，包含当前正在跑 turn 的 sdkSessionId。
   const runningSdkSessionIds = useSessionStore((s) => s.runningSdkSessionIds)
   const loading = useSessionStore((s) => s.sessionsLoading)
@@ -998,9 +1013,11 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const filteredSessions = useMemo(() => {
     // 关键词搜索已挪进 SessionSearchPalette（Ctrl+K / 搜索图标），列表本身
     // 不再做行内过滤，只保留 WSL 后端可见性这一层。
+    // 2026-08：归档的会话也从这里过滤（归档页才能看到）。
     return sessions
       .filter((session) => {
         if (!wslSupportEnabled && (session.runtimeBackend ?? 'windows') === 'wsl') return false
+        if (archivedIds && session.sessionId in archivedIds) return false
         return true
       })
       .slice()
@@ -1015,7 +1032,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
           BACKEND_SORT_ORDER[b.runtimeBackend ?? 'windows']
         )
       })
-  }, [pinnedSessionKeys, sessions, wslSupportEnabled])
+  }, [pinnedSessionKeys, sessions, wslSupportEnabled, archivedIds])
 
   // 显示顺序在本次挂载期间保持稳定。
   // 上面那个排序按 lastModified 倒序——而**打开一个会话就会刷新它的 mtime**，
@@ -1652,7 +1669,17 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
 
                   {!editing && !exiting && !multiMode && (
                     <div className="absolute bottom-1 right-1 z-10 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                      {/* 会话操作组（预留扩展位：以后加"归档"等操作就往这里加） */}
+                      {/* 会话操作组：置顶 / 重命名 / 归档（进归档页）/ 删除 */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void archiveSession(s.sessionId)
+                        }}
+                        className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
+                        title="归档（从列表收起，归档页可找回）"
+                      >
+                        <ArchiveIcon />
+                      </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation()

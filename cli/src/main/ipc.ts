@@ -18,6 +18,7 @@ import {
   setActiveSummaryProfile
 } from './settings'
 import { saveMcpServer, deleteMcpServer } from './mcpConfig'
+import { startBrowserBridge, stopBrowserBridge, getBrowserBridgeStatus } from './browserBridge'
 import {
   listProviders,
   getActiveProvider,
@@ -61,6 +62,12 @@ import { getDeepseekBalanceCached, invalidateDeepseekBalanceCache } from './deep
 import { listKimiSessions } from './kimiHistory'
 import { deleteKimiSession } from './sessionDelete'
 import { removeSessionTitle, recordManualTitle } from './sessionTitles'
+import {
+  archiveSession,
+  dropArchivedSession,
+  getArchivedSessions,
+  unarchiveSession
+} from './archivedSessions'
 import { allAiTitles, generateAiTitlesBatch, getSessionPreview } from './aiTitles'
 import { getSessionTasks } from './kimiServerApi'
 import type { GoalControlAction, GoalStartOptions } from './goalStore'
@@ -114,6 +121,7 @@ import type {
   PromptDiagnosis,
   SessionTodosResult,
   PlanUsageResult,
+  BrowserBridgeStatus,
   DeepseekBalanceResult,
   SummaryProfile
 } from '../shared/ipc'
@@ -331,6 +339,10 @@ export function registerIpc(
     send('forge:providers-changed', { reason })
   })
   app.once('before-quit', stopProviderConfigWatch)
+
+  // 浏览器控制桥：启动失败只记日志（不能影响主流程），状态变化推给渲染层。
+  void startBrowserBridge((status) => send('forge:browser-bridge-status', status))
+  app.once('before-quit', stopBrowserBridge)
 
   const bridge = new AgentBridge({
     onMessage: (sessionId, message) => {
@@ -675,6 +687,8 @@ export function registerIpc(
   )
   ipcMain.handle('forge:getDiagnosticLog', async (): Promise<string> => getDiagnosticLog())
   ipcMain.handle('forge:getAppVersion', async (): Promise<string> => app.getVersion())
+  ipcMain.handle('forge:getBrowserBridgeStatus', async (): Promise<BrowserBridgeStatus> =>
+    getBrowserBridgeStatus())
   ipcMain.handle('forge:checkForUpdates', async (): Promise<UpdateCheckResult> => checkForUpdates())
   ipcMain.handle(
     'forge:downloadAndInstallUpdate',
@@ -1122,10 +1136,24 @@ export function registerIpc(
       void cwd
       void backend
       const result = await deleteKimiSession(sessionId)
-      if (result.ok) removeSessionTitle(sessionId)
+      if (result.ok) {
+        removeSessionTitle(sessionId)
+        dropArchivedSession(sessionId)
+      }
       return result
     }
   )
+
+  // 会话归档：Tran 侧标记（数据不动），列表过滤掉；删除只在归档页发生。
+  ipcMain.handle('forge:getArchivedSessions', async (): Promise<Record<string, number>> =>
+    getArchivedSessions()
+  )
+  ipcMain.handle('forge:archiveSession', async (_e, sessionId: string): Promise<void> => {
+    archiveSession(requireString(sessionId, 'sessionId'))
+  })
+  ipcMain.handle('forge:unarchiveSession', async (_e, sessionId: string): Promise<void> => {
+    unarchiveSession(requireString(sessionId, 'sessionId'))
+  })
 
   ipcMain.handle(
     'forge:getSubagentMessages',

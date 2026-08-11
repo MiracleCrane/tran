@@ -130,7 +130,11 @@ export default function DisclosureSelect({
           naked && !open
             ? 'border border-transparent bg-transparent'
             : 'glass-panel-soft disclosure-select-panel'
-        } absolute inset-x-0 ${
+        } absolute ${
+          // 2026-08：触发器宽度自适应（不定宽）后，inset-x-0 会把展开面板也
+          // 压成触发器那么窄（选项挤成一列单字）。展开时按内容撑开，上限 17rem。
+          open ? 'left-0 w-max min-w-full max-w-[17rem]' : 'inset-x-0'
+        } ${
           compact ? 'rounded-xl p-1' : 'rounded-2xl p-1.5'
         } ${
           elevated ? 'z-[90]' : 'z-50'
