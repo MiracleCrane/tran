@@ -18,6 +18,39 @@ const BAIDU_ENDPOINT = 'https://fanyi-api.baidu.com/api/trans/vip/translate'
 /** 请求超时：此前无超时，连接挂起时翻译调用永不落地。 */
 const BAIDU_TIMEOUT_MS = 30000
 
+/**
+ * 熔断：不会自愈的错误（欠费 54004、未授权 52003、签名错 54001、服务关闭
+ * 58002）触发后，本次运行内不再发起百度请求——2026-08 实测欠费时思考翻译的
+ * 重试把 main.log 刷成每秒上百条失败。限频 54003 是会自愈的，只熔断 60s。
+ * 换了凭据（保存翻译设置）会重置。
+ */
+const FATAL_CODES = new Set(['54004', '52003', '54001', '58002'])
+const RATE_LIMIT_COOLDOWN_MS = 60_000
+let fatalTrippedReason: string | null = null
+let rateLimitedUntil = 0
+
+/** 百度通道当前是否被熔断；返回原因文案（null = 可用）。 */
+export function baiduTripped(): string | null {
+  if (fatalTrippedReason) return fatalTrippedReason
+  if (Date.now() < rateLimitedUntil) return '百度翻译限频冷却中'
+  return null
+}
+
+/** 保存了新的百度凭据时调用：给新钥匙一次机会。 */
+export function resetBaiduBreaker(): void {
+  fatalTrippedReason = null
+  rateLimitedUntil = 0
+}
+
+function tripOnError(code: string, msg: string): void {
+  if (FATAL_CODES.has(code)) {
+    fatalTrippedReason = `百度翻译错误 ${code}: ${msg}（本次运行内不再重试）`
+    log('baidu', `熔断：${fatalTrippedReason}`)
+  } else if (code === '54003') {
+    rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS
+  }
+}
+
 function md5Hex(s: string): string {
   return createHash('md5').update(s, 'utf8').digest('hex')
 }
@@ -78,6 +111,7 @@ async function postTranslate(q: string, appId: string, secretKey: string): Promi
     throw new Error('百度翻译响应不是合法 JSON')
   }
   if (data.error_code) {
+    tripOnError(String(data.error_code), data.error_msg ?? '未知错误')
     throw new Error(`百度翻译错误 ${data.error_code}: ${data.error_msg ?? '未知错误'}`)
   }
   return (data.trans_result ?? []).map((r) => r.dst ?? '')
@@ -99,6 +133,8 @@ export async function translateViaBaidu(
   const deduped = Array.from(new Set(texts.filter((t) => t && t.trim())))
   if (deduped.length === 0) return []
 
+  const tripped = baiduTripped()
+  if (tripped) throw new Error(tripped)
   const normalized = deduped.map((t) => t.replace(/\r?\n/g, ' '))
   const q = normalized.join('\n')
   log('baidu', `translating ${deduped.length} text(s)`)
@@ -128,6 +164,8 @@ export async function translateLongTextViaBaidu(
   appId: string,
   secretKey: string
 ): Promise<string> {
+  const tripped = baiduTripped()
+  if (tripped) throw new Error(tripped)
   const lines = text.replace(/\r\n/g, '\n').split('\n')
   const result: string[] = new Array<string>(lines.length).fill('')
 

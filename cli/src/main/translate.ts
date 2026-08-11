@@ -1,6 +1,6 @@
 import { getActiveProvider } from './providers'
 import { getBaiduCreds, getTranslateEngine } from './translateConfig'
-import { translateViaBaidu } from './baidu'
+import { baiduTripped, translateViaBaidu } from './baidu'
 import { cheapComplete } from './cheapModel'
 import { getApiKey } from './settings'
 import { log } from './logger'
@@ -150,7 +150,9 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
  * 去做纯属浪费。摘要旁路的 key 本来就是为这类杂活准备的。
  */
 export async function translateTexts(texts: string[]): Promise<string[]> {
-  if (getTranslateEngine() === 'baidu') {
+  // 百度被熔断（欠费/未授权）时不再硬走百度：往下落到便宜通道/主 Agent，
+  // 别让翻译整个消失。
+  if (getTranslateEngine() === 'baidu' && !baiduTripped()) {
     const creds = getBaiduCreds()
     if (!creds) throw new Error('已选择百度翻译,但未配置 appId / secretKey')
     return translateViaBaidu(texts, creds.appId, creds.secretKey)

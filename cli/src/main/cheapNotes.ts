@@ -6,7 +6,8 @@ import { log } from './logger'
 import { cheapSummarize, cheapComplete } from './cheapModel'
 import { loadSettings } from './settings'
 import { getBaiduCreds, resolveThinkingTranslateEngine } from './translateConfig'
-import { translateLongTextViaBaidu } from './baidu'
+import { baiduTripped, translateLongTextViaBaidu } from './baidu'
+import { getApiKey } from './settings'
 
 /**
  * 总结类杂活的第二、第三项：**命令一句话说明**与**思考块摘要**。
@@ -267,7 +268,10 @@ export async function translateThinking(text: string): Promise<string | null> {
 
   // 思考翻译有自己的引擎开关（与技能描述翻译分离，见 shared/ipc 的
   // ThinkingTranslateEngine 注释）。'auto' 在这里已被解析成具体通道。
-  const engine = resolveThinkingTranslateEngine()
+  // 百度被熔断（欠费/未授权，见 baidu.ts）时自动落到 LLM 通道——配了摘要
+  // key 的用户不该因为百度欠费就整个失去翻译，那正是 2026-08 刷屏事故的形态。
+  let engine = resolveThinkingTranslateEngine()
+  if (engine === 'baidu' && baiduTripped() && getApiKey()) engine = 'llm'
   const run = (
     engine === 'baidu'
       ? translateViaBaiduEngine(input)

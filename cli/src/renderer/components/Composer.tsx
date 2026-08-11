@@ -608,6 +608,11 @@ export default function Composer(): JSX.Element {
     let files: Awaited<ReturnType<typeof window.api.pickFiles>> = []
     try {
       files = await window.api.pickFiles(meta.cwd)
+    } catch (error) {
+      // IPC 失败（主进程忙/对话框异常）不能变成 unhandled rejection——
+      // pickAttachment 是被 void 调用的。
+      setAttachmentError(error instanceof Error ? error.message : String(error))
+      return
     } finally {
       setPickingFile(false)
     }

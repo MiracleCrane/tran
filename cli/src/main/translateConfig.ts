@@ -1,5 +1,5 @@
 import { loadSettings, saveSettings, getBaiduSecret, setBaiduSecret } from './settings'
-import { translateViaBaidu } from './baidu'
+import { resetBaiduBreaker, translateViaBaidu } from './baidu'
 import type { TranslateConfig, TranslateTestResult, TranslateEngine, ThinkingTranslateEngine } from '../shared/ipc'
 
 /** Translate-engine config (Translate panel). Stored in tran-settings.json
@@ -26,6 +26,8 @@ export function saveTranslateConfig(cfg: TranslateConfig): TranslateConfig {
   s.baiduAppId = cfg.baidu.appId
   setBaiduSecret(cfg.baidu.secretKey)
   saveSettings(s)
+  // 换了凭据/引擎就把熔断放开：给新配置一次机会（见 baidu.ts 的熔断说明）。
+  resetBaiduBreaker()
   return getTranslateConfig()
 }
 

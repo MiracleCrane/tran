@@ -314,8 +314,10 @@ function hasRecentOwnMessageEcho(items: TranscriptItem[], echoText: string): boo
   const from = items.length - 1
   for (let i = from; i >= 0 && i > from - OWN_ECHO_SCAN_LIMIT; i--) {
     const it = items[i]
-    // 最近一条用户消息定胜负；query/compaction/assistant 等一律跳过继续向后找。
-    if (it?.kind === 'user') return isOwnMessageEcho(it, echoText)
+    // 窗口内**任意**一条用户消息命中即算回显。原先是"最近一条用户消息定胜负"：
+    // 连发两条直达（A、B）后 A 的回显先到，与最近的 B 比对不中，A 被再插一份
+    // ——多在途直达必现双份。
+    if (it?.kind === 'user' && isOwnMessageEcho(it, echoText)) return true
   }
   return false
 }
@@ -991,6 +993,9 @@ interface BackgroundSessionState {
   /** #23 模式面板状态（Swarm/目标开关、计划前权限档）：低成本，随快照带走，
    *  切回不落回默认。 */
   modePanel: ModePanelState
+  /** #29 后台 turn 出错时回收的未确认直达消息：attach 时落入 pendingQueue，
+   *  走 #20 的重发/清空出路（与前台错误收尾同款语义）。 */
+  recycledQueue?: PendingMessage[]
 }
 
 const backgroundSessions = new Map<string, BackgroundSessionState>()
@@ -1516,8 +1521,6 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
       // 后续消息靠后端回显进入 items），running 以后端推送/下一个事件为准。
       bg.running = false
       markSdkSessionRunning(bg.sdkSessionId, false)
-      // #29 后台会话成功收尾：该会话的未确认直达消息出台账（防台账滞留）。
-      if (r.subtype === 'success') takeUnackedDirectMessages(bg.bridgeSessionId)
       delete bg.startedAt
       delete bg.stall
       bg.items = sealHungToolBlocks(
@@ -1526,7 +1529,27 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
       )
       bg.currentStreamingMsgId = null
       const resultError = r.errors?.length ? r.errors.join('; ') : r.subtype
-      if (r.subtype !== 'success' && !isUserStopDiagnostic(resultError)) bg.error = resultError
+      if (r.subtype === 'success') {
+        // #29 后台会话成功收尾：该会话的未确认直达消息出台账（防台账滞留）。
+        takeUnackedDirectMessages(bg.bridgeSessionId)
+      } else if (!isUserStopDiagnostic(resultError)) {
+        bg.error = resultError
+        // #29 后台 turn 出错：未确认直达消息回收进缓冲队列（原先只出账不回收，
+        // 后台错误的消息等于被吞），attach 时落回 pendingQueue。
+        const taken = takeUnackedDirectMessages(bg.bridgeSessionId)
+        if (taken.length) {
+          bg.recycledQueue = [
+            ...(bg.recycledQueue ?? []),
+            ...taken.map((m) => ({
+              id: uid(),
+              text: m.text,
+              ...(m.attachments ? { attachments: m.attachments } : {}),
+              ...(m.swarm ? { swarm: true } : {}),
+              ...(m.cutIn ? { cutIn: true } : {})
+            }))
+          ]
+        }
+      }
       invalidateBackgroundHistoryCache(bg)
       scheduleSessionsRefresh(get)
       break
@@ -2604,7 +2627,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         // 没变）：整体克隆一份再入 store，保证 memo 化的行组件拿到新引用。
         items: cloneTranscriptItems(bg.items),
         tasks: bg.tasks,
-        pendingQueue: [],
+        // #29 后台 turn 出错时回收的直达消息在这里落回队列（无则空）。
+        pendingQueue: bg.recycledQueue ?? [],
         sessionConfigDirty: false,
         sessionModelDirty: false,
         bridgeEnded: false,

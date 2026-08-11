@@ -394,6 +394,10 @@ export class KimiBackend {
       if (!this.sessions.has(sessionId)) return
       const message = userFacingError(error)
       log('kimi', `prepare failed session=${sessionId}: ${message}`)
+      // 先置 closed：排队中的 drain 在 ready reject 后会走到 catch/finally，
+      // 不置的话它还会向这个已 onEnded 的会话再发一份 error result，且
+      // afterTurn 会对着失败的 acpSessionId 发隐藏 /usage 轮。
+      session.closed = true
       this.h.onEnded(sessionId, message)
       this.sessions.delete(sessionId)
       // L1：resume 路径在 session/load 请求前就注册了 acpToSession——失败时把
@@ -422,7 +426,11 @@ export class KimiBackend {
       controlGoal(sessionId, 'pause')
       this.emitGoal(session)
     }
-    const client = await this.ensureClient()
+    // 只对**活着的** client 发 cancel：ACP 进程已死时没有可取消的 turn，
+    // 走 ensureClient 会为一条对新进程毫无意义的通知拉起整个 kimi 进程
+    // （~300MB），还绕过 #3 的恢复退避窗口。
+    const client = this.client
+    if (!client) return
     client.notify('session/cancel', { sessionId: session.acpSessionId })
   }
 
@@ -432,7 +440,10 @@ export class KimiBackend {
     session.model = kimiModel(model)
     // 'kimi-default' 表示交给 CLI 自己选模型，不下发 ACP 切换。
     if (!session.model || !session.acpSessionId) return
-    const client = await this.ensureClient()
+    // 同 interrupt：client 已死就不为一条配置下发拉起新进程——新值已存在
+    // session.model 里，恢复/重建路径会带上它。
+    const client = this.client
+    if (!client) return
     await client.request('session/set_config_option', {
       sessionId: session.acpSessionId,
       configId: 'model',
@@ -447,7 +458,9 @@ export class KimiBackend {
     if (!session) return
     session.permissionMode = mode
     if (!session.acpSessionId) return
-    const client = await this.ensureClient()
+    // 同 interrupt/setModel：client 已死不为配置下发拉起新进程。
+    const client = this.client
+    if (!client) return
     await client.request('session/set_config_option', {
       sessionId: session.acpSessionId,
       configId: 'mode',

@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.0.76 - 2026-08-11
+
+### 中文
+
+- 变更:**思考翻译/描述翻译默认走摘要旁路的便宜模型**(如火山引擎方舟),不再依赖百度。百度通道保留,但加了熔断:欠费(54004)、未授权(52003)、签名错(54001)、服务关闭(58002)这类不会自愈的错误触发后,本次运行内不再发起百度请求——此前欠费时思考翻译的重试能把日志刷成每秒上百条。限频(54003)只熔断 60 秒。熔断期间思考翻译自动落到 LLM 通道(配了摘要 key 就不会失去翻译);保存翻译设置会重置熔断。
+- 修复:连发多条直达消息时回显去重只对比最近一条,先发的那条会被再插一份(转录出现双份消息)。
+- 修复:后台会话 turn 出错时,未确认的直达消息只出账不回收——现在回收进缓冲,切回会话时落回排队区,可一键重发。
+- 修复:恢复会话加载失败(session/load 报错)后,排队中的消息还会向已结束的会话再发一份错误、并对失败的会话发隐藏 /usage 轮。
+- 修复:ACP 进程崩溃的恢复退避期间,点"停止"/切模型/切权限档会为一条对新进程毫无意义的请求拉起整个 kimi 进程(~300MB)、绕过退避窗口。
+- 修复:附件选择器 IPC 失败时的未捕获 promise rejection(现在显示错误提示)。
+
+### English
+
+- Changed: thinking/description translation defaults to the cheap summary-API model (e.g. Volcengine Ark) instead of Baidu. Baidu channel remains but now has a circuit breaker: non-self-healing errors (arrears 54004, unauthorized 52003, bad signature 54001, service closed 58002) trip it for the rest of the run — previously an out-of-quota Baidu key caused a retry storm flooding the log. Rate limiting (54003) cools down for 60s. While tripped, thinking translation falls back to the LLM channel; saving translate settings resets the breaker.
+- Fixed: echo dedup only compared the most recent user message, duplicating earlier messages when several direct sends were in flight.
+- Fixed: unacked direct messages are now recycled into the queue when a background session's turn errors (previously silently dropped from the ledger).
+- Fixed: after a failed session/load, queued messages no longer emit an extra error into the ended session or trigger a hidden /usage turn against the dead ACP session.
+- Fixed: stop/model/permission changes during ACP crash-recovery backoff no longer spawn a fresh kimi process just to send a no-op request.
+- Fixed: unhandled rejection when the attachment picker IPC fails (now surfaces an error hint).
+
 ## v1.0.75 - 2026-08-11
 
 ### 中文
