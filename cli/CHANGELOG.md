@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.78 - 2026-08-07
+
+### 中文
+
+- 优化:工具行减负——状态圆点删除（与右侧状态重复）;"✓ 完成"全文改成只留一枚小勾（运行中/失败仍显示文字）;摘要与工具名重复时（Skill/TodoList）不再显示两遍。
+- 新增:Skill 调用带图标（Codex 提取集的扳手）+ 摘要行「使用 Skill」标签。
+
+### English
+
+- Tool rows decluttered: status dot removed (duplicated the right-hand state); "done" is now a bare ✓ (running/failed keep text); summaries identical to the tool name (Skill/TodoList) no longer print twice.
+- New: Skill calls get the Codex-extracted wrench icon and a proper summary label.
+
+## v1.0.77 - 2026-08-07
 ## v1.0.77 - 2026-08-11
 
 ### 中文

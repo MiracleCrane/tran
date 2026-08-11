@@ -5,7 +5,7 @@ import { useUiStore } from '../store/uiStore'
 import { probeCommit } from '../utils/streamProbe'
 import type { AssistantBlock, AssistantItem, UserAttachment, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
 import MessageText, { InlineMarkdown } from './MessageText'
-import { ToolGlyph } from './toolIcons'
+import { ToolGlyph, FoldChevron } from './toolIcons'
 import { showImageContextMenu } from './ImageContextMenu'
 import { formatTimeFull, formatTimeShort, messageTime } from '../utils/messageTimes'
 import { initSentImageRecording, loadSentImages, matchHistoryImages } from '../utils/sentImages'
@@ -695,21 +695,7 @@ const ThinkingBlock = memo(function ThinkingBlock({
 })
 
 /** 折叠指示（2026-08：文本字形 ▸/▾ 太小太糊，用户反馈）：12px V 形图标，
- *  收起时旋转 -90° 带过渡——比瞬时换字形顺眼。 */
-function FoldChevron({ open }: { open: boolean }): JSX.Element {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden
-      className={`shrink-0 text-zinc-600 transition-transform duration-150 ${open ? '' : '-rotate-90'}`}
-    >
-      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
+ *  收起时旋转 -90° 带过渡——比瞬时换字形顺眼。已挪到 toolIcons.tsx 共享。 */
 
 /** Takes `item` (not the wrapping forest node) precisely so React.memo's shallow
  *  compare can short-circuit: the forest node is rebuilt every frame, but the
@@ -770,7 +756,9 @@ const TOOL_ACTIVITY_META: Record<string, { label: string; icon: string; tone: st
   FetchURL: { label: '抓取网页', icon: 'web', tone: 'web' },
   WebFetch: { label: '抓取网页', icon: 'web', tone: 'web' },
   TodoList: { label: '更新待办', icon: '', tone: 'todo' },
-  todo_list: { label: '更新待办', icon: '', tone: 'todo' }
+  todo_list: { label: '更新待办', icon: '', tone: 'todo' },
+  Skill: { label: '使用 Skill', icon: 'skill', tone: 'agent' },
+  skill: { label: '使用 Skill', icon: 'skill', tone: 'agent' }
 }
 
 interface ActivityEntry {

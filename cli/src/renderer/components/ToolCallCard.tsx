@@ -6,7 +6,7 @@ import CodeBlock, { langForTool } from './CodeBlock'
 import DiffView from './DiffView'
 import SwarmCard from './SwarmCard'
 import { useCheapNote } from '../hooks/useCheapNote'
-import { ToolGlyph } from './toolIcons'
+import { ToolGlyph, FoldChevron } from './toolIcons'
 
 function normalizeResult(result: unknown): string {
   if (result == null) return ''
@@ -229,6 +229,8 @@ function toolGlyphKind(name: string): string {
     case 'AgentSwarm':
     case 'Task':
       return 'agent'
+    case 'Skill':
+      return 'skill'
     default:
       return ''
   }
@@ -284,7 +286,8 @@ const ToolCallCard = memo(function ToolCallCard({
         onClick={() => setUserToggled(!collapsed)}
         className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-white/[0.04]"
       >
-        <span className={`h-2 w-2 shrink-0 rounded-full ${isSubagent ? 'bg-accent' : meta.dot} ${streaming ? 'animate-pulse' : ''}`} />
+        {/* 状态圆点已删（2026-08 用户：和右侧状态重复）；运行中的信号由
+            is-running 淡紫底 + 右侧"运行中"表达。 */}
         {/* Codex 风工具图标（2026-08）：不同操作不同小图标，SVG 为 Codex 桌面版
             实测提取的原版（见 toolIcons.tsx）。子代理行同样给图标，在徽章前。 */}
         <span className="shrink-0 text-zinc-500">
@@ -307,7 +310,8 @@ const ToolCallCard = memo(function ToolCallCard({
         ) : (
           <span className="shrink-0 font-mono text-xs font-medium text-zinc-300">{block.name}</span>
         )}
-        {summary && (
+        {/* 摘要与工具名重复时（Skill/TodoList 这种没参数的）不再显示第二遍。 */}
+        {summary && summary !== block.name && (
           <span className="truncate font-mono text-xs text-zinc-500">{summary}</span>
         )}
         {/* 说明跟在命令**后面**而不是取代它：用户需要看见真正要跑的是什么，
@@ -317,13 +321,19 @@ const ToolCallCard = memo(function ToolCallCard({
             · {commandNote}
           </span>
         )}
+        {/* 状态：完成只留一枚小 ✓（2026-08 用户："完成"俩字重复一屏太吵），
+            运行中/失败保持文字——那才是需要一眼看到的状态。 */}
         <span key={block.status} className={`ml-auto shrink-0 text-[11px] ${meta.text}`}>
-          {/* 完成瞬间：状态勾弹入（key 随状态重挂载，动画只播一次） */}
-          {block.status === 'done' && !bg?.running && <span className="tran-check-pop mr-1 inline-block">✓</span>}
-          {statusLabel}
-          {block.elapsed ? ` · ${block.elapsed.toFixed(1)}s` : ''}
+          {block.status === 'done' && !bg?.running ? (
+            <span className="tran-check-pop inline-block text-green-500">✓</span>
+          ) : (
+            <>
+              {statusLabel}
+              {block.elapsed ? ` · ${block.elapsed.toFixed(1)}s` : ''}
+            </>
+          )}
         </span>
-        <span className="shrink-0 text-xs text-zinc-600">{collapsed ? '▸' : '▾'}</span>
+        <FoldChevron open={!collapsed} />
       </button>
 
       <Collapse open={!collapsed}>
