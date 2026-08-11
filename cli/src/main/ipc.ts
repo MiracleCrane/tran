@@ -1,6 +1,6 @@
 import { app, ipcMain, dialog, shell, clipboard, nativeImage, net, Notification, type BrowserWindow } from 'electron'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
-import { readFile, readdir, stat as statAsync } from 'node:fs/promises'
+import { readFile, readdir, stat as statAsync, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AgentBridge } from './agent/AgentBridge'
@@ -541,9 +541,26 @@ export function registerIpc(
     const value = src.trim()
     if (value.startsWith('data:')) return nativeImage.createFromDataURL(value)
     if (/^https?:\/\//i.test(value)) {
-      const res = await net.fetch(value)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return nativeImage.createFromBuffer(Buffer.from(await res.arrayBuffer()))
+      // 超时 + 大小上限：src 来自渲染层（不可信），慢速响应会把
+      // copyImage/saveImageAs 永久挂起，巨图会把主进程内存打爆——本地图片
+      // 那条路有 MAX_IMAGE_BYTES 上限，这条网络路此前没有。
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 20_000)
+      try {
+        const res = await net.fetch(value, { signal: controller.signal })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const length = Number(res.headers.get('content-length') ?? 0)
+        if (length > MAX_IMAGE_BYTES) {
+          throw new Error(`图片超过 ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
+        }
+        const buffer = Buffer.from(await res.arrayBuffer())
+        if (buffer.length > MAX_IMAGE_BYTES) {
+          throw new Error(`图片超过 ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
+        }
+        return nativeImage.createFromBuffer(buffer)
+      } finally {
+        clearTimeout(timer)
+      }
     }
     const path = value.toLowerCase().startsWith('file:') ? fileURLToPath(value) : value
     return nativeImage.createFromPath(path)
@@ -572,7 +589,8 @@ export function registerIpc(
           filters: [{ name: 'PNG 图片', extensions: ['png'] }]
         })
         if (res.canceled || !res.filePath) return { ok: false, canceled: true }
-        writeFileSync(res.filePath, image.toPNG())
+        // 异步写：大图 PNG 编码 + 写慢盘/网络盘的同步写会冻住主进程。
+        await writeFile(res.filePath, image.toPNG())
         return { ok: true, path: res.filePath }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -713,7 +731,7 @@ export function registerIpc(
       if (res.canceled || !res.filePath) return { canceled: true }
       const report = await buildDiagnosticReport(options)
       try {
-        writeFileSync(res.filePath, report, 'utf8')
+        await writeFile(res.filePath, report, 'utf8')
       } catch (error) {
         // 与同级 handler（saveImageAs）一致：把失败作为结构化结果返回，
         // 而不是抛成 promise 拒绝丢给渲染层。
@@ -1103,7 +1121,7 @@ export function registerIpc(
       // 永久删除：移除 session_index.jsonl 行 + 删 sessions/ 下会话目录（严格路径校验）。
       void cwd
       void backend
-      const result = deleteKimiSession(sessionId)
+      const result = await deleteKimiSession(sessionId)
       if (result.ok) removeSessionTitle(sessionId)
       return result
     }

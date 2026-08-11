@@ -363,11 +363,11 @@ if (!hasSingleInstanceLock) {
     // 卡住；挪到窗口创建之后、用 setImmediate 让出一轮，用户先看到界面。
     // 孤儿目录是上次运行的残留，晚几百毫秒清理没有任何影响。
     setImmediate(() => {
-      try {
-        sweepOrphanSessionDirs()
-      } catch (error) {
+      // sweepOrphanSessionDirs 已改异步（目录删除走 fs/promises），错误内部
+      // 全捕获；这里兜一层防未捕获 rejection。
+      void sweepOrphanSessionDirs().catch((error) => {
         log('startup', `孤儿会话目录清理失败：${error instanceof Error ? error.message : String(error)}`)
-      }
+      })
     })
     forgeTray = buildForgeTray()
 

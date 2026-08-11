@@ -267,11 +267,14 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   // '' when there's no active project; every git call is guarded by
   // `if (!cwd)` / `if (!branch)` so the empty string never reaches git.
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
-  const cachedGitToolbar = cwd ? getCachedGitToolbar(cwd) : null
-  const [branch, setBranch] = useState<string | null>(cachedGitToolbar?.branch ?? null)
-  const [gitChecked, setGitChecked] = useState(cachedGitToolbar?.checked ?? false)
-  const [status, setStatus] = useState<GitStatus>(cachedGitToolbar?.status ?? emptyGitStatus())
-  const [branches, setBranches] = useState<GitBranchInfo[]>(cachedGitToolbar?.branches ?? [])
+  // 惰性初始化：getCachedGitToolbar 每次调用都深克隆 status 四个数组 +
+  // branches，而结果只用作 useState 初始值（仅首渲染有效）——放组件体里
+  // 等于每次渲染白克隆一遍。
+  const [initialGitToolbar] = useState(() => (cwd ? getCachedGitToolbar(cwd) : null))
+  const [branch, setBranch] = useState<string | null>(initialGitToolbar?.branch ?? null)
+  const [gitChecked, setGitChecked] = useState(initialGitToolbar?.checked ?? false)
+  const [status, setStatus] = useState<GitStatus>(initialGitToolbar?.status ?? emptyGitStatus())
+  const [branches, setBranches] = useState<GitBranchInfo[]>(initialGitToolbar?.branches ?? [])
   const [commits, setCommits] = useState<GitCommit[]>([])
   const [stashList, setStashList] = useState<string[]>([])
   const [loading, setLoading] = useState(false)

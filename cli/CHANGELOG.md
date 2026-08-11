@@ -1,5 +1,41 @@
 # Changelog
 
+## v1.0.77 - 2026-08-11
+
+### 中文
+
+第二轮全面扫描（渲染层 12 处 + 主进程 10 处，全部逐条验证后修复）：
+
+**安全**
+- 修复:更新器安装包文件名路径穿越——URL 里编码的 `%5C`/`..` 解码后能把下载写到目录之外,而下载终点会被 shell.openPath 执行。现在解码后的文件名必须是纯文件名。
+- 修复:MCP 服务器名零校验(空名/`__proto__` 原型键会污染对象或静默丢失)。
+
+**流式性能(卡顿治理)**
+- 思考块/译文的逐行 markdown 渲染改为按行 memo——原先流式期间父级每帧重渲染,200 行思考块就是 200 次完整 remark 管线重解析;现在只有正在变的最后一行重解析。
+- 行内 code/链接节点不再每个都挂 store 订阅(长会话成百上千个订阅者,每帧全跑一遍 selector);点击时现取。
+- 消息时间戳的 store 订阅加引用短路(原先任意 store 更新都全量遍历 items)。
+- 会话悬停预览卡状态下沉为独立组件——悬停/移开不再整列表重渲染几百行。
+- GitToolbar 每次渲染深克隆 git 缓存 → 惰性初始化只克隆一次。
+
+**修复**
+- 中文乱码:git 输出按 chunk 转字符串,中文路径/内容跨 chunk 边界必出 U+FFFD——改用流式解码。
+- DeepSeek 余额查询的超时只盖到响应头,body 停滞会让余额永远"加载中"直到重启。
+- 会话删除的大目录同步删除会把主进程冻住几秒 → 改异步;图片"另存为"/诊断报告导出同理。
+- 图片右键"复制/另存"的网络图片分支无超时无大小上限(渲染层可传任意 URL)→ 补 20s 超时 + 20MB 上限。
+- kimi 路径探测全部失败时的裸 'kimi' 兜底被永久缓存——装好 kimi 后仍持续 ENOENT 直到重启。
+- 设置保存失败静默(未捕获 rejection + 按钮复位装作成功)→ 顶部错误横幅;侧栏 AI 命名同理。
+- 会话悬停预览的慢请求竞态(快速掠过多行时旧内容覆盖新行、移开后预览又弹回)。
+- 思考翻译状态的刷新竞态(保存设置后旧请求晚返回覆盖新状态)。
+- 用量卡钉住后重置倒计时永远冻结 → 低频 tick 驱动。
+- 代码块复制按钮的定时器在卸载后触发 + 泄漏。
+- 已发送图片记录超限清空导致重复落盘错位。
+- kimi 历史连接对反向请求的应答用错连接代(建连中静默不回/换代后错发)。
+- gpu 偏好直写主设置文件非原子(崩溃截断)→ 原子写。
+
+### English
+
+Second full sweep (12 renderer + 10 main-process findings, all verified and fixed): update-installer filename path traversal; per-line markdown re-parsing during streaming (now memoized per line); per-node store subscriptions removed; hover-preview state extracted (no more full-list re-renders); git output mojibake on chunk boundaries; DeepSeek balance stuck loading forever on stalled body; sync deletes/writes freezing the main process (now async); un-capped network image fetch; cached 'kimi' fallback path; silent settings-save failures; several request races (session preview, translate status); frozen usage-card countdown; copy-button timer leak; sent-image duplicate recording; wrong-generation ACP responses; non-atomic settings write in gpuBackend; MCP server name validation.
+
 ## v1.0.76 - 2026-08-11
 
 ### 中文

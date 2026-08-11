@@ -1,6 +1,7 @@
 import { app } from 'electron'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { writeJsonAtomic } from './atomicWrite'
 import { log } from './logger'
 
 interface RawSettings {
@@ -42,7 +43,9 @@ function readJson<T>(path: string, fallback: T): T {
 function writeJson(path: string, value: unknown): void {
   try {
     mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(path, JSON.stringify(value, null, 2), 'utf8')
+    // 原子写：这里会直写 tran-settings.json（disableVulkanPreference），
+    // 非原子的话崩溃/断电写到一半就把主设置文件截断了。
+    writeJsonAtomic(path, value)
   } catch (err) {
     log('gpu', `failed to write ${path}: ${err instanceof Error ? err.message : String(err)}`)
   }

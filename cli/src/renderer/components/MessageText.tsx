@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState, type AnchorHTMLAttributes, type ImgHTMLAttributes, type MouseEvent } from 'react'
+import { useTransientFlag } from '../hooks/useTransientFlag'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -86,8 +87,9 @@ function openPathPreview(
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CodeRenderer({ className, children: c }: any): JSX.Element {
-  const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
-  const openAttachmentPreview = useUiStore((s) => s.openAttachmentPreview)
+  // cwd/openAttachmentPreview 在点击时经 getState() 现取，不做渲染期订阅：
+  // 长会话里成百上千个行内 code span，每个都挂 selector 的话，流式期间每帧
+  // store 更新都要跑一遍全部订阅者。
   const text = String(c ?? '')
   const isBlock = !!className && /language-|hljs/.test(className)
 
@@ -97,11 +99,12 @@ function CodeRenderer({ className, children: c }: any): JSX.Element {
       <button
         type="button"
         onClick={(event) => {
+          const cwd = useSessionStore.getState().meta?.cwd ?? ''
           if (event.ctrlKey) {
             void window.api.revealInExplorer(cwd, path)
             return
           }
-          openPathPreview(cwd, path, openAttachmentPreview)
+          openPathPreview(cwd, path, useUiStore.getState().openAttachmentPreview)
         }}
         className="mx-0.5 inline rounded bg-white/[0.07] px-1 font-mono text-[0.85em] text-accent transition hover:bg-white/[0.14] hover:underline"
         title={`预览 ${path}；Ctrl+点击在资源管理器中显示`}
@@ -122,10 +125,9 @@ function LinkRenderer({
   node: _node,
   ...props
 }: LinkRendererProps): JSX.Element {
-  const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
-  const openAttachmentPreview = useUiStore((s) => s.openAttachmentPreview)
   const title = typeof href === 'string' && href ? href : undefined
 
+  // 同 CodeRenderer：store 状态点击时现取，不做渲染期订阅。
   const handleClick = (event: MouseEvent<HTMLAnchorElement>): void => {
     if (!href || event.defaultPrevented || event.button !== 0) return
 
@@ -140,11 +142,12 @@ function LinkRenderer({
 
     const path = hrefToPreviewPath(href)
     if (!path) return
+    const cwd = useSessionStore.getState().meta?.cwd ?? ''
     if (event.ctrlKey) {
       void window.api.revealInExplorer(cwd, path)
       return
     }
-    openPathPreview(cwd, path, openAttachmentPreview)
+    openPathPreview(cwd, path, useUiStore.getState().openAttachmentPreview)
   }
 
   /** 网站图标：直连站点 /favicon.ico（Codex 用的是 google s2/favicons，但那域名
@@ -222,7 +225,9 @@ function ImgRenderer({ src, alt, node: _node, ...props }: ImgRendererProps): JSX
  *  textContent——highlight 之后 children 是一串 span，从 props 抠文本不可靠。 */
 function PreRenderer({ children, ...props }: any): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
-  const [copied, setCopied] = useState(false)
+  // useTransientFlag 管定时器的取消与卸载清理：裸 setTimeout 在 1.2s 内组件
+  // 卸载（流式重排/切会话）时会打在已卸载组件上，连点还互相踩。
+  const [copied, flashCopied] = useTransientFlag(1200)
   const codeProps = (Array.isArray(children) ? children[0] : children)?.props ?? {}
   const lang = /language-([\w-]+)/.exec(codeProps.className ?? '')?.[1] ?? 'text'
 
@@ -231,8 +236,7 @@ function PreRenderer({ children, ...props }: any): JSX.Element {
     if (!text) return
     try {
       await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1200)
+      flashCopied()
     } catch {
       /* 剪贴板不可用时静默 */
     }
@@ -347,25 +351,38 @@ function MessageTextImpl({
 const MessageText = memo(MessageTextImpl)
 export default MessageText
 
+/** 单行渲染抽成 memo 组件：流式期间父级每帧重渲染，但只有最后一行在变——
+ *  其余行 memo 命中，跳过整条 unified/remark 管线（否则 200 行思考块 ×
+ *  每帧全量重解析，是流式卡顿的主要来源之一）。 */
+const InlineLine = memo(function InlineLine({ line }: { line: string }): JSX.Element {
+  return (
+    <div>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkCjkStrong]}
+        allowedElements={['strong', 'em', 'code', 'a', 'del']}
+        unwrapDisallowed
+        urlTransform={urlTransformAllowDataImage}
+        components={MD_COMPONENTS}
+      >
+        {line || ' '}
+      </ReactMarkdown>
+    </div>
+  )
+})
+
 /** 轻量行内 markdown（2026-08，思考块/译文用）：只渲染 加粗/斜体/行内代码/
  *  链接/删除线，不做段落级排版——思考是写给自己的推理，full markdown 不值
  *  那个成本。按行切开渲染，保留换行结构。 */
-export function InlineMarkdown({ children }: { children: string }): JSX.Element {
+export const InlineMarkdown = memo(function InlineMarkdown({
+  children
+}: {
+  children: string
+}): JSX.Element {
   return (
     <>
       {children.split('\n').map((line, i) => (
-        <div key={i}>
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkCjkStrong]}
-            allowedElements={['strong', 'em', 'code', 'a', 'del']}
-            unwrapDisallowed
-            urlTransform={urlTransformAllowDataImage}
-            components={MD_COMPONENTS}
-          >
-            {line || ' '}
-          </ReactMarkdown>
-        </div>
+        <InlineLine key={i} line={line} />
       ))}
     </>
   )
-}
+})

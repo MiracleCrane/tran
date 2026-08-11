@@ -43,6 +43,63 @@ const SESSION_LOAD_MORE_THRESHOLD_PX = 180
 const PREVIEW_WIDTH_PX = 256
 const PREVIEW_MAX_HEIGHT_PX = 168
 const PREVIEW_GAP_PX = 10
+
+/** 悬停预览卡的数据。状态由 SessionPreviewCard 独立持有（模块级 setter 注入），
+ *  不进 Sidebar 的 state——否则每次悬停/移开都整列表重渲染。 */
+interface SessionPreviewData {
+  key: string
+  top: number
+  left: number
+  summary: string
+  cwd?: string
+  lastModified: number
+  firstPrompt?: string
+}
+
+let previewSetter: ((p: SessionPreviewData | null) => void) | null = null
+
+function showSessionPreview(p: SessionPreviewData | null): void {
+  previewSetter?.(p)
+}
+
+function SessionPreviewCard({
+  onHoldOpen,
+  onClose
+}: {
+  onHoldOpen: () => void
+  onClose: () => void
+}): JSX.Element | null {
+  const [preview, setPreview] = useState<SessionPreviewData | null>(null)
+  useEffect(() => {
+    previewSetter = setPreview
+    return () => {
+      if (previewSetter === setPreview) previewSetter = null
+    }
+  }, [])
+  if (!preview) return null
+  return createPortal(
+    <div
+      className="glass-panel tran-enter fixed z-[90] w-64 rounded-2xl p-3 shadow-2xl"
+      style={{ top: preview.top, left: preview.left }}
+      onPointerEnter={onHoldOpen}
+      onPointerLeave={onClose}
+    >
+      <div className="truncate text-xs font-medium text-zinc-100">{preview.summary}</div>
+      {preview.firstPrompt && (
+        <div className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-zinc-400">
+          {preview.firstPrompt}
+        </div>
+      )}
+      <div className="mt-1.5 text-[10px] text-zinc-600">{relTime(preview.lastModified)}</div>
+      {preview.cwd && (
+        <div className="mt-0.5 truncate font-mono text-[10px] text-zinc-600" title={preview.cwd}>
+          {preview.cwd}
+        </div>
+      )}
+    </div>,
+    document.body
+  )
+}
 const BACKEND_SORT_ORDER: Record<ClaudeExecutionBackend, number> = { windows: 0, wsl: 1 }
 
 function bucketOf(ts: number): string {
@@ -330,17 +387,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const [collapsedGroupLabels, setCollapsedGroupLabels] = useState<Set<string>>(() => new Set())
   const [appVersion, setAppVersion] = useState('')
   const [aiNamingBusy, setAiNamingBusy] = useState(false)
-  /** 会话条目悬停预览（零 token，磁盘读 state.json）。 */
-  const [preview, setPreview] = useState<{
-    key: string
-    top: number
-    left: number
-    summary: string
-    cwd?: string
-    lastModified: number
-    firstPrompt?: string
-  } | null>(null)
   const previewTimerRef = useRef<number | null>(null)
+  /** 预览请求代际号（见 schedulePreview 的竞态守卫）。 */
+  const previewSeqRef = useRef(0)
 
   useEffect(() => {
     void window.api.getAppVersion().then(setAppVersion).catch(() => {})
@@ -360,6 +409,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       const ids = sessions.map((s) => s.sessionId).filter((id) => !aiTitles[id])
       if (!ids.length) return
       await window.api.generateAiTitles(ids)
+    } catch {
+      // IPC 失败不能变成未捕获 rejection（本函数被 void 调用）；批量命名是
+      // "有则更好"，失败静默即可，busy 复位在 finally。
     } finally {
       setAiNamingBusy(false)
     }
@@ -390,11 +442,16 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         Math.max(PREVIEW_GAP_PX, rect.top - 4),
         Math.max(PREVIEW_GAP_PX, window.innerHeight - PREVIEW_MAX_HEIGHT_PX)
       )
+      // 竞态守卫：快速掠过多行时，先发的慢请求可能在新行的请求之后才返回，
+      // 用旧行内容/坐标覆盖新行的预览卡。seq 记本次调度的代际，回来时不是
+      // 最新一发就丢弃。
+      const seq = ++previewSeqRef.current
       void window.api
         .getSessionPreview(s.sessionId)
         .catch(() => ({} as SessionPreview))
         .then((data) => {
-          setPreview({
+          if (seq !== previewSeqRef.current) return
+          showSessionPreview({
             key,
             top,
             left,
@@ -409,7 +466,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
 
   const hidePreview = (): void => {
     cancelPreviewTimer()
-    setPreview(null)
+    // 作废在途请求：不然移开后才返回的 IPC 会把预览卡又弹回来。
+    previewSeqRef.current++
+    showSessionPreview(null)
   }
   const [pinnedSessionKeys, setPinnedSessionKeys] = useState<Set<string>>(() => readPinnedSessions())
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
@@ -1761,30 +1820,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         onCancel={() => setConfirmBatch(false)}
       />
 
-      {/* 会话条目悬停预览（零 token：标题 / 首条消息 / 更新时间 / 目录） */}
-      {preview &&
-        createPortal(
-          <div
-            className="glass-panel tran-enter fixed z-[90] w-64 rounded-2xl p-3 shadow-2xl"
-            style={{ top: preview.top, left: preview.left }}
-            onPointerEnter={cancelPreviewTimer}
-            onPointerLeave={hidePreview}
-          >
-            <div className="truncate text-xs font-medium text-zinc-100">{preview.summary}</div>
-            {preview.firstPrompt && (
-              <div className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-zinc-400">
-                {preview.firstPrompt}
-              </div>
-            )}
-            <div className="mt-1.5 text-[10px] text-zinc-600">{relTime(preview.lastModified)}</div>
-            {preview.cwd && (
-              <div className="mt-0.5 truncate font-mono text-[10px] text-zinc-600" title={preview.cwd}>
-                {preview.cwd}
-              </div>
-            )}
-          </div>,
-          document.body
-        )}
+      {/* 会话条目悬停预览（零 token：标题 / 首条消息 / 更新时间 / 目录）。
+          状态在 SessionPreviewCard 自己手里：悬停 setState 不再重渲染整个
+          侧栏列表（几百行会话行全量重来是悬停卡顿的来源）。 */}
+      <SessionPreviewCard onHoldOpen={cancelPreviewTimer} onClose={hidePreview} />
     </div>
   )
 }

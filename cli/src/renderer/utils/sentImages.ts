@@ -148,7 +148,14 @@ export function initSentImageRecording(): void {
       recordedItemIds.add(item.id)
       void recordSentImages(sessionKey, item.text, atts)
     }
-    if (recordedItemIds.size > 5000) recordedItemIds.clear()
+    // 超限只淘汰已不在 items 里的 id：整个 clear 会让仍在场的带图消息下次
+    // 扫描被重复落盘（IndexedDB 重复条目会让历史匹配错位吞掉后续匹配）。
+    if (recordedItemIds.size > 5000) {
+      const alive = new Set(s.items.map((i) => i.id))
+      for (const id of recordedItemIds) {
+        if (!alive.has(id)) recordedItemIds.delete(id)
+      }
+    }
   }
   scan()
   useSessionStore.subscribe(scan)

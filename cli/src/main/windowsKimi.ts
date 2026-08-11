@@ -141,7 +141,9 @@ export function resolveWindowsKimiCommand(): Promise<WindowsKimiCommand> {
       return { command: 'kimi', argsPrefix: [], displayPath: 'kimi' }
     })()
       .then((resolved) => {
-        cached = resolved
+        // 全部探测失败的裸 'kimi' 兜底**不缓存**：用户随后装好 kimi（或升级
+        // 挪了位置）后，缓存会让本进程每次 spawn 继续 ENOENT，直到重启应用。
+        if (resolved.displayPath !== 'kimi') cached = resolved
         return resolved
       })
       .finally(() => {

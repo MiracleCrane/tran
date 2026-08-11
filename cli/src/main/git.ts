@@ -33,9 +33,13 @@ function runGit(cwd: string, args: string[], timeout = 10_000): Promise<{ stdout
       reject(new Error(`git ${args.join(' ')} timed out after ${timeout}ms`))
     }, timeout)
 
-    child.stdout.on('data', (d: Buffer) => {
+    // setEncoding 让 Node 用 StringDecoder 处理跨 chunk 的 UTF-8 多字节边界：
+    // 逐 chunk d.toString() 时，中文路径/内容恰好切在边界上必出 U+FFFD 乱码。
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (d: string) => {
       if (out.length >= MAX_GIT_OUTPUT_CHARS) return
-      out += d.toString()
+      out += d
       if (out.length >= MAX_GIT_OUTPUT_CHARS) {
         out = out.slice(0, MAX_GIT_OUTPUT_CHARS) + TRUNCATION_NOTICE
         truncated = true
@@ -43,8 +47,8 @@ function runGit(cwd: string, args: string[], timeout = 10_000): Promise<{ stdout
         // 只是不再往缓冲里堆。
       }
     })
-    child.stderr.on('data', (d: Buffer) => {
-      if (err.length < 64 * 1024) err += d.toString()
+    child.stderr.on('data', (d: string) => {
+      if (err.length < 64 * 1024) err += d
     })
     child.on('close', (code) => {
       clearTimeout(timer)

@@ -38,6 +38,9 @@ async function fetchBalance(): Promise<DeepseekBalanceResult> {
   if (!key) return { ok: false, error: NO_KEY_MESSAGE }
 
   const controller = new AbortController()
+  // 超时要盖住整个请求（响应头 + body）：原先 clearTimeout 在 fetch 的
+  // finally 里，body 停滞时 response.json() 无限期挂起，inflight 永不清空，
+  // 余额从此永远"加载中"直到重启。
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   let response: Response
   try {
@@ -47,16 +50,17 @@ async function fetchBalance(): Promise<DeepseekBalanceResult> {
       signal: controller.signal
     })
   } catch (error) {
+    clearTimeout(timer)
     log('deepseek', `balance fetch failed: ${error instanceof Error ? error.message : String(error)}`)
     return { ok: false, error: NETWORK_ERROR_MESSAGE }
-  } finally {
-    clearTimeout(timer)
   }
 
   if (response.status === 401 || response.status === 403) {
+    clearTimeout(timer)
     return { ok: false, error: 'DeepSeek API key 无效，请在设置里检查' }
   }
   if (!response.ok) {
+    clearTimeout(timer)
     return { ok: false, error: `DeepSeek 接口返回 ${response.status}` }
   }
 
@@ -75,6 +79,8 @@ async function fetchBalance(): Promise<DeepseekBalanceResult> {
   } catch (error) {
     log('deepseek', `balance parse failed: ${error instanceof Error ? error.message : String(error)}`)
     return { ok: false, error: 'DeepSeek 返回数据无法解析' }
+  } finally {
+    clearTimeout(timer)
   }
 }
 

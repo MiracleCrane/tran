@@ -25,11 +25,20 @@ function stamp(items: readonly { id: string; isHistory?: boolean }[]): void {
 }
 
 let subscribed = false
+/** 上次扫描过的 items 引用：流式期间 store 每帧更新，但多数更新根本没动
+ *  items（status/plan 等），动了也只是尾部追加——引用判等短路掉全量遍历
+ *  （与 sentImages.ts 的同型优化一致）。 */
+let lastScannedItems: unknown = null
 function ensureSubscription(): void {
   if (subscribed) return
   subscribed = true
+  lastScannedItems = useSessionStore.getState().items
   stamp(useSessionStore.getState().items)
-  useSessionStore.subscribe((s) => stamp(s.items))
+  useSessionStore.subscribe((s) => {
+    if (s.items === lastScannedItems) return
+    lastScannedItems = s.items
+    stamp(s.items)
+  })
 }
 
 /** live 消息的接收时间（首次出现在 items 时打上）；历史消息返回 undefined。 */

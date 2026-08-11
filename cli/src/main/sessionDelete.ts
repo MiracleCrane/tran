@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { basename, join, resolve, sep } from 'node:path'
 import { log } from './logger'
 import { kimiSessionIndexPath, kimiSessionsRoot } from './kimiHome'
@@ -46,18 +47,19 @@ function safeResolveSessionDir(sessionId: string, dir: string): string | null {
   return resolvedDir
 }
 
-function deleteDir(sessionId: string, dir: string): string | null {
+async function deleteDir(sessionId: string, dir: string): Promise<string | null> {
   const resolvedDir = safeResolveSessionDir(sessionId, dir)
   if (!resolvedDir) return '路径校验失败，拒绝删除'
   try {
-    rmSync(resolvedDir, { recursive: true, force: true })
+    // 异步删：大转录目录 rmSync 会把主进程冻住几秒（UI 全卡）。
+    await rm(resolvedDir, { recursive: true, force: true })
     return null
   } catch (error) {
     return error instanceof Error ? error.message : String(error)
   }
 }
 
-export function deleteKimiSession(sessionId: string): DeleteResult {
+export async function deleteKimiSession(sessionId: string): Promise<DeleteResult> {
   // sessionId 形式校验（kimi 生成的固定格式，防注入）。
   if (!/^session_[\w-]+$/.test(sessionId)) return { ok: false, error: '非法会话 ID' }
 
@@ -109,7 +111,7 @@ export function deleteKimiSession(sessionId: string): DeleteResult {
   // 3) 删目录（严格路径校验）；索引行已移除，目录不存在也视为成功。
   let removedDir = false
   if (sessionDir && existsSync(sessionDir)) {
-    const error = deleteDir(sessionId, sessionDir)
+    const error = await deleteDir(sessionId, sessionDir)
     if (error) return { ok: false, error: `删除会话目录失败：${error}` }
     removedDir = true
   }
@@ -133,7 +135,7 @@ export function deleteKimiSession(sessionId: string): DeleteResult {
  *
  *  安全约束：只删 mtime 超过 1 小时的目录——kimi 先建目录后写索引，新目录
  *  可能还没来得及入索引，时间窗兜底避免误删别的 kimi 实例的活跃会话。 */
-export function sweepOrphanSessionDirs(maxAgeMs = 60 * 60 * 1000): void {
+export async function sweepOrphanSessionDirs(maxAgeMs = 60 * 60 * 1000): Promise<void> {
   try {
     const indexed = new Set<string>()
     try {
@@ -164,7 +166,7 @@ export function sweepOrphanSessionDirs(maxAgeMs = 60 * 60 * 1000): void {
         const dir = join(wdDir, entry.name)
         try {
           if (statSync(dir).mtimeMs > cutoff) continue
-          rmSync(dir, { recursive: true, force: true })
+          await rm(dir, { recursive: true, force: true })
           swept++
         } catch { /* 单个失败不阻塞整体清扫 */ }
       }

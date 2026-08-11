@@ -25,6 +25,9 @@ const UNKNOWN: ThinkingTranslateStatus = { engine: null, autoFellBack: false }
 
 let cached: ThinkingTranslateStatus = UNKNOWN
 let inflight: Promise<void> | null = null
+/** 代际号：refresh 后旧的在途请求作废——否则旧请求晚返回会把新配置的状态
+ *  覆盖回旧值，旧请求的 finally 还会清掉新请求的 inflight。 */
+let loadSeq = 0
 const listeners = new Set<(s: ThinkingTranslateStatus) => void>()
 
 function emit(next: ThinkingTranslateStatus): void {
@@ -34,9 +37,11 @@ function emit(next: ThinkingTranslateStatus): void {
 
 function load(): Promise<void> {
   if (inflight) return inflight
+  const seq = ++loadSeq
   inflight = window.api
     .getTranslateConfig()
     .then((cfg) => {
+      if (seq !== loadSeq) return
       const hasBaidu = !!cfg.baidu.appId.trim()
       // 与主进程 resolveThinkingTranslateEngine 的解析顺序保持一致：
       // follow → 用描述翻译那个开关；auto → 有百度密钥走百度，否则便宜模型。
@@ -53,11 +58,12 @@ function load(): Promise<void> {
       emit({ engine, autoFellBack: cfg.thinkingEngine === 'auto' && !hasBaidu })
     })
     .catch(() => {
+      if (seq !== loadSeq) return
       // 拉不到配置就当"未知"：宁可不提示，也不要瞎报一个通道误导用户。
       emit(UNKNOWN)
     })
     .finally(() => {
-      inflight = null
+      if (seq === loadSeq) inflight = null
     })
   return inflight
 }

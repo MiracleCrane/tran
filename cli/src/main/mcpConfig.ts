@@ -63,12 +63,23 @@ function pathFor(cwd: string, scope: McpScope): string {
   return scope === 'project' ? projectConfigPath(cwd) : userConfigPath()
 }
 
+/** 服务器名必须是普通键：空名/原型键（__proto__ 等）会污染对象原型或
+ *  静默丢失（JSON.stringify 不落盘），写进 kimi CLI 要解析的文件前先挡。 */
+function assertServerName(name: string): void {
+  const trimmed = name.trim()
+  if (!trimmed) throw new Error('MCP 服务器名不能为空')
+  if (['__proto__', 'constructor', 'prototype'].includes(trimmed)) {
+    throw new Error(`非法的 MCP 服务器名：${trimmed}`)
+  }
+}
+
 export function saveMcpServer(args: {
   cwd: string
   scope: McpScope
   name: string
   config: McpServerConfigInput
 }): void {
+  assertServerName(args.name)
   const path = pathFor(args.cwd, args.scope)
   const root = readRoot(path)
   const servers = locateServers(root)

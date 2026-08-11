@@ -226,6 +226,19 @@ export default function UsageRings(): JSX.Element {
     }
   }, [open, refreshPlan])
 
+  // 卡片开着（尤其钉住）时低频 tick：resetParts 的「X 小时 X 分钟后重置」是
+  // 渲染时算的，没有任何驱动的话钉住的卡倒计时会永远冻结；顺带让 60s 的
+  // plan 陈旧阈值在长开期间也能被检查到。
+  const [, setUsageTick] = useState(0)
+  useEffect(() => {
+    if (!open) return
+    const timer = window.setInterval(() => {
+      setUsageTick((v) => v + 1)
+      if (Date.now() - planFetchedAtRef.current > PLAN_STALE_MS) refreshPlan()
+    }, 30_000)
+    return () => window.clearInterval(timer)
+  }, [open, refreshPlan])
+
   useEffect(() => {
     if (!pinned) return
     const onPointerDown = (event: PointerEvent): void => {

@@ -244,6 +244,9 @@ function safeAssetName(assetUrl: string, fallback = 'Tran-update-setup.exe'): st
   try {
     const parsed = new URL(assetUrl)
     const name = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() ?? '')
+    // 解码后必须是"纯文件名"：URL 里编码的 %5C（\）/ %2F（/）/ .. 解码后能让
+    // join(updateDir, name) 越出下载目录，而下载终点会被 shell.openPath 执行。
+    if (/[\\/:]/.test(name) || name.includes('..')) return fallback
     return /setup\.exe$/i.test(name) ? name : fallback
   } catch {
     return fallback

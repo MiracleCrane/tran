@@ -934,23 +934,27 @@ export class KimiBackend {
    *  并清掉本地标题记录。删除失败只记日志、不阻塞导航。 */
   private discardEmptyShell(session: ActiveKimiSession): void {
     if (!session.createdViaNew || session.gotRealPrompt || !session.acpSessionId) return
-    const result = deleteKimiSession(session.acpSessionId)
-    if (result.ok) {
-      removeSessionTitle(session.acpSessionId)
-      log('kimi', `discarded empty session shell ${session.acpSessionId}`)
-      // 通知渲染层刷新侧栏（空壳条目立即消失）；删除失败不发。15 秒的补刀
-      // 删除（见下）不再通知——条目在首次刷新后已不可见。
-      this.h.onSessionsChanged?.()
-      // kimi ACP 进程在删除后会异步重建目录壳（空的 agents/ 残留，实测）。
-      // 延迟补一刀：仍在索引外就直接再删；兜底扫尾交给启动时的孤儿清扫。
-      const acpSessionId = session.acpSessionId
-      setTimeout(() => {
-        const retry = deleteKimiSession(acpSessionId)
-        if (!retry.ok) log('kimi', `empty shell re-delete failed: ${retry.error ?? 'unknown'}`)
-      }, 15_000).unref()
-    } else {
-      log('kimi', `discard empty shell failed: ${result.error ?? 'unknown'}`)
-    }
+    const acpSessionId = session.acpSessionId
+    // deleteKimiSession 已改异步（大目录 rm 不再冻主进程）；这里保持
+    // fire-and-forget——空壳治理本来就"删除失败只记日志、不阻塞导航"。
+    void deleteKimiSession(acpSessionId).then((result) => {
+      if (result.ok) {
+        removeSessionTitle(acpSessionId)
+        log('kimi', `discarded empty session shell ${acpSessionId}`)
+        // 通知渲染层刷新侧栏（空壳条目立即消失）；删除失败不发。15 秒的补刀
+        // 删除（见下）不再通知——条目在首次刷新后已不可见。
+        this.h.onSessionsChanged?.()
+        // kimi ACP 进程在删除后会异步重建目录壳（空的 agents/ 残留，实测）。
+        // 延迟补一刀：仍在索引外就直接再删；兜底扫尾交给启动时的孤儿清扫。
+        setTimeout(() => {
+          void deleteKimiSession(acpSessionId).then((retry) => {
+            if (!retry.ok) log('kimi', `empty shell re-delete failed: ${retry.error ?? 'unknown'}`)
+          })
+        }, 15_000).unref()
+      } else {
+        log('kimi', `discard empty shell failed: ${result.error ?? 'unknown'}`)
+      }
+    })
   }
 
   // MCP server 状态来自隐藏 /mcp 轮（ACP initialize/session-new 均不下发

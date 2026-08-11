@@ -568,6 +568,10 @@ export default function SettingsPanel(): JSX.Element {
       setModels(prefs.composerModels ?? cleanModels)
       emitForgeEvent('modelOptionsChanged')
       flashSaved()
+    } catch (error) {
+      // 保存失败必须可见：原先只有 finally，IPC 失败是未捕获 rejection，
+      // 按钮静默复位，用户以为保存成功了。复用顶部的错误横幅。
+      setLoadError(error instanceof Error ? error.message : String(error))
     } finally {
       setSaving(false)
     }
@@ -708,7 +712,7 @@ export default function SettingsPanel(): JSX.Element {
         {/* 初始加载失败：页面照常渲染（显示默认值），顶部给错误与重试入口。 */}
         {loadError && (
           <div className="flex items-center gap-3 rounded-xl border border-red-400/20 bg-red-950/30 px-3 py-2 text-xs text-red-300">
-            <span className="min-w-0 flex-1">设置加载失败：{loadError}</span>
+            <span className="min-w-0 flex-1">设置操作失败：{loadError}</span>
             <button
               type="button"
               onClick={loadInitial}

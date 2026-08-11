@@ -79,6 +79,10 @@ function ensureClient(): Promise<AcpClient> {
   }
   if (!clientPromise) {
     let promise!: Promise<AcpClient>
+    /** 本代连接自己的句柄：反向请求必须用它应答，不能读模块级 client——
+     *  建连未完成时后者还是 null（静默不回，对端挂等），连接换代后旧连接的
+     *  迟到请求还可能经新连接应答（id 空间不同，纯属错发）。 */
+    let own: AcpClient | null = null
     promise = (async () => {
       const resolved = await resolveWindowsKimiCommand()
       return AcpClient.start({
@@ -96,7 +100,7 @@ function ensureClient(): Promise<AcpClient> {
       onNotification: () => {},
       onServerRequest: (msg) => {
         // 历史连接不处理任何反向请求（权限/文件读写都属于活跃会话）。
-        if (msg.id !== undefined) client?.respondError(msg.id, 'Tran history client does not handle requests.', -32601)
+        if (msg.id !== undefined) own?.respondError(msg.id, 'Tran history client does not handle requests.', -32601)
       },
       onClose: () => {
         // 只清理“当前这一代”连接的关闭：过期被换下的旧连接 close 事件晚到时，
@@ -108,6 +112,7 @@ function ensureClient(): Promise<AcpClient> {
       }
     })
     })().then((started) => {
+      own = started
       client = started
       return started
     }).catch((error) => {
