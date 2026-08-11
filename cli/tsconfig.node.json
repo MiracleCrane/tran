@@ -17,6 +17,7 @@
     "src/main/**/*",
     "src/preload/**/*",
     "src/shared/**/*",
+    "src/mcp-browser/**/*",
     "electron.vite.config.ts"
   ]
 }

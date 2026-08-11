@@ -14,6 +14,10 @@ extraResources:
     to: icon.ico
   - from: extension
     to: browser-extension
+  # MCP server 必须在 asar 外：ELECTRON_RUN_AS_NODE 模式读不了 asar 里的文件。
+  # 放 out/mcp/ 而不是 out/main/ 是因为 electron-vite dev 会清空 out/main。
+  - from: out/mcp/mcp-browser.js
+    to: mcp-browser.js
 asar: true
 compression: maximum
 electronLanguages:

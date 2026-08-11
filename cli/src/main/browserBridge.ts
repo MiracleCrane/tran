@@ -47,7 +47,7 @@ let nextCallId = 1
 const pendingCalls = new Map<string, PendingCall>()
 let notifyStatus: ((status: BrowserBridgeStatus) => void) | null = null
 
-function tokenFilePath(): string {
+export function tokenFilePath(): string {
   return join(app.getPath('userData'), 'browser-bridge-token.json')
 }
 
@@ -154,7 +154,14 @@ function handleConnection(socket: WebSocket): void {
 
   socket.once('message', (data: RawData) => {
     clearTimeout(handshakeTimer)
-    let msg: { type?: string; token?: string; extensionVersion?: string; protocolVersion?: number }
+    let msg: {
+      type?: string
+      token?: string
+      role?: string
+      extensionVersion?: string
+      clientVersion?: string
+      protocolVersion?: number
+    }
     try {
       msg = JSON.parse(data.toString())
     } catch {
@@ -177,6 +184,18 @@ function handleConnection(socket: WebSocket): void {
         })
       )
       socket.close()
+      return
+    }
+
+    // client 角色：MCP server 等本机调用方，把工具调用转发给扩展执行。
+    // 不带 role 视为扩展（兼容 0.2.0 及更早的扩展）。
+    if (msg.role === 'client') {
+      socket.send(JSON.stringify({ type: 'hello_ok', tranVersion: app.getVersion() }))
+      log('browser-bridge', `client connected (v${msg.clientVersion ?? '?'})`)
+      socket.on('message', (raw: RawData) => handleClientMessage(socket, raw))
+      socket.on('error', (error) => {
+        log('browser-bridge', `client socket error: ${error.message}`)
+      })
       return
     }
 
@@ -207,6 +226,33 @@ function handleConnection(socket: WebSocket): void {
       log('browser-bridge', `extension socket error: ${error.message}`)
     })
   })
+}
+
+/** client（MCP server 等）的工具调用：{id, tool, args} → 转发扩展 → 原样回结果。
+ *  client 自己的 id 原样带回；与扩展侧的内部 id 空间互不相干。 */
+function handleClientMessage(socket: WebSocket, raw: RawData): void {
+  let msg: { type?: string; id?: string; tool?: string; args?: unknown }
+  try {
+    msg = JSON.parse(raw.toString())
+  } catch {
+    return
+  }
+  if (msg.type === 'pong') return
+  if (typeof msg.id !== 'string' || typeof msg.tool !== 'string') return
+  const id = msg.id
+  callBrowserTool(msg.tool, msg.args)
+    .then((result) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ id, ok: true, result }))
+      }
+    })
+    .catch((error: unknown) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(
+          JSON.stringify({ id, ok: false, error: error instanceof Error ? error.message : String(error) })
+        )
+      }
+    })
 }
 
 function handleExtensionMessage(raw: RawData): void {

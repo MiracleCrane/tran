@@ -7,13 +7,14 @@
   "main": "./out/main/index.js",
   "author": "",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "npm run build:mcp && electron-vite dev",
+    "build": "electron-vite build && npm run build:mcp",
     "preview": "electron-vite preview",
-    "build:win": "electron-vite build && electron-builder --config electron-builder.yml --win",
+    "build:win": "electron-vite build && npm run build:mcp && electron-builder --config electron-builder.yml --win",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
-    "typecheck": "npm run typecheck:node && npm run typecheck:web"
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "build:mcp": "esbuild src/mcp-browser/index.ts --bundle --platform=node --format=cjs --outfile=out/mcp/mcp-browser.js --external:bufferutil --external:utf-8-validate"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",

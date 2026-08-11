@@ -7,6 +7,8 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
+        // 注意：mcp-browser 不走这里——多入口会把 ws 拆成共享 chunk，而它
+        // 必须是单文件（extraResources 只带一个 js）。见 build:mcp（esbuild）。
         input: { index: resolve(__dirname, 'src/main/index.ts') },
         // ws 的可选原生加速依赖：留成运行时 require，ws 内部 try/catch
         // 会在缺失时退回纯 JS 实现；打进 bundle 反而变成硬依赖报错。

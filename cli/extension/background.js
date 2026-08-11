@@ -82,6 +82,7 @@ async function connect() {
     socket.send(
       JSON.stringify({
         type: 'hello',
+        role: 'extension',
         token: pairing.token,
         extensionVersion: EXTENSION_VERSION,
         protocolVersion: PROTOCOL_VERSION
@@ -254,6 +255,83 @@ function extractPageContent(maxChars) {
   }
 }
 
+/**
+ * 注入执行：按 ref（read_page 编号）或 CSS selector 点击元素。
+ * click() 前滚动到可视区；ref 失效（导航过）给明确提示。
+ */
+function clickElement(ref, selector) {
+  let el = null
+  if (typeof ref === 'number') {
+    const refs = window.__tranRefs
+    if (!refs || !refs[ref]) {
+      return { error: `ref_${ref} 不存在或已失效（页面导航过？先重新 read_page）` }
+    }
+    el = refs[ref]
+    if (!el.isConnected) return { error: `ref_${ref} 的元素已从页面移除，先重新 read_page` }
+  } else if (typeof selector === 'string') {
+    el = document.querySelector(selector)
+    if (!el) return { error: `没有匹配 selector 的元素: ${selector}` }
+  } else {
+    return { error: '必须提供 ref 或 selector 之一' }
+  }
+  el.scrollIntoView({ block: 'center', inline: 'center' })
+  const desc = (el.innerText || el.value || el.getAttribute('aria-label') || el.tagName)
+    .trim().replace(/\s+/g, ' ').slice(0, 80)
+  el.click()
+  return { clicked: desc }
+}
+
+/**
+ * 注入执行：向输入元素写文本。用 native setter 绕过 React 等框架的受控
+ * 输入（直接赋 value 不触发它们的 onChange），再补 input/change 事件；
+ * submit=true 时按一次回车。
+ */
+function typeIntoElement(ref, selector, text, submit) {
+  let el = null
+  if (typeof ref === 'number') {
+    const refs = window.__tranRefs
+    if (!refs || !refs[ref]) {
+      return { error: `ref_${ref} 不存在或已失效（页面导航过？先重新 read_page）` }
+    }
+    el = refs[ref]
+    if (!el.isConnected) return { error: `ref_${ref} 的元素已从页面移除，先重新 read_page` }
+  } else if (typeof selector === 'string') {
+    el = document.querySelector(selector)
+    if (!el) return { error: `没有匹配 selector 的元素: ${selector}` }
+  } else {
+    return { error: '必须提供 ref 或 selector 之一' }
+  }
+  el.scrollIntoView({ block: 'center', inline: 'center' })
+  el.focus()
+  const tag = el.tagName.toLowerCase()
+  if (tag === 'input' || tag === 'textarea') {
+    const proto = tag === 'input' ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value').set
+    setter.call(el, text)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  } else if (el.isContentEditable) {
+    el.textContent = text
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text }))
+  } else {
+    return { error: `元素 <${tag}> 不可输入（需要 input/textarea/contenteditable）` }
+  }
+  if (submit) {
+    const kbOpts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }
+    // 合成键盘事件不会触发浏览器原生的表单提交，所以 keydown 没被
+    // preventDefault 且元素在表单里时手动补一次（模拟原生语义，避免
+    // JS 自己处理了 Enter 的页面被提交两次）。
+    const notPrevented = el.dispatchEvent(new KeyboardEvent('keydown', kbOpts))
+    el.dispatchEvent(new KeyboardEvent('keyup', kbOpts))
+    const form = el.form
+    if (notPrevented && form) {
+      if (form.requestSubmit) form.requestSubmit()
+      else form.submit()
+    }
+  }
+  return { typed: text.length, submitted: Boolean(submit) }
+}
+
 const NAVIGATE_TIMEOUT_MS = 15000
 const READ_PAGE_DEFAULT_MAX_CHARS = 30000
 
@@ -319,6 +397,47 @@ async function handleToolCall(msg) {
       const first = results && results[0]
       if (!first || !first.result) throw new Error('页面脚本没有返回内容')
       return { tabId: tab.id, url: tab.url, title: tab.title, ...first.result }
+    }
+
+    case 'click':
+    case 'type': {
+      const tab = await resolveTab(args.tabId)
+      const func = msg.tool === 'click' ? clickElement : typeIntoElement
+      const funcArgs =
+        msg.tool === 'click'
+          ? [args.ref, args.selector]
+          : [args.ref, args.selector, String(args.text ?? ''), args.submit === true]
+      let results
+      try {
+        results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func, args: funcArgs })
+      } catch (e) {
+        throw new Error(`无法在该页面执行：${e && e.message ? e.message : e}（受保护页面不允许注入）`)
+      }
+      const first = results && results[0]
+      if (!first || !first.result) throw new Error('页面脚本没有返回结果')
+      if (first.result.error) throw new Error(first.result.error)
+      return { tabId: tab.id, ...first.result }
+    }
+
+    case 'screenshot': {
+      const tab = await resolveTab(args.tabId)
+      // captureVisibleTab 只能拍窗口当前可见的标签页：先激活目标页。
+      if (!tab.active) {
+        await chrome.tabs.update(tab.id, { active: true })
+        await new Promise((r) => setTimeout(r, 350))
+      }
+      await chrome.windows.update(tab.windowId, { focused: true })
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+        format: 'jpeg',
+        quality: typeof args.quality === 'number' ? args.quality : 70
+      })
+      const comma = dataUrl.indexOf(',')
+      return {
+        tabId: tab.id,
+        url: tab.url,
+        mimeType: 'image/jpeg',
+        base64: dataUrl.slice(comma + 1)
+      }
     }
 
     default:

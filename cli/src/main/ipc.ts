@@ -18,7 +18,14 @@ import {
   setActiveSummaryProfile
 } from './settings'
 import { saveMcpServer, deleteMcpServer } from './mcpConfig'
-import { startBrowserBridge, stopBrowserBridge, getBrowserBridgeStatus, callBrowserTool } from './browserBridge'
+import {
+  startBrowserBridge,
+  stopBrowserBridge,
+  getBrowserBridgeStatus,
+  callBrowserTool,
+  tokenFilePath
+} from './browserBridge'
+import { registerMcpBrowserServer } from './mcpBrowserRegistration'
 import {
   listProviders,
   getActiveProvider,
@@ -342,7 +349,11 @@ export function registerIpc(
   app.once('before-quit', stopProviderConfigWatch)
 
   // 浏览器控制桥：启动失败只记日志（不能影响主流程），状态变化推给渲染层。
-  void startBrowserBridge((status) => send('forge:browser-bridge-status', status))
+  // 桥起来后把 tran-browser MCP server 幂等注册进 kimi 的 mcp.json（安装
+  // 路径变动时启动自动修正）。
+  void startBrowserBridge((status) => send('forge:browser-bridge-status', status)).then(() => {
+    registerMcpBrowserServer(tokenFilePath())
+  })
   app.once('before-quit', stopBrowserBridge)
 
   const bridge = new AgentBridge({
