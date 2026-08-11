@@ -50,7 +50,7 @@ export default function BrowserBridgeCard(): JSX.Element {
   const textClass = connected ? 'text-emerald-400' : running ? 'text-amber-400' : 'text-red-400'
 
   return (
-    <div className="mt-6 rounded-xl border border-border-subtle bg-bg-panel px-4 py-3">
+    <section className="glass-panel-soft rounded-2xl p-4">
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium text-zinc-100">浏览器控制</span>
         <span className={`inline-flex items-center gap-1.5 text-[11px] ${textClass}`}>
@@ -109,6 +109,6 @@ export default function BrowserBridgeCard(): JSX.Element {
           <li>扩展图标显示 ON、此处显示「已连接」即配对成功。</li>
         </ol>
       )}
-    </div>
+    </section>
   )
 }

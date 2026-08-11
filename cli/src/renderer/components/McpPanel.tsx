@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import McpServerFormModal from './McpServerFormModal'
-import BrowserBridgeCard from './BrowserBridgeCard'
 import type { McpServerEntry, McpServerStatusKind, McpScope } from '../../shared/ipc'
 import { RefreshIcon, ToolPanelAlert, ToolPanelButton } from './ToolPanelChrome'
 import { useTransientFlag } from '../hooks/useTransientFlag'
@@ -351,8 +350,6 @@ export default function McpPanel(): JSX.Element {
             )
           })}
         </div>
-
-        <BrowserBridgeCard />
       </div>
 
       {formMode && meta && (

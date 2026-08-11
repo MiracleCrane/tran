@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ShortcutSettings from './ShortcutSettings'
+import BrowserBridgeCard from './BrowserBridgeCard'
 import ConfirmDialog from './ConfirmDialog'
 import type {
   ComposerModel,
@@ -966,6 +967,8 @@ export default function SettingsPanel(): JSX.Element {
             <div className="mt-2 text-[11px] leading-relaxed text-red-300">{importMessage}</div>
           )}
         </section>
+
+        <BrowserBridgeCard />
 
         <section className="glass-panel-soft rounded-2xl p-4">
           <div className="mb-4">
