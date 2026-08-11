@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.0.81 - 2026-08-11
+
+### 中文
+
+- 新增:**浏览器控制（Chrome 扩展路线）**。kimi 现在能操作你日常在用、登录态齐全的真实 Chrome:列标签页、开/切/关标签页、导航、读页面（正文 + 可交互元素 ref 编号）、点击、输入（可回车提交）、截图。
+  - 一次性配对:「设置 → 浏览器控制」里复制配对码 → chrome://extensions 开发者模式「加载已解压的扩展程序」选 Tran 安装目录的 `resources/browser-extension` → 扩展选项里粘贴。之后重启/升级全自动重连。
+  - 安全:桥只听 127.0.0.1,握手必须带配对 token;端口漂移时扩展先要求服务端出示 HMAC 身份证明再交 token。
+  - 实现:MV3 扩展 ↔ Tran 内置 WebSocket 桥 ↔ stdio MCP server(启动时自动注册进 kimi 的 mcp.json,九个 `browser_*` 工具)。
+  - 升级提示:扩展代码更新后需在 chrome://extensions 点刷新重载,UI 会在版本落后时提醒。
+- 开发:dev 实例支持 `TRAN_USER_DATA_DIR` 重定向 userData,可与正式版并行运行。
+
+### English
+
+- New: **browser control (Chrome extension route)**. kimi can now drive your real, logged-in Chrome: list/open/activate/close tabs, navigate, read pages (text + interactive elements with ref ids), click, type (with Enter submit), and screenshot.
+  - One-time pairing: copy the pairing code from Settings → Browser Control, load `resources/browser-extension` as an unpacked extension, paste the code in its options. Reconnects survive restarts and upgrades.
+  - Security: the bridge listens on 127.0.0.1 only and requires the pairing token; on port drift the extension demands an HMAC proof from the server before revealing the token.
+  - Plumbing: MV3 extension ↔ built-in WebSocket bridge ↔ stdio MCP server (auto-registered into kimi's mcp.json, nine `browser_*` tools).
+  - After updating the extension code, reload it in chrome://extensions; the UI warns when the connected version is outdated.
+- Dev: `TRAN_USER_DATA_DIR` redirects userData so a dev instance can run beside the installed app.
+
 ## v1.0.80 - 2026-08-11
 
 ### 中文
