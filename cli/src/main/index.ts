@@ -398,7 +398,13 @@ app.on('before-quit', () => {
   isQuitting = true
   // 空壳治理：退出前清理本次运行中 Tran 新建但没发过消息的空会话（同步
   // 文件删除立即生效；ACP 通知尽力而为，进程随即退出）。
-  if (agentBridge) void agentBridge.shutdown()
+  // shutdown 是异步且 Electron 不 await before-quit：其末尾 kill ACP 子进程的
+  // dispose 可能跑不到，主 ACP 进程（约 300MB）泄漏。disposeSync 在此同步兜底
+  // 保证 kill；dispose 幂等，与 shutdown 末尾的 dispose 不冲突。
+  if (agentBridge) {
+    void agentBridge.shutdown()
+    agentBridge.disposeSync()
+  }
 })
 
 // When the window is actually destroyed, tear down the tray so no icon lingers.

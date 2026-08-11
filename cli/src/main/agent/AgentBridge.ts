@@ -176,8 +176,15 @@ export class AgentBridge {
     for (const sessionId of [...this.sessionBackends.keys()]) {
       await this.close(sessionId).catch(() => {})
     }
-    // 会话收完后释放后端级资源：ACP 子进程不属于任何单个会话，
-    // 不显式 kill 的话在 Windows 上不会随父进程退出而回收。
+    this.disposeSync()
+  }
+
+  /** 同步 kill 所有后端的 ACP 子进程（backend.dispose 本身是同步的）。
+   *  before-quit 里的 async shutdown 是 fire-and-forget、Electron 不 await，
+   *  await close() 循环慢时其末尾的 dispose 可能在进程退出前跑不到——主 ACP
+   *  进程（约 300MB，Windows 不随父回收）就此泄漏。因此在 before-quit 里
+   *  同步再调一次本方法兜底。dispose 幂等，重复调用安全。 */
+  disposeSync(): void {
     for (const backend of Object.values(this.backends)) {
       try {
         backend.dispose?.()

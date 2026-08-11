@@ -295,6 +295,15 @@ async function readPickedFiles(cwd: string, paths: string[], source: string): Pr
         }
         data = (await withPathReadTimeout(readFile(p), `read image ${p}`)).toString('base64')
       } else if (kind === 'text') {
+        // 体积上限前置守卫：直接 readFile 会把整文件读进内存后才 slice，
+        // 拖入几百 MB 的 .log/.csv 会造成内存尖峰甚至 OOM。超过内联上限的
+        // 若干倍就拒读（正常文本附件远小于此；确需大文件另走文件引用）。
+        const MAX_TEXT_FILE_BYTES = MAX_TEXT_INLINE * 8
+        if (stat.size > MAX_TEXT_FILE_BYTES) {
+          throw new Error(
+            `文本文件超过 ${Math.floor(MAX_TEXT_FILE_BYTES / 1024 / 1024)}MB 上限（仅内联前 ${Math.floor(MAX_TEXT_INLINE / 1024)}KB 的小文件）`
+          )
+        }
         data = (await withPathReadTimeout(readFile(p, 'utf-8'), `read text ${p}`)).slice(0, MAX_TEXT_INLINE)
       }
       out.push({
