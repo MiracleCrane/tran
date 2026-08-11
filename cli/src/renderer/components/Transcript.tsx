@@ -631,9 +631,16 @@ const ThinkingBlock = memo(function ThinkingBlock({
         className="flex w-full cursor-pointer select-none items-center gap-1.5 text-left text-xs font-medium text-zinc-500 hover:text-zinc-400"
       >
         <FoldChevron open={open} />
-        {/* 进行中用紫黄流光扫过文字本身，不再在前面挂一颗转圈的月亮：
-            动效落在正在变化的东西上，比额外加一个装饰件干净。 */}
-        <span className={`shrink-0 ${streaming ? 'flow-text flow-text-violet' : ''}`}>
+        {/* 火花图标 + 微光（2026-08 用户点名"思考也要有图标和流光"）：
+            流式中保留紫黄 flow-text（动态=正在想），完成后落到收敛的灰紫微光。 */}
+        <span className={`shrink-0 ${streaming ? 'text-accent/80' : 'text-zinc-500'}`}>
+          <ToolGlyph kind="think" size={12} />
+        </span>
+        <span
+          className={`shrink-0 ${
+            streaming ? 'flow-text flow-text-violet' : 'seg-shimmer seg-shimmer-think'
+          }`}
+        >
           思考过程 · {text.length} 字
         </span>
         {!open && (

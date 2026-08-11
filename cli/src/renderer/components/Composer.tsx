@@ -1276,7 +1276,6 @@ export default function Composer(): JSX.Element {
                       <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   }
-                  className="min-w-28"
                 />
               )}
               {meta && (
@@ -1294,7 +1293,6 @@ export default function Composer(): JSX.Element {
                       <path d="M5 20V14M12 20V8M19 20V4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
                     </svg>
                   }
-                  className="min-w-[4.5rem]"
                 />
               )}
               {meta && (
@@ -1305,7 +1303,6 @@ export default function Composer(): JSX.Element {
                   placement="top"
                   compact
                   naked
-                  className="min-w-28"
                 />
               )}
               {running && (

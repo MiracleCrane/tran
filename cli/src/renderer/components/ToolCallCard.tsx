@@ -321,12 +321,10 @@ const ToolCallCard = memo(function ToolCallCard({
             · {commandNote}
           </span>
         )}
-        {/* 状态：完成只留一枚小 ✓（2026-08 用户："完成"俩字重复一屏太吵），
-            运行中/失败保持文字——那才是需要一眼看到的状态。 */}
+        {/* 状态（2026-08 定稿）：完成**什么都不显示**——成功是默认态，满屏绿勾
+            纯噪声；只有 运行中/失败/被拒 才出现文字。 */}
         <span key={block.status} className={`ml-auto shrink-0 text-[11px] ${meta.text}`}>
-          {block.status === 'done' && !bg?.running ? (
-            <span className="tran-check-pop inline-block text-green-500">✓</span>
-          ) : (
+          {block.status === 'done' && !bg?.running ? null : (
             <>
               {statusLabel}
               {block.elapsed ? ` · ${block.elapsed.toFixed(1)}s` : ''}

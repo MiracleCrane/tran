@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.0.79 - 2026-08-11
+
+### 中文
+
+- 优化:工具行状态最终定稿——完成态什么都不显示（成功是默认态，满屏绿勾纯噪声），只有运行中/失败/被拒出文字。
+- 优化:工具组折叠卡也裸掉（与单行工具同一语言），完成态同样不显示标记。
+- 新增:思考块标题带火花图标 + 灰紫微光（流式中仍是紫黄流光）。
+- 修复:行内路径 chip 的紫色换成正常锌色。
+- 修复:输入框三个下拉（权限/effort/模型）宽度随内容自适应，不再空一截。
+
+### English
+
+- Tool rows finalized: success shows nothing at all (only running/failed/denied print text); group fold cards are frameless too; thinking headers get a sparkle icon + muted shimmer; path chips no longer purple; composer selects size to content.
+
+## v1.0.78 - 2026-08-07
 ## v1.0.78 - 2026-08-07
 
 ### 中文

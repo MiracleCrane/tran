@@ -2,6 +2,7 @@ import { memo, useState } from 'react'
 import type { ToolBlock } from '../types'
 import Collapse from './Collapse'
 import ToolCallCard from './ToolCallCard'
+import { FoldChevron } from './toolIcons'
 
 const WrenchGlyph = (): JSX.Element => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
@@ -14,14 +15,8 @@ const WrenchGlyph = (): JSX.Element => (
   </svg>
 )
 
-const CheckGlyph = (): JSX.Element => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-    <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-)
-
-/** 连续相邻的工具调用聚成的分组块（对齐 kimi web：左侧圆点+图标、右侧状态勾、
- *  可展开查看每个工具调用）。纯渲染层聚合，数据仍来自各自的 ToolBlock。 */
+/** 连续相邻的工具调用聚成的分组块（纯渲染层聚合，数据仍来自各自的 ToolBlock）。
+ *  2026-08 起与单行工具同一语言：裸排版无框，完成态不显示任何标记。 */
 const ToolGroupCard = memo(function ToolGroupCard({
   blocks,
   forceOpen = false,
@@ -40,41 +35,34 @@ const ToolGroupCard = memo(function ToolGroupCard({
   const toolNames = [...new Set(blocks.map((b) => b.name))].join(', ')
 
   return (
+    // 2026-08：组卡也裸掉（与单行工具/思考块同一语言）——框没有信息量，
+    // 可展开由右缘的旋转箭头表达；运行中留一丝紫底信号。
     <div
-      className={`tool-call-card my-[3px] overflow-hidden rounded-lg border bg-[#101116] ${
-        running ? 'is-running' : ''
-      } ${hasError ? 'border-red-900/50' : 'border-border-subtle'}`}
+      className={`tool-call-card my-[3px] overflow-hidden ${running ? 'is-running' : ''}`}
     >
       <button
         type="button"
         aria-expanded={!collapsed}
         onClick={() => setUserToggled(!collapsed)}
-        className="flex w-full items-center gap-2 bg-[#14151b] px-3 py-2 text-left transition-colors hover:bg-[#1b1c23]"
+        className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-white/[0.04]"
       >
-        <span
-          className={`h-2 w-2 shrink-0 rounded-full ${
-            running ? 'animate-pulse bg-blue-400' : hasError ? 'bg-red-500' : 'bg-green-500'
-          }`}
-        />
         <span className="shrink-0 text-zinc-400">
           <WrenchGlyph />
         </span>
         <span className="shrink-0 text-xs font-medium text-zinc-200">{blocks.length} 个工具调用</span>
         <span className="min-w-0 truncate font-mono text-[11px] text-zinc-500">{toolNames}</span>
-        <span className={`shrink-0 text-[11px] ${hasError ? 'text-red-400' : 'text-zinc-500'}`}>
-          {running ? '进行中' : hasError ? '已完成（含失败）' : '已完成'}
-        </span>
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          {!running && !hasError && (
-            <span className="text-green-500">
-              <CheckGlyph />
-            </span>
-          )}
-          <span className="text-xs text-zinc-600">{collapsed ? '▸' : '▾'}</span>
+        {/* 与单行工具同一约定：完成态什么都不显示，只有 进行中/含失败 出文字。 */}
+        {(running || hasError) && (
+          <span className={`shrink-0 text-[11px] ${hasError ? 'text-red-400' : 'text-zinc-500'}`}>
+            {running ? '进行中' : '已完成（含失败）'}
+          </span>
+        )}
+        <span className="ml-auto shrink-0">
+          <FoldChevron open={!collapsed} />
         </span>
       </button>
       <Collapse open={!collapsed}>
-        <div className="border-t border-border-subtle bg-[#0f1015] px-2 py-1.5">
+        <div className="ml-2 border-l border-white/[0.07] px-2 py-1">
           {blocks.map((block) => (
             <ToolCallCard
               key={block.toolUseId}

@@ -106,7 +106,7 @@ function CodeRenderer({ className, children: c }: any): JSX.Element {
           }
           openPathPreview(cwd, path, useUiStore.getState().openAttachmentPreview)
         }}
-        className="mx-0.5 inline rounded bg-white/[0.07] px-1 font-mono text-[0.85em] text-accent transition hover:bg-white/[0.14] hover:underline"
+        className="mx-0.5 inline rounded bg-white/[0.07] px-1 font-mono text-[0.85em] text-zinc-200 transition hover:bg-white/[0.14] hover:underline"
         title={`预览 ${path}；Ctrl+点击在资源管理器中显示`}
       >
         {text}
