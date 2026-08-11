@@ -189,7 +189,11 @@ function handleConnection(socket: WebSocket): void {
     //（HMAC(token, nonce)），验证通过才会发真正的 hello——避免把 token
     // 发给恰好占着端口的陌生本地进程。探测不消耗握手机会。
     if (msg.type === 'probe' && typeof msg.nonce === 'string' && token) {
-      const proof = createHmac('sha256', token).update(msg.nonce.slice(0, 128)).digest('hex')
+      // proof 绑定服务端实际监听端口：中继攻击（占 9224 转发给真 Tran 的
+      // 9225）拿到的是对 9225 的 proof，拨号方按 9224 校验会不匹配而识破。
+      const proof = createHmac('sha256', token)
+        .update(`${msg.nonce.slice(0, 128)}:${listeningPort}`)
+        .digest('hex')
       socket.send(JSON.stringify({ type: 'probe_ok', proof }))
       socket.once('message', onHandshakeMessage)
       return

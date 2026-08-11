@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Tran 浏览器桥",
   "description": "让 Tran 里的 AI 代理操作本机 Chrome（标签页、页面读取、点击输入）。仅连接本机 Tran，需配对码。",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "permissions": ["debugger", "tabs", "activeTab", "storage", "alarms", "scripting"],
   "host_permissions": ["<all_urls>"],
   "background": {

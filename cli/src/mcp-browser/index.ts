@@ -12,6 +12,7 @@
  * （{token, port}），缺省取 %APPDATA%/Tran/browser-bridge-token.json。
  * 每次 tools/call 前按需连接 WS，断线下次调用自动重连。
  */
+import { createHmac, randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -80,25 +81,45 @@ function connectBridge(): Promise<void> {
       CONNECT_TIMEOUT_MS
     )
 
+    // 先 probe：要求服务端用 HMAC(token, nonce:port) 证明它就是 Tran，
+    // 通过后才发 token——否则占住配对文件里那个端口的陌生本地进程能骗到
+    // token，进而冒充 Tran 驱动浏览器。
+    const probeNonce = randomUUID()
+    let helloSent = false
     ws.on('open', () => {
-      ws.send(
-        JSON.stringify({
-          type: 'hello',
-          role: 'client',
-          token: pairing.token,
-          clientVersion: SERVER_VERSION,
-          protocolVersion: BRIDGE_PROTOCOL_VERSION
-        })
-      )
+      ws.send(JSON.stringify({ type: 'probe', nonce: probeNonce }))
     })
     ws.on('message', (data) => {
-      let msg: { type?: string; id?: string; ok?: boolean; result?: unknown; error?: string; message?: string }
+      let msg: { type?: string; id?: string; ok?: boolean; result?: unknown; error?: string; message?: string; proof?: string }
       try {
         msg = JSON.parse(String(data))
       } catch {
         return
       }
+      if (msg.type === 'probe_ok') {
+        const expected = createHmac('sha256', pairing.token)
+          .update(`${probeNonce}:${pairing.port}`)
+          .digest('hex')
+        if (msg.proof !== expected) {
+          clearTimeout(connectTimer)
+          fail(`端口 ${pairing.port} 后面不是 Tran（身份校验失败），已拒绝发送配对码`)
+          ws.close()
+          return
+        }
+        helloSent = true
+        ws.send(
+          JSON.stringify({
+            type: 'hello',
+            role: 'client',
+            token: pairing.token,
+            clientVersion: SERVER_VERSION,
+            protocolVersion: BRIDGE_PROTOCOL_VERSION
+          })
+        )
+        return
+      }
       if (msg.type === 'hello_ok') {
+        if (!helloSent) return
         clearTimeout(connectTimer)
         bridgeReady = true
         if (!settled) {

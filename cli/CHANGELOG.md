@@ -6,7 +6,7 @@
 
 - 新增:**浏览器控制（Chrome 扩展路线）**。kimi 现在能操作你日常在用、登录态齐全的真实 Chrome:列标签页、开/切/关标签页、导航、读页面（正文 + 可交互元素 ref 编号）、点击、输入（可回车提交）、截图。
   - 一次性配对:「设置 → 浏览器控制」里复制配对码 → chrome://extensions 开发者模式「加载已解压的扩展程序」选 Tran 安装目录的 `resources/browser-extension` → 扩展选项里粘贴。之后重启/升级全自动重连。
-  - 安全:桥只听 127.0.0.1,握手必须带配对 token;端口漂移时扩展先要求服务端出示 HMAC 身份证明再交 token。
+  - 安全:桥只听 127.0.0.1,握手必须带配对 token;所有连接方（扩展与 MCP server）在交 token 前都先要求服务端出示绑定端口的 HMAC 身份证明,挡掉占端口的本地进程骗取配对码与中继攻击;read_page 不回传密码/信用卡/验证码类输入的值。
   - 实现:MV3 扩展 ↔ Tran 内置 WebSocket 桥 ↔ stdio MCP server(启动时自动注册进 kimi 的 mcp.json,九个 `browser_*` 工具)。
   - 升级提示:扩展代码更新后需在 chrome://extensions 点刷新重载,UI 会在版本落后时提醒。
 - 开发:dev 实例支持 `TRAN_USER_DATA_DIR` 重定向 userData,可与正式版并行运行。

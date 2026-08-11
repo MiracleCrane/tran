@@ -88,7 +88,8 @@ function probePort(port, token) {
       clearTimeout(timer)
       try {
         const msg = JSON.parse(ev.data)
-        if (msg.type === 'probe_ok' && msg.proof === (await hmacHex(token, nonce))) {
+        // proof 绑定端口：拨号 port 必须与服务端签名用的端口一致，挡掉中继。
+        if (msg.type === 'probe_ok' && msg.proof === (await hmacHex(token, `${nonce}:${port}`))) {
           done(true)
           return
         }
@@ -137,6 +138,19 @@ async function connect() {
   // 连续失败多次：可能 Tran 换了端口（9224 被占递增），扫一轮重发现。
   if (reconnectAttempts >= 4 && reconnectAttempts % 4 === 0) {
     if (await rediscoverPort()) pairing = await getPairing()
+  }
+  // 先 probe 验明端口后面确实是 Tran（服务端 HMAC 证明），再交 token——
+  // 否则占用存储端口的陌生本地进程能直接骗到 token。probe 失败就走重发现，
+  // 仍不行则等下次退避重连（绝不盲发 token）。
+  if (!(await probePort(pairing.port, pairing.token))) {
+    if (await rediscoverPort()) {
+      pairing = await getPairing()
+    } else {
+      lastError = `端口 ${pairing.port} 后面不是 Tran（未运行或被占用），已跳过以保护配对码`
+      setBadge(false)
+      scheduleReconnect()
+      return
+    }
   }
   let socket
   try {
@@ -286,10 +300,20 @@ function extractPageContent(maxChars) {
     const tag = el.tagName.toLowerCase()
     let desc
     if (tag === 'input') {
+      // 敏感字段绝不回传 value：密码、以及浏览器按 autocomplete 归类为
+      // 信用卡/一次性验证码等的输入。读一次页面就把密码送进模型是不可接受的。
+      const type = (el.type || 'text').toLowerCase()
+      const ac = (el.getAttribute('autocomplete') || '').toLowerCase()
+      const sensitive =
+        type === 'password' ||
+        type === 'hidden' ||
+        /(^|\s)(cc-number|cc-csc|cc-exp|one-time-code)(\s|$)/.test(ac) ||
+        /(^|-)(cc-num|cvc|cvv|otp)(-|$)/.test(ac)
+      const showValue = !sensitive && el.value
       desc =
-        `<input type=${el.type || 'text'}>` +
+        `<input type=${type}>` +
         (el.placeholder ? ` placeholder="${el.placeholder.slice(0, 60)}"` : '') +
-        (el.value ? ` value="${String(el.value).slice(0, 60)}"` : '')
+        (sensitive && el.value ? ' value=[已隐藏]' : showValue ? ` value="${String(el.value).slice(0, 60)}"` : '')
     } else if (tag === 'select') {
       const opts = Array.from(el.options).slice(0, 8).map((o) => o.text.trim()).join(' | ')
       desc = `<select> 选项[${opts}]`
