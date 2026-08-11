@@ -127,8 +127,23 @@ function reconnect(delayMs) {
   }, delayMs)
 }
 
+let connecting = false
+
 async function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
+  // 并发守卫：readyState 检查之后有多个 await（getPairing/probe/rediscover），
+  // alarm 与 onclose 的重连几乎同时触发两次 connect() 会都通过上面的检查，
+  // 建出两条并发连接、状态与 badge 互踢。用同步标志把住入口。
+  if (connecting) return
+  connecting = true
+  try {
+    await connectInner()
+  } finally {
+    connecting = false
+  }
+}
+
+async function connectInner() {
   let pairing = await getPairing()
   if (!pairing) {
     lastError = '未配对：请在扩展选项里粘贴 Tran 的配对码'

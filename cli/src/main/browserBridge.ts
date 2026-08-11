@@ -96,7 +96,9 @@ function broadcastStatus(): void {
 
 function tryListen(port: number): Promise<WebSocketServer> {
   return new Promise((resolvePromise, rejectPromise) => {
-    const wss = new WebSocketServer({ host: '127.0.0.1', port })
+    // maxPayload 兜底：未认证连接在 token 校验前也受此上限约束，避免本机
+    // 进程发接近 100MiB 的巨帧把主进程内存顶爆。read_page 快照远小于此。
+    const wss = new WebSocketServer({ host: '127.0.0.1', port, maxPayload: 8 * 1024 * 1024 })
     wss.once('listening', () => {
       wss.removeAllListeners('error')
       resolvePromise(wss)

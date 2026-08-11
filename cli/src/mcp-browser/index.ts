@@ -56,9 +56,20 @@ let bridge: WebSocket | null = null
 let bridgeReady = false
 let nextCallId = 1
 const pendingCalls = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
+/** 正在进行的连接。并发 tools/call 共用同一次连接，避免各建一条 WS 互相
+ *  覆写全局 bridge、先建的孤儿 close handler 把在途调用全 reject。 */
+let connectInFlight: Promise<void> | null = null
 
 function connectBridge(): Promise<void> {
   if (bridge && bridgeReady) return Promise.resolve()
+  if (connectInFlight) return connectInFlight
+  connectInFlight = doConnect().finally(() => {
+    connectInFlight = null
+  })
+  return connectInFlight
+}
+
+function doConnect(): Promise<void> {
   return new Promise((resolvePromise, rejectPromise) => {
     let settled = false
     const fail = (message: string): void => {
