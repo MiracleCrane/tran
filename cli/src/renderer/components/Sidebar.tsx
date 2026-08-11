@@ -1599,6 +1599,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                       value={editText}
                       onChange={(e) => setEditText(e.target.value)}
                       onKeyDown={(e) => {
+                        // 输入法组词中的 Enter 是确认候选，不能当成提交重命名
+                        //（否则会用没上屏的半截拼音命名会话）。
+                        if (e.nativeEvent.isComposing || e.keyCode === 229) return
                         if (e.key === 'Enter') commitEdit()
                         else if (e.key === 'Escape') setEditingId(null)
                       }}

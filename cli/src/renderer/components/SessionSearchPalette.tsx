@@ -76,6 +76,9 @@ export default function SessionSearchPalette(): JSX.Element | null {
             setActive(0)
           }}
           onKeyDown={(event) => {
+            // 输入法组词中派发的 Enter（部分输入法 isComposing=true / keyCode 229）
+            // 是「确认候选词」，不能当成选中会话。
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return
             if (event.key === 'Escape') setOpen(false)
             else if (event.key === 'ArrowDown') {
               event.preventDefault()

@@ -291,6 +291,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   const mountedRef = useRef(true)
   // refresh 的取消守卫：序号 + 最新 cwd 快照（见 refresh 内注释）。
   const refreshSeqRef = useRef(0)
+  const diffSeqRef = useRef(0)
   const cwdRef = useRef(cwd)
   cwdRef.current = cwd
   const [drawerHeight, setDrawerHeight] = useState<number | null>(null)
@@ -593,6 +594,9 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
 
   const loadDiff = async (paths: string[], staged: boolean, note?: string): Promise<void> => {
     if (!cwd) return
+    // 竞态守卫：先点大文件（diff 慢）再点小文件（快），慢响应后到会覆盖，
+    // 面板跳回上一个文件。用序号只让最后一次点击的结果落地。
+    const seq = ++diffSeqRef.current
     setDiffView({ paths, staged, text: '', note, loading: true })
     if (note) {
       setDiffView({ paths, staged, text: '', note, loading: false })
@@ -600,8 +604,10 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
     }
     try {
       const text = await window.api.gitDiff(cwd, { paths, staged })
+      if (seq !== diffSeqRef.current) return
       setDiffView({ paths, staged, text, loading: false })
     } catch (e: unknown) {
+      if (seq !== diffSeqRef.current) return
       setDiffView({ paths, staged, text: '', note: e instanceof Error ? e.message : String(e), loading: false })
     }
   }
@@ -816,7 +822,11 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                 <input
                   value={newBranchName}
                   onChange={(e) => setNewBranchName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && newBranchName.trim()) void createBranch() }}
+                  onKeyDown={(e) => {
+                    // 输入法组词中的 Enter 是确认候选，别拿没上屏的名字建分支。
+                    if (e.nativeEvent.isComposing || e.keyCode === 229) return
+                    if (e.key === 'Enter' && newBranchName.trim()) void createBranch()
+                  }}
                   placeholder="新分支名"
                   className="flex-1 rounded-lg border border-white/[0.1] bg-bg-elev/60 px-2 py-1 text-[11px] text-zinc-200 outline-none focus:border-accent/50"
                 />

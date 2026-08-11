@@ -253,6 +253,8 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
                   value={editText}
                   onChange={(e) => setEditText(e.target.value)}
                   onKeyDown={(e) => {
+                    // 输入法组词中的 Enter 是确认候选，不能当成提交项目重命名。
+                    if (e.nativeEvent.isComposing || e.keyCode === 229) return
                     if (e.key === 'Enter') void commitRename(p.path)
                     else if (e.key === 'Escape') setEditingPath(null)
                   }}
