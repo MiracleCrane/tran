@@ -10,6 +10,13 @@
   - 实现:MV3 扩展 ↔ Tran 内置 WebSocket 桥 ↔ stdio MCP server(启动时自动注册进 kimi 的 mcp.json,九个 `browser_*` 工具)。
   - 升级提示:扩展代码更新后需在 chrome://extensions 点刷新重载,UI 会在版本落后时提醒。
 - 开发:dev 实例支持 `TRAN_USER_DATA_DIR` 重定向 userData,可与正式版并行运行。
+- 修复（第三轮全面扫描，主进程/渲染层/归档）:
+  - 归档批量删除失败时不再摘除归档标记（此前用户确认「永久删除」的会话会因删除失败反而回到侧栏）;列表未加载成功时不再把归档会话误判「已不存在」。
+  - AskUserQuestion 点选答案后 1.2s 内切走会话,答案不再丢失（修复 turn 永久卡死）。
+  - 新会话首条消息 init 到达时不再清空刚加的附件。
+  - 会话搜索/会话重命名/项目重命名/新建分支四处补输入法组词 Enter 守卫,中文确认候选词不再误触发。
+  - 退出时同步 kill 主 ACP 进程,不再泄漏约 300MB 常驻进程;文本附件加体积上限,防大文件 OOM。
+  - MCP 面板连接中轮询不再因一次失败永久卡住;会话列表刷新失败不再变未处理 rejection;Git diff 切文件竞态不再跳回旧文件。
 
 ### English
 
@@ -19,6 +26,7 @@
   - Plumbing: MV3 extension ↔ built-in WebSocket bridge ↔ stdio MCP server (auto-registered into kimi's mcp.json, nine `browser_*` tools).
   - After updating the extension code, reload it in chrome://extensions; the UI warns when the connected version is outdated.
 - Dev: `TRAN_USER_DATA_DIR` redirects userData so a dev instance can run beside the installed app.
+- Fixes (third full scan — main/renderer/archive): archive bulk-delete no longer un-archives sessions whose delete failed (they used to reappear in the sidebar after a confirmed "permanent delete"), and the archive page no longer mislabels sessions as "gone" when the list failed to load; AskUserQuestion answers are no longer lost if you switch sessions within 1.2s of answering (fixes a stuck turn); attachments added during a new session's init window are no longer wiped; IME composition Enter guards added to session search / session rename / project rename / new branch; the main ACP process is now killed synchronously on quit (no more ~300MB leak) and text attachments have a size cap; MCP panel polling no longer stalls permanently on one failure, session-list refresh failures no longer become unhandled rejections, and Git diff no longer races back to a previously selected file.
 
 ## v1.0.80 - 2026-08-11
 
