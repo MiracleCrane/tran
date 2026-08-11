@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { randomBytes } from 'node:crypto'
+import { createHmac, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { WebSocketServer, WebSocket, type RawData } from 'ws'
 import { readJsonSafe, writeJsonAtomic } from './atomicWrite'
@@ -51,6 +51,20 @@ export function tokenFilePath(): string {
   return join(app.getPath('userData'), 'browser-bridge-token.json')
 }
 
+/** 随包分发的扩展版本（extension/manifest.json）。读不到不致命，返回 null。 */
+let bundledExtensionVersionCache: string | null | undefined
+function bundledExtensionVersion(): string | null {
+  if (bundledExtensionVersionCache !== undefined) return bundledExtensionVersionCache
+  const manifestPath = app.isPackaged
+    ? join(process.resourcesPath, 'browser-extension', 'manifest.json')
+    : join(app.getAppPath(), 'extension', 'manifest.json')
+  const read = readJsonSafe<{ version?: string }>(manifestPath)
+  bundledExtensionVersionCache = read.status === 'ok' && typeof read.value.version === 'string'
+    ? read.value.version
+    : null
+  return bundledExtensionVersionCache
+}
+
 /** token 跨启动保持稳定（否则每次升级 Tran 都要重新配对）。
  *  文件损坏时直接重建：坏文件里的 token 本来就读不出来，重新配对不可避免。 */
 function loadOrCreateToken(): string {
@@ -71,7 +85,8 @@ export function getBrowserBridgeStatus(): BrowserBridgeStatus {
     port: listeningPort,
     pairingCode: token !== null && listeningPort !== null ? `tran1:${listeningPort}:${token}` : null,
     extensionConnected: extensionSocket !== null,
-    extensionVersion
+    extensionVersion,
+    bundledExtensionVersion: bundledExtensionVersion()
   }
 }
 
@@ -152,12 +167,12 @@ function handleConnection(socket: WebSocket): void {
   // 未握手连接限时：不发 hello 或 token 不对的一律断开。
   const handshakeTimer = setTimeout(() => socket.terminate(), HANDSHAKE_TIMEOUT_MS)
 
-  socket.once('message', (data: RawData) => {
-    clearTimeout(handshakeTimer)
+  const onHandshakeMessage = (data: RawData): void => {
     let msg: {
       type?: string
       token?: string
       role?: string
+      nonce?: string
       extensionVersion?: string
       clientVersion?: string
       protocolVersion?: number
@@ -165,9 +180,21 @@ function handleConnection(socket: WebSocket): void {
     try {
       msg = JSON.parse(data.toString())
     } catch {
+      clearTimeout(handshakeTimer)
       socket.terminate()
       return
     }
+
+    // 端口重发现探测：扩展在扫描端口时先要求服务端证明自己知道 token
+    //（HMAC(token, nonce)），验证通过才会发真正的 hello——避免把 token
+    // 发给恰好占着端口的陌生本地进程。探测不消耗握手机会。
+    if (msg.type === 'probe' && typeof msg.nonce === 'string' && token) {
+      const proof = createHmac('sha256', token).update(msg.nonce.slice(0, 128)).digest('hex')
+      socket.send(JSON.stringify({ type: 'probe_ok', proof }))
+      socket.once('message', onHandshakeMessage)
+      return
+    }
+    clearTimeout(handshakeTimer)
     if (msg.type !== 'hello' || typeof msg.token !== 'string' || msg.token !== token) {
       log('browser-bridge', 'rejected connection: bad token or malformed hello')
       socket.send(JSON.stringify({ type: 'error', code: 'bad_token', message: '配对码不对，请在 Tran 里重新复制' }))
@@ -225,7 +252,8 @@ function handleConnection(socket: WebSocket): void {
     socket.on('error', (error) => {
       log('browser-bridge', `extension socket error: ${error.message}`)
     })
-  })
+  }
+  socket.once('message', onHandshakeMessage)
 }
 
 /** client（MCP server 等）的工具调用：{id, tool, args} → 转发扩展 → 原样回结果。

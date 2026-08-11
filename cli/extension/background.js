@@ -51,6 +51,72 @@ function scheduleReconnect() {
   reconnect(delay)
 }
 
+// ---- 端口重发现 ----
+// Tran 默认监听 9224，被占会递增。存储的端口连不上时扫描 9224-9233，
+// 但绝不先交 token：先发 probe（带随机 nonce），要求服务端回
+// HMAC(token, nonce) 证明它就是 Tran，验证通过才走正常 hello。
+
+const PORT_SCAN_START = 9224
+const PORT_SCAN_END = 9233
+
+async function hmacHex(secret, message) {
+  const enc = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  )
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(message))
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+function probePort(port, token) {
+  return new Promise((resolve) => {
+    let sock
+    try {
+      sock = new WebSocket(`ws://127.0.0.1:${port}`)
+    } catch {
+      resolve(false)
+      return
+    }
+    const nonce = crypto.randomUUID()
+    const done = (ok) => {
+      try { sock.close() } catch { /* ignore */ }
+      resolve(ok)
+    }
+    const timer = setTimeout(() => done(false), 1500)
+    sock.onopen = () => sock.send(JSON.stringify({ type: 'probe', nonce }))
+    sock.onmessage = async (ev) => {
+      clearTimeout(timer)
+      try {
+        const msg = JSON.parse(ev.data)
+        if (msg.type === 'probe_ok' && msg.proof === (await hmacHex(token, nonce))) {
+          done(true)
+          return
+        }
+      } catch { /* ignore */ }
+      done(false)
+    }
+    sock.onerror = () => {
+      clearTimeout(timer)
+      done(false)
+    }
+  })
+}
+
+async function rediscoverPort() {
+  const pairing = await getPairing()
+  if (!pairing) return false
+  for (let port = PORT_SCAN_START; port <= PORT_SCAN_END; port++) {
+    if (await probePort(port, pairing.token)) {
+      if (port !== pairing.port) {
+        await chrome.storage.local.set({ pairing: { port, token: pairing.token } })
+        lastError = ''
+      }
+      return true
+    }
+  }
+  return false
+}
+
 function reconnect(delayMs) {
   if (reconnectTimer) clearTimeout(reconnectTimer)
   // SW 若在等待期间被杀，这个 timer 会丢——由 alarms 兜底唤醒重连。
@@ -62,11 +128,15 @@ function reconnect(delayMs) {
 
 async function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
-  const pairing = await getPairing()
+  let pairing = await getPairing()
   if (!pairing) {
     lastError = '未配对：请在扩展选项里粘贴 Tran 的配对码'
     setBadge(false)
     return
+  }
+  // 连续失败多次：可能 Tran 换了端口（9224 被占递增），扫一轮重发现。
+  if (reconnectAttempts >= 4 && reconnectAttempts % 4 === 0) {
+    if (await rediscoverPort()) pairing = await getPairing()
   }
   let socket
   try {

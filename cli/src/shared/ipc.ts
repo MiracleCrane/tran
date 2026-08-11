@@ -1015,6 +1015,8 @@ export interface BrowserBridgeStatus {
   pairingCode: string | null
   extensionConnected: boolean
   extensionVersion: string | null
+  /** 随 Tran 分发的扩展版本；与已连扩展版本不同时 UI 提示重新加载。 */
+  bundledExtensionVersion: string | null
 }
 
 declare global {

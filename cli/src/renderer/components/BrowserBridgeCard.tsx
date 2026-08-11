@@ -73,6 +73,16 @@ export default function BrowserBridgeCard(): JSX.Element {
         通过 Chrome 扩展让 AI 操作你日常在用的浏览器（标签页、页面读取、点击输入）。
       </p>
 
+      {connected &&
+        status?.extensionVersion &&
+        status?.bundledExtensionVersion &&
+        status.extensionVersion !== status.bundledExtensionVersion && (
+          <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-300">
+            扩展版本 v{status.extensionVersion} 落后于 Tran 自带的 v{status.bundledExtensionVersion}
+            ：请到 chrome://extensions 找到「Tran 浏览器桥」点刷新（↻）重新加载。
+          </div>
+        )}
+
       {running && status?.pairingCode && (
         <div className="mt-2 flex items-center gap-2">
           <span className="text-[11px] text-zinc-500">配对码</span>
