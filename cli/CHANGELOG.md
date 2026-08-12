@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.0.86 - 2026-08-12
+
+### 中文
+
+- 修复:**Claude Code 后端此前根本跑不动**。适配器排队等 `system/init` 才发用户消息,而 CLI 要先收到输入才吐 `init`——两边互等,一条消息都发不出去。现在直接写入,实测一问一答正常。
+- 修复:**Claude Code 会话里所有要授权的工具一律被拒**。`--print` 模式不给 `--permission-prompt-tool` 就无处询问,`Write` 直接失败并回「权限未授予」。现已接通控制协议:CLI 的 `can_use_tool` 冒到 Tran 的权限弹窗,裁决回传给 CLI;「本次会话都允许」之类的建议项一并透传。权限模式(默认/自动/YOLO)支持热切,不必重开会话。
+- 修复:**Claude Code 里点停止等于杀会话**。改走控制协议的优雅中断;进程真没了的话,下次发消息带 `--resume` 悄悄重启,上下文接着走。
+- 修复:Claude Code 会话的上下文环长期显示接近 0——用量只算了 `input+output`,没算缓存命中(实测一轮 `input=2` 而 `cache_read=55294`)。
+- 新增:**输入框上方的「N 个文件已更改 +X -Y」悬浮胶囊**(Codex 同款)。显示当前工作区相对 HEAD 的总账,悬停展开文件列表,点击进改动面板;工作区干净时自动消失。与轮内汇总卡的分工是流水 vs 余额。
+- 修复:**分屏控制的隔离漏在键盘上**。`desktop_click` / `desktop_focus_window` 都判了越界,`desktop_type` / `desktop_key` 没判——键入一律打给前台窗口,你在自己那块屏上随手点一下换了前台,字就敲进你正在用的窗口里。现在键入前会现查前台窗口在哪块屏。
+- 修复:显示器列表永久缓存,插拔扩展坞/改缩放之后越界判定还按旧坐标算;设置页每次打开都把「分屏控制」画成「不限制」(已选的那块屏没回读);桌面控制关掉后光晕仍被锁在之前选的那块屏上。
+- 修复:AI 控制光晕的三处失效——切换分屏目标后光晕永久哑火;首次工具调用常撞上遮罩页面加载中而丢失(单次调用等于完全没提示);显示器插拔后遮罩留在旧坐标。
+- 修复:每轮改动快照原是全局单槽,同时挂多个会话时互相冲掉基线,汇总卡会把别的会话的改动算到自己头上。
+- 修复:`desktop_type` 的工具描述还写着「剪贴板粘贴、会自动恢复剪贴板」,而实现早已换成 SendInput 直接注入 Unicode。
+
+### English
+
+- Fixed: **the Claude Code backend never worked.** It queued user messages until `system/init`, but the CLI emits `init` only after receiving input — a deadlock. Also, without `--permission-prompt-tool` every permission-gated tool was auto-denied in `--print` mode; the control protocol is now wired end to end (`can_use_tool` → Tran's permission modal → `control_response`), including suggestions and live permission-mode switching. Stop no longer kills the session (graceful interrupt, then lazy `--resume`), and usage now counts cache tokens so the context ring is accurate.
+- New: **a floating "N files changed +X -Y" pill above the composer** (Codex-style) showing the working tree against HEAD; hover for the file list, click to open the changes panel.
+- Fixed: **split-screen isolation leaked through the keyboard** — `desktop_type`/`desktop_key` had no bounds check, so text landed in whatever window you had just focused on your own monitor. Plus a stale display cache, the selected display not being read back into settings, and the overlay staying locked to that display after desktop control was turned off.
+- Fixed: three ways the AI-control glow could silently stop showing (after switching the split-screen target, on the first tool call while the overlay page was still loading, and after a monitor was plugged/unplugged).
+- Fixed: per-turn change snapshots were a single global slot, so concurrent sessions overwrote each other's baseline.
+
 ## v1.0.85 - 2026-08-12
 
 ### 中文
