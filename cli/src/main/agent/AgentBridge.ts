@@ -15,6 +15,7 @@ import {
 import { getPreferences } from '../preferences'
 import { log } from '../logger'
 import { KimiBackend } from './KimiBackend'
+import { ClaudeBackend } from './ClaudeBackend'
 import type { GoalControlAction, GoalInfo, GoalStartOptions } from '../goalStore'
 import type { PermissionRequestPayload, SDKMessage } from '../../shared/ipc'
 
@@ -88,8 +89,10 @@ export class AgentBridge {
       }
     }
     this.backends = {
-      // 目前只实例化 Kimi 一个后端；新增后端时在此挂接新的 adapter。
-      kimi: new KimiBackend(wrappedHandlers)
+      // 两个后端并存、按会话切换：Kimi 走 ACP，Claude 走 stream-json。
+      // 各自独立实现 AgentBackendAdapter，互不影响。
+      kimi: new KimiBackend(wrappedHandlers),
+      claude: new ClaudeBackend(wrappedHandlers)
     }
   }
 
