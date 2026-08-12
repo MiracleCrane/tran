@@ -407,11 +407,15 @@ export function registerIpc(
     screen.getAllDisplays().map((d, index) => ({
       index,
       label: `显示器 ${index + 1}`,
-      width: d.bounds.width,
-      height: d.bounds.height,
+      // 报物理分辨率而不是 Electron 的 DIP：设置里选屏时用户看的是"我那块
+      // 3120x2080 的笔电屏"，报 1560x1040 会让人以为认错了屏。桌面控制进程
+      // 也是按物理像素工作（PMv2），两边口径这样才一致。
+      width: Math.round(d.bounds.width * d.scaleFactor),
+      height: Math.round(d.bounds.height * d.scaleFactor),
       x: d.bounds.x,
       y: d.bounds.y,
-      primary: d.id === screen.getPrimaryDisplay().id
+      primary: d.id === screen.getPrimaryDisplay().id,
+      scalePercent: Math.round(d.scaleFactor * 100)
     }))
   )
   ipcMain.handle(

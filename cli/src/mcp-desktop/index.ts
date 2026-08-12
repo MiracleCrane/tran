@@ -164,7 +164,14 @@ $list = New-Object System.Collections.ArrayList
 $i = 0
 foreach ($s in [System.Windows.Forms.Screen]::AllScreens) {
   $b = $s.Bounds
-  [void]$list.Add(@{ index = $i; x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height; primary = $s.Primary })
+  # 各屏真实缩放：混合 DPI 下这决定了截图里的元素有多大，模型据此判断点击精度。
+  $pt = New-Object TranU32+POINT
+  $pt.X = $b.X + [int]($b.Width / 2); $pt.Y = $b.Y + [int]($b.Height / 2)
+  $dx = 0; $dy = 0
+  try { [void][TranU32]::GetDpiForMonitor([TranU32]::MonitorFromPoint($pt, 2), 0, [ref]$dx, [ref]$dy) } catch { $dx = 96 }
+  if ($dx -le 0) { $dx = 96 }
+  [void]$list.Add(@{ index = $i; x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height
+    primary = $s.Primary; dpi = $dx; scalePercent = [math]::Round($dx / 96.0 * 100) })
   $i++
 }
 Write-Output ("TRANJSON:" + (ConvertTo-Json @{ displays = $list } -Depth 4 -Compress))
@@ -242,6 +249,10 @@ using System.Text;
 using System.Runtime.InteropServices;
 public class TranU32 {
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr ctx);
+  [DllImport("shcore.dll")] public static extern int GetDpiForMonitor(IntPtr hmon, int type, out uint x, out uint y);
+  [DllImport("user32.dll")] public static extern IntPtr MonitorFromPoint(POINT pt, uint flags);
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte sc, uint f, UIntPtr e);
@@ -259,7 +270,12 @@ public class TranU32 {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L; public int T; public int R; public int B; }
 }
 '@
-[void][TranU32]::SetProcessDPIAware()
+# 每显示器 DPI 感知 v2（-4）。必须是 PMv2 而不是 SetProcessDPIAware：
+# 后者是"系统 DPI 感知"，在混合 DPI 下（如 200% 笔电 + 100% 外接）会把所有
+# 显示器都按主屏缩放虚拟化——外接屏截图被 2 倍上采样（糊），报出的尺寸也是
+# 虚构的。PMv2 下各屏都是真实物理像素，截图 1:1，坐标与 SetCursorPos 同空间。
+# 旧版 Windows（< 1703）没有这个 API，回退到系统 DPI 感知。
+try { [void][TranU32]::SetProcessDpiAwarenessContext([IntPtr](-4)) } catch { [void][TranU32]::SetProcessDPIAware() }
 `
 
 // ---------- 各工具的 PS 实现 ----------

@@ -114,6 +114,7 @@ export default function DesktopControlCard(): JSX.Element {
                 }`}
               >
                 {d.label} · {d.width}×{d.height}
+                {d.scalePercent !== 100 ? ` · ${d.scalePercent}%` : ''}
                 {d.primary ? ' · 主屏' : ''}
               </button>
             ))}

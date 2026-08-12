@@ -1007,7 +1007,7 @@ export interface ForgeApi {
   setDesktopDisplay(displayIndex: number | null): Promise<void>
 }
 
-/** 一块显示器（分屏控制的选择项）。 */
+/** 一块显示器（分屏控制的选择项）。width/height 是**物理**分辨率。 */
 export interface DisplayInfo {
   index: number
   label: string
@@ -1016,6 +1016,8 @@ export interface DisplayInfo {
   x: number
   y: number
   primary: boolean
+  /** 系统缩放百分比（125 / 200 …）。混合 DPI 下用来解释物理尺寸。 */
+  scalePercent: number
 }
 
 /** 控制类插件的开关状态。开关本体 = kimi mcp.json 的注册/反注册（+ 浏览器
