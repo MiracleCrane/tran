@@ -18,6 +18,8 @@ extraResources:
   # 放 out/mcp/ 而不是 out/main/ 是因为 electron-vite dev 会清空 out/main。
   - from: out/mcp/mcp-browser.js
     to: mcp-browser.js
+  - from: out/mcp/mcp-desktop.js
+    to: mcp-desktop.js
 asar: true
 compression: maximum
 electronLanguages:

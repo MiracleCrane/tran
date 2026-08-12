@@ -25,7 +25,11 @@ import {
   callBrowserTool,
   tokenFilePath
 } from './browserBridge'
-import { registerMcpBrowserServer } from './mcpBrowserRegistration'
+import {
+  registerMcpBrowserServer,
+  registerMcpDesktopServer,
+  unregisterMcpServer
+} from './mcpBrowserRegistration'
 import {
   listProviders,
   getActiveProvider,
@@ -130,6 +134,7 @@ import type {
   PlanUsageResult,
   BrowserBridgeStatus,
   BrowserToolResult,
+  ControlPluginsState,
   DeepseekBalanceResult,
   SummaryProfile
 } from '../shared/ipc'
@@ -357,13 +362,60 @@ export function registerIpc(
   })
   app.once('before-quit', stopProviderConfigWatch)
 
-  // 浏览器控制桥：启动失败只记日志（不能影响主流程），状态变化推给渲染层。
-  // 桥起来后把 tran-browser MCP server 幂等注册进 kimi 的 mcp.json（安装
-  // 路径变动时启动自动修正）。
-  void startBrowserBridge((status) => send('forge:browser-bridge-status', status)).then(() => {
-    registerMcpBrowserServer(tokenFilePath())
-  })
+  // 控制类插件按设置开关启用（开关本体 = mcp.json 注册/反注册 + 桥启停）：
+  // - 浏览器控制默认开：起桥 + 注册 tran-browser；
+  // - 桌面控制默认关：仅显式开启时注册 tran-desktop。
+  // 关闭态在启动时也执行一次反注册（清理旧版本/上次开启留下的条目）。
+  const notifyBridgeStatus = (status: BrowserBridgeStatus): void =>
+    send('forge:browser-bridge-status', status)
+  const applyBrowserControl = async (enabled: boolean): Promise<void> => {
+    if (enabled) {
+      await startBrowserBridge(notifyBridgeStatus)
+      registerMcpBrowserServer(tokenFilePath())
+    } else {
+      stopBrowserBridge()
+      unregisterMcpServer('tran-browser')
+      notifyBridgeStatus(getBrowserBridgeStatus())
+    }
+  }
+  const applyDesktopControl = (enabled: boolean): void => {
+    if (enabled) registerMcpDesktopServer()
+    else unregisterMcpServer('tran-desktop')
+  }
+  {
+    const s = loadSettings()
+    void applyBrowserControl(s.browserControlEnabled !== false)
+    applyDesktopControl(s.desktopControlEnabled === true)
+  }
   app.once('before-quit', stopBrowserBridge)
+
+  ipcMain.handle('forge:getControlPlugins', async (): Promise<ControlPluginsState> => {
+    const s = loadSettings()
+    return {
+      browserEnabled: s.browserControlEnabled !== false,
+      desktopEnabled: s.desktopControlEnabled === true
+    }
+  })
+  ipcMain.handle(
+    'forge:setControlPlugin',
+    async (_e, plugin: 'browser' | 'desktop', enabled: boolean): Promise<ControlPluginsState> => {
+      const s = loadSettings()
+      if (plugin === 'browser') {
+        s.browserControlEnabled = enabled !== false
+        saveSettings(s)
+        await applyBrowserControl(enabled !== false)
+      } else if (plugin === 'desktop') {
+        s.desktopControlEnabled = enabled === true
+        saveSettings(s)
+        applyDesktopControl(enabled === true)
+      }
+      const now = loadSettings()
+      return {
+        browserEnabled: now.browserControlEnabled !== false,
+        desktopEnabled: now.desktopControlEnabled === true
+      }
+    }
+  )
 
   const bridge = new AgentBridge({
     onMessage: (sessionId, message) => {

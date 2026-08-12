@@ -999,6 +999,16 @@ export interface ForgeApi {
   onBrowserBridgeStatus(cb: (status: BrowserBridgeStatus) => void): () => void
   /** 直调一个浏览器工具（tabs_list / navigate / read_page …），经桥转发给扩展。 */
   browserToolCall(tool: string, args?: unknown): Promise<BrowserToolResult>
+  /** --- 控制类插件开关（浏览器控制 / 桌面控制） --- */
+  getControlPlugins(): Promise<ControlPluginsState>
+  setControlPlugin(plugin: 'browser' | 'desktop', enabled: boolean): Promise<ControlPluginsState>
+}
+
+/** 控制类插件的开关状态。开关本体 = kimi mcp.json 的注册/反注册（+ 浏览器
+ *  侧的桥启停）；kimi 重开会话后生效。 */
+export interface ControlPluginsState {
+  browserEnabled: boolean
+  desktopEnabled: boolean
 }
 
 /** 浏览器工具调用结果（错误不抛异常，以 ok:false 携带原因）。 */

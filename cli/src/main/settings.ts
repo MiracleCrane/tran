@@ -94,6 +94,13 @@ interface PersistedSettings {
    *  要把整个会话上下文重新过一遍——实测约 88k token，是命名那类小请求的七百倍。
    *  而且下一条真实消息本来就会让 AI 收到完成通知，所以它买到的只是「提前」。 */
   autoTodoNudge?: boolean
+  /** 浏览器控制（Chrome 扩展桥，默认开）。关闭 = 停桥 + 从 kimi mcp.json
+   *  反注册 tran-browser，kimi 看不到任何 browser_* 工具。 */
+  browserControlEnabled?: boolean
+  /** 桌面控制（Codex 式 computer-use，**默认关**）。开启 = 注册 tran-desktop
+   *  MCP server，kimi 获得截屏/点击/键入/窗口管理等系统级工具。能力等同于
+   *  让 AI 坐在键盘前，务必知情开启。 */
+  desktopControlEnabled?: boolean
   /** 总结类杂活（会话命名、命令说明、思考摘要…）用的型号。空 = 用
    *  cheapModel.DEFAULT_CHEAP_MODEL。别写死猜测的型号——设置页有探测按钮。 */
   summaryModel?: string
@@ -339,6 +346,8 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.aiNamingEnabled = optionalBoolean(source.aiNamingEnabled)
   settings.cloudUsageEnabled = optionalBoolean(source.cloudUsageEnabled)
   settings.autoTodoNudge = optionalBoolean(source.autoTodoNudge)
+  settings.browserControlEnabled = optionalBoolean(source.browserControlEnabled)
+  settings.desktopControlEnabled = optionalBoolean(source.desktopControlEnabled)
   settings.summaryModel = optionalString(source.summaryModel)
   settings.summaryApiBaseUrl = optionalString(source.summaryApiBaseUrl)
   settings.summaryThinkingEnabled = optionalBoolean(source.summaryThinkingEnabled)

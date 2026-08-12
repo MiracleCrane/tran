@@ -10,11 +10,18 @@ export default function BrowserBridgeCard(): JSX.Element {
   const [status, setStatus] = useState<BrowserBridgeStatus | null>(null)
   const [copied, flashCopied] = useTransientFlag(1500)
   const [showGuide, setShowGuide] = useState(false)
+  // 插件开关：null = 还没读到。切换即时生效（停桥/起桥 + mcp.json 注册增删），
+  // kimi 侧要重开会话才会重新装载工具列表。
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [toggling, setToggling] = useState(false)
 
   useEffect(() => {
     let alive = true
     void window.api.getBrowserBridgeStatus().then((s) => {
       if (alive) setStatus(s)
+    }).catch(() => {})
+    void window.api.getControlPlugins().then((p) => {
+      if (alive) setEnabled(p.browserEnabled)
     }).catch(() => {})
     const off = window.api.onBrowserBridgeStatus((s) => setStatus(s))
     return () => {
@@ -22,6 +29,19 @@ export default function BrowserBridgeCard(): JSX.Element {
       off()
     }
   }, [])
+
+  const toggle = async (): Promise<void> => {
+    if (enabled === null || toggling) return
+    setToggling(true)
+    try {
+      const next = await window.api.setControlPlugin('browser', !enabled)
+      setEnabled(next.browserEnabled)
+    } catch {
+      /* 保持原状 */
+    } finally {
+      setToggling(false)
+    }
+  }
 
   const copyPairingCode = async (): Promise<void> => {
     if (!status?.pairingCode) return
@@ -49,31 +69,54 @@ export default function BrowserBridgeCard(): JSX.Element {
       : 'bg-red-500'
   const textClass = connected ? 'text-emerald-400' : running ? 'text-amber-400' : 'text-red-400'
 
+  const on = enabled === true
   return (
     <section className="glass-panel-soft rounded-2xl p-4">
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium text-zinc-100">浏览器控制</span>
-        <span className={`inline-flex items-center gap-1.5 text-[11px] ${textClass}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
-          {stateLabel}
-        </span>
-        {connected && status?.extensionVersion && (
+        {on && (
+          <span className={`inline-flex items-center gap-1.5 text-[11px] ${textClass}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
+            {stateLabel}
+          </span>
+        )}
+        {!on && enabled !== null && <span className="text-[11px] text-zinc-600">已关闭</span>}
+        {on && connected && status?.extensionVersion && (
           <span className="text-[11px] text-zinc-500">扩展 v{status.extensionVersion}</span>
         )}
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-2">
+          {on && (
+            <button
+              onClick={() => setShowGuide((v) => !v)}
+              className="rounded px-2 py-0.5 text-[11px] text-zinc-400 transition hover:bg-bg-hover hover:text-zinc-200"
+            >
+              {showGuide ? '收起引导' : '安装引导'}
+            </button>
+          )}
           <button
-            onClick={() => setShowGuide((v) => !v)}
-            className="rounded px-2 py-0.5 text-[11px] text-zinc-400 transition hover:bg-bg-hover hover:text-zinc-200"
+            type="button"
+            role="switch"
+            aria-checked={on}
+            aria-label="切换浏览器控制"
+            disabled={enabled === null || toggling}
+            onClick={() => void toggle()}
+            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+              on ? 'bg-accent' : 'bg-zinc-700'
+            }`}
           >
-            {showGuide ? '收起引导' : '安装引导'}
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                on ? 'translate-x-[18px]' : 'translate-x-0.5'
+              }`}
+            />
           </button>
         </div>
       </div>
       <p className="mt-1 text-[11px] text-zinc-500">
         通过 Chrome 扩展让 AI 操作你日常在用的浏览器（标签页、页面读取、点击输入）。
+        {!on && enabled !== null && ' 开启后 kimi 重开会话即可使用 browser_* 工具。'}
       </p>
-
-      {connected &&
+      {on && connected &&
         status?.extensionVersion &&
         status?.bundledExtensionVersion &&
         status.extensionVersion !== status.bundledExtensionVersion && (
@@ -83,7 +126,7 @@ export default function BrowserBridgeCard(): JSX.Element {
           </div>
         )}
 
-      {running && status?.pairingCode && (
+      {on && running && status?.pairingCode && (
         <div className="mt-2 flex items-center gap-2">
           <span className="text-[11px] text-zinc-500">配对码</span>
           <code className="max-w-[280px] truncate rounded bg-bg-elev px-1.5 py-0.5 font-mono text-[11px] text-zinc-300">
@@ -98,13 +141,13 @@ export default function BrowserBridgeCard(): JSX.Element {
         </div>
       )}
 
-      {!running && status && (
+      {on && !running && status && (
         <div className="mt-2 text-[11px] text-red-400/80">
           本机 WebSocket 服务启动失败（端口被占用？），重启 Tran 重试。
         </div>
       )}
 
-      {showGuide && (
+      {on && showGuide && (
         <ol className="mt-3 list-decimal space-y-1 pl-5 text-[11px] leading-relaxed text-zinc-400">
           <li>
             打开 Chrome，访问 <code className="rounded bg-bg-elev px-1 py-0.5 font-mono">chrome://extensions</code>
