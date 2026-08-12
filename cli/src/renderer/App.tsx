@@ -7,6 +7,7 @@ import SidebarShell from './components/SidebarShell'
 import Transcript from './components/Transcript'
 import Composer from './components/Composer'
 import ElicitationCard from './components/ElicitationCard'
+import SessionChangesPill from './components/SessionChangesPill'
 import PlanCard from './components/PlanCard'
 import GoalCard from './components/GoalCard'
 import ErrorDiagnosticPanel from './components/ErrorDiagnosticPanel'
@@ -333,6 +334,7 @@ function MainViewContent({
         />
       </div>
       <ElicitationCard />
+      <SessionChangesPill />
       <Composer />
       <ErrorDiagnosticPanel />
     </>

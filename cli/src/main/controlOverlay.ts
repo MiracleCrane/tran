@@ -61,6 +61,19 @@ function overlayHtml(): string {
   </script>`
 }
 
+/** 页面加载完之前 webContents.send 是丢的——首次 pulse 常常正好撞上加载中，
+ *  于是"AI 只调了一个工具"那次光晕根本没亮过。存下最后一次状态，加载完补发。 */
+const pendingState = new WeakMap<BrowserWindow, { on: boolean; label?: string }>()
+
+function sendState(win: BrowserWindow, on: boolean, label?: string): void {
+  if (win.isDestroyed()) return
+  if (win.webContents.isLoading()) {
+    pendingState.set(win, { on, ...(label ? { label } : {}) })
+    return
+  }
+  win.webContents.send('overlay:state', on, label)
+}
+
 function createOverlayFor(display: Electron.Display): BrowserWindow | null {
   try {
     const win = new BrowserWindow({
@@ -84,6 +97,12 @@ function createOverlayFor(display: Electron.Display): BrowserWindow | null {
     win.setIgnoreMouseEvents(true, { forward: true })
     win.setAlwaysOnTop(true, 'screen-saver')
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    win.webContents.on('did-finish-load', () => {
+      const state = pendingState.get(win)
+      if (!state || win.isDestroyed()) return
+      pendingState.delete(win)
+      win.webContents.send('overlay:state', state.on, state.label)
+    })
     void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(overlayHtml())}`)
     return win
   } catch (error) {
@@ -118,13 +137,42 @@ export function setOverlayTargetDisplay(displayId: number | null): void {
 }
 
 /**
+ * 显示器拓扑变了（插拔、改分辨率、改缩放）就把遮罩全推倒重建。
+ * 不重建的话窗口还按老 bounds 摆着——新接的屏没有光晕，拔掉的屏留下一个
+ * 挂在虚拟桌面外的幽灵窗口。
+ */
+let screenWatchInstalled = false
+function watchDisplayChanges(): void {
+  if (screenWatchInstalled) return
+  screenWatchInstalled = true
+  const rebuild = (): void => {
+    destroyOverlays()
+    // visible 保持原样：下一次 pulse 会按当前状态把新窗口点亮。
+    if (visible) {
+      ensureOverlays()
+      for (const win of overlays) {
+        win.showInactive()
+        sendState(win, true)
+      }
+    }
+  }
+  screen.on('display-added', rebuild)
+  screen.on('display-removed', rebuild)
+  screen.on('display-metrics-changed', rebuild)
+}
+
+/**
  * 报告一次 AI 控制活动：显示遮罩并把淡出计时重置到 800ms 后。
  * 每个工具调用前后各调一次即可，无需精确配对。
  */
 export function pulseControlOverlay(label = 'AI 控制中'): void {
+  watchDisplayChanges()
+  const hadWindows = overlays.length > 0
   ensureOverlays()
   if (overlays.length === 0) return
-  if (!visible) {
+  // visible 与「窗口真的显示着」必须一起判断：切分屏目标会把窗口销毁，若只看
+  // visible，重建出来的新窗口永远走不到 showInactive，光晕就此哑火。
+  if (!visible || !hadWindows) {
     visible = true
     for (const win of overlays) {
       if (win.isDestroyed()) continue
@@ -132,9 +180,7 @@ export function pulseControlOverlay(label = 'AI 控制中'): void {
       win.setAlwaysOnTop(true, 'screen-saver')
     }
   }
-  for (const win of overlays) {
-    if (!win.isDestroyed()) win.webContents.send('overlay:state', true, label)
-  }
+  for (const win of overlays) sendState(win, true, label)
   if (hideTimer) clearTimeout(hideTimer)
   hideTimer = setTimeout(hideControlOverlay, IDLE_HIDE_MS)
   hideTimer.unref?.()
@@ -143,9 +189,7 @@ export function pulseControlOverlay(label = 'AI 控制中'): void {
 function hideControlOverlay(): void {
   hideTimer = null
   visible = false
-  for (const win of overlays) {
-    if (!win.isDestroyed()) win.webContents.send('overlay:state', false)
-  }
+  for (const win of overlays) sendState(win, false)
   // 等淡出动画跑完再真正隐藏窗口，否则是"啪"地消失。
   const timer = setTimeout(() => {
     for (const win of overlays) {

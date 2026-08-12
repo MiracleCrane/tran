@@ -389,8 +389,11 @@ let unackedDirectMessages: UnackedDirectMessage[] = []
  *  统计本轮改动用「前后快照差」而不是数编辑工具调用——后者漏掉一切经 shell
  *  改的文件（sed/格式化脚本/构建产物），而那些同样是这一轮造成的。 */
 type GitStatSnapshot = Map<string, { added: number; removed: number; untracked: boolean }>
-let turnStartSnapshot: GitStatSnapshot | null = null
-let turnStartCwd: string | null = null
+/** 按会话存快照，不是全局单槽：Tran 可以同时挂多个会话，甲会话开轮时把乙会话
+ *  的快照冲掉，乙轮结束就会拿甲的基线做差（同一 cwd 下两个会话尤其明显）。
+ *  存的是 Promise 而不是值——快照是异步拍的，短轮可能先结束；存 Promise 就
+ *  等得到，也不会把迟到的快照留成下一轮的脏基线。 */
+const turnStartSnapshots = new Map<string, { cwd: string; snapshot: Promise<GitStatSnapshot | null> }>()
 
 async function snapshotWorkingChanges(cwd: string): Promise<GitStatSnapshot | null> {
   if (!cwd) return null
@@ -1856,9 +1859,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (!meta) return
     // #TurnChanges 轮开始快照：不 await——拍快照是给结束时做差用的，
     // 拖慢发送不值得；拿不到（非 git 目录）就整套静默降级。
-    turnStartCwd = meta.cwd
-    void snapshotWorkingChanges(meta.cwd).then((snap) => {
-      turnStartSnapshot = snap
+    turnStartSnapshots.set(meta.sessionId, {
+      cwd: meta.cwd,
+      snapshot: snapshotWorkingChanges(meta.cwd)
     })
     const value = text.trim()
     const atts = attachments ?? []
@@ -3729,30 +3732,32 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         // #TurnChanges：与轮开始的快照做差，改了文件就在对话流里落一张
         // 「已编辑 N 个文件 +X -Y」的卡片（Codex 同款）。异步算，不挡收尾。
         {
-          const cwd = turnStartCwd
-          const before = turnStartSnapshot
-          turnStartSnapshot = null
-          turnStartCwd = null
-          if (cwd && before) {
-            void computeTurnChanges(cwd, before).then((changes) => {
-              if (!changes) return
-              // 结果回来时用户可能已切走：只往当前仍是这个 cwd 的会话里落卡片。
-              if (get().meta?.cwd !== cwd) return
-              set((s2) => ({
-                items: [
-                  ...s2.items,
-                  {
-                    id: uid(),
-                    kind: 'turnChanges' as const,
-                    parentToolUseId: null,
-                    files: changes.files,
-                    addedTotal: changes.addedTotal,
-                    removedTotal: changes.removedTotal,
-                    at: Date.now()
-                  }
-                ]
-              }))
-            })
+          const sid = get().meta?.sessionId
+          const pending = sid ? turnStartSnapshots.get(sid) : undefined
+          if (sid) turnStartSnapshots.delete(sid)
+          if (pending) {
+            const { cwd } = pending
+            void pending.snapshot
+              .then((before) => (before ? computeTurnChanges(cwd, before) : null))
+              .then((changes) => {
+                if (!changes) return
+                // 结果回来时用户可能已切走：只往仍是这个会话的界面上落卡片。
+                if (get().meta?.sessionId !== sid) return
+                set((s2) => ({
+                  items: [
+                    ...s2.items,
+                    {
+                      id: uid(),
+                      kind: 'turnChanges' as const,
+                      parentToolUseId: null,
+                      files: changes.files,
+                      addedTotal: changes.addedTotal,
+                      removedTotal: changes.removedTotal,
+                      at: Date.now()
+                    }
+                  ]
+                }))
+              })
           }
         }
         break
