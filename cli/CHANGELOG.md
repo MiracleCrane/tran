@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.84 - 2026-08-12
+
+### 中文
+
+- 新增:**Claude Code 后端**。设置 → 会话 → Agent 后端可切到 Claude Code,与 Kimi 并存;自动探测可执行文件,权限确认、工具流、会话恢复走同一套 UI。
+- 新增:**AI 控制屏幕光晕**。AI 操作浏览器/桌面时屏幕边缘浮出渐变紫光晕 + 「AI 控制中」标识,停歇后自动淡出;全程点击穿透,不挡任何操作。
+- 新增:**桌面控制分屏隔离**。可把一块显示器划给 AI——截图只截那块屏,点击/聚焦越界直接拒绝,你在另一块屏上继续干活互不干扰。
+- 新增:**每轮文件改动汇总卡**。一轮结束后在对话流里给出「已编辑 N 个文件 +X -Y」,可整轮撤销、可打开改动面板审核。统计走 git 工作区前后快照差,经 shell 改的文件同样算得到。
+- 改版:**Codex 同款炭灰实色主题**,玻璃拟态与深黑皮肤全部移除;侧栏默认展开、一律显示全部会话、重排为 置顶 → 最近 → 项目 三段;消息导航条改为悬停单节高亮 + 摘要浮出。
+- 改版:**设置页分五类**（会话/插件/外观/系统/备份）,说明支持 Markdown,文案整体重写。
+- 修复:低分辨率屏与高分辨率屏图标不一致——ICO 里 ≤48px 的档原本是另一套简化设计（无留白、无质感）,现在全部从 256px 正稿等比重生成。
+
+### English
+
+- New: **Claude Code backend** (switchable alongside Kimi), **AI-control screen glow** (click-through purple vignette while the AI drives), **per-display desktop isolation** (hand one monitor to the AI; out-of-bounds clicks are refused), and a **per-turn file-changes card** ("edited N files +X -Y", revert or review) computed from git snapshots so shell-made edits count too.
+- Redesign: Codex-style charcoal theme (glass/onyx skins removed), sidebar always expanded showing all sessions in Pinned → Recent → Projects, Codex-style message rail, and a five-category settings page with Markdown descriptions.
+- Fixed: the app icon differed between low- and high-DPI displays — the ≤48px entries in the ICO were a separate simplified design; all sizes are now regenerated from the 256px master.
+
 ## v1.0.83 - 2026-08-12
 
 ### 中文
