@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.87 - 2026-08-12
+
+### 中文
+
+- 修复:**浏览器控制 / 桌面控制的开关对 Claude Code 会话不生效**。两个开关原先只写 Kimi 的 `mcp.json`,在 Claude Code 会话里工具根本不装载——但开关看上去是开着的。现在同时调 Claude Code 自己的 `claude mcp add/remove --scope user`,一个开关管两个后端。没装 Claude Code 时静默跳过,不影响开关本身。
+- 修复:**Claude Code 会话里图片附件被丢弃**。发送时结构化内容被拍平成纯文本、只留文字块,图片直接消失。现已原样透传。
+- 改进:**Claude Code 的技能与 MCP 面板不再是空的**,改为展示该会话真实装载的技能列表与 MCP 服务器连接状态(增删改仍走 `claude mcp` 命令,Tran 只做展示)。
+- 改版:**侧栏底部工具区融进侧栏**。去掉那圈卡片外框(玻璃主题下线后它在实色侧栏里只是个突兀的浮起矩形),改为默认收起、鼠标移到底部浮出、点标题可钉住;选中项也不再描边,只用底色区分。
+
+### English
+
+- Fixed: **the browser/desktop control toggles did nothing in Claude Code sessions** — they only wrote Kimi's `mcp.json`, so the tools never loaded, while the switch looked enabled. They now also call `claude mcp add/remove --scope user`, so one switch covers both backends (silently skipped when Claude Code isn't installed).
+- Fixed: **image attachments were dropped in Claude Code sessions** (structured content was flattened to text). They now pass through unchanged.
+- Improved: the Skills and MCP panels for Claude Code show the session's real skills and MCP server status instead of an empty list.
+- Redesign: the sidebar's footer tool section now blends into the sidebar — no card frame, collapsed by default, revealed on hover, click the header to pin it open.
+
 ## v1.0.86 - 2026-08-12
 
 ### 中文
