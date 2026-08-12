@@ -8,6 +8,7 @@ import type {
   ComposerModel,
   MarketplacePlugin,
   McpServerEntry,
+  McpServerStatusKind,
   PermissionResponsePayload,
   PermissionUpdate,
   SDKMessage,
@@ -74,12 +75,15 @@ interface ActiveClaudeSession {
   /** 已发出的 interrupt control request id（等 control_response）。 */
   interruptRequestId: string | null
   interruptTimer: ReturnType<typeof setTimeout> | null
+  /** system/init 里带的技能名与 MCP 服务器状态（只读展示用）。 */
+  skills: string[]
+  mcpServers: McpServerEntry[]
 }
 
 /** stderr 只留尾部用于报错，避免长会话把内存吃掉（同 AcpClient 的取舍）。 */
 const MAX_STDERR = 8000
 
-function resolveClaudeCommand(): { command: string; prefixArgs: string[] } {
+export function resolveClaudeCommand(): { command: string; prefixArgs: string[] } {
   // 用户级安装（Windows 下 claude 装在 ~/.local/bin）优先，其次 PATH。
   const local = join(homedir(), '.local', 'bin', process.platform === 'win32' ? 'claude.exe' : 'claude')
   if (existsSync(local)) return { command: local, prefixArgs: [] }
@@ -122,7 +126,9 @@ export class ClaudeBackend {
       stderr: '',
       pendingPermissions: new Map(),
       interruptRequestId: null,
-      interruptTimer: null
+      interruptTimer: null,
+      skills: [],
+      mcpServers: []
     }
     this.spawnChild(session)
     this.sessions.set(sessionId, session)
@@ -221,6 +227,29 @@ export class ClaudeBackend {
     const sid = typeof msg['session_id'] === 'string' ? (msg['session_id'] as string) : null
     if (sid && session.claudeSessionId !== sid) session.claudeSessionId = sid
 
+    // init 里带着这个会话真实装载的技能与 MCP 服务器状态——面板据此展示，
+    // 而不是一律显示「一个都没有」。
+    if (msg.type === 'system' && msg['subtype'] === 'init') {
+      const skills = msg['skills']
+      if (Array.isArray(skills)) session.skills = skills.filter((s): s is string => typeof s === 'string')
+      const servers = msg['mcp_servers']
+      if (Array.isArray(servers)) {
+        session.mcpServers = servers.map((raw) => {
+          const s = raw as Record<string, unknown>
+          const status = String(s['status'] ?? 'pending')
+          return {
+            name: String(s['name'] ?? '(未命名)'),
+            status: (['connected', 'failed', 'needs-auth', 'pending', 'disabled'] as const).includes(
+              status as McpServerStatusKind
+            )
+              ? (status as McpServerStatusKind)
+              : 'pending',
+            scope: 'claude-code'
+          }
+        })
+      }
+    }
+
     if (msg.type === 'assistant' && !session.running) {
       session.running = true
       this.h.onSessionRunning?.(session.id, true, session.claudeSessionId ?? undefined, Date.now())
@@ -299,7 +328,7 @@ export class ClaudeBackend {
     }
   }
 
-  private writeUser(session: ActiveClaudeSession, content: string): void {
+  private writeUser(session: ActiveClaudeSession, content: string | unknown[]): void {
     this.writeLine(session, { type: 'user', message: { role: 'user', content } })
   }
 
@@ -312,18 +341,6 @@ export class ClaudeBackend {
   send(sessionId: string, content: string | unknown[]): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
-    // 附件等结构化内容先降级成文本：Claude Code 的 stream-json 输入接受
-    // content 数组，但块类型与 Tran 的附件形状未逐一验证，v1 只保证文本可靠。
-    const text =
-      typeof content === 'string'
-        ? content
-        : content
-            .map((block) => {
-              const b = block as Record<string, unknown>
-              return typeof b['text'] === 'string' ? (b['text'] as string) : ''
-            })
-            .filter(Boolean)
-            .join('\n')
     // 中断/崩溃后进程可能已经没了：带 --resume 悄悄重开，上下文接着走。
     // （旧实现在这儿排队等 system/init，但 CLI 要先收到输入才吐 init，
     //   两边互等——整个后端一条消息都发不出去。）
@@ -336,7 +353,10 @@ export class ClaudeBackend {
         return
       }
     }
-    this.writeUser(session, text)
+    // 附件原样透传：渲染层拼出来的块本来就是 Anthropic API 的形状
+    // （text / image + source.base64），与 Claude Code 的 stream-json 输入一致。
+    // 早先这里把数组拍平成纯文本只取 text 块，图片附件直接消失。
+    this.writeUser(session, content)
   }
 
   async interrupt(sessionId: string): Promise<void> {
@@ -463,26 +483,28 @@ export class ClaudeBackend {
     return ids
   }
 
-  /** MCP 服务器：init 消息里带 mcp_servers，但 v1 不做增删改（Claude Code
-   *  自己管理 .mcp.json），面板显示空列表比显示错误信息干净。 */
-  async listMcpServers(): Promise<McpServerEntry[]> {
-    return []
+  /** MCP 服务器：只读展示 init 下发的状态。增删改仍由 Claude Code 自己管
+   *  （`claude mcp add/remove`），Tran 不代管它的配置文件。 */
+  async listMcpServers(sessionId: string): Promise<McpServerEntry[]> {
+    return this.sessions.get(sessionId)?.mcpServers ?? []
   }
 
-  async refreshMcpServers(): Promise<McpServerEntry[]> {
-    return []
+  async refreshMcpServers(sessionId: string): Promise<McpServerEntry[]> {
+    // 状态只随 init 下发，会话中途没有刷新通道；返回当前已知的即可。
+    return this.listMcpServers(sessionId)
   }
 
   async toggleMcpServer(): Promise<void> {
-    throw new Error('Claude Code 后端暂不支持在 Tran 里开关 MCP 服务器')
+    throw new Error('Claude Code 的 MCP 服务器请用 `claude mcp` 命令管理，Tran 这里只做展示')
   }
 
   async backgroundTask(): Promise<boolean> {
     return false
   }
 
-  async listSkills(): Promise<SkillInfo[]> {
-    return []
+  async listSkills(sessionId: string): Promise<SkillInfo[]> {
+    const skills = this.sessions.get(sessionId)?.skills ?? []
+    return skills.map((name) => ({ name, description: 'Claude Code 内置技能' }))
   }
 
   async getSessionUsage(sessionId: string): Promise<SessionUsageInfo> {

@@ -50,9 +50,10 @@ export const AGENT_BACKENDS: AgentBackendInfo[] = [
       // 权限走控制协议 can_use_tool → Tran 的权限弹窗 → control_response，
       // 模式切换（默认/自动/YOLO）也是热切，不必重开会话。
       permissions: true,
-      // MCP 由 Claude Code 侧配置，Tran 面板不做增删改。
-      mcp: false,
-      skills: false,
+      // MCP 只做只读展示（增删改仍用 `claude mcp` 命令），技能列表来自
+      // system/init。能力徽章只是标注，不驱动任何开关。
+      mcp: true,
+      skills: true,
       sessionHistory: true,
       subagents: false
     }

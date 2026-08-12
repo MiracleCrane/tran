@@ -123,7 +123,9 @@ export const useUiStore = create<UiStore>((set) => ({
     }
     set({ sidebarHoverExpand: on })
   },
-  navCollapsed: false,
+  // 默认收起：工具区是低频入口，常驻展开只是把五行图标怼在侧栏底部。
+  // 鼠标移到底部就浮出来，够用（2026-08 用户要求）。
+  navCollapsed: true,
   toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
   attachmentPreview: null,
   openAttachmentPreview: (attachment) => set({ attachmentPreview: { ...attachment } }),

@@ -395,6 +395,11 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const toggleSidebar = useUiStore((s) => s.toggleSidebar)
   const navCollapsed = useUiStore((s) => s.navCollapsed)
   const toggleNav = useUiStore((s) => s.toggleNav)
+  /** 鼠标停在底部工具区上——临时浮出，移开即收，不写进 store。 */
+  const [navHover, setNavHover] = useState(false)
+  // forceExpanded（收起态侧栏的悬停浮层）永远展开工具区：浮层的意义就是快速
+  // 触达这几个入口，再要求用户在浮层里二次悬停就多此一举。
+  const navOpen = forceExpanded || !navCollapsed || navHover
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
@@ -1327,9 +1332,11 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     sessionListTransitionPhase === 'exiting'
       ? 'is-exiting'
       : ''
+  // 无框：选中态只用底色区分，不描边。glass-active 会画一圈 1px 亮边——
+  // 玻璃主题下线之后，那圈边在实色侧栏里就是个孤立的方框。
   const navCls = (on: boolean): string =>
-    `sidebar-tool-tab flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs ${
-      on ? 'is-active glass-active text-zinc-100' : 'text-zinc-400'
+    `sidebar-tool-tab flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs ${
+      on ? 'is-active bg-white/[0.07] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200'
     }`
 
   const handleSidebarPointerGlow = (event: PointerEvent<HTMLButtonElement>): void => {
@@ -1738,13 +1745,20 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         </div>
       </div>
 
-      {/* footer nav — collapsible tool tabs */}
-      <div className="sidebar-deferred-content is-ready px-3 pb-4 pt-2">
-        <div className="glass-panel-soft rounded-2xl p-1.5">
+      {/* footer nav — 融进侧栏的工具区：无卡片外框、默认收起、鼠标移到底部
+          就浮出来。原先那圈 glass-panel-soft 在实色主题下是块突兀的浮起矩形，
+          而里面装的只是五个低频入口，不值一个视觉层级（2026-08 用户要求）。
+          点标题仍可「钉住」展开，移开鼠标也不收。 */}
+      <div
+        className="sidebar-deferred-content is-ready px-3 pb-4 pt-2"
+        onMouseEnter={() => setNavHover(true)}
+        onMouseLeave={() => setNavHover(false)}
+      >
+        <div>
           <button
             onClick={toggleNav}
-            className="flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-[10px] font-medium uppercase tracking-wide text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
-            title={navCollapsed ? '展开工具栏' : '收起工具栏'}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[10px] font-medium uppercase tracking-wide text-zinc-600 transition hover:text-zinc-400"
+            title={navCollapsed ? '展开工具栏（点击钉住）' : '收起工具栏'}
           >
             <span className="flex-1">工具</span>
             <svg
@@ -1752,7 +1766,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               height="13"
               viewBox="0 0 24 24"
               fill="none"
-              className={`shrink-0 text-zinc-500 transition-transform duration-300 ease-spring ${navCollapsed ? '-rotate-90' : ''}`}
+              className={`shrink-0 transition-transform duration-300 ease-spring ${navOpen ? '' : '-rotate-90'}`}
             >
               <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -1764,13 +1778,13 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               触达这四个入口，用户在展开态收起过「工具」不该让浮出态也收起
               （2026-08 用户反馈）。navHidden 同样要豁免 forceExpanded——否则
               Collapse 开了、条目还是 opacity 0，就是一个空盒子（v1.0.65 实测 bug）。 */}
-          <Collapse open={forceExpanded || !navCollapsed}>
+          <Collapse open={navOpen}>
             <div className="mt-1">
               {NAV_ITEMS.map((item, i) => {
                 const on = view === item.view
                 const isWslItem = item.view === 'wslHealth'
                 const isProviderItem = item.view === 'providers'
-                const navHidden = navCollapsed && !forceExpanded
+                const navHidden = !navOpen
                 const button = (
                   <button
                     key={item.view}

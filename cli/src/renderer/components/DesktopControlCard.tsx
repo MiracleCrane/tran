@@ -89,8 +89,8 @@ export default function DesktopControlCard(): JSX.Element {
         键盘输入、切换窗口。开关即时生效，kimi 重开会话后可用 desktop_* 工具。
       </p>
       <p className="mt-1 text-[11px] text-zinc-600">
-        目前只装载进 <span className="text-zinc-500">Kimi Code</span> 会话；Claude Code
-        后端读的是它自己的 MCP 配置，暂不受此开关影响。
+        对 <span className="text-zinc-500">Kimi Code</span> 与{' '}
+        <span className="text-zinc-500">Claude Code</span> 两个后端同时生效（各写各的 MCP 配置）。
       </p>
       {on && displays.length > 1 && (
         <div className="mt-3">

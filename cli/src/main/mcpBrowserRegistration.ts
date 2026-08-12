@@ -1,7 +1,9 @@
 import { app } from 'electron'
+import { execFile } from 'node:child_process'
 import { join } from 'node:path'
 import { kimiHome } from './kimiHome'
 import { readJsonSafe, writeJsonAtomic } from './atomicWrite'
+import { resolveClaudeCommand } from './agent/ClaudeBackend'
 import { log } from './logger'
 
 /**
@@ -16,8 +18,10 @@ import { log } from './logger'
  * 不一定有 node，Electron 即 Node。
  */
 
-const BROWSER_SERVER_NAME = 'tran-browser'
-const DESKTOP_SERVER_NAME = 'tran-desktop'
+type ServerName = 'tran-browser' | 'tran-desktop'
+
+const BROWSER_SERVER_NAME: ServerName = 'tran-browser'
+const DESKTOP_SERVER_NAME: ServerName = 'tran-desktop'
 
 interface McpServerEntry {
   type: string
@@ -55,23 +59,79 @@ function withMcpConfig(mutate: (servers: Record<string, unknown>) => boolean): v
   }
 }
 
-function upsert(name: string, desired: McpServerEntry): void {
+/** 本进程内已同步给 Claude Code 的条目（序列化后比对）。Claude 那边的配置
+ *  位置不归我们管，读不到现状，只能靠这个避免重复起子进程。 */
+const claudeSynced = new Map<ServerName, string>()
+
+function upsert(name: ServerName, desired: McpServerEntry): void {
   withMcpConfig((servers) => {
     if (JSON.stringify(servers[name]) === JSON.stringify(desired)) return false
     servers[name] = desired
     log('mcp', `registered ${name}（command=${desired.command}）`)
     return true
   })
+  const fingerprint = JSON.stringify(desired)
+  if (claudeSynced.get(name) !== fingerprint) {
+    claudeSynced.set(name, fingerprint)
+    void claudeMcpAdd(name, desired)
+  }
 }
 
 /** 反注册（开关关闭时）。条目不存在则无操作。 */
-export function unregisterMcpServer(name: 'tran-browser' | 'tran-desktop'): void {
+export function unregisterMcpServer(name: ServerName): void {
   withMcpConfig((servers) => {
     if (!(name in servers)) return false
     delete servers[name]
     log('mcp', `unregistered ${name}`)
     return true
   })
+  if (claudeSynced.has(name)) claudeSynced.delete(name)
+  void claudeMcpRemove(name)
+}
+
+// ---------- Claude Code 侧的注册 ----------
+
+/**
+ * Claude Code 不读 kimi 的 mcp.json，它有自己的一套配置（位置随版本变，
+ * Windows 上未必是 ~/.claude.json）。所以这里不去猜文件路径，直接调它自己的
+ * `claude mcp add/remove --scope user` ——官方接口，格式与位置都由 CLI 负责。
+ *
+ * 全部 best-effort：没装 Claude Code、或用户没登录，都只记一行日志，绝不能
+ * 让「浏览器控制」这个开关因为另一个后端不在而失败。
+ */
+function runClaudeCli(args: string[], label: string): Promise<void> {
+  return new Promise((resolvePromise) => {
+    const { command, prefixArgs } = resolveClaudeCommand()
+    execFile(
+      command,
+      [...prefixArgs, ...args],
+      { windowsHide: true, timeout: 20_000 },
+      (error, _stdout, stderr) => {
+        if (error) {
+          log('mcp', `claude ${label} 未生效（可忽略，若未安装 Claude Code）：${(stderr || error.message).trim().slice(0, 200)}`)
+        } else {
+          log('mcp', `claude ${label} ok`)
+        }
+        resolvePromise()
+      }
+    )
+  })
+}
+
+async function claudeMcpRemove(name: ServerName): Promise<void> {
+  // 条目不存在时 CLI 会以非 0 退出——这在「本来就没注册过」时是正常的，
+  // runClaudeCli 只记日志不抛。
+  await runClaudeCli(['mcp', 'remove', '--scope', 'user', name], `mcp remove ${name}`)
+}
+
+async function claudeMcpAdd(name: ServerName, entry: McpServerEntry): Promise<void> {
+  // add 遇到重名会失败，所以先 remove 再 add —— 这就是幂等 upsert。
+  await claudeMcpRemove(name)
+  const envArgs = Object.entries(entry.env).flatMap(([k, v]) => ['-e', `${k}=${v}`])
+  await runClaudeCli(
+    ['mcp', 'add', '--scope', 'user', name, ...envArgs, '--', entry.command, ...entry.args],
+    `mcp add ${name}`
+  )
 }
 
 /** 浏览器控制：注册 tran-browser（需要桥的配对文件路径）。 */
