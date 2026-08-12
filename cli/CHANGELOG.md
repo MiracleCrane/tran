@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.82 - 2026-08-12
+
+### 中文
+
+- 修复:**浏览器控制 click/type 完全不可用**——chrome.scripting 的参数里 undefined 不可序列化(真机测试抓到),缺省参数改传 null(扩展 v0.3.3,需在 chrome://extensions 重载一次)。
+- 修复(扫描收尾,清空 #63-#66 全部剩余项):
+  - 归档存档文件损坏时不再静默假成功,归档页横幅提示;搜索面板打开归档会话自动取消归档。
+  - 桥:被替换的僵尸扩展连接不再喂活探活;read_page 元素列表纳入长度预算;粘新配对码立即生效。
+  - 主进程:网络图片改流式限量下载(谎报 content-length 防不住的内存路径关闭);plan 文件路径归一防 `..` 逃逸;诊断报告日志段脱敏。
+  - 会话:桥进程异常退出时未确认消息回收进待发队列(不再静默丢失),台账死条目不再滞留;AgentSwarm 卡片流式期间即时显示任务;超长会话消息时间戳不再消失。
+
+### English
+
+- Fixed: **browser-control click/type were entirely broken** — `undefined` in chrome.scripting args is unserializable (caught in live testing); optional params now pass null (extension v0.3.3, reload once in chrome://extensions).
+- Scan wrap-up (closes all remaining items of #63-#66): archive corruption no longer fakes success (banner shown) and search-palette opens auto-unarchive; bridge ignores zombie-connection heartbeats, read_page element list respects the length budget, re-pairing takes effect immediately; network images stream with a hard size cap, plan-file paths are resolved against `..` escapes, diagnostic log section is redacted; messages unacknowledged when the bridge dies are recycled into the pending queue instead of vanishing, swarm cards render during streaming, and long-session timestamps no longer disappear.
+
 ## v1.0.81 - 2026-08-11
 
 ### 中文
