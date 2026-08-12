@@ -1002,6 +1002,20 @@ export interface ForgeApi {
   /** --- 控制类插件开关（浏览器控制 / 桌面控制） --- */
   getControlPlugins(): Promise<ControlPluginsState>
   setControlPlugin(plugin: 'browser' | 'desktop', enabled: boolean): Promise<ControlPluginsState>
+  /** 分屏控制：列出显示器 / 指定划给 AI 的那块（null = 不限制）。 */
+  listDisplays(): Promise<DisplayInfo[]>
+  setDesktopDisplay(displayIndex: number | null): Promise<void>
+}
+
+/** 一块显示器（分屏控制的选择项）。 */
+export interface DisplayInfo {
+  index: number
+  label: string
+  width: number
+  height: number
+  x: number
+  y: number
+  primary: boolean
 }
 
 /** 控制类插件的开关状态。开关本体 = kimi mcp.json 的注册/反注册（+ 浏览器

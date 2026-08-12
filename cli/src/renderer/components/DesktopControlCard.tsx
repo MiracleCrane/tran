@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { DisplayInfo } from '../../shared/ipc'
 
 /**
  * 「桌面控制」开关卡片（Codex 式 computer-use，默认关）。
@@ -9,16 +10,31 @@ import { useEffect, useState } from 'react'
 export default function DesktopControlCard(): JSX.Element {
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const [toggling, setToggling] = useState(false)
+  const [displays, setDisplays] = useState<DisplayInfo[]>([])
+  /** null = 不限制（整个桌面）；数字 = 只允许操作这块屏。 */
+  const [aiDisplay, setAiDisplay] = useState<number | null>(null)
 
   useEffect(() => {
     let alive = true
     void window.api.getControlPlugins().then((p) => {
       if (alive) setEnabled(p.desktopEnabled)
     }).catch(() => {})
+    void window.api.listDisplays().then((list) => {
+      if (alive) setDisplays(list)
+    }).catch(() => {})
     return () => {
       alive = false
     }
   }, [])
+
+  const pickDisplay = async (index: number | null): Promise<void> => {
+    setAiDisplay(index)
+    try {
+      await window.api.setDesktopDisplay(index)
+    } catch {
+      /* 保持本地选择，下次打开重新读 */
+    }
+  }
 
   const toggle = async (): Promise<void> => {
     if (enabled === null || toggling) return
@@ -68,10 +84,48 @@ export default function DesktopControlCard(): JSX.Element {
         让 AI 像 Codex 那样操作整个 Windows 桌面：截屏识别、读取窗口控件（UIA）、移动点击鼠标、
         键盘输入、切换窗口。开关即时生效，kimi 重开会话后可用 desktop_* 工具。
       </p>
+      {on && displays.length > 1 && (
+        <div className="mt-3">
+          <div className="text-[11px] font-medium text-zinc-300">分屏控制</div>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
+            把其中一块屏划给 AI：截图只截这块屏，点击/聚焦越界会被拒绝，你在另一块屏上继续干活互不干扰。
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => void pickDisplay(null)}
+              className={`rounded-lg px-3 py-1.5 text-[11px] transition ${
+                aiDisplay === null
+                  ? 'bg-accent/20 text-accent'
+                  : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
+              }`}
+            >
+              不限制（整个桌面）
+            </button>
+            {displays.map((d) => (
+              <button
+                key={d.index}
+                type="button"
+                onClick={() => void pickDisplay(d.index)}
+                className={`rounded-lg px-3 py-1.5 text-[11px] transition ${
+                  aiDisplay === d.index
+                    ? 'bg-accent/20 text-accent'
+                    : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
+                }`}
+              >
+                {d.label} · {d.width}×{d.height}
+                {d.primary ? ' · 主屏' : ''}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {on && (
         <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-950/30 px-3 py-2 text-[11px] leading-relaxed text-amber-300">
           ⚠️ 桌面控制等同于把键盘鼠标交给 AI——它能操作屏幕上的任何程序。工具调用仍会走
           kimi 的权限确认（逐条确认模式下每步都会问你）；不放心时把会话保持在「逐条确认」模式。
+          AI 操作期间屏幕边缘会亮起紫色光晕作提示。
         </div>
       )}
     </section>

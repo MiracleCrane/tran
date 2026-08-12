@@ -784,6 +784,7 @@ export default function SettingsPanel(): JSX.Element {
         )}
 
         {category === 'session' && (
+        <>
         <section className="glass-panel-soft glass-overflow-visible rounded-2xl p-4">
           <div className="mb-3">
             <label className={labelCls}>Agent 后端</label>
@@ -901,6 +902,7 @@ export default function SettingsPanel(): JSX.Element {
           </button>
           {savedAt && <span className="text-xs text-emerald-400">已保存</span>}
         </div>
+        </>
         )}
 
         {category === 'backup' && (
@@ -942,6 +944,7 @@ export default function SettingsPanel(): JSX.Element {
             <div className="mt-2 text-[11px] leading-relaxed text-red-300">{importMessage}</div>
           )}
         </section>
+        )}
 
         {category === 'plugins' && <BrowserBridgeCard />}
 

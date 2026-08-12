@@ -241,6 +241,8 @@ const api: ForgeApi = {
   getBrowserBridgeStatus: () => ipcRenderer.invoke('forge:getBrowserBridgeStatus'),
   getControlPlugins: () => ipcRenderer.invoke('forge:getControlPlugins'),
   setControlPlugin: (plugin, enabled) => ipcRenderer.invoke('forge:setControlPlugin', plugin, enabled),
+  listDisplays: () => ipcRenderer.invoke('forge:listDisplays'),
+  setDesktopDisplay: (displayIndex) => ipcRenderer.invoke('forge:setDesktopDisplay', displayIndex),
   browserToolCall: (tool, args) => ipcRenderer.invoke('forge:browserToolCall', tool, args),
   onBrowserBridgeStatus: (cb) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: BrowserBridgeStatus): void =>

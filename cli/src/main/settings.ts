@@ -101,6 +101,9 @@ interface PersistedSettings {
    *  MCP server，kimi 获得截屏/点击/键入/窗口管理等系统级工具。能力等同于
    *  让 AI 坐在键盘前，务必知情开启。 */
   desktopControlEnabled?: boolean
+  /** 分屏控制：只允许 AI 操作这块显示器（序号，与系统枚举顺序一致）。
+   *  undefined / -1 = 不限制（整个虚拟桌面）。 */
+  desktopDisplayIndex?: number
   /** 总结类杂活（会话命名、命令说明、思考摘要…）用的型号。空 = 用
    *  cheapModel.DEFAULT_CHEAP_MODEL。别写死猜测的型号——设置页有探测按钮。 */
   summaryModel?: string
@@ -348,6 +351,10 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.autoTodoNudge = optionalBoolean(source.autoTodoNudge)
   settings.browserControlEnabled = optionalBoolean(source.browserControlEnabled)
   settings.desktopControlEnabled = optionalBoolean(source.desktopControlEnabled)
+  settings.desktopDisplayIndex =
+    typeof source.desktopDisplayIndex === 'number' && Number.isInteger(source.desktopDisplayIndex)
+      ? source.desktopDisplayIndex
+      : undefined
   settings.summaryModel = optionalString(source.summaryModel)
   settings.summaryApiBaseUrl = optionalString(source.summaryApiBaseUrl)
   settings.summaryThinkingEnabled = optionalBoolean(source.summaryThinkingEnabled)

@@ -3,6 +3,7 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { WebSocketServer, WebSocket, type RawData } from 'ws'
 import { readJsonSafe, writeJsonAtomic } from './atomicWrite'
+import { pulseControlOverlay } from './controlOverlay'
 import { log } from './logger'
 import type { BrowserBridgeStatus } from '../shared/ipc'
 
@@ -265,13 +266,19 @@ function handleConnection(socket: WebSocket): void {
 /** client（MCP server 等）的工具调用：{id, tool, args} → 转发扩展 → 原样回结果。
  *  client 自己的 id 原样带回；与扩展侧的内部 id 空间互不相干。 */
 function handleClientMessage(socket: WebSocket, raw: RawData): void {
-  let msg: { type?: string; id?: string; tool?: string; args?: unknown }
+  let msg: { type?: string; id?: string; tool?: string; args?: unknown; label?: string }
   try {
     msg = JSON.parse(raw.toString())
   } catch {
     return
   }
   if (msg.type === 'pong') return
+  // 桌面控制进程（tran-desktop）不经扩展执行工具，它只借这条连接上报活动，
+  // 好让屏幕光晕在桌面操作期间也亮起来。
+  if (msg.type === 'activity') {
+    pulseControlOverlay(typeof msg.label === 'string' ? msg.label : 'AI 控制中')
+    return
+  }
   if (typeof msg.id !== 'string' || typeof msg.tool !== 'string') return
   const id = msg.id
   callBrowserTool(msg.tool, msg.args)
@@ -336,6 +343,8 @@ function failAllPending(error: Error): void {
 
 /** 把工具调用发给扩展执行。扩展未连接立即报错；30s 超时。 */
 export function callBrowserTool(tool: string, args: unknown): Promise<unknown> {
+  // #67 可视化：AI 每碰一次浏览器就亮一次屏幕光晕（停歇 800ms 后自动淡出）。
+  pulseControlOverlay('AI 控制浏览器')
   const socket = extensionSocket
   if (!socket) {
     return Promise.reject(new Error('浏览器扩展未连接：请确认 Chrome 已安装并配对 Tran 浏览器桥扩展'))

@@ -84,12 +84,20 @@ export function registerMcpBrowserServer(tokenFile: string): void {
   })
 }
 
-/** 桌面控制：注册 tran-desktop（自包含，不依赖桥）。 */
-export function registerMcpDesktopServer(): void {
+/**
+ * 桌面控制：注册 tran-desktop。
+ * @param displayIndex 分屏控制的目标显示器序号；null = 不限制。
+ * @param tokenFile 桥的配对文件（桌面进程借它上报活动，点亮屏幕光晕）。
+ */
+export function registerMcpDesktopServer(displayIndex: number | null, tokenFile: string): void {
   upsert(DESKTOP_SERVER_NAME, {
     type: 'stdio',
     command: process.execPath,
     args: [scriptPath('mcp-desktop.js')],
-    env: { ELECTRON_RUN_AS_NODE: '1' }
+    env: {
+      ELECTRON_RUN_AS_NODE: '1',
+      TRAN_BRIDGE_TOKEN_FILE: tokenFile,
+      ...(displayIndex === null ? {} : { TRAN_DESKTOP_DISPLAY: String(displayIndex) })
+    }
   })
 }

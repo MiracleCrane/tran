@@ -15,16 +15,189 @@
  * 协议：MCP stdio（newline-delimited JSON-RPC 2.0），与 mcp-browser 同构。
  */
 import { execFile } from 'node:child_process'
+import { createHmac, randomUUID } from 'node:crypto'
 import { readFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
+import WebSocket from 'ws'
 
-const SERVER_VERSION = '0.1.0'
+const SERVER_VERSION = '0.2.0'
 const PS_TIMEOUT_MS = 30_000
 
 function logErr(message: string): void {
   process.stderr.write(`[tran-desktop] ${message}\n`)
+}
+
+// ---------- 活动上报（#67 屏幕光晕） ----------
+
+/**
+ * 每次工具调用往 Tran 报一声，好让「AI 控制中」的紫色光晕亮起来。
+ * 复用浏览器桥的 client 通道（probe-first 握手同一套）。连不上就算了——
+ * 光晕是提示，不能因为它失败而让桌面工具不可用。
+ */
+let bridge: WebSocket | null = null
+let bridgeReady = false
+let connecting = false
+
+function bridgePairing(): { token: string; port: number } | null {
+  const file =
+    process.env['TRAN_BRIDGE_TOKEN_FILE'] ||
+    join(process.env['APPDATA'] || '', 'Tran', 'browser-bridge-token.json')
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { token?: string; port?: number }
+    if (typeof parsed.token === 'string' && typeof parsed.port === 'number') {
+      return { token: parsed.token, port: parsed.port }
+    }
+  } catch {
+    /* 没配对文件 = Tran 没装/没启动过，静默跳过 */
+  }
+  return null
+}
+
+function connectBridge(): void {
+  if (bridgeReady || connecting) return
+  const pairing = bridgePairing()
+  if (!pairing) return
+  connecting = true
+  let ws: WebSocket
+  try {
+    ws = new WebSocket(`ws://127.0.0.1:${pairing.port}`)
+  } catch {
+    connecting = false
+    return
+  }
+  const nonce = randomUUID()
+  const done = (): void => {
+    connecting = false
+  }
+  ws.on('open', () => ws.send(JSON.stringify({ type: 'probe', nonce })))
+  ws.on('message', (data) => {
+    let msg: { type?: string; proof?: string }
+    try {
+      msg = JSON.parse(String(data))
+    } catch {
+      return
+    }
+    if (msg.type === 'probe_ok') {
+      const expected = createHmac('sha256', pairing.token)
+        .update(`${nonce}:${pairing.port}`)
+        .digest('hex')
+      if (msg.proof !== expected) {
+        ws.close()
+        done()
+        return
+      }
+      ws.send(
+        JSON.stringify({
+          type: 'hello',
+          role: 'client',
+          token: pairing.token,
+          clientVersion: SERVER_VERSION,
+          protocolVersion: 1
+        })
+      )
+      return
+    }
+    if (msg.type === 'hello_ok') {
+      bridge = ws
+      bridgeReady = true
+      done()
+      return
+    }
+    if (msg.type === 'ping') ws.send(JSON.stringify({ type: 'pong' }))
+  })
+  ws.on('close', () => {
+    if (bridge === ws) bridge = null
+    bridgeReady = false
+    done()
+  })
+  ws.on('error', () => {
+    bridgeReady = false
+    done()
+  })
+}
+
+function reportActivity(label: string): void {
+  if (!bridgeReady || !bridge) {
+    connectBridge()
+    return
+  }
+  try {
+    bridge.send(JSON.stringify({ type: 'activity', label }))
+  } catch {
+    bridgeReady = false
+  }
+}
+
+// ---------- 分屏控制（把 AI 关在一块屏里） ----------
+
+/**
+ * TRAN_DESKTOP_DISPLAY：允许 AI 操作的显示器序号（desktop_list_displays 的
+ * index）。设了就是「分屏控制」——截图只截这块屏，点击越界直接拒绝，用户在
+ * 另一块屏上继续干自己的活，互不干扰。没设 = 整个虚拟桌面都可操作。
+ */
+function targetDisplayIndex(): number | null {
+  const raw = process.env['TRAN_DESKTOP_DISPLAY']
+  if (raw === undefined || raw === '') return null
+  const n = Number(raw)
+  return Number.isInteger(n) && n >= 0 ? n : null
+}
+
+interface DisplayBounds {
+  index: number
+  x: number
+  y: number
+  width: number
+  height: number
+  primary: boolean
+}
+
+let displayCache: DisplayBounds[] | null = null
+
+async function listDisplays(): Promise<DisplayBounds[]> {
+  if (displayCache) return displayCache
+  const r = await runPs(
+    CS_USER32 + `
+Add-Type -AssemblyName System.Windows.Forms
+$list = New-Object System.Collections.ArrayList
+$i = 0
+foreach ($s in [System.Windows.Forms.Screen]::AllScreens) {
+  $b = $s.Bounds
+  [void]$list.Add(@{ index = $i; x = $b.X; y = $b.Y; width = $b.Width; height = $b.Height; primary = $s.Primary })
+  $i++
+}
+Write-Output ("TRANJSON:" + (ConvertTo-Json @{ displays = $list } -Depth 4 -Compress))
+`
+  )
+  const raw = r['displays']
+  const arr = Array.isArray(raw) ? raw : raw ? [raw] : []
+  displayCache = arr.map((d) => d as unknown as DisplayBounds)
+  return displayCache
+}
+
+/** 分屏模式下的可操作区域；未限制时返回 null。 */
+async function allowedBounds(): Promise<DisplayBounds | null> {
+  const idx = targetDisplayIndex()
+  if (idx === null) return null
+  const displays = await listDisplays()
+  const target = displays.find((d) => d.index === idx)
+  if (!target) {
+    throw new Error(`分屏控制指定了显示器 ${idx}，但系统只有 ${displays.length} 块屏幕（编号 0-${displays.length - 1}）`)
+  }
+  return target
+}
+
+/** 坐标必须落在划给 AI 的那块屏里——越界就是要去动用户正在用的屏幕。 */
+function assertInBounds(b: DisplayBounds | null, x: number, y: number): void {
+  if (!b) return
+  if (x < b.x || x >= b.x + b.width || y < b.y || y >= b.y + b.height) {
+    throw new Error(
+      `坐标 (${x}, ${y}) 不在划给 AI 的显示器 ${b.index} 内` +
+        `（范围 x ${b.x}~${b.x + b.width}, y ${b.y}~${b.y + b.height}）。` +
+        '分屏控制模式下只能操作这块屏幕。'
+    )
+  }
 }
 
 // ---------- PowerShell 执行 ----------
@@ -91,26 +264,44 @@ public class TranU32 {
 
 // ---------- 各工具的 PS 实现 ----------
 
-async function psScreenshot(): Promise<{ file: string; width: number; height: number }> {
+async function psScreenshot(): Promise<{
+  file: string
+  width: number
+  height: number
+  left: number
+  top: number
+}> {
   const file = join(tmpdir(), `tran-desktop-shot-${Date.now()}.jpg`)
+  // 分屏模式：只截划给 AI 的那块屏，用户那块屏的内容根本不会进 AI 的上下文
+  //（既是隐私，也省 token）。未限制时截整个虚拟桌面。
+  const bounds = await allowedBounds()
+  const region = bounds
+    ? `$rl=${bounds.x}; $rt=${bounds.y}; $rw=${bounds.width}; $rh=${bounds.height}`
+    : `$vs=[System.Windows.Forms.SystemInformation]::VirtualScreen; $rl=$vs.Left; $rt=$vs.Top; $rw=$vs.Width; $rh=$vs.Height`
   const r = await runPs(
     CS_USER32 + `
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-$vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
-$bmp = New-Object System.Drawing.Bitmap $vs.Width, $vs.Height
+${region}
+$bmp = New-Object System.Drawing.Bitmap $rw, $rh
 $g = [System.Drawing.Graphics]::FromImage($bmp)
-$g.CopyFromScreen($vs.Left, $vs.Top, 0, 0, $bmp.Size)
+$g.CopyFromScreen($rl, $rt, 0, 0, $bmp.Size)
 $enc = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
 $p = New-Object System.Drawing.Imaging.EncoderParameters 1
 $p.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality, [long]72)
 $bmp.Save($env:TRAN_SHOT_FILE, $enc, $p)
 $g.Dispose(); $bmp.Dispose()
-Write-Output ("TRANJSON:" + (ConvertTo-Json @{ width = $vs.Width; height = $vs.Height; left = $vs.Left; top = $vs.Top } -Compress))
+Write-Output ("TRANJSON:" + (ConvertTo-Json @{ width = $rw; height = $rh; left = $rl; top = $rt } -Compress))
 `,
     { TRAN_SHOT_FILE: file }
   )
-  return { file, width: Number(r['width']), height: Number(r['height']) }
+  return {
+    file,
+    width: Number(r['width']),
+    height: Number(r['height']),
+    left: Number(r['left']),
+    top: Number(r['top'])
+  }
 }
 
 function psListWindows(): Promise<Record<string, unknown>> {
@@ -329,10 +520,32 @@ const TOOLS: ToolDef[] = [
       const shot = await psScreenshot()
       const base64 = readFileSync(shot.file).toString('base64')
       try { unlinkSync(shot.file) } catch { /* ignore */ }
+      // 截图原点不一定是 (0,0)（分屏模式截的是某块屏、或虚拟桌面含负坐标），
+      // 必须把换算方式讲清楚，否则模型会拿图内坐标直接去点，整体偏移一屏。
+      const origin =
+        shot.left === 0 && shot.top === 0
+          ? '图中像素坐标即屏幕坐标，可直接用于 desktop_click。'
+          : `图左上角对应屏幕坐标 (${shot.left}, ${shot.top})：` +
+            `desktop_click 的 x = ${shot.left} + 图内x，y = ${shot.top} + 图内y。`
       return [
         { type: 'image', data: base64, mimeType: 'image/jpeg' },
-        { type: 'text', text: `屏幕 ${shot.width}x${shot.height}，图中像素坐标可直接用于 desktop_click。` }
+        { type: 'text', text: `截图 ${shot.width}x${shot.height}。${origin}` }
       ]
+    }
+  },
+  {
+    name: 'desktop_list_displays',
+    description:
+      '列出所有显示器及其屏幕坐标范围。分屏控制模式下会标出哪块屏划给了 AI——只有那块屏可操作。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: async () => {
+      const displays = await listDisplays()
+      const idx = targetDisplayIndex()
+      return textContent({
+        displays,
+        aiDisplay: idx,
+        mode: idx === null ? '全屏可操作' : `分屏控制：只能操作显示器 ${idx}`
+      })
     }
   },
   {
@@ -350,7 +563,25 @@ const TOOLS: ToolDef[] = [
       required: ['hwnd'],
       additionalProperties: false
     },
-    run: async (a) => textContent(await psFocusWindow(Number(a['hwnd'])))
+    run: async (a) => {
+      const hwnd = Number(a['hwnd'])
+      // 分屏模式：只放行窗口中心落在 AI 那块屏里的窗口——把用户屏上的窗口
+      // 抢到前台，等于直接打断用户。
+      const bounds = await allowedBounds()
+      if (bounds) {
+        const list = await psListWindows()
+        const wins = (Array.isArray(list['windows']) ? list['windows'] : []) as Array<Record<string, number>>
+        const target = wins.find((w) => Number(w['hwnd']) === hwnd)
+        if (target) {
+          assertInBounds(
+            bounds,
+            Number(target['x']) + Number(target['width']) / 2,
+            Number(target['y']) + Number(target['height']) / 2
+          )
+        }
+      }
+      return textContent(await psFocusWindow(hwnd))
+    }
   },
   {
     name: 'desktop_read_window',
@@ -379,7 +610,12 @@ const TOOLS: ToolDef[] = [
       required: ['x', 'y'],
       additionalProperties: false
     },
-    run: async (a) => textContent(await psClick(Number(a['x']), Number(a['y']), String(a['button'] ?? 'left')))
+    run: async (a) => {
+      const x = Number(a['x'])
+      const y = Number(a['y'])
+      assertInBounds(await allowedBounds(), x, y)
+      return textContent(await psClick(x, y, String(a['button'] ?? 'left')))
+    }
   },
   {
     name: 'desktop_type',
@@ -460,6 +696,9 @@ async function handleRequest(req: JsonRpcRequest): Promise<void> {
         return
       }
       try {
+        // #67：每次桌面操作点亮屏幕光晕（只读的列举类也报——AI 在看你的屏幕
+        // 同样该让人知道）。
+        reportActivity('AI 控制桌面')
         sendResult(id, { content: await tool.run(args) })
       } catch (error) {
         sendResult(id, {
@@ -492,5 +731,9 @@ rl.on('line', (line) => {
     if (req.id !== undefined && req.id !== null) sendError(req.id, -32603, '内部错误')
   })
 })
-rl.on('close', () => process.exit(0))
+rl.on('close', () => {
+  bridge?.close()
+  process.exit(0)
+})
+connectBridge()
 logErr(`tran-desktop MCP server v${SERVER_VERSION} 就绪（stdio）`)

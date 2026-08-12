@@ -1,4 +1,4 @@
-import { app, ipcMain, dialog, shell, clipboard, nativeImage, net, Notification, type BrowserWindow } from 'electron'
+import { app, ipcMain, dialog, shell, clipboard, nativeImage, net, screen, Notification, type BrowserWindow } from 'electron'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { readFile, readdir, stat as statAsync, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
@@ -30,6 +30,7 @@ import {
   registerMcpDesktopServer,
   unregisterMcpServer
 } from './mcpBrowserRegistration'
+import { setOverlayTargetDisplay, stopControlOverlay } from './controlOverlay'
 import {
   listProviders,
   getActiveProvider,
@@ -135,6 +136,7 @@ import type {
   BrowserBridgeStatus,
   BrowserToolResult,
   ControlPluginsState,
+  DisplayInfo,
   DeepseekBalanceResult,
   SummaryProfile
 } from '../shared/ipc'
@@ -379,7 +381,16 @@ export function registerIpc(
     }
   }
   const applyDesktopControl = (enabled: boolean): void => {
-    if (enabled) registerMcpDesktopServer()
+    const s = loadSettings()
+    const displayIndex =
+      typeof s.desktopDisplayIndex === 'number' && s.desktopDisplayIndex >= 0
+        ? s.desktopDisplayIndex
+        : null
+    // 分屏控制：光晕也只打在划给 AI 的那块屏上——用户那块屏不该有任何干扰。
+    setOverlayTargetDisplay(
+      displayIndex === null ? null : (screen.getAllDisplays()[displayIndex]?.id ?? null)
+    )
+    if (enabled) registerMcpDesktopServer(displayIndex, tokenFilePath())
     else unregisterMcpServer('tran-desktop')
   }
   {
@@ -387,7 +398,31 @@ export function registerIpc(
     void applyBrowserControl(s.browserControlEnabled !== false)
     applyDesktopControl(s.desktopControlEnabled === true)
   }
-  app.once('before-quit', stopBrowserBridge)
+  app.once('before-quit', () => {
+    stopBrowserBridge()
+    stopControlOverlay()
+  })
+
+  ipcMain.handle('forge:listDisplays', async (): Promise<DisplayInfo[]> =>
+    screen.getAllDisplays().map((d, index) => ({
+      index,
+      label: `显示器 ${index + 1}`,
+      width: d.bounds.width,
+      height: d.bounds.height,
+      x: d.bounds.x,
+      y: d.bounds.y,
+      primary: d.id === screen.getPrimaryDisplay().id
+    }))
+  )
+  ipcMain.handle(
+    'forge:setDesktopDisplay',
+    async (_e, displayIndex: number | null): Promise<void> => {
+      const s = loadSettings()
+      s.desktopDisplayIndex = displayIndex === null ? -1 : displayIndex
+      saveSettings(s)
+      applyDesktopControl(s.desktopControlEnabled === true)
+    }
+  )
 
   ipcMain.handle('forge:getControlPlugins', async (): Promise<ControlPluginsState> => {
     const s = loadSettings()
