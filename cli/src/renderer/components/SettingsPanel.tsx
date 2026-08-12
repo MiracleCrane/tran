@@ -669,7 +669,6 @@ export default function SettingsPanel(): JSX.Element {
       if (parsed.appearance) {
         const next = parsed.appearance as Partial<typeof appearance>
         if (typeof next.motionSpeed === 'number') updateAppearance('motionSpeed', next.motionSpeed)
-        if (typeof next.glassGlow === 'boolean') updateAppearance('glassGlow', next.glassGlow)
       }
       await reloadPreferenceState()
       emitForgeEvent('providerChanged')
@@ -737,69 +736,6 @@ export default function SettingsPanel(): JSX.Element {
             </button>
           </div>
           <div className="space-y-4">
-            {/* 界面风格：即时生效（根元素 data-ui 切换），不需要重启。 */}
-            <div>
-              <div className="text-xs text-zinc-500">界面风格</div>
-              <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-                简约（默认）：面板不再描边和投影，分区靠背景深浅；「新建对话」降为
-                次要按钮；你的发言从右侧气泡改为左侧一条竖线（贴日志贴代码时更好读），
-                与 AI 回复共用同一条居中的正文列。
-              </p>
-              <div className="mt-2 flex gap-1.5">
-                {([
-                  { id: 'glass', label: '玻璃' },
-                  { id: 'flat', label: '简约' }
-                ] as const).map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => updateAppearance('uiStyle', option.id)}
-                    className={`rounded-lg px-3 py-1.5 text-xs transition ${
-                      appearance.uiStyle === option.id
-                        ? 'bg-accent/20 text-accent'
-                        : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* 主题底色：即时生效（根元素 data-theme 切换），只换底色台阶，
-                accent 紫色系不动。 */}
-            <div>
-              <div className="text-xs text-zinc-500">主题底色</div>
-              <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-                深黑（默认）：一直以来的近黑底色；炭灰：Codex 风，整体抬亮一档，
-                壳 #1b1d21、面板 #23262b。
-              </p>
-              <div className="mt-2 flex gap-1.5">
-                {([
-                  { id: 'onyx', label: '深黑' },
-                  { id: 'charcoal', label: '炭灰' }
-                ] as const).map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => updateAppearance('theme', option.id)}
-                    className={`rounded-lg px-3 py-1.5 text-xs transition ${
-                      appearance.theme === option.id
-                        ? 'bg-accent/20 text-accent'
-                        : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <ToggleControl
-              label="玻璃泛光"
-              description="控制玻璃组件的外发光、边缘高光和环境泛光。简约风下不生效。"
-              checked={appearance.glassGlow}
-              disabled={appearance.uiStyle === 'flat'}
-              onChange={(checked) => updateAppearance('glassGlow', checked)}
-            />
             <RangeControl
               label="动画速度"
               value={appearance.motionSpeed}

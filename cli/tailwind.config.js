@@ -4,14 +4,17 @@ module.exports = {
   darkMode: 'class',
   theme: {
     extend: {
+      // 2026-08-12 定稿：Codex 同款中性炭灰实色（玻璃时代的半透明值全部作废）。
+      // 分层靠明度台阶而不是透明度叠加——半透明在深浅背景上表现不一致，
+      // 也是"看起来发灰发脏"的来源。
       colors: {
         bg: {
-          base: 'rgba(14, 15, 20, 0.26)',
-          panel: 'rgba(28, 29, 36, 0.34)',
-          elev: 'rgba(48, 48, 58, 0.38)',
-          hover: 'rgba(76, 76, 88, 0.34)'
+          base: '#1a1a1a',   // 窗口底
+          panel: '#1e1e1e',  // 主区/面板
+          elev: '#262626',   // 卡片、代码块、输入框
+          hover: '#2f2f2f'   // 悬停
         },
-        border: { subtle: 'rgba(238, 232, 226, 0.16)' },
+        border: { subtle: 'rgba(255, 255, 255, 0.08)' },
         accent: '#8b5cf6'
       },
       // sans 完全照抄 Codex 桌面版实测的 --font-sans-default（见 main.tsx 注释）：

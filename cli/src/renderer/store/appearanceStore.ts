@@ -2,27 +2,15 @@ import { useEffect } from 'react'
 import { create } from 'zustand'
 
 /**
- * 界面风格。
- * - glass：现有的玻璃拟态（面板带描边 + 渐变 + 内高光 + 投影 + 两层透镜伪元素）
- * - flat：极简。容器让位给内容——分区靠背景台阶而不是描边，去投影，
- *   统一一个发丝色和一个圆角，强调色只留给「进行中」状态和发送键。
- * 两套都保留，因为这是审美取舍不是对错，切换成本也低。
+ * 外观设置。
+ *
+ * 2026-08-12 定稿：只保留一套外观——Codex 同款中性炭灰扁平风。此前的
+ * 「玻璃拟态 / 深黑(onyx) / 炭灰(charcoal)」三选项全部删除：多套皮肤要在
+ * 每处新 UI 上都验两遍，而实际只有一套在用，剩下的只是维护税。
+ * 因此这里只剩动画速度一项。
  */
-export type UiStyle = 'glass' | 'flat'
-
-/**
- * 主题底色。
- * - onyx：一直以来的深黑（壳底近 #05060A）
- * - charcoal：Codex 风炭灰，整体抬亮一档（壳 #1b1d21、面板 #23262b）。
- *   只换"底"，accent 紫色系不动。
- */
-export type ThemeName = 'onyx' | 'charcoal'
-
 export interface AppearanceSettings {
   motionSpeed: number
-  glassGlow: boolean
-  uiStyle: UiStyle
-  theme: ThemeName
 }
 
 export const MOTION_SPEED_MIN = 25
@@ -30,11 +18,7 @@ export const MOTION_SPEED_MAX = 200
 export const MOTION_SPEED_STEP = 5
 
 export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
-  motionSpeed: 50,
-  glassGlow: false,
-  // 默认简约。玻璃那套仍然保留在设置里，只是不再是新装机看到的第一眼。
-  uiStyle: 'flat',
-  theme: 'onyx'
+  motionSpeed: 50
 }
 
 const LEGACY_STORAGE_KEY = 'forge.appearance.v1'
@@ -58,20 +42,7 @@ function normalizeMotionSpeed(value: unknown): number {
 }
 
 function normalizeSettings(value: Partial<AppearanceSettings> | null | undefined): AppearanceSettings {
-  return {
-    motionSpeed: normalizeMotionSpeed(value?.motionSpeed),
-    glassGlow: value?.glassGlow ?? DEFAULT_APPEARANCE_SETTINGS.glassGlow,
-    // 两个值都要显式认。原先只认 'flat'、其余一律回落到默认——默认改成
-    // flat 之后，那样写会把「用户明确选了玻璃」也吞掉，设置里点不动。
-    uiStyle:
-      value?.uiStyle === 'flat' || value?.uiStyle === 'glass'
-        ? value.uiStyle
-        : DEFAULT_APPEARANCE_SETTINGS.uiStyle,
-    theme:
-      value?.theme === 'onyx' || value?.theme === 'charcoal'
-        ? value.theme
-        : DEFAULT_APPEARANCE_SETTINGS.theme
-  }
+  return { motionSpeed: normalizeMotionSpeed(value?.motionSpeed) }
 }
 
 function migrateLegacySettings(value: Partial<AppearanceSettings> | null | undefined): AppearanceSettings {
@@ -118,15 +89,12 @@ export function applyAppearanceSettings(settings: AppearanceSettings): void {
   const normalized = normalizeSettings(settings)
   const durationFactor = 50 / normalized.motionSpeed
 
-  // 简约模式下泛光一律按 off 生效（设置里的开关值保留，切回玻璃风时恢复）。
-  // 否则 .accent-soft-button / .glass-active 这类不在简约覆盖清单里的元素
-  // 仍会随开关变化——简约风下切「玻璃泛光」能看出区别就是这么来的。
-  const effectiveGlow = normalized.uiStyle === 'flat' ? false : normalized.glassGlow
-  root.dataset.glassGlow = effectiveGlow ? 'on' : 'off'
-  // 扁平化规则必须写在 styles.css 的 @layer components 里才生效：级联层对
-  // !important 的优先级是反的（层内赢过层外），层外样式压不住既有的层内规则。
-  root.dataset.ui = normalized.uiStyle
-  root.dataset.theme = normalized.theme
+  // 单一外观：扁平（Codex 风）。data-ui/data-theme 仍然写，因为 styles.css
+  // 里成规模的扁平化规则挂在 [data-ui='flat'] 选择器上——保留选择器比把
+  // 三千行 CSS 里的前缀逐条摘掉安全得多。
+  root.dataset.glassGlow = 'off'
+  root.dataset.ui = 'flat'
+  root.dataset.theme = 'codex'
 
   root.style.setProperty('--motion-collapse-open', `${Math.round(180 * durationFactor)}ms`)
   root.style.setProperty('--motion-collapse-close', `${Math.round(150 * durationFactor)}ms`)
@@ -152,7 +120,7 @@ export function applyAppearanceSettings(settings: AppearanceSettings): void {
   root.style.setProperty('--glass-lens-control', cssNumber(0.91))
   root.style.setProperty('--glass-window-blur', '0px')
   // 环境泛光层（.app-shell::before）同样跟随生效值，而不是原始开关值。
-  root.style.setProperty('--glass-ambient-opacity', effectiveGlow ? '0.48' : '0.18')
+  root.style.setProperty('--glass-ambient-opacity', '0')
 }
 
 interface AppearanceStore {
@@ -187,5 +155,5 @@ export function useApplyAppearanceSettings(): void {
 
   useEffect(() => {
     applyAppearanceSettings(settings)
-  }, [settings.motionSpeed, settings.glassGlow, settings.uiStyle, settings.theme])
+  }, [settings.motionSpeed])
 }

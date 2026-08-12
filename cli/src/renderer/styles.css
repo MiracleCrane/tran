@@ -53,10 +53,9 @@ body,
 #root {
   height: 100%;
   width: 100%;
-  background:
-    radial-gradient(46rem circle at 14% -12%, rgba(167, 139, 250, 0.055), transparent 58%),
-    radial-gradient(42rem circle at 94% -8%, rgba(124, 211, 252, 0.046), transparent 62%),
-    linear-gradient(145deg, #08090d 0%, #05060a 46%, #09080a 100%);
+  /* Codex 同款中性炭灰实色。玻璃时代的紫/蓝径向泛光与近黑渐变一并去掉：
+     那是"深黑玻璃"风格的底，现在整套换成实色台阶。 */
+  background: #1a1a1a;
 }
 
 html {
@@ -103,10 +102,9 @@ body {
      显式写在这里而不只靠 Tailwind preflight：本文件的自定义 body 规则会盖过
      preflight，留空的话全局字体就不确定了。 */
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
-  background:
-    radial-gradient(46rem circle at 14% -12%, rgba(167, 139, 250, 0.055), transparent 58%),
-    radial-gradient(42rem circle at 94% -8%, rgba(124, 211, 252, 0.046), transparent 62%),
-    linear-gradient(145deg, #08090d 0%, #05060a 46%, #09080a 100%);
+  /* Codex 同款中性炭灰实色。玻璃时代的紫/蓝径向泛光与近黑渐变一并去掉：
+     那是"深黑玻璃"风格的底，现在整套换成实色台阶。 */
+  background: #1a1a1a;
   color: #d4d4d8;
   font-family: Inter, system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -3096,10 +3094,27 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
     display: none;
   }
 
-  /* 2. 侧栏贴边，与主区之间只留一条发丝线 */
+  /* 2. 侧栏贴边，与主区之间只留一条发丝线。
+     Codex 配色：侧栏比主区暗一档（#171717 vs #1e1e1e），靠明度台阶分区。 */
   :root[data-ui='flat'] .glass-sidebar {
-    background: rgba(255, 255, 255, 0.016);
-    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    background: #171717;
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  /* 主区与卡片：实色台阶，不再靠半透明叠加。 */
+  :root[data-ui='flat'] .main-surface {
+    background: #1e1e1e;
+  }
+  :root[data-ui='flat'] .glass-panel,
+  :root[data-ui='flat'] .glass-panel-soft {
+    background: #232323;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  :root[data-ui='flat'] .glass-control {
+    background: #262626;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  :root[data-ui='flat'] .glass-active {
+    background: #2f2f2f;
   }
   :root[data-ui='flat'] .app-shell,
   :root[data-ui='flat'] .workspace-shell {
