@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ShortcutSettings from './ShortcutSettings'
+import SettingText from './SettingText'
 import BrowserBridgeCard from './BrowserBridgeCard'
 import DesktopControlCard from './DesktopControlCard'
 import ConfirmDialog from './ConfirmDialog'
@@ -99,9 +100,11 @@ function ToggleControl({
 }): JSX.Element {
   return (
     <div className={`flex items-start justify-between gap-3 ${disabled ? 'opacity-45' : ''}`}>
-      <div>
-        <div className="text-xs text-zinc-500">{label}</div>
-        {description && <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">{description}</p>}
+      <div className="min-w-0">
+        {/* 标签抬到 zinc-200：此前标签 zinc-500、说明 zinc-600，两者都灰、
+            层级读不出来，整页看着像草稿。现在标签是可读的主文字，说明退一档。 */}
+        <div className="text-xs font-medium text-zinc-200">{label}</div>
+        {description && <SettingText className="mt-1">{description}</SettingText>}
       </div>
       <button
         type="button"
@@ -120,7 +123,18 @@ function ToggleControl({
   )
 }
 
+/** 设置分类。顺序即用户从「最常改」到「最少改」的直觉顺序。 */
+const SETTINGS_CATEGORIES = [
+  { id: 'session', label: '会话' },
+  { id: 'plugins', label: '插件' },
+  { id: 'appearance', label: '外观' },
+  { id: 'system', label: '系统' },
+  { id: 'backup', label: '备份' }
+] as const
+type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number]['id']
+
 export default function SettingsPanel(): JSX.Element {
+  const [category, setCategory] = useState<SettingsCategory>('session')
   const [agentBackend, setAgentBackend] = useState<AgentBackendId>('kimi')
   const [agentBackends, setAgentBackends] = useState<AgentBackendInfo[]>([])
   const [effort, setEffort] = useState<EffortLevel>('high')
@@ -710,6 +724,25 @@ export default function SettingsPanel(): JSX.Element {
           )}
         </div>
 
+        {/* 分类导航：此前所有设置糊在一页里滚（外观、会话默认值、插件、系统
+            杂项、备份混排），找一项要靠肉眼扫。分成五类各自成页。 */}
+        <div className="sticky top-[52px] z-10 -mx-6 flex gap-1 bg-bg-base/85 px-6 pb-2 backdrop-blur-md">
+          {SETTINGS_CATEGORIES.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setCategory(c.id)}
+              className={`rounded-lg px-3 py-1.5 text-xs transition ${
+                category === c.id
+                  ? 'bg-white/[0.08] text-zinc-100'
+                  : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+
         {/* 初始加载失败：页面照常渲染（显示默认值），顶部给错误与重试入口。 */}
         {loadError && (
           <div className="flex items-center gap-3 rounded-xl border border-red-400/20 bg-red-950/30 px-3 py-2 text-xs text-red-300">
@@ -724,6 +757,7 @@ export default function SettingsPanel(): JSX.Element {
           </div>
         )}
 
+        {category === 'appearance' && (
         <section className="glass-panel-soft rounded-2xl p-4">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-zinc-200">个性化</h2>
@@ -747,7 +781,9 @@ export default function SettingsPanel(): JSX.Element {
             />
           </div>
         </section>
+        )}
 
+        {category === 'session' && (
         <section className="glass-panel-soft glass-overflow-visible rounded-2xl p-4">
           <div className="mb-3">
             <label className={labelCls}>Agent 后端</label>
@@ -865,7 +901,9 @@ export default function SettingsPanel(): JSX.Element {
           </button>
           {savedAt && <span className="text-xs text-emerald-400">已保存</span>}
         </div>
+        )}
 
+        {category === 'backup' && (
         <section className="glass-panel-soft rounded-2xl p-4">
           <div className="mb-3">
             <h2 className="text-sm font-semibold text-zinc-200">设置导入 / 导出</h2>
@@ -905,10 +943,11 @@ export default function SettingsPanel(): JSX.Element {
           )}
         </section>
 
-        <BrowserBridgeCard />
+        {category === 'plugins' && <BrowserBridgeCard />}
 
-        <DesktopControlCard />
+        {category === 'plugins' && <DesktopControlCard />}
 
+        {category === 'system' && (
         <section className="glass-panel-soft rounded-2xl p-4">
           <div className="mb-4">
             <h2 className="text-sm font-semibold text-zinc-200">系统</h2>
@@ -916,19 +955,32 @@ export default function SettingsPanel(): JSX.Element {
           <div className="space-y-4">
             <ToggleControl
               label="AI 自动命名"
-              description="新会话发第一条消息后自动生成短标题（每次约消耗一两百 token）；侧栏可一键补全老会话。关闭后不做任何命名调用，命令说明和思考块摘要也一并停用。"
+              description={
+                '新会话发出第一条消息后自动生成短标题，侧栏可一键补全历史会话。\n' +
+                '关闭后不再发起任何命名请求，命令说明与思考摘要一并停用。约 **120 token / 次**。'
+              }
               checked={aiNaming}
               onChange={(checked) => void toggleAiNaming(checked)}
             />
             <ToggleControl
               label="云端套餐额度显示"
-              description="⚠ 默认关闭，有账号风险。5h / 每周额度这两行只能来自 api.kimi.com 的私有接口（kimi 的 /usage 命令不提供额度信息，已核对其输出模板），需要复用 CLI 的登录凭证直连。这不是公开 API，已有因此被封号的实际先例——除非你清楚风险，否则保持关闭。关闭后这两行显示「—」；上下文那行来自本地 /usage，不受影响。"
+              description={
+                '在用量卡里显示 5 小时 / 每周套餐额度。\n' +
+                '**有账号风险，默认关闭。** 额度数据只能取自 `api.kimi.com` 的非公开接口，' +
+                '需复用 CLI 登录凭证直连；已有账号因此被封的先例。\n' +
+                '关闭时这两行显示「—」，上下文占用一行来自本地 `/usage`，不受影响。'
+              }
               checked={cloudUsage}
               onChange={(checked) => void toggleCloudUsage(checked)}
             />
             <ToggleControl
               label="后台任务结束后自动更新待办"
-              description="后台任务收尾且待办还有未完成项时，Tran 替你向 AI 发一次「更新待办」的请求。⚠ 默认关闭：这是一次完整对话轮，要把整个会话上下文重新过一遍——实测一个 42 条记录的会话约 88000 token，是命名那类小请求（约 120 token）的七百倍。而且你下次随便发条消息，AI 本来就会收到后台任务的完成通知并更新待办，所以它买到的只是「提前」，不是「否则就不会更新」。愿意花这个额度换及时性再开。"
+              description={
+                '后台任务结束且待办仍有未完成项时，自动请求 AI 更新待办状态。\n' +
+                '**开销较大，默认关闭。** 这是一次完整对话轮，需重新读取整个会话上下文' +
+                '（42 条记录的会话实测约 **88k token**）。不开启也不会漏更新——' +
+                '你下次发消息时 AI 同样会收到完成通知并更新，区别只在于是否提前。'
+              }
               checked={autoTodoNudge}
               onChange={(checked) => void toggleAutoTodoNudge(checked)}
             />
@@ -940,16 +992,13 @@ export default function SettingsPanel(): JSX.Element {
                 与上面的摘要 API 相互独立——那边可以是任何 OpenAI 兼容服务。 */}
             <div className="space-y-2">
               <div>
-                <div className="text-xs font-medium text-zinc-300">DeepSeek 余额</div>
-                <div className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
-                  用量卡里显示 DeepSeek 账户余额（总 / 充值 / 赠金），走官方公开的
-                  /user/balance 接口；官方只暴露余额，没有 token 用量明细。
-                  <span className="text-zinc-400">
-                    通常不用填——「AI 辅助」里激活的那套配置如果就是 DeepSeek，会直接复用它的 Key。
-                  </span>
-                  只有当摘要 API 用的是别家、而你仍想看 DeepSeek 余额时才需要单独填。
-                  Key 使用系统安全存储。
-                </div>
+                <div className="text-xs font-medium text-zinc-200">DeepSeek 余额</div>
+                <SettingText className="mt-1">
+                  {'在用量卡里显示 DeepSeek 账户余额（总额 / 充值 / 赠金），走官方公开的 `/user/balance` 接口。\n' +
+                    '**通常无需填写**：若「AI 辅助」中启用的配置本身就是 DeepSeek，会自动复用其 Key。' +
+                    '仅当摘要 API 用的是其他服务商、又想查看 DeepSeek 余额时才需单独填。\n' +
+                    'Key 存于系统安全存储。'}
+                </SettingText>
               </div>
               <div className="flex items-center gap-2">
                 <input
@@ -1165,14 +1214,17 @@ export default function SettingsPanel(): JSX.Element {
             </div>
           </div>
         </section>
+        )}
 
+        {category === 'system' && (
         <section className="glass-panel-soft rounded-2xl p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <label className="text-xs text-zinc-500">Vulkan GPU 合成后端(实验)</label>
-              <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-                让 Chromium 的合成走 ANGLE Vulkan 后端(默认 D3D11)。某些显卡上更流畅,某些驱动上可能闪烁或不稳。更改需重启生效,默认关闭。
-              </p>
+              <div className="text-xs font-medium text-zinc-200">Vulkan GPU 合成后端</div>
+              <SettingText className="mt-1">
+                {'让 Chromium 的界面合成走 ANGLE Vulkan 后端（默认 `D3D11`）。\n' +
+                  '**实验性，默认关闭。** 部分显卡上更流畅，也可能在某些驱动上闪烁或不稳定。重启后生效。'}
+              </SettingText>
             </div>
             <button
               type="button"
@@ -1188,6 +1240,7 @@ export default function SettingsPanel(): JSX.Element {
             </button>
           </div>
         </section>
+        )}
 
       </div>
     </div>
