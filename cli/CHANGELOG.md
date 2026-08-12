@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.85 - 2026-08-12
+
+### 中文
+
+- 修复:**混合 DPI 下桌面控制的坐标与截图错乱**。此前桌面控制进程只声明「系统 DPI 感知」,在主屏 200%、副屏 100% 这类混合缩放环境里,Windows 会把所有显示器按主屏缩放虚拟化——副屏被报成 3840×2160（实际 1920×1080）、截图被 2 倍上采样糊掉、点击坐标与截图不同源。现改用 PerMonitorV2,各屏一律真实物理像素、截图 1:1。
+- 改进:显示器列表现在给出**物理分辨率 + 缩放百分比**（如 `3120×2080 · 200%`),不再显示缩放后的逻辑尺寸;`desktop_list_displays` 同步返回每屏 `dpi` / `scalePercent`。
+
+### English
+
+- Fixed: **desktop control was mis-mapping coordinates and blurring screenshots under mixed DPI.** The helper only declared system-DPI awareness, so with a 200% primary and a 100% secondary, Windows virtualized every monitor at the primary's scale — the secondary was reported as 3840×2160 (really 1920×1080) and its screenshots were 2x-upscaled. It now uses PerMonitorV2: true physical pixels everywhere, 1:1 screenshots.
+- Improved: the display list shows physical resolution plus scale (`3120×2080 · 200%`) instead of the scaled logical size; `desktop_list_displays` returns per-monitor `dpi`/`scalePercent`.
+
 ## v1.0.84 - 2026-08-12
 
 ### 中文
