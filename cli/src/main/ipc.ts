@@ -380,15 +380,21 @@ export function registerIpc(
       notifyBridgeStatus(getBrowserBridgeStatus())
     }
   }
-  const applyDesktopControl = (enabled: boolean): void => {
+  const desktopDisplayIndex = (): number | null => {
     const s = loadSettings()
-    const displayIndex =
-      typeof s.desktopDisplayIndex === 'number' && s.desktopDisplayIndex >= 0
-        ? s.desktopDisplayIndex
-        : null
+    return typeof s.desktopDisplayIndex === 'number' && s.desktopDisplayIndex >= 0
+      ? s.desktopDisplayIndex
+      : null
+  }
+  const applyDesktopControl = (enabled: boolean): void => {
+    const displayIndex = desktopDisplayIndex()
     // 分屏控制：光晕也只打在划给 AI 的那块屏上——用户那块屏不该有任何干扰。
+    // 桌面控制关掉时不限制：那块屏的选择只对桌面控制生效，浏览器控制的光晕
+    // 不该跟着被关进一块屏里。
     setOverlayTargetDisplay(
-      displayIndex === null ? null : (screen.getAllDisplays()[displayIndex]?.id ?? null)
+      !enabled || displayIndex === null
+        ? null
+        : (screen.getAllDisplays()[displayIndex]?.id ?? null)
     )
     if (enabled) registerMcpDesktopServer(displayIndex, tokenFilePath())
     else unregisterMcpServer('tran-desktop')
@@ -432,7 +438,10 @@ export function registerIpc(
     const s = loadSettings()
     return {
       browserEnabled: s.browserControlEnabled !== false,
-      desktopEnabled: s.desktopControlEnabled === true
+      desktopEnabled: s.desktopControlEnabled === true,
+      // 必须回传：不回的话设置页每次打开都把「分屏控制」画成「不限制」，
+      // 而后台其实还锁在上次选的那块屏上，界面与实际状态对不上。
+      desktopDisplayIndex: desktopDisplayIndex()
     }
   })
   ipcMain.handle(
@@ -451,7 +460,8 @@ export function registerIpc(
       const now = loadSettings()
       return {
         browserEnabled: now.browserControlEnabled !== false,
-        desktopEnabled: now.desktopControlEnabled === true
+        desktopEnabled: now.desktopControlEnabled === true,
+        desktopDisplayIndex: desktopDisplayIndex()
       }
     }
   )

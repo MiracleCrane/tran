@@ -17,7 +17,11 @@ export default function DesktopControlCard(): JSX.Element {
   useEffect(() => {
     let alive = true
     void window.api.getControlPlugins().then((p) => {
-      if (alive) setEnabled(p.desktopEnabled)
+      if (!alive) return
+      setEnabled(p.desktopEnabled)
+      // 回读已选的那块屏：不读的话每次打开设置都显示「不限制」，而后台其实
+      // 还锁着上次的选择。
+      setAiDisplay(p.desktopDisplayIndex)
     }).catch(() => {})
     void window.api.listDisplays().then((list) => {
       if (alive) setDisplays(list)
@@ -83,6 +87,10 @@ export default function DesktopControlCard(): JSX.Element {
       <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
         让 AI 像 Codex 那样操作整个 Windows 桌面：截屏识别、读取窗口控件（UIA）、移动点击鼠标、
         键盘输入、切换窗口。开关即时生效，kimi 重开会话后可用 desktop_* 工具。
+      </p>
+      <p className="mt-1 text-[11px] text-zinc-600">
+        目前只装载进 <span className="text-zinc-500">Kimi Code</span> 会话；Claude Code
+        后端读的是它自己的 MCP 配置，暂不受此开关影响。
       </p>
       {on && displays.length > 1 && (
         <div className="mt-3">

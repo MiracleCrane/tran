@@ -22,7 +22,7 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import WebSocket from 'ws'
 
-const SERVER_VERSION = '0.2.0'
+const SERVER_VERSION = '0.3.0'
 const PS_TIMEOUT_MS = 30_000
 
 function logErr(message: string): void {
@@ -154,9 +154,13 @@ interface DisplayBounds {
 }
 
 let displayCache: DisplayBounds[] | null = null
+let displayCacheAt = 0
+/** 显示器拓扑会在会话中途变（插拔扩展坞、切投影、改缩放）。永久缓存会让分屏
+ *  的越界判定拿着旧坐标算——AI 以为在自己那块屏上点，其实点到用户屏上了。 */
+const DISPLAY_CACHE_MS = 15_000
 
 async function listDisplays(): Promise<DisplayBounds[]> {
-  if (displayCache) return displayCache
+  if (displayCache && Date.now() - displayCacheAt < DISPLAY_CACHE_MS) return displayCache
   const r = await runPs(
     CS_USER32 + `
 Add-Type -AssemblyName System.Windows.Forms
@@ -180,6 +184,7 @@ Write-Output ("TRANJSON:" + (ConvertTo-Json @{ displays = $list } -Depth 4 -Comp
   const raw = r['displays']
   const arr = Array.isArray(raw) ? raw : raw ? [raw] : []
   displayCache = arr.map((d) => d as unknown as DisplayBounds)
+  displayCacheAt = Date.now()
   return displayCache
 }
 
@@ -203,6 +208,39 @@ function assertInBounds(b: DisplayBounds | null, x: number, y: number): void {
       `坐标 (${x}, ${y}) 不在划给 AI 的显示器 ${b.index} 内` +
         `（范围 x ${b.x}~${b.x + b.width}, y ${b.y}~${b.y + b.height}）。` +
         '分屏控制模式下只能操作这块屏幕。'
+    )
+  }
+}
+
+/**
+ * 分屏模式下的键盘守卫。
+ *
+ * 键盘输入没有坐标，一律打给**前台窗口**——而前台窗口是用户随手一点就会换的。
+ * 只守 click/focus 的话有个明显的漏法：用户在自己那块屏上点了下别的程序，
+ * 紧接着 AI 调 desktop_type，字就敲进用户正在用的窗口里了。所以键入前必须
+ * 现查一次前台窗口在哪块屏。
+ */
+async function assertForegroundInBounds(action: string): Promise<void> {
+  const bounds = await allowedBounds()
+  if (!bounds) return
+  const r = await runPs(
+    CS_USER32 + `
+$h = [TranU32]::GetForegroundWindow()
+$rect = New-Object TranU32+RECT
+[void][TranU32]::GetWindowRect($h, [ref]$rect)
+$sb = New-Object System.Text.StringBuilder 260
+[void][TranU32]::GetWindowText($h, $sb, $sb.Capacity)
+Write-Output ("TRANJSON:" + (ConvertTo-Json @{ x = $rect.L; y = $rect.T
+  width = $rect.R - $rect.L; height = $rect.B - $rect.T; title = $sb.ToString() } -Compress))
+`
+  )
+  const cx = Number(r['x']) + Number(r['width']) / 2
+  const cy = Number(r['y']) + Number(r['height']) / 2
+  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return
+  if (cx < bounds.x || cx >= bounds.x + bounds.width || cy < bounds.y || cy >= bounds.y + bounds.height) {
+    throw new Error(
+      `拒绝${action}：当前前台窗口「${String(r['title'] ?? '')}」不在划给 AI 的显示器 ${bounds.index} 上。` +
+        '分屏控制模式下键盘只能打给那块屏上的窗口——请先 desktop_focus_window 聚焦目标窗口。'
     )
   }
 }
@@ -635,7 +673,9 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'desktop_type',
-    description: '向当前焦点处输入文本（剪贴板粘贴，完整支持中文；会自动恢复用户剪贴板），可选按回车。先点击目标输入框再调用。',
+    description:
+      '向当前焦点处输入文本（SendInput 直接注入 Unicode 字符：完整支持中文，' +
+      '不经中文输入法组词，也不动系统剪贴板），可选按回车。先点击目标输入框再调用。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -645,7 +685,10 @@ const TOOLS: ToolDef[] = [
       required: ['text'],
       additionalProperties: false
     },
-    run: async (a) => textContent(await psType(String(a['text'] ?? ''), a['enter'] === true))
+    run: async (a) => {
+      await assertForegroundInBounds('键入')
+      return textContent(await psType(String(a['text'] ?? ''), a['enter'] === true))
+    }
   },
   {
     name: 'desktop_key',
@@ -657,7 +700,10 @@ const TOOLS: ToolDef[] = [
       required: ['keys'],
       additionalProperties: false
     },
-    run: async (a) => textContent(await psKey(String(a['keys'] ?? '')))
+    run: async (a) => {
+      await assertForegroundInBounds('按键')
+      return textContent(await psKey(String(a['keys'] ?? '')))
+    }
   }
 ]
 

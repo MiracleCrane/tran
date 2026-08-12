@@ -1025,6 +1025,8 @@ export interface DisplayInfo {
 export interface ControlPluginsState {
   browserEnabled: boolean
   desktopEnabled: boolean
+  /** 分屏控制划给 AI 的显示器序号；null = 不限制（整个桌面）。 */
+  desktopDisplayIndex: number | null
 }
 
 /** 浏览器工具调用结果（错误不抛异常，以 ok:false 携带原因）。 */

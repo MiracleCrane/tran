@@ -116,6 +116,10 @@ export default function BrowserBridgeCard(): JSX.Element {
         通过 Chrome 扩展让 AI 操作你日常在用的浏览器（标签页、页面读取、点击输入）。
         {!on && enabled !== null && ' 开启后 kimi 重开会话即可使用 browser_* 工具。'}
       </p>
+      <p className="mt-1 text-[11px] text-zinc-600">
+        目前只装载进 <span className="text-zinc-500">Kimi Code</span> 会话；Claude Code
+        后端读的是它自己的 MCP 配置，暂不受此开关影响。
+      </p>
       {on && connected &&
         status?.extensionVersion &&
         status?.bundledExtensionVersion &&
