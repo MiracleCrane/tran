@@ -62,15 +62,6 @@ function overlayId(): string {
 }
 
 const SIDEBAR_WIDTH_KEY = 'tran.sidebarWidth'
-const SIDEBAR_HIDDEN_KEY = 'tran.sidebarHidden'
-
-function readSidebarHidden(): boolean {
-  try {
-    return localStorage.getItem(SIDEBAR_HIDDEN_KEY) === '1'
-  } catch {
-    return false
-  }
-}
 /** 默认 256px = 原先写死的 Tailwind w-64，改成可调后保持同一个初值。 */
 export const SIDEBAR_WIDTH_DEFAULT = 256
 export const SIDEBAR_WIDTH_MIN = 180
@@ -101,45 +92,18 @@ function readSidebarWidth(): number {
   }
 }
 
-/** 收起（图标条）状态持久化：默认收起（2026-08 用户指定"默认全部收起"）。 */
-const SIDEBAR_COLLAPSED_KEY = 'tran.sidebarCollapsed'
-
-function readSidebarCollapsed(): boolean {
-  try {
-    const raw = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
-    return raw === null ? true : raw === '1'
-  } catch {
-    return true
-  }
-}
-
 export const useUiStore = create<UiStore>((set) => ({
   view: 'chat',
   setView: (view) => set({ view }),
-  sidebarCollapsed: readSidebarCollapsed(),
-  toggleSidebar: () =>
-    set((s) => {
-      const next = !s.sidebarCollapsed
-      try {
-        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0')
-      } catch {
-        /* 同 sidebarWidth 的兜底 */
-      }
-      return { sidebarCollapsed: next }
-    }),
+  // 启动一律展开、可见（2026-08-12 用户改口：打开默认不要收起侧边栏——
+  // Codex 同款）。收起/隐藏改为会话内动作，不再跨启动持久化：持久化的
+  // 收起态会让"上次随手收起"的人每次启动都对着图标条找会话列表。
+  sidebarCollapsed: false,
+  toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   /** 完全隐藏（Codex 风）：连图标条都不留。与 collapsed（收成图标条）是两档，
    *  Alt+Q 绑定这档。 */
-  sidebarHidden: readSidebarHidden(),
-  toggleSidebarHidden: () =>
-    set((s) => {
-      const next = !s.sidebarHidden
-      try {
-        localStorage.setItem(SIDEBAR_HIDDEN_KEY, next ? '1' : '0')
-      } catch {
-        /* 同 sidebarWidth 的兜底 */
-      }
-      return { sidebarHidden: next }
-    }),
+  sidebarHidden: false,
+  toggleSidebarHidden: () => set((s) => ({ sidebarHidden: !s.sidebarHidden })),
   sidebarWidth: readSidebarWidth(),
   setSidebarWidth: (width) => {
     const next = clampSidebarWidth(width)

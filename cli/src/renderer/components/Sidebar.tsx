@@ -15,9 +15,10 @@ import { onForgeEvent, emitForgeEvent } from '../events'
 type SessionGroupMode = 'time' | 'project'
 type SessionListTransitionPhase = 'idle' | 'exiting' | 'loading' | 'entering'
 type WslNavRevealPhase = 'hidden' | 'opening' | 'visible' | 'closing'
-type SessionGroup = { label: string; items: SessionListItem[] }
+/** section: Codex 式布局的合成段（置顶/最近）——纯文本组头、不参与 cwd 折叠。 */
+type SessionGroup = { label: string; items: SessionListItem[]; section?: boolean }
 type AnimatedSessionItem = { session: SessionListItem; exiting: boolean }
-type AnimatedSessionGroup = { label: string; items: AnimatedSessionItem[] }
+type AnimatedSessionGroup = { label: string; items: AnimatedSessionItem[]; section?: boolean }
 type SessionListSnapshot = {
   activeSessionId: string | null
   groups: SessionGroup[]
@@ -194,6 +195,7 @@ function toAnimatedSessionGroups(
   return groups
     .map((group) => ({
       label: group.label,
+      ...(group.section ? { section: true } : {}),
       items: group.items.map((session) => ({
         session,
         exiting: exitingKeys.has(sessionKey(session))
@@ -397,7 +399,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
-  const [groupMode, setGroupMode] = useState<SessionGroupMode>('time')
+  // Codex 式三段布局固定用 project 分组（time 分支保留给未来可能的切换）。
+  const [groupMode] = useState<SessionGroupMode>('project')
   /** 「全部」视图里被折叠的 cwd 组（label = 完整路径）。 */
   const [collapsedGroupLabels, setCollapsedGroupLabels] = useState<Set<string>>(() => new Set())
   const [appVersion, setAppVersion] = useState('')
@@ -1060,15 +1063,30 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     return next
   }, [filteredSessions, pinnedSessionKeys])
 
-  const sessionGroups = useMemo(
-    () =>
-      groupMode === 'project'
-        ? sessionScope === 'all'
-          ? groupSessionsByCwd(orderedSessions, meta?.cwd ?? '')
-          : groupSessionsByProject(orderedSessions, meta?.cwd ?? '')
-        : groupSessionsByTime(orderedSessions),
-    [orderedSessions, groupMode, meta?.cwd, sessionScope]
-  )
+  // Codex 式三段布局（2026-08-12 用户定稿）：置顶 → 项目（按 cwd 折叠组）→
+  // 最近。三段互斥（同一会话只出现一次——渲染/多选/动画都按 sessionKey 索引，
+  // 重复会撞 key）：置顶的进置顶段；其余最新 8 条进「最近」；剩下按项目分组。
+  const RECENT_SECTION_SIZE = 8
+  const sessionGroups = useMemo(() => {
+    if (groupMode === 'time') return groupSessionsByTime(orderedSessions)
+    const pinned = orderedSessions.filter((s) => pinnedSessionKeys.has(sessionKey(s)))
+    const rest = orderedSessions.filter((s) => !pinnedSessionKeys.has(sessionKey(s)))
+    const recent = rest
+      .slice()
+      .sort((a, b) => b.lastModified - a.lastModified)
+      .slice(0, RECENT_SECTION_SIZE)
+    const recentKeys = new Set(recent.map(sessionKey))
+    const projectRest = rest.filter((s) => !recentKeys.has(sessionKey(s)))
+    const cwdGroups =
+      sessionScope === 'all'
+        ? groupSessionsByCwd(projectRest, meta?.cwd ?? '')
+        : groupSessionsByProject(projectRest, meta?.cwd ?? '')
+    return [
+      ...(pinned.length ? [{ label: '置顶', items: pinned, section: true }] : []),
+      ...(recent.length ? [{ label: '最近', items: recent, section: true }] : []),
+      ...cwdGroups
+    ]
+  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys])
   sessionGroupsRef.current = sessionGroups
 
   const visibleSessionKeys = useMemo(
@@ -1409,7 +1427,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       {/* session list label */}
       <div className="flex items-center justify-between px-4 py-0.5">
         <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500/80">
-          最近会话
+          会话
         </span>
         <span className="flex items-center gap-1">
           <button
@@ -1418,13 +1436,6 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             title="搜索会话（Ctrl+K）"
           >
             <SearchIcon />
-          </button>
-          <button
-            onClick={() => setGroupMode((mode) => (mode === 'time' ? 'project' : 'time'))}
-            className="rounded-md px-1.5 py-0.5 text-[10px] text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
-            title="切换分组"
-          >
-            {groupMode === 'time' ? '按时间' : '按项目'}
           </button>
           <button
             onClick={() => void handleAiNaming()}
@@ -1478,30 +1489,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
 
       <div className="min-h-0 flex flex-1 flex-col">
         {/* grouped sessions */}
-        <div className="space-y-1.5 px-4 pb-1.5 pt-0.5">
-          {/* 视图切换：当前项目 / 全部（跨项目）。进「全部」默认按项目分组。 */}
-          <div className="flex rounded-lg border border-white/[0.08] bg-white/[0.025] p-0.5 text-[11px]">
-            {(['project', 'all'] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => {
-                  void setSessionScope(value)
-                  if (value === 'all') setGroupMode('project')
-                }}
-                className={`flex-1 rounded-md px-2 py-1 transition ${
-                  sessionScope === value
-                    ? 'bg-accent/20 text-accent'
-                    : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
-                }`}
-              >
-                {value === 'project' ? '当前项目' : '全部'}
-              </button>
-            ))}
-          </div>
-          {/* 搜索已挪进 Codex 风命令面板（「最近会话」行的 🔍 图标 / Ctrl+K），
-              不再常驻一个输入框占一整行（2026-08 用户：搜索框太大了）。 */}
-        </div>
+        {/* 「当前项目/全部」切换已删（2026-08-12 用户定稿：一律全部会话，
+            Codex 同款）；搜索在 Ctrl+K 命令面板。 */}
 
         {/* grouped sessions */}
         <div className="relative min-h-0 flex-1">
@@ -1537,15 +1526,26 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
           <div className="px-2 py-3 text-xs text-zinc-600">没有匹配的会话。</div>
         )}
         {groups.map((g, groupIndex) => {
-          // cwd 折叠组头只在「全部 + 按项目」下启用；其余情况用纯文本组头。
-          const cwdGroupHeader = sessionScope === 'all' && groupMode === 'project'
+          // cwd 折叠组头只在「全部 + 按项目」下启用；合成段（置顶/最近）与
+          // 其余情况用纯文本组头。
+          const cwdGroupHeader = !g.section && sessionScope === 'all' && groupMode === 'project'
           const groupCollapsed = cwdGroupHeader && collapsedGroupLabels.has(g.label)
+          // Codex 式段标题：第一个项目组前面立一块「项目」分隔（置顶/最近的
+          // 段名就是组名，项目段的组名是各自路径，需要一个总标题）。
+          const firstCwdIndex = groups.findIndex((x) => !x.section)
+          const showProjectDivider =
+            cwdGroupHeader && groupIndex === firstCwdIndex && groups.some((x) => x.section)
           return (
           <div
             key={g.label}
             className="session-list-grow-group mb-2"
             style={{ '--session-grow-delay': `${Math.min(groupIndex * 28, 120)}ms` } as CSSProperties}
           >
+            {showProjectDivider && (
+              <div className="mb-0.5 mt-1 px-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500/80">
+                项目
+              </div>
+            )}
             {/* 组头（项目 / 时间段）。原先是 10px、zinc-500/70 —— 比会话行还
                 淡，看着不像"这些属于哪个项目"的标题，倒像一行灰噪声。抬到
                 11px/zinc-400 并加粗一档；下面的会话再缩进一格，从属关系才

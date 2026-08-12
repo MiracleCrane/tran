@@ -1687,7 +1687,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
   sessionsLoading: false,
   sessionsHasMore: false,
-  sessionScope: 'project',
+  // 2026-08-12 用户定稿：侧栏不再分「当前项目/全部」，一律跨项目全部会话
+  //（Codex 同款）。scope 机制保留（切换 API 还在），只是 UI 不再暴露。
+  sessionScope: 'all',
   tasks: [], pendingQueue: [],
   sessionConfigDirty: false,
   sessionModelDirty: false,
