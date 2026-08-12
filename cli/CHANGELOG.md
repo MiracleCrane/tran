@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.83 - 2026-08-12
+
+### 中文
+
+- 新增:**浏览器/桌面控制做成可开关插件**（设置页两张卡片,即时生效,kimi 重开会话装载/卸载工具）。浏览器控制默认开;桌面控制默认关、带醒目警示。
+- 新增:**桌面控制（Codex 式 computer-use,实验性）**。开启后 kimi 获得 7 个 `desktop_*` 工具:全屏截图、窗口枚举/聚焦、UIA 控件树读取（带中心坐标,可不看图直接点）、鼠标点击、文本输入（SendInput Unicode 直接注入,绕过中文输入法组词与剪贴板同步软件干扰）、组合键。无需任何外部组件。
+- 改版:**Codex 风侧栏**。启动一律展开;不再分「当前项目/全部」,一律跨项目全部会话;列表重排为 置顶 → 最近 → 项目（按项目折叠分组,带「当前」徽标）三段。行悬停操作、运行标识、悬停预览、多选、AI 命名、Ctrl+K 搜索全部保留。
+
+### English
+
+- New: **browser/desktop control as toggleable plugins** (two cards in Settings; toggling registers/unregisters the MCP servers instantly, kimi picks it up on next session). Browser control defaults on; desktop control defaults off with a prominent warning.
+- New: **desktop control (Codex-style computer use, experimental)** — seven `desktop_*` tools: full-screen capture, window enumeration/focus, UIA control-tree reading (with center coordinates for text-first clicking), mouse clicks, text typing via SendInput Unicode injection (immune to CJK IME composition and clipboard-sync tools), and key combos. No external components required.
+- Redesign: **Codex-style sidebar** — always expanded on launch; no more per-project/all toggle (always all sessions); list restructured into Pinned → Recent → Projects (collapsible per-project groups with a "current" badge). Hover actions, running indicators, preview cards, multi-select, AI naming, and Ctrl+K search all preserved.
+
 ## v1.0.82 - 2026-08-12
 
 ### 中文
