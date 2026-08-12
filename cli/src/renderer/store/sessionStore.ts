@@ -385,6 +385,62 @@ function evictSessionHistoryCache(): void {
 type UnackedDirectMessage = Omit<PendingMessage, 'id'> & { sessionId: string }
 let unackedDirectMessages: UnackedDirectMessage[] = []
 
+/** #TurnChanges：一轮开始时的 git 工作区快照（cwd → path → 增删行数）。
+ *  统计本轮改动用「前后快照差」而不是数编辑工具调用——后者漏掉一切经 shell
+ *  改的文件（sed/格式化脚本/构建产物），而那些同样是这一轮造成的。 */
+type GitStatSnapshot = Map<string, { added: number; removed: number; untracked: boolean }>
+let turnStartSnapshot: GitStatSnapshot | null = null
+let turnStartCwd: string | null = null
+
+async function snapshotWorkingChanges(cwd: string): Promise<GitStatSnapshot | null> {
+  if (!cwd) return null
+  try {
+    const changes = await window.api.gitWorkingChanges(cwd)
+    const map: GitStatSnapshot = new Map()
+    for (const f of changes.files) {
+      map.set(f.path, {
+        added: f.additions ?? 0,
+        removed: f.deletions ?? 0,
+        untracked: f.status === 'untracked'
+      })
+    }
+    return map
+  } catch {
+    // 非 git 目录 / git 不可用：本功能静默降级（不该因为它影响对话）。
+    return null
+  }
+}
+
+/** 轮结束：与轮开始的快照做差，得到「本轮改了哪些文件、各多少行」。 */
+async function computeTurnChanges(
+  cwd: string,
+  before: GitStatSnapshot | null
+): Promise<{ files: Array<{ path: string; added: number; removed: number; untracked?: boolean }>; addedTotal: number; removedTotal: number } | null> {
+  if (!before) return null
+  const after = await snapshotWorkingChanges(cwd)
+  if (!after) return null
+  const files: Array<{ path: string; added: number; removed: number; untracked?: boolean }> = []
+  let addedTotal = 0
+  let removedTotal = 0
+  for (const [path, now] of after) {
+    const prev = before.get(path)
+    const added = now.added - (prev?.added ?? 0)
+    const removed = now.removed - (prev?.removed ?? 0)
+    // 只收本轮真正变动的：行数没变的文件是上一轮/用户自己改的，不该算在这轮头上。
+    if (added === 0 && removed === 0) continue
+    files.push({
+      path,
+      added: Math.max(0, added),
+      removed: Math.max(0, removed),
+      ...(now.untracked ? { untracked: true } : {})
+    })
+    addedTotal += Math.max(0, added)
+    removedTotal += Math.max(0, removed)
+  }
+  if (files.length === 0) return null
+  return { files, addedTotal, removedTotal }
+}
+
 /** 取出（并移除）该会话的全部未确认直达消息（保持发送顺序）。 */
 function takeUnackedDirectMessages(sessionId: string): UnackedDirectMessage[] {
   const taken = unackedDirectMessages.filter((m) => m.sessionId === sessionId)
@@ -1798,6 +1854,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   async sendMessage(text, attachments, opts) {
     let meta = get().meta
     if (!meta) return
+    // #TurnChanges 轮开始快照：不 await——拍快照是给结束时做差用的，
+    // 拖慢发送不值得；拿不到（非 git 目录）就整套静默降级。
+    turnStartCwd = meta.cwd
+    void snapshotWorkingChanges(meta.cwd).then((snap) => {
+      turnStartSnapshot = snap
+    })
     const value = text.trim()
     const atts = attachments ?? []
     if (!value && atts.length === 0) return
@@ -3664,6 +3726,35 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         markSdkSessionRunning(get().meta?.sdkSessionId, get().status.running)
         // turn 完成：kimi 此时已持久化会话，刷新侧栏"最近会话"（防抖）。
         scheduleSessionsRefresh(get)
+        // #TurnChanges：与轮开始的快照做差，改了文件就在对话流里落一张
+        // 「已编辑 N 个文件 +X -Y」的卡片（Codex 同款）。异步算，不挡收尾。
+        {
+          const cwd = turnStartCwd
+          const before = turnStartSnapshot
+          turnStartSnapshot = null
+          turnStartCwd = null
+          if (cwd && before) {
+            void computeTurnChanges(cwd, before).then((changes) => {
+              if (!changes) return
+              // 结果回来时用户可能已切走：只往当前仍是这个 cwd 的会话里落卡片。
+              if (get().meta?.cwd !== cwd) return
+              set((s2) => ({
+                items: [
+                  ...s2.items,
+                  {
+                    id: uid(),
+                    kind: 'turnChanges' as const,
+                    parentToolUseId: null,
+                    files: changes.files,
+                    addedTotal: changes.addedTotal,
+                    removedTotal: changes.removedTotal,
+                    at: Date.now()
+                  }
+                ]
+              }))
+            })
+          }
+        }
         break
       }
       default:

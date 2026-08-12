@@ -83,7 +83,29 @@ export interface AssistantItem {
   /** 来自 session/load 重放的历史消息（分界线上方内容）。 */
   isHistory?: boolean
 }
-export type TranscriptItem = UserItem | AssistantItem | CompactionItem | QueryItem
+export type TranscriptItem =
+  | UserItem
+  | AssistantItem
+  | CompactionItem
+  | QueryItem
+  | TurnChangesItem
+
+/** 一轮对话结束后的文件改动汇总（Codex 同款卡片）。
+ *
+ *  统计来源是 git 工作区快照的**前后差**，而不是"AI 调了几次编辑工具"——
+ *  后者漏掉一切经 shell 改的文件（sed/mv/格式化脚本/构建产物），而那些同样
+ *  是这一轮造成的改动。轮开始时记一次 numstat，轮结束再记一次，差集即本轮。 */
+export interface TurnChangesItem {
+  id: string
+  kind: 'turnChanges'
+  parentToolUseId: null
+  /** 本轮发生变化的文件（path + 相对轮开始的增删行数）。 */
+  files: Array<{ path: string; added: number; removed: number; untracked?: boolean }>
+  addedTotal: number
+  removedTotal: number
+  at: number
+  isHistory?: boolean
+}
 
 /** 查询类斜杠命令（/usage、/status、/mcp）的结果状态卡（system/query_result →
  *  TranscriptItem）。查询输出是状态信息，不以普通对话流形式出现（#15）。 */

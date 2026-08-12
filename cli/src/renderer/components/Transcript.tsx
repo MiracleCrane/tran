@@ -15,6 +15,8 @@ import ToolGroupCard from './ToolGroupCard'
 import CompactionDivider from './CompactionDivider'
 import EmptyState from './EmptyState'
 import QueryResultCard from './QueryResultCard'
+import TurnChangesCard from './TurnChangesCard'
+import { emitForgeEvent } from '../events'
 import UserMessageNav, { type UserNavEntry } from './UserMessageNav'
 import { useCheapNote } from '../hooks/useCheapNote'
 import { useThinkingTranslateStatus } from '../hooks/useThinkingTranslateStatus'
@@ -1666,6 +1668,14 @@ export default function Transcript({
       )
     if (row.node.item.kind === 'compaction') return <CompactionDivider item={row.node.item} />
     if (row.node.item.kind === 'query') return <QueryResultCard item={row.node.item} />
+    if (row.node.item.kind === 'turnChanges') {
+      return (
+        <TurnChangesCard
+          item={row.node.item}
+          onReview={() => emitForgeEvent('openChangesPanel')}
+        />
+      )
+    }
     return (
       <AssistantMessage
         item={row.node.item as AssistantItem}

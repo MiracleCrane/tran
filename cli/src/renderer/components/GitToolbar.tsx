@@ -5,6 +5,7 @@ import DiffView from './DiffView'
 import Collapse from './Collapse'
 import ConfirmDialog from './ConfirmDialog'
 import ChangesPanel from './ChangesPanel'
+import { onForgeEvent } from '../events'
 
 /* --- icons --- */
 const BranchIcon = (): JSX.Element => (
@@ -591,6 +592,15 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
     setDrawer(next)
     loadDrawerData(next)
   }
+
+  // 轮次改动卡的「审核」按钮：打开工作区改动面板（对话流里点、面板在这儿开，
+  // 两个组件不直接耦合，走既有的渲染层事件总线）。
+  useEffect(() => {
+    return onForgeEvent('openChangesPanel', () => {
+      setDrawer('changes')
+      loadDrawerData('changes')
+    })
+  }, [])
 
   const loadDiff = async (paths: string[], staged: boolean, note?: string): Promise<void> => {
     if (!cwd) return

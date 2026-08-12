@@ -5,7 +5,9 @@ export const FORGE_RENDERER_EVENTS = {
   providerChanged: 'forge:provider-changed',
   wslSupportChanged: 'forge:wsl-support-changed',
   /** 打开会话搜索面板（侧栏搜索图标 / Ctrl+K → SessionSearchPalette）。 */
-  openSessionSearch: 'forge:open-session-search'
+  openSessionSearch: 'forge:open-session-search',
+  /** 打开改动面板（轮次改动卡的「审核」→ GitToolbar 的 ChangesPanel）。 */
+  openChangesPanel: 'forge:open-changes-panel'
 } as const
 
 export type ForgeRendererEventKey = keyof typeof FORGE_RENDERER_EVENTS
