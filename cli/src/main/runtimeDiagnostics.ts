@@ -248,6 +248,15 @@ function redactSecrets(value: unknown, key = ''): unknown {
   return out
 }
 
+/** 日志文本脱敏（纵深防御）：各模块本就不把密钥写日志，但诊断报告会被用户
+ *  整份贴给别人，这里再兜一层，把常见密钥形态遮掉。 */
+function redactLogText(text: string): string {
+  return text
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-[redacted]')
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/-]{16,}=*/gi, '$1[redacted]')
+    .replace(/((?:token|secret|password|api[_-]?key)["']?\s*[:=]\s*["']?)[^\s"'&,;}]{8,}/gi, '$1[redacted]')
+}
+
 function jsonBlock(value: unknown): string {
   return `\n\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\`\n`
 }
@@ -300,7 +309,7 @@ export async function buildDiagnosticReport(
     jsonBlock(settings),
     '',
     '## Recent Main Log',
-    textBlock(diagnosticLog),
+    textBlock(redactLogText(diagnosticLog)),
     ''
   ].join('\n')
 }

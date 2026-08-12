@@ -15,9 +15,12 @@ function stamp(items: readonly { id: string; isHistory?: boolean }[]): void {
     times.set(item.id, now)
   }
   if (times.size > MAX_ENTRIES) {
-    // Map 迭代序即插入序：淘汰最旧的一批，防长会话无界增长。
+    // 只淘汰已不在当前 items 里的条目（与 sentImages.ts 同约定）：按插入序
+    // 盲删的话，超长会话里最早一批在场消息的时间戳会无声消失。
+    const inPlay = new Set(items.map((item) => item?.id))
     let drop = Math.ceil(MAX_ENTRIES / 5)
     for (const key of times.keys()) {
+      if (inPlay.has(key)) continue
       times.delete(key)
       if (--drop <= 0) break
     }

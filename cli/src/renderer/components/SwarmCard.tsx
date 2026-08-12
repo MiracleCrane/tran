@@ -32,7 +32,10 @@ function statusDot(status: string | undefined): string {
 
 /** 从 rawInput（完整 JSON 或流式片段）防御式解析 description / items。 */
 function parseSwarmInput(block: ToolBlock): { description?: string; items: string[] } {
-  const sources: unknown[] = [block.input, block.result]
+  // inputRaw 优先：流式期间 input 恒为 {}（content_block_stop 才落地），
+  // 真正的片段在 inputRaw 里累积——不读它的话正则兜底分支全程是死代码，
+  // 卡片直到块收尾都只显示"子代理启动中…"。
+  const sources: unknown[] = [block.input, block.inputRaw, block.result]
   for (const src of sources) {
     const text = typeof src === 'string' ? src : src ? JSON.stringify(src) : ''
     if (!text) continue

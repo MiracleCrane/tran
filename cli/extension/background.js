@@ -41,6 +41,13 @@ async function savePairingCode(code) {
   if (!m) return { ok: false, error: '配对码格式不对，应形如 tran1:9224:xxxxxxxx' }
   await chrome.storage.local.set({ pairing: { port: Number(m[1]), token: m[2] } })
   reconnectAttempts = 0
+  // 关掉现有连接再连：旧 socket 还 OPEN/挂在 CONNECTING 时，connect() 的
+  // readyState 检查会直接 return，新配对码永远不生效。
+  if (ws) {
+    const old = ws
+    ws = null
+    try { old.close() } catch { /* ignore */ }
+  }
   reconnect(0)
   return { ok: true }
 }
@@ -234,13 +241,16 @@ function handleMessage(socket, msg) {
     return
   }
   if (typeof msg.id === 'string' && typeof msg.tool === 'string') {
+    // send 全程保护：长工具调用期间连接可能已被替换/关闭，send 抛异常会变
+    // service worker 的 unhandled rejection。
+    const safeSend = (payload) => {
+      try {
+        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload))
+      } catch { /* 连接已死，结果作废 */ }
+    }
     handleToolCall(msg)
-      .then((result) => socket.send(JSON.stringify({ id: msg.id, ok: true, result })))
-      .catch((e) =>
-        socket.send(
-          JSON.stringify({ id: msg.id, ok: false, error: String(e && e.message ? e.message : e) })
-        )
-      )
+      .then((result) => safeSend({ id: msg.id, ok: true, result }))
+      .catch((e) => safeSend({ id: msg.id, ok: false, error: String(e && e.message ? e.message : e) }))
   }
 }
 
@@ -347,20 +357,38 @@ function extractPageContent(maxChars) {
   }
   window.__tranRefs = refs
 
+  // maxChars 夹紧到理智区间；元素块也纳入预算（上限 40%），不再无视 maxChars
+  // ——恶意/复杂页面 300 个元素能凑出 ~60KB。ref 映射已存好，被截掉的元素
+  // 依然可以用 selector 定位。
+  const cap = Math.min(Math.max(maxChars, 1000), 200000)
+  const itemsBudget = Math.floor(cap * 0.4)
+  let itemsBlock = ''
+  let itemsTruncated = false
+  if (items.length) {
+    let joined = `\n\n[可交互元素]（后续 click/type 按 ref 编号定位）\n`
+    for (let i = 0; i < items.length; i++) {
+      if (joined.length + items[i].length > itemsBudget) {
+        itemsTruncated = true
+        joined += `…（其余 ${items.length - i} 个元素已截断）`
+        break
+      }
+      joined += items[i] + '\n'
+    }
+    itemsBlock = joined.replace(/\n$/, '')
+  }
+
   let text = document.body ? document.body.innerText : ''
   text = text.replace(/\n{3,}/g, '\n\n')
   const head = `[页面] ${document.title} — ${location.href}`
-  const itemsBlock = items.length
-    ? `\n\n[可交互元素]（后续 click/type 按 ref 编号定位）\n${items.join('\n')}`
-    : ''
-  let budget = maxChars - head.length - itemsBlock.length - 40
+  let budget = cap - head.length - itemsBlock.length - 40
   if (budget < 500) budget = 500
   const truncated = text.length > budget
   if (truncated) text = text.slice(0, budget)
   return {
     snapshot: `${head}\n\n[正文]\n${text}${truncated ? '\n…（正文已截断）' : ''}${itemsBlock}`,
     refCount: n,
-    textTruncated: truncated
+    textTruncated: truncated,
+    itemsTruncated
   }
 }
 
@@ -512,10 +540,14 @@ async function handleToolCall(msg) {
     case 'type': {
       const tab = await resolveTab(args.tabId)
       const func = msg.tool === 'click' ? clickElement : typeIntoElement
+      // executeScript 的 args 必须 JSON 可序列化：undefined 直接报
+      // "Value is unserializable"，缺省参数一律传 null。
+      const ref = typeof args.ref === 'number' ? args.ref : null
+      const selector = typeof args.selector === 'string' ? args.selector : null
       const funcArgs =
         msg.tool === 'click'
-          ? [args.ref, args.selector]
-          : [args.ref, args.selector, String(args.text ?? ''), args.submit === true]
+          ? [ref, selector]
+          : [ref, selector, String(args.text ?? ''), args.submit === true]
       let results
       try {
         results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func, args: funcArgs })

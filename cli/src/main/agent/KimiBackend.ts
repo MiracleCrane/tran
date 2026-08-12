@@ -1,5 +1,5 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { kimiSessionsRoot } from '../kimiHome'
 import type {
   ComposerModel,
@@ -314,7 +314,9 @@ function missingPlanFileFromError(error: unknown, acpSessionId: string): string 
   if (!haystack.includes('ENOENT') || !haystack.includes('readTextFile')) return null
   const match = /readTextFile failed for (.+?\.md)\b/i.exec(haystack)
   if (!match) return null
-  const p = match[1].trim()
+  // resolve 归一后再校验：不归一的话 `<root>\<sid>\plans\..\..\evil.md` 也能
+  // 通过 startsWith/includes 检查，沿 `..` 写出会话目录之外。
+  const p = resolve(match[1].trim())
   const norm = (s: string): string => s.replace(/\//g, '\\').toLowerCase()
   const sessionsRoot = kimiSessionsRoot()
   if (!norm(p).startsWith(norm(sessionsRoot))) return null

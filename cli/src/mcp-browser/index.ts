@@ -377,6 +377,12 @@ function sendError(id: number | string | null, code: number, message: string): v
 
 async function handleRequest(req: JsonRpcRequest): Promise<void> {
   const id = req.id ?? null
+  // JSON-RPC notification（无 id）不得应答——已知方法若以 notification 形式
+  // 到达（如 {"method":"ping"} 无 id），执行副作用无意义且回 id:null 违反规范。
+  // notifications/* 前缀（initialized 等）继续静默放行到 default 分支。
+  if ((req.id === undefined || req.id === null) && !req.method.startsWith('notifications/')) {
+    return
+  }
   switch (req.method) {
     case 'initialize': {
       const requested = (req.params?.['protocolVersion'] as string) || '2024-11-05'

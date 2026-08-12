@@ -11,40 +11,51 @@ import { create } from 'zustand'
 interface ArchiveStore {
   /** null = 还没加载过（首次读取前）。 */
   archivedIds: Record<string, number> | null
+  /** 最近一次归档/恢复失败的原因（存档文件损坏等），供归档页横幅展示。 */
+  lastError: string | null
   loadArchived: () => Promise<void>
   archive: (sessionId: string) => Promise<void>
   unarchive: (sessionId: string) => Promise<void>
 }
 
+/** 乐观更新的代数：load 慢返回不得覆盖其后发生的 archive/unarchive。 */
+let mutationSeq = 0
+
 export const useArchiveStore = create<ArchiveStore>((set, get) => ({
   archivedIds: null,
+  lastError: null,
   loadArchived: async () => {
+    const seqAtStart = mutationSeq
     try {
       const ids = await window.api.getArchivedSessions()
+      // 加载期间用户点过归档/恢复：旧快照作废，以乐观状态为准（下次 load 纠偏）。
+      if (mutationSeq !== seqAtStart) return
       set({ archivedIds: ids })
     } catch {
       /* 读不到就当作没有归档——不阻塞侧栏 */
     }
   },
   archive: async (sessionId) => {
-    // 乐观更新：归档是纯本地标记，失败代价为零。
+    // 乐观更新：归档是纯本地标记，失败即回滚。
+    mutationSeq += 1
     const prev = get().archivedIds ?? {}
-    set({ archivedIds: { ...prev, [sessionId]: Date.now() } })
+    set({ archivedIds: { ...prev, [sessionId]: Date.now() }, lastError: null })
     try {
       await window.api.archiveSession(sessionId)
-    } catch {
-      set({ archivedIds: prev })
+    } catch (e) {
+      set({ archivedIds: prev, lastError: e instanceof Error ? e.message : String(e) })
     }
   },
   unarchive: async (sessionId) => {
+    mutationSeq += 1
     const prev = get().archivedIds ?? {}
     const next = { ...prev }
     delete next[sessionId]
-    set({ archivedIds: next })
+    set({ archivedIds: next, lastError: null })
     try {
       await window.api.unarchiveSession(sessionId)
-    } catch {
-      set({ archivedIds: prev })
+    } catch (e) {
+      set({ archivedIds: prev, lastError: e instanceof Error ? e.message : String(e) })
     }
   }
 }))

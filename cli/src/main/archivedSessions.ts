@@ -52,7 +52,17 @@ export function getArchivedSessions(): Record<string, number> {
   return { ...load() }
 }
 
+/** 存档文件损坏（只读模式）时抛错：此前只改内存并静默"成功"，重启后本次
+ *  所有归档操作蒸发且无任何提示。抛出让渲染层回滚乐观更新并提示用户。 */
+function assertWritable(): void {
+  if (loadFailed) {
+    throw new Error('归档存档文件损坏，本次运行归档功能只读（重启 Tran 可尝试重建）')
+  }
+}
+
 export function archiveSession(sessionId: string): void {
+  load()
+  assertWritable()
   load()[sessionId] = Date.now()
   save()
 }
@@ -60,11 +70,17 @@ export function archiveSession(sessionId: string): void {
 export function unarchiveSession(sessionId: string): void {
   const store = load()
   if (!(sessionId in store)) return
+  assertWritable()
   delete store[sessionId]
   save()
 }
 
-/** 真删会话后的清理：归档表里的残留一并去掉。 */
+/** 真删会话后的清理：归档表里的残留一并去掉。只读模式下静默跳过——
+ *  这里是删除链路的附带清理，不能让它把已成功的删除炸成失败。 */
 export function dropArchivedSession(sessionId: string): void {
-  unarchiveSession(sessionId)
+  try {
+    unarchiveSession(sessionId)
+  } catch {
+    /* 只读模式，残留标记等重启后处理 */
+  }
 }

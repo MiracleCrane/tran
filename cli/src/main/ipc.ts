@@ -586,11 +586,23 @@ export function registerIpc(
         if (length > MAX_IMAGE_BYTES) {
           throw new Error(`图片超过 ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
         }
-        const buffer = Buffer.from(await res.arrayBuffer())
-        if (buffer.length > MAX_IMAGE_BYTES) {
-          throw new Error(`图片超过 ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
+        // 流式读取边下边计数：arrayBuffer() 会先把整个 body 缓冲进内存，
+        // 对端不报/谎报 content-length 时上限形同虚设。超限立即 abort。
+        const chunks: Buffer[] = []
+        let received = 0
+        const reader = res.body?.getReader()
+        if (!reader) throw new Error('响应无内容')
+        for (;;) {
+          const { done, value: chunk } = await reader.read()
+          if (done) break
+          received += chunk.byteLength
+          if (received > MAX_IMAGE_BYTES) {
+            controller.abort()
+            throw new Error(`图片超过 ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
+          }
+          chunks.push(Buffer.from(chunk))
         }
-        return nativeImage.createFromBuffer(buffer)
+        return nativeImage.createFromBuffer(Buffer.concat(chunks))
       } finally {
         clearTimeout(timer)
       }

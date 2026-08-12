@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useSessionStore } from '../store/sessionStore'
+import { useArchiveStore } from '../store/archiveStore'
 import { relTime } from '../utils/format'
 import { onForgeEvent } from '../events'
 
@@ -53,6 +54,10 @@ export default function SessionSearchPalette(): JSX.Element | null {
   const choose = (index: number): void => {
     const target = results[index]
     if (!target) return
+    // 归档会话经搜索打开时先取消归档（对齐归档页的打开路径）：否则会话在
+    // 活跃使用但侧栏永远看不到它。
+    const { archivedIds, unarchive } = useArchiveStore.getState()
+    if (archivedIds && target.sessionId in archivedIds) void unarchive(target.sessionId)
     void useSessionStore
       .getState()
       .openSessionCrossProject(target.sessionId, target.cwd ?? '', target.runtimeBackend)

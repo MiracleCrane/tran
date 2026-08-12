@@ -246,7 +246,7 @@ function handleConnection(socket: WebSocket): void {
     log('browser-bridge', `extension connected (v${extensionVersion ?? '?'})`)
     broadcastStatus()
 
-    socket.on('message', (raw: RawData) => handleExtensionMessage(raw))
+    socket.on('message', (raw: RawData) => handleExtensionMessage(socket, raw))
     socket.on('close', () => {
       if (extensionSocket !== socket) return
       extensionSocket = null
@@ -289,7 +289,10 @@ function handleClientMessage(socket: WebSocket, raw: RawData): void {
     })
 }
 
-function handleExtensionMessage(raw: RawData): void {
+function handleExtensionMessage(socket: WebSocket, raw: RawData): void {
+  // 被替换的旧连接（close(4000) 后 TCP 半开未断）残留消息不能刷新探活时间，
+  // 否则僵尸连接会把新连接的 45s 空闲检测"喂活"。
+  if (socket !== extensionSocket) return
   extensionLastSeen = Date.now()
   let msg: { type?: string; id?: string; ok?: boolean; result?: unknown; error?: string }
   try {

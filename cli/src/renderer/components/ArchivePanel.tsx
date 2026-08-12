@@ -15,6 +15,7 @@ export default function ArchivePanel(): JSX.Element {
   const archivedIds = useArchiveStore((s) => s.archivedIds)
   const loadArchived = useArchiveStore((s) => s.loadArchived)
   const unarchive = useArchiveStore((s) => s.unarchive)
+  const storeError = useArchiveStore((s) => s.lastError)
   const [sessions, setSessions] = useState<SessionListItem[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirming, setConfirming] = useState(false)
@@ -120,9 +121,9 @@ export default function ArchivePanel(): JSX.Element {
           归档只是从侧栏列表藏起来，数据原地不动。在这里可以恢复（回到列表）或多选后彻底删除。
         </p>
 
-        {actionError && (
+        {(actionError || storeError) && (
           <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-3 py-2 text-[11px] text-red-300">
-            {actionError}
+            {actionError || storeError}
           </div>
         )}
 

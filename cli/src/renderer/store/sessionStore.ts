@@ -1177,7 +1177,24 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
     bg.running = false
     delete bg.startedAt
     delete bg.stall
-    bg.error = isUserStopDiagnostic(e.error) ? bg.error : (e.error ?? bg.error)
+    const userStopped = isUserStopDiagnostic(e.error)
+    bg.error = userStopped ? bg.error : (e.error ?? bg.error)
+    // #29 台账终局结算（与前台 ended 同语义）：这个 bridge id 不会再有 result，
+    // 出账防死条目滞留；异常收场把未确认消息回收进缓冲队列，attach 时落回
+    // pendingQueue。
+    const taken = takeUnackedDirectMessages(bg.bridgeSessionId)
+    if (!userStopped && e.error !== undefined && taken.length) {
+      bg.recycledQueue = [
+        ...(bg.recycledQueue ?? []),
+        ...taken.map((m) => ({
+          id: uid(),
+          text: m.text,
+          ...(m.attachments ? { attachments: m.attachments } : {}),
+          ...(m.swarm ? { swarm: true } : {}),
+          ...(m.cutIn ? { cutIn: true } : {})
+        }))
+      ]
+    }
     // #5 会话关闭：移出运行中列表。
     markSdkSessionRunning(bg.sdkSessionId, false)
     invalidateBackgroundHistoryCache(bg)
@@ -3061,6 +3078,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       // 积压 delta 冲进 items，再走与 result 相同的封口。不封的话流式光标
       // 永远闪、悬挂的工具卡永远转圈。
       flushPendingStreamDeltas()
+      // #29 台账终局结算：ended 之后这个 bridge id 不会再有任何 result，
+      // 台账必须清（否则死条目永久滞留）。异常收场（崩溃/被杀）把未确认
+      // 消息回收进 pendingQueue（走 #20 重发/清空出路）；用户主动停止/正常
+      // 收场只出账不回收。
+      const recycled = takeUnackedDirectMessages(e.sessionId)
+      const shouldRequeue = endedError !== undefined && recycled.length > 0
       set((s) => ({
         bridgeEnded: true,
         items: sealHungToolBlocks(
@@ -3068,6 +3091,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           true
         ),
         currentStreamingMsgId: null,
+        ...(shouldRequeue
+          ? {
+              pendingQueue: [
+                ...recycled.map((m) => ({
+                  id: uid(),
+                  text: m.text,
+                  ...(m.attachments ? { attachments: m.attachments } : {}),
+                  ...(m.swarm ? { swarm: true } : {}),
+                  ...(m.cutIn ? { cutIn: true } : {})
+                })),
+                ...s.pendingQueue
+              ]
+            }
+          : {}),
         status: { ...s.status, running: false, startedAt: undefined, stall: undefined, error: endedError ?? s.status.error }
       }))
       scheduleSessionsRefresh(get)
