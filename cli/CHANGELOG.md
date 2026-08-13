@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.0.91 - 2026-08-13
+
+### 中文
+
+- 改版:**消息导航条完全重写,照搬 Codex 的实现**(方向镜像到右侧)。
+  - **命中区放大**:每一节是 10×36px 的透明带,刻度只是里面一根 26px×2px 的线。之前命中区就是那根线本身,要求精准戳中十来个像素。
+  - **悬停是一条涟漪**:当前节满格,相邻 70%、次邻 40%、再次 20%——不再是单节硬邦邦地弹一下。刻度靠 `scaleX` 变长而不改布局宽度,所以动画不抖。
+  - **可以按住拖着刷**:按下沿刻度上下拖动即可连续预览/跳转,拖动中即时跟手。这个能力此前完全没有。
+  - **高亮的是视口内的一整段**:一屏看得到三条消息就亮三格,不再只亮一格。
+  - **悬停卡片**改为「你说的那句话 + 这一轮 AI 回复前三行」的 320px 卡片——只看自己说过什么其实认不出是哪一轮。
+  - **跳转后目标气泡闪一下**紫色光晕,长回合里一眼看清落点。
+
+### English
+
+- Redesign: **the message nav rail is a faithful port of Codex's implementation** (mirrored to the right edge).
+  - **Bigger hit targets**: each row is a 10×36px transparent band; the tick is just a 26×2px line inside it. Previously the tick *was* the hit target.
+  - **Hover ripples across neighbours** (100% / 70% / 40% / 20%) instead of one tick popping. Ticks grow via `scaleX` without changing layout width, so nothing jitters.
+  - **Press and drag to scrub** the rail for continuous preview/jump — entirely new.
+  - **The whole visible span highlights**, not a single tick.
+  - **Hover card** now shows your message plus the first three lines of that turn's reply.
+  - **The target bubble flashes** after a jump so you can see where you landed.
+
 ## v1.0.90 - 2026-08-13
 
 ### 中文
