@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.89 - 2026-08-13
+
+### 中文
+
+- 修复:**消息导航条点了不跳转**。命中区原先只有那根 3px 高、10px 宽的横线,而整条列又正好压在滚动条上——点下去多半打在滚动条上。现在每一节是一条 40px 宽的透明命中带,整条列往里让开滚动条。
+- 修复:**悬停不出摘要**。摘要标签是往左浮出到刻度列外面的,而外层容器带着 `overflow-hidden`,标签一直被裁掉——功能其实在,只是永远看不见。
+- 改进:导航条**节距收紧**(14px → 9px),不再那么稀疏。
+- 修复:**默认模型冷启动就忘**。此前只有「当前会话的模型」这一处状态:会话内切换记得住、新建对话也沿用,但关掉 Tran 再开就掉回默认,每次都要重新选。现在按 Agent 后端各记一个上次用过的模型。
+
+### English
+
+- Fixed: **clicking the message nav rail didn't jump.** The hit target was just the 3px×10px tick, and the rail sat right on top of the scrollbar. Each tick now has a 40px-wide transparent hit band, and the rail is inset clear of the scrollbar.
+- Fixed: **hovering showed no summary.** The label floats out to the left of the rail, but the container had `overflow-hidden` clipping it away — the feature worked, it was just never visible.
+- Improved: tighter rail spacing (14px → 9px pitch).
+- Fixed: **the default model was forgotten on restart.** Model choice lived only on the current session, so it survived model switches and new chats but reset every time Tran reopened. It's now remembered per agent backend.
+
 ## v1.0.88 - 2026-08-12
 
 ### 中文
