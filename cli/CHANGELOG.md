@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.92 - 2026-08-13
+
+### 中文
+
+- 修复:**Kimi 与 Claude Code 的会话混在一列里**。v1.0.88 把两家历史合并排序是个设计错误——用 Kimi 的时候冒出一堆 Claude Code 的对话(反之亦然),既看不懂也点不进去。现在侧栏只列当前 Agent 后端的会话,切后端时列表跟着切。
+- 修复:**消息导航条点了不跳转**(v1.0.91 引入)。拖动用的指针捕获挂在了外层滚动列上,而指针捕获会把随后的点击一并重定向给捕获元素,按钮自己的点击事件就永远不触发了。改为挂在按下的那一节上(与 Codex 原实现一致)。
+- 修复:**长会话里旧消息在导航条上点不到**。条目原先只留最近 30 条,聊到上百轮之后前面的全都不见了。现在不再截断,刻度列自己滚动,并且会自动把你正在看的那一段滚进视野。
+
+### English
+
+- Fixed: **Kimi and Claude Code sessions were interleaved in one list.** Merging both histories (v1.0.88) was a design mistake — Claude Code conversations showed up while using Kimi and vice versa, and opening one would silently switch engines. The sidebar now lists only the active agent backend's sessions.
+- Fixed: **clicking the message nav rail didn't jump** (introduced in v1.0.91). The scrub pointer-capture was attached to the scrolling list, and pointer capture retargets the following click to the capture element, so the tick's own click never fired. It now captures on the pressed tick, matching Codex's implementation.
+- Fixed: **older messages were unreachable on the rail in long conversations** — it kept only the most recent 30. The cap is gone; the rail scrolls itself and keeps the span you're reading in view.
+
 ## v1.0.91 - 2026-08-13
 
 ### 中文
