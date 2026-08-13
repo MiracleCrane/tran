@@ -221,7 +221,8 @@ interface SessionStore {
   openSessionCrossProject: (
     sdkSessionId: string,
     cwd: string | undefined,
-    backend?: ClaudeExecutionBackend
+    backend?: ClaudeExecutionBackend,
+    targetAgentBackend?: AgentBackendId
   ) => Promise<void>
   /** 排队消息：从队列删除（×）/ 取出并返回（点击卡片取回编辑）。 */
   removePendingMessage: (id: string) => void
@@ -241,7 +242,13 @@ interface SessionStore {
   answerElicitation: (toolUseID: string, optionId: string) => Promise<void>
   loadMoreSessions: () => Promise<void>
   newChat: () => Promise<void>
-  openSession: (sdkSessionId: string, backend?: ClaudeExecutionBackend, targetCwd?: string) => Promise<void>
+  openSession: (
+    sdkSessionId: string,
+    backend?: ClaudeExecutionBackend,
+    targetCwd?: string,
+    /** 这条会话所属的 agent 后端（kimi / claude）。缺省沿用当前会话的。 */
+    targetAgentBackend?: AgentBackendId
+  ) => Promise<void>
   prefetchSessionHistory: (sdkSessionId: string, backend?: ClaudeExecutionBackend) => Promise<void>
   pruneSessionHistoryCache: (visibleSessionIds: string[]) => void
   setTranscriptScrolling: (scrolling: boolean) => void
@@ -2508,7 +2515,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     await get().refreshSessions()
   },
 
-  async openSessionCrossProject(sdkSessionId, cwd, backend) {
+  async openSessionCrossProject(sdkSessionId, cwd, backend, targetAgentBackend) {
     const meta = get().meta
     if (!meta) return
     // 先切到该会话所属项目，再 resume（不在原项目里跨 cwd load）。
@@ -2527,9 +2534,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       // 表现就是"切个会话，左边目录整个收缩重载一次"。而「全部」视图本来就是
       // 跨项目的,清掉的多半还是同一批会话。改成留着旧列表,等下面
       // refreshSessions 拿到新数据再原地替换,只有真正变了的行会走进出动画。
-      await get().openSession(sdkSessionId, backend, cwd)
+      await get().openSession(sdkSessionId, backend, cwd, targetAgentBackend)
     } else {
-      await get().openSession(sdkSessionId, backend)
+      await get().openSession(sdkSessionId, backend, undefined, targetAgentBackend)
     }
     // 侧栏列表还停在原项目：按新 cwd 重拉（openSession 仅 attach 分支会刷新）。
     void get().refreshSessions()
@@ -2683,12 +2690,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  async openSession(sdkSessionId: string, backend?: ClaudeExecutionBackend, targetCwd?: string) {
+  async openSession(
+    sdkSessionId: string,
+    backend?: ClaudeExecutionBackend,
+    targetCwd?: string,
+    targetAgentBackend?: AgentBackendId
+  ) {
     const meta = get().meta
     if (!meta) return
     if (meta.sdkSessionId === sdkSessionId) return
     cancelActiveHistoryHydration()
-    const { model, permissionMode, agentBackend } = meta
+    const { model, permissionMode } = meta
+    // 会话归哪个 agent 后端由**这条会话**决定，不是当前会话、更不是全局偏好：
+    // 侧栏现在同时列 kimi 与 Claude Code 的历史，拿当前会话的后端去 resume
+    // 另一个后端的会话必然失败（#71）。
+    const agentBackend = targetAgentBackend ?? meta.agentBackend
     // #47 跨项目打开时目标 cwd 由 openSessionCrossProject 以参数传入：meta.cwd
     // 保持旧项目直到快照完成（后台缓冲的 cwd 用于切回 attach 比对与缓存失效）。
     const cwd = targetCwd ?? meta.cwd

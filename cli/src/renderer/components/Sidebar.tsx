@@ -940,9 +940,11 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       meta &&
       normalizeCwdForCompare(s.cwd) !== normalizeCwdForCompare(meta.cwd)
     ) {
-      void openSessionCrossProject(s.sessionId, s.cwd, s.runtimeBackend)
+      // 第 4 个参数是这条会话所属的 agent 后端：侧栏现在 kimi 与 Claude Code
+      // 的历史混排，不带上它就会拿当前会话的后端去 resume 另一家的会话。
+      void openSessionCrossProject(s.sessionId, s.cwd, s.runtimeBackend, s.agentBackend)
     } else {
-      void openSession(s.sessionId, s.runtimeBackend)
+      void openSession(s.sessionId, s.runtimeBackend, undefined, s.agentBackend)
     }
     setView('chat')
   }

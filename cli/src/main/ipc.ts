@@ -72,6 +72,7 @@ import { fetchSessionTodos } from './kimiTodos'
 import { getPlanUsageCached } from './usageService'
 import { getDeepseekBalanceCached, invalidateDeepseekBalanceCache } from './deepseekService'
 import { listKimiSessions } from './kimiHistory'
+import { deleteClaudeSession, listClaudeSessions, readClaudeSessionMessages } from './claudeHistory'
 import { deleteKimiSession } from './sessionDelete'
 import { removeSessionTitle, recordManualTitle } from './sessionTitles'
 import {
@@ -1069,13 +1070,23 @@ export function registerIpc(
     const all = opts?.scope === 'all'
     const limit = all ? 200 : opts?.limit && opts.limit > 0 ? opts.limit : 50
     const offset = opts?.offset && opts.offset > 0 ? opts.offset : 0
-    const items = (await listKimiSessions(cwd, {
-      limit,
-      offset,
-      scope: all ? 'all' : 'project',
-      // 无标题会话只豁免"本进程还持有的"那些，见 listKimiSessions 注释。
-      liveIds: bridge.liveAcpSessionIds()
-    }))
+    // 两个后端的历史各存各的（kimi 走 ACP 的 history，Claude Code 写自己的
+    // projects/*.jsonl），列表在这里合并后按时间排。Claude 那边失败不能拖垮
+    // 整个侧栏——没装 Claude Code 是完全正常的情形。
+    const [kimiItems, claudeItems] = await Promise.all([
+      listKimiSessions(cwd, {
+        limit,
+        offset,
+        scope: all ? 'all' : 'project',
+        // 无标题会话只豁免"本进程还持有的"那些，见 listKimiSessions 注释。
+        liveIds: bridge.liveAcpSessionIds()
+      }),
+      listClaudeSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' }).catch((error) => {
+        log('claude-history', `list failed: ${error instanceof Error ? error.message : String(error)}`)
+        return []
+      })
+    ])
+    const items = [...kimiItems, ...claudeItems]
       .sort((a, b) => b.lastModified - a.lastModified)
       .slice(0, limit)
     // 合并主进程内存中的运行状态（SessionListItem.sessionId 即 ACP 会话 id）。
@@ -1094,10 +1105,13 @@ export function registerIpc(
   ): Promise<HistoryMessage[]> => {
     // TODO(kimi-history): ACP 没有逐条读取历史消息的方法；恢复会话时由
     // session/load 在 agent 侧回放（见 KimiBackend / kimiHistory 的 TODO）。
-    void sessionId
+    //
+    // Claude Code 不一样：`--resume` 只恢复上下文、不重放消息，但它把整段对话
+    // 都写在 projects/<slug>/<id>.jsonl 里，自己读回来即可——否则点开一条历史
+    // 会话是空白的。id 不属于 Claude 时返回 []，kimi 路径行为不变。
     void cwd
     void backend
-    return []
+    return await readClaudeSessionMessages(sessionId)
   })
 
   ipcMain.handle(
@@ -1281,7 +1295,14 @@ export function registerIpc(
       // 永久删除：移除 session_index.jsonl 行 + 删 sessions/ 下会话目录（严格路径校验）。
       void cwd
       void backend
-      const result = await deleteKimiSession(sessionId)
+      // 两个后端的会话在侧栏混排，删除也得两边都试：先按 kimi 删，找不到再
+      // 按 Claude Code 的 projects/*.jsonl 删。只走 kimi 那条的话，删 Claude
+      // 会话表面成功、刷新那一行又回来了。
+      let result = await deleteKimiSession(sessionId)
+      if (!result.ok) {
+        const claudeResult = await deleteClaudeSession(sessionId)
+        if (claudeResult.ok) result = claudeResult
+      }
       if (result.ok) {
         removeSessionTitle(sessionId)
         dropArchivedSession(sessionId)

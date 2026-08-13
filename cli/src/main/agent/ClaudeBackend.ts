@@ -395,8 +395,18 @@ export class ClaudeBackend {
 
   async setModel(sessionId: string, model: string): Promise<void> {
     const session = this.sessions.get(sessionId)
-    if (session) session.model = model
-    // 模型是 spawn 参数，改动在下次会话启动时生效（渲染层已有重开会话的流程）。
+    if (!session) return
+    session.model = model
+    // 控制协议支持热切（实测 CLI 回 control_response 后 init 就报新模型），
+    // 与 setPermissionMode 同理。早先这里只改内存字段，而 model 只在 spawn 时
+    // 用一次——Composer 里换模型对进行中的会话完全没效果。
+    if (this.isAlive(session)) {
+      this.writeLine(session, {
+        type: 'control_request',
+        request_id: randomUUID(),
+        request: { subtype: 'set_model', model }
+      })
+    }
   }
 
   async setPermissionMode(sessionId: string, mode: string): Promise<void> {
