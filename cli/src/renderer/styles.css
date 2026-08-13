@@ -3652,6 +3652,17 @@ div:has(textarea:focus) .composer-shortcut-hint {
   user-select: none;
 }
 
+/* 一聚焦就撤掉占位符：绝对定位之后它和光标叠在同一处，看着像光标插在
+   「给」字里（2026-08 用户反馈）。既然已经点进来了，提示也就没用了。 */
+.rich-input:focus[data-empty='true']::before {
+  content: none;
+}
+
+/* textarea 那条路同理，保持两边行为一致。 */
+.composer-textarea:focus::placeholder {
+  color: transparent;
+}
+
 .rich-input-chip {
   display: inline-flex;
   align-items: center;

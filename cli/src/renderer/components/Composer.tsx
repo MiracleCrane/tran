@@ -1351,7 +1351,7 @@ export default function Composer(): JSX.Element {
               minHeight: heightBounds.min,
               maxHeight: heightBounds.max
             }}
-            className="composer-textarea w-full resize-none rounded-xl border border-transparent bg-transparent px-3 py-2 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-white/10 focus:bg-white/[0.025]"
+            className="composer-textarea w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-500"
             hidden={richComposer}
           />
           {/* 实验：富文本输入框。两条路都在，靠设置切——地基换了但旧路一行没动，
@@ -1370,7 +1370,7 @@ export default function Composer(): JSX.Element {
               placeholder={running ? 'Tran 正在处理…(可继续发送,消息会排队)' : '给 Tran 发消息…'}
               ariaLabel="消息输入框"
               resolveCommand={resolveCommandForChip}
-              className="rich-input rounded-xl border border-transparent bg-transparent px-3 py-2 text-sm leading-relaxed text-zinc-200 outline-none focus:border-white/10 focus:bg-white/[0.025]"
+              className="rich-input border-0 bg-transparent px-1 py-1 text-sm leading-relaxed text-zinc-200 outline-none"
             />
           )}
           {attachments.length > 0 && (
