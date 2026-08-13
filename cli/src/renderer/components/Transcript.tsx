@@ -58,7 +58,6 @@ function looksEnglish(text: string): boolean {
   const cjk = (sample.match(/[一-鿿]/g) ?? []).length
   return cjk / Math.max(1, sample.length) < 0.15
 }
-const USER_NAV_MAX_ENTRIES = 30
 /** Virtuoso firstItemIndex 的起始基数：头部每插入 N 条就减 N，够减很久。 */
 const FIRST_ITEM_INDEX_BASE = 1_000_000
 /** 思考框内距底多少像素以内算"还贴着底"（继续跟随流式输出）。 */
@@ -1221,7 +1220,10 @@ export default function Transcript({
       }
       entries.push({ id: item.id, rowIndex, summary, ...(preview ? { preview } : {}) })
     })
-    return entries.slice(-USER_NAV_MAX_ENTRIES)
+    // 不截断：长会话里旧消息同样要能定位。之前只留最近 30 条，聊到一百轮之后
+    // 前面的全都点不到了。刻度列自己会滚（max-h + overflow-y-auto，Codex 同款），
+    // 每节 10px，几百条也就是列内滚动的事。
+    return entries
   }, [displayRows])
   // "最新块"保持展开：最新一条 live（非历史）assistant 消息里的最后一个思考/
   // 工具块。纯文本段落开头的消息 → 无最新块（上一个收起）；最新是历史 → 不收。

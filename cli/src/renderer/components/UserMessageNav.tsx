@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 
 /**
  * #48 用户消息导航条。2026-08-13 重写：**照搬 Codex 的
@@ -62,7 +62,10 @@ export default function UserMessageNav({
   const [scrubId, setScrubId] = useState<string | null>(null)
   /** 拖动过程中已经跳过了：随后那一次 click 必须吞掉，否则重复跳转。 */
   const scrubbedRef = useRef(false)
-  const pointerRef = useRef<number | null>(null)
+  /** 拖动中的指针 id 与**捕获元素**。捕获必须挂在按下的那个 button 上——
+   *  挂在外层滚动列上的话，指针捕获会把随后的 click 一并重定向到列本身，
+   *  按钮的 onClick 永远不触发（v1.0.91「点了不跳转」就是这个原因）。 */
+  const pointerRef = useRef<{ id: number; target: HTMLElement } | null>(null)
 
   /** 悬停卡片要浮在刻度列**外面**，而列本身是 overflow-y-auto（横向也会被裁），
    *  所以卡片渲染在列的外层容器里，靠这里量出来的 y 定位。 */
@@ -74,14 +77,36 @@ export default function UserMessageNav({
     setHovered({ entry, top: b.top - h.top + b.height / 2 })
   }, [])
 
-  if (entries.length === 0) return null
+  /**
+   * 长会话里刻度列自己会滚（max-h + overflow-y-auto）。每次可见区间变化就把
+   * 当前那一节滚进列的视野——否则聊到几十轮之后，导航条停在顶部一动不动，
+   * 你正在看的那几格早滚到列外面去了。
+   *
+   * 拖动中不要抢滚动位置（会跟手指打架）。逻辑与 Codex 的 `et()` 一致：只在
+   * 越界时补最小位移，不做居中。
+   */
+  const lastActiveId = activeIds.size > 0 ? [...activeIds][activeIds.size - 1] : null
+  useLayoutEffect(() => {
+    if (scrubId !== null || lastActiveId === null) return
+    const list = listRef.current
+    if (!list) return
+    const node = list.querySelector<HTMLElement>(`[data-nav-item-id="${CSS.escape(lastActiveId)}"]`)
+    if (!node) return
+    if (node.offsetTop < list.scrollTop) {
+      list.scrollTop = node.offsetTop
+    } else if (node.offsetTop + node.offsetHeight > list.scrollTop + list.clientHeight) {
+      list.scrollTop = node.offsetTop + node.offsetHeight - list.clientHeight + 1
+    }
+  }, [lastActiveId, scrubId, entries.length])
 
   const endScrub = (event: React.PointerEvent<HTMLDivElement>): void => {
-    if (pointerRef.current !== event.pointerId) return
+    const active = pointerRef.current
+    if (active === null || active.id !== event.pointerId) return
     pointerRef.current = null
     setScrubId(null)
-    const list = listRef.current
-    if (list?.hasPointerCapture?.(event.pointerId)) list.releasePointerCapture(event.pointerId)
+    if (active.target.hasPointerCapture?.(event.pointerId)) {
+      active.target.releasePointerCapture(event.pointerId)
+    }
     // 下一个 tick 再解锁：中间夹着的那次 click 要被吞掉。
     window.setTimeout(() => {
       scrubbedRef.current = false
@@ -121,19 +146,25 @@ export default function UserMessageNav({
           if (event.button !== 0) return
           const list = listRef.current
           if (!list) return
-          const id = itemIdAt(list, event.clientY)
-          if (id === null) return
+          const target = (event.target instanceof Element ? event.target : null)?.closest<HTMLElement>(
+            '[data-nav-item-id]'
+          )
+          if (!target || !list.contains(target)) return
+          const id = target.dataset.navItemId
+          if (id === undefined) return
           const entry = entries.find((e) => e.id === id)
           if (!entry) return
-          pointerRef.current = event.pointerId
+          // 捕获挂在**按钮**上，不是外层的列：挂在列上会把随后的 click 重定向
+          // 给列，按钮的 onClick 就再也不触发了。
+          pointerRef.current = { id: event.pointerId, target }
           scrubbedRef.current = false
           setScrubId(id)
-          list.setPointerCapture?.(event.pointerId)
+          target.setPointerCapture?.(event.pointerId)
         }}
         onPointerMove={(event) => {
           const list = listRef.current
           if (!list) return
-          if (pointerRef.current !== event.pointerId) return
+          if (pointerRef.current?.id !== event.pointerId) return
           // 按键已松开（拖出列外松手等）：收尾。
           if (event.buttons % 2 === 0) {
             endScrub(event)

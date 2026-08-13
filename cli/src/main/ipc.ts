@@ -55,6 +55,7 @@ import {
 import { translateTexts } from './translate'
 import { getTranslateConfig, saveTranslateConfig, testTranslate } from './translateConfig'
 import { getPreferences, savePreferences } from './preferences'
+import { DEFAULT_AGENT_BACKEND_ID, normalizeAgentBackend } from '../shared/agentBackends'
 import {
   exportSettings,
   getDiagnosticLog,
@@ -1071,24 +1072,29 @@ export function registerIpc(
     const limit = all ? 200 : opts?.limit && opts.limit > 0 ? opts.limit : 50
     const offset = opts?.offset && opts.offset > 0 ? opts.offset : 0
     // 两个后端的历史各存各的（kimi 走 ACP 的 history，Claude Code 写自己的
-    // projects/*.jsonl），列表在这里合并后按时间排。Claude 那边失败不能拖垮
-    // 整个侧栏——没装 Claude Code 是完全正常的情形。
-    const [kimiItems, claudeItems] = await Promise.all([
-      listKimiSessions(cwd, {
-        limit,
-        offset,
-        scope: all ? 'all' : 'project',
-        // 无标题会话只豁免"本进程还持有的"那些，见 listKimiSessions 注释。
-        liveIds: bridge.liveAcpSessionIds()
-      }),
-      listClaudeSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' }).catch((error) => {
-        log('claude-history', `list failed: ${error instanceof Error ? error.message : String(error)}`)
-        return []
-      })
-    ])
-    const items = [...kimiItems, ...claudeItems]
-      .sort((a, b) => b.lastModified - a.lastModified)
-      .slice(0, limit)
+    // projects/*.jsonl）。**只列当前后端的**：v1.0.88 把两家合并混排是个设计
+    // 错误——用 Kimi 的时候冒出一堆 Claude Code 的对话（反之亦然），既看不懂
+    // 也点不进去（点进去要换后端，等于莫名其妙切走了引擎）。
+    const backend = normalizeAgentBackend(getPreferences().agentBackend ?? DEFAULT_AGENT_BACKEND_ID)
+    const items =
+      backend === 'claude'
+        ? await listClaudeSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' }).catch(
+            (error) => {
+              log(
+                'claude-history',
+                `list failed: ${error instanceof Error ? error.message : String(error)}`
+              )
+              return []
+            }
+          )
+        : await listKimiSessions(cwd, {
+            limit,
+            offset,
+            scope: all ? 'all' : 'project',
+            // 无标题会话只豁免"本进程还持有的"那些，见 listKimiSessions 注释。
+            liveIds: bridge.liveAcpSessionIds()
+          })
+    items.sort((a, b) => b.lastModified - a.lastModified)
     // 合并主进程内存中的运行状态（SessionListItem.sessionId 即 ACP 会话 id）。
     const running = bridge.runningAcpSessionIds()
     if (running.size) {
