@@ -650,6 +650,10 @@ const ThinkingBlock = memo(function ThinkingBlock({
           }`}
         >
           思考过程 · {text.length} 字
+          {/* 本轮计时。原来挂在输入框上方那条「AI 正在输出中（00:18）」上，
+              用户嫌它多余——信息并进这里，正文里流光的那一行本来就是"它在动"
+              的最强信号，时间跟着它走最自然（2026-08 用户要求）。 */}
+          {streaming && <TurnClock />}
         </span>
         {!open && (
           <span className="min-w-0 truncate font-normal text-zinc-600">{preview}</span>
@@ -924,6 +928,31 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
     </div>
   )
 })
+
+/**
+ * 本轮已运行时长（mm:ss），挂在正文里正在流的那一行标题上。
+ *
+ * 只在流式期间挂载，所以 1s 心跳不会在空闲时空转。turn 没在跑（startedAt 为
+ * 空）时不渲染任何东西。
+ */
+function TurnClock(): JSX.Element | null {
+  const startedAt = useSessionStore((s) => s.status.startedAt)
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (!startedAt) return
+    const t = window.setInterval(() => tick((n) => n + 1), 1000)
+    return () => window.clearInterval(t)
+  }, [startedAt])
+  if (!startedAt) return null
+  const total = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+  const mm = String(Math.floor(total / 60)).padStart(2, '0')
+  const ss = String(total % 60).padStart(2, '0')
+  return (
+    <span className="ml-1 font-mono tabular-nums">
+      · {mm}:{ss}
+    </span>
+  )
+}
 
 const AssistantMessage = memo(function AssistantMessage({
   item,

@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ClipboardEvent,
+  type CSSProperties,
   type DragEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent
@@ -248,6 +249,7 @@ export default function Composer(): JSX.Element {
   const running = useSessionStore((s) => s.status.running)
   // #41 忙碌态计时（turn 开始时间戳）与疑似无响应提示。
   const turnStartedAt = useSessionStore((s) => s.status.startedAt)
+  void turnStartedAt // 计时已挪到正文的流式标题上（见 Transcript 的 TurnClock）
   const turnStall = useSessionStore((s) => s.status.stall)
   const dismissTurnStall = useSessionStore((s) => s.dismissTurnStall)
   const starting = useSessionStore((s) => s.starting)
@@ -269,6 +271,8 @@ export default function Composer(): JSX.Element {
   // #5c 忙碌原因（输入区提示文案用）：权限确认 / 提问等待 / 后台子任务。
   const pendingPermissionCount = useSessionStore((s) => s.pendingPermissions.length)
   const elicitationCount = useSessionStore((s) => s.elicitationQueue.length)
+  /** 只有这两种情况需要用户动手，值得在输入框上方常驻一行提示。 */
+  const waitingOnUser = pendingPermissionCount > 0 || elicitationCount > 0
   const hasBackgroundSubagent = useSessionStore((s) =>
     s.tasks.some((t) => t.isBackgrounded && t.status === 'running')
   )
@@ -276,6 +280,21 @@ export default function Composer(): JSX.Element {
   const [openChip, setOpenChip] = useState<ChipKind | null>(null)
   const [chipAnchor, setChipAnchor] = useState<ChipAnchor | null>(null)
   const chipRowRef = useRef<HTMLDivElement | null>(null)
+  /**
+   * `/` 面板要浮在输入框**之上**，而它的定位祖先是输入框那一层，`bottom:100%`
+   * 只让开输入框本身——正好压住上面那条 chip 行（后台命令 / 子 Agent / 上下文
+   * 环）。量一下 chip 行的高度，让面板再往上抬这么多。
+   */
+  const [chipRowHeight, setChipRowHeight] = useState(0)
+  useEffect(() => {
+    const row = chipRowRef.current
+    if (!row || typeof ResizeObserver === 'undefined') return
+    const measure = (): void => setChipRowHeight(row.offsetHeight)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(row)
+    return () => ro.disconnect()
+  }, [])
 
   const toggleChip = (kind: ChipKind): void => {
     if (openChip === kind) {
@@ -353,6 +372,10 @@ export default function Composer(): JSX.Element {
   // 兜底：订阅仍为空时通过 listSkills IPC 主动拉一次（后端 listSkills 返回
   // session.skills，缓冲队列修复后它在 start 期间已被正确赋值）。订阅优先，
   // 拉取只在订阅为空时补。
+  // 依赖里必须带上 sdkSessionId：后端崩了自动重连之后，桥接 id（sessionId）
+  // 不变、只有 ACP 侧的会话 id 换了。只盯 sessionId 的话这个兜底永远不会重跑，
+  // 命令列表就一直空着——实测把 kimi 杀掉重连后，`/` 面板里 40 个命令全没了，
+  // 只剩 Tran 自带的几个模板。
   useEffect(() => {
     if (!meta?.sessionId || starting) return
     if (useSessionStore.getState().slashCommands.length > 0) return
@@ -361,7 +384,7 @@ export default function Composer(): JSX.Element {
         useSessionStore.setState({ slashCommands: skills })
       }
     }).catch(() => {})
-  }, [meta?.sessionId, starting])
+  }, [meta?.sessionId, meta?.sdkSessionId, starting])
   const [slashContext, setSlashContext] = useState<SlashContext | null>(null)
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight)
@@ -987,29 +1010,19 @@ export default function Composer(): JSX.Element {
               待办卡片，同一份数据在一屏里出现两次，底下这个只是噪声。 */}
           <UsageRings />
         </div>
-        {/* #39 思考/忙碌指示独立成层（chip 行下方、紧贴输入框）：之前挤在 chip
-            行里，出现或变宽（计时、排队数）时会把两个 chip 和 UsageRings 挤得
-            来回跳。#5 忙碌态明确提示 + 排队语义；#5c 有更具体的等待原因
-            （权限确认/回答问题）时替换泛泛的"正在输出中"。 */}
-        {(running || hasBackgroundSubagent) && (
+        {/* 「AI 正在输出中（00:18），已排队 N 条」这条常驻提示删掉了
+            （2026-08 用户要求）：正在跑这件事，正文里的流光标题 + 发送键变成
+            「停止」已经说得很清楚；计时挪进正文的流式标题里；排队条数在上面
+            的队列卡片里本来就有，重复一遍是噪声。
+            保留的只有两种**真正需要动作**的提示：等你授权/回答，以及疑似卡住。 */}
+        {(waitingOnUser || (running && turnStall) || hasBackgroundSubagent) && (
           <div className="mb-1.5 flex items-center gap-3 px-1 text-[11px] text-zinc-500">
-            {running ? (
-              <span className="flex min-w-0 items-center gap-1.5 text-accent/90">
-                {/* 流光整行统一（2026-08 用户要求）：标签、计时、排队提示同一个
-                    flow-text 罩住，之前只有标签闪、后半截灰着，看着像断了。 */}
-                <span className="flow-text flow-text-violet flex min-w-0 items-center gap-1.5">
-                  <span>
-                    {pendingPermissionCount > 0
-                      ? '正在等待权限确认'
-                      : elicitationCount > 0
-                        ? '正在等待你回答上方问题'
-                        : 'AI 正在输出中'}
-                  </span>
-                  {turnStartedAt ? <TurnElapsed startedAt={turnStartedAt} /> : null}
-                  {pending.length > 0 ? `，已排队 ${pending.length} 条` : '，新消息将排队发送'}
-                </span>
+            {waitingOnUser && (
+              <span className="flow-text flow-text-violet flex min-w-0 items-center gap-1.5 text-accent/90">
+                {pendingPermissionCount > 0 ? '正在等待权限确认' : '正在等待你回答上方问题'}
               </span>
-            ) : (
+            )}
+            {!waitingOnUser && hasBackgroundSubagent && !running && (
               <span className="flex min-w-0 items-center gap-1.5 text-zinc-500">
                 <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent/70" aria-hidden />
                 子任务后台运行中，可正常发送新消息
@@ -1061,7 +1074,7 @@ export default function Composer(): JSX.Element {
           )}
           <div
             className={`slash-command-reveal ${slashMenuOpen ? 'is-open' : ''}`}
-            style={{ height: slashPanelHeight }}
+            style={{ height: slashPanelHeight, '--composer-chip-clearance': `${chipRowHeight}px` } as CSSProperties}
           >
             <div className="slash-command-panel">
               <div className="flex items-center justify-between px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500/80">
@@ -1106,7 +1119,7 @@ export default function Composer(): JSX.Element {
           </div>
           <div
             className={`template-panel-reveal ${showTemplates ? 'is-open' : ''}`}
-            style={{ height: templatePanelHeight }}
+            style={{ height: templatePanelHeight, '--composer-chip-clearance': `${chipRowHeight}px` } as CSSProperties}
           >
             <div className="template-panel">
               <div className="flex items-center justify-between px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500/80">

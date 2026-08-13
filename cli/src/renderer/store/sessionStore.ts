@@ -422,6 +422,9 @@ function evictSessionHistoryCache(): void {
 type UnackedDirectMessage = Omit<PendingMessage, 'id'> & { sessionId: string }
 let unackedDirectMessages: UnackedDirectMessage[] = []
 
+/** kimi 侧已确认不存在的会话 id：待办轮询遇到一次 40401 就拉黑，不再重试。 */
+const deadTodoSessions = new Set<string>()
+
 /** #TurnChanges：一轮开始时的 git 工作区快照（cwd → path → 增删行数）。
  *  统计本轮改动用「前后快照差」而不是数编辑工具调用——后者漏掉一切经 shell
  *  改的文件（sed/格式化脚本/构建产物），而那些同样是这一轮造成的。 */
@@ -1805,9 +1808,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   async refreshTodos() {
     const sdkSessionId = get().meta?.sdkSessionId
     if (!sdkSessionId) return
+    // 这个会话已经确认没了（40401）：不再浪费请求。之前没有这道闸，实测日志里
+    // `session not found` 每 10 秒刷一条、无限刷下去。
+    if (deadTodoSessions.has(sdkSessionId)) return
     const result = await window.api.getSessionTodos(sdkSessionId).catch(() => null)
     // #3 await 期间可能已切会话：A 的待办不能写进 B 的面板，身份不符直接丢弃。
     if (get().meta?.sdkSessionId !== sdkSessionId) return
+    if (result === 'session-gone') {
+      deadTodoSessions.add(sdkSessionId)
+      return
+    }
     // null = 拉不到（server 没起/网络错）。**不能当成"待办为空"**——那会把
     // 界面上刚推来的待办清掉。
     if (!result) return

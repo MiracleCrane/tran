@@ -316,6 +316,10 @@ export interface SessionTodosResult {
   updatedAt: number | null
 }
 
+/** 待办拉取的三态：拿到了 / 暂时拉不到（null）/ 这个会话在 kimi 侧已经没了。
+ *  第三态必须与第二态分开——前者该停手，后者该重试。 */
+export type SessionTodosFetch = SessionTodosResult | null | 'session-gone'
+
 /** 一个候选型号的探测结果（设置页「探测可用型号」）。 */
 export interface SummaryModelProbe {
   model: string
@@ -865,7 +869,7 @@ export interface ForgeApi {
   /** 提示词策略自检：四种请求形态各打一发（共约 400 token），带回服务端原始报错。 */
   diagnoseSummaryPrompt(): Promise<PromptDiagnosis[]>
   /** 待办真值（kimi 本地 server，零 token）。拉不到返回 null。 */
-  getSessionTodos(sessionId: string): Promise<SessionTodosResult | null>
+  getSessionTodos(sessionId: string): Promise<SessionTodosFetch>
   /** 后台任务收尾后催模型更新待办。**会发一次真实 turn、消耗额度**；
    *  返回 true 表示这一轮真的发出去了（界面据此标注）。 */
   nudgeTodos(sessionId: string): Promise<boolean>

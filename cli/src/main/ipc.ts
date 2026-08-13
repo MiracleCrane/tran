@@ -134,6 +134,7 @@ import type {
   SummaryModelProbe,
   PromptDiagnosis,
   SessionTodosResult,
+  SessionTodosFetch,
   PlanUsageResult,
   BrowserBridgeStatus,
   BrowserToolResult,
@@ -912,7 +913,7 @@ export function registerIpc(
   )
   ipcMain.handle(
     'forge:getSessionTodos',
-    async (_e, sessionId: unknown): Promise<SessionTodosResult | null> =>
+    async (_e, sessionId: unknown): Promise<SessionTodosFetch> =>
       fetchSessionTodos(requireString(sessionId, 'sessionId'))
   )
   ipcMain.handle(

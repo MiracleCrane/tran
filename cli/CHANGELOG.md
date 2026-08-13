@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.94 - 2026-08-13
+
+### 中文
+
+- 修复:**后端重连之后 `/` 命令列表全空**。Kimi 崩溃/重启会换一个新的 ACP 会话 id,但 Tran 的桥接 id 不变,而补拉命令的兜底只盯着桥接 id ——于是永远不会重跑,40 个命令一个都回不来,面板里只剩几个自带模板。
+- 修复:**待办轮询会对着一个已经不存在的会话无限重试**。kimi 返回 `40401 session not found` 时旧代码与"网络暂时不通"一视同仁,于是每 10 秒重试一次、永远不停(日志里刷了几百条)。现在这类致命错误单独识别,确认一次就不再问。
+- 改版:**`/` 快捷命令面板**底色改成与面板同色(原来是近乎纯黑压在炭灰界面上,像挖了个洞),并且不再盖住上方的「后台命令 / 子 Agent / 上下文环」那一行。
+- 改版:**去掉输入框上方那条「AI 正在输出中(00:18),已排队 N 条」**。计时并进正文里正在流的那一行标题;排队条数在上方队列卡片里本来就有。只保留真正需要你动手的提示:等待授权/回答,以及疑似卡住。
+
+### English
+
+- Fixed: **the `/` command list came back empty after the backend reconnected.** A Kimi crash/restart yields a new ACP session id while Tran's bridge id stays the same, and the fallback that re-fetches commands only watched the bridge id — so it never re-ran.
+- Fixed: **the todo poller retried a non-existent session forever.** `40401 session not found` was treated like a transient network error, so it retried every 10s indefinitely. That fatal case is now recognised and the poller stops.
+- Redesign: the **`/` palette** now uses the panel background colour (it was near-black on a charcoal UI) and no longer covers the status chip row above the composer.
+- Redesign: **removed the "AI is generating (00:18), N queued" strip** above the composer. The timer moved into the streaming header in the transcript; the queue count already exists on the queue card. Only prompts that need you to act remain (permission/question, and the stall notice).
+
 ## v1.0.93 - 2026-08-13
 
 后台把 Tran 当普通用户跑了一轮（Kimi + Claude Code 各走完整流程),抓到三个真机才暴露的问题。

@@ -59,7 +59,15 @@ export interface SessionTodos {
  * 拉一个会话的待办真值。拿不到（server 没起、会话没有待办、网络错）返回 null，
  * 与"待办是空的"区分开——前者不该覆盖界面上已有的内容，后者应该。
  */
-export async function fetchSessionTodos(sessionId: string): Promise<SessionTodos | null> {
+/** kimi server 的「会话不存在」错误码。 */
+const SESSION_GONE_CODE = 40401
+
+/** 哨兵：这个会话在 kimi 侧已经没了，别再轮询。与 null（暂时拉不到）区分。 */
+export const SESSION_GONE = 'session-gone' as const
+
+export async function fetchSessionTodos(
+  sessionId: string
+): Promise<SessionTodos | null | typeof SESSION_GONE> {
   // sessionId 会拼进 URL，先挡住路径穿越/注入。
   if (!/^[\w-]+$/.test(sessionId)) return null
   const handle = await ensureKimiServer()
@@ -80,6 +88,15 @@ export async function fetchSessionTodos(sessionId: string): Promise<SessionTodos
       data?: { todos?: unknown }
     }
     if (json.code !== 0) {
+      // 会话在 kimi 那边根本不存在（40401）：这不是"暂时拉不到"，是**永远**
+      // 拉不到。以前一律返回 null，渲染层就每 10 秒重试一次、无限循环——实测
+      // 日志里 `session not found` 刷了几百条，同时界面上既没有待办也没有任何
+      // 提示。这类致命错误单独标记出来，让调用方停手。
+      const gone = json.code === SESSION_GONE_CODE || /session not found/i.test(json.msg ?? '')
+      if (gone) {
+        log('kimi-todos', `会话已不存在，停止轮询：${sessionId}`)
+        return SESSION_GONE
+      }
       log('kimi-todos', `transcript 返回 code=${json.code} ${json.msg ?? ''}`)
       return null
     }
