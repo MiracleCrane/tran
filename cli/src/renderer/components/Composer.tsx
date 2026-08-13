@@ -11,6 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react'
 import { useSessionStore } from '../store/sessionStore'
+ import { displayName, hasFriendlyName, readAliases, writeAlias } from '../lib/commandAliases'
 import { useUiStore } from '../store/uiStore'
 import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, PermissionMode, SkillInfo } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
@@ -191,6 +192,21 @@ function getToolChipStats(s: SessionSnapshot): ToolChipStats {
   return stats
 }
 
+/** 命令胶囊上的小图标（同 Codex 的立方体感，纯描边不抢戏）。 */
+function SkillGlyph(): JSX.Element {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" className="shrink-0 text-accent" aria-hidden>
+      <path
+        d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 /** 斜杠命令缓存键：按 agent 后端分开存（Kimi 与 Claude Code 的命令完全不同）。 */
 function slashCacheKey(backend: string | undefined): string {
   return `forge.slashCommands.${backend ?? 'kimi'}`
@@ -304,6 +320,10 @@ export default function Composer(): JSX.Element {
   const waitingOnUser = pendingPermissionCount > 0 || elicitationCount > 0
   /** `/` 面板里给「后端下发的命令」打的徽标：跟着当前后端走。 */
   const backendLabel = useSessionStore((s) => (s.meta?.agentBackend === 'claude' ? 'Claude' : 'Kimi'))
+  /** 当前挂在输入框上的命令（胶囊形态），null = 没挂。 */
+  const [activeCommand, setActiveCommand] = useState<string | null>(null)
+  /** 用户自定义别名。改名后要立刻重渲染，所以进 state 而不是每次读 localStorage。 */
+  const [aliases, setAliases] = useState<Record<string, string>>({})
   const hasBackgroundSubagent = useSessionStore((s) =>
     s.tasks.some((t) => t.isBackgrounded && t.status === 'running')
   )
@@ -416,6 +436,14 @@ export default function Composer(): JSX.Element {
     const cached = readCachedSlashCommands(agentBackend)
     if (cached.length) useSessionStore.setState({ slashCommands: cached })
   }, [agentBackend])
+
+  // 别名随后端切换重读；换会话时挂着的胶囊也要清掉（命令属于那个会话）。
+  useEffect(() => {
+    setAliases(readAliases(agentBackend))
+  }, [agentBackend])
+  useEffect(() => {
+    setActiveCommand(null)
+  }, [meta?.sessionId])
 
   // 真值一到就刷新缓存（命令增删、换后端都靠这里跟上）。
   useEffect(() => {
@@ -664,6 +692,18 @@ export default function Composer(): JSX.Element {
     if (!slashContext) return
     const before = text.slice(0, slashContext.start)
     const after = text.slice(slashContext.end)
+
+    // 后端命令 → 胶囊：把 `/xxx` 从文本里摘掉，命令本身挂到 activeCommand 上。
+    // 模板不走这条（它插入的是一整段 prompt 正文，本来就该留在文本里）。
+    if (command.source === 'skill') {
+      const nextText = `${before}${after.replace(/^\s+/, '')}`
+      setText(nextText)
+      setActiveCommand(command.name)
+      setSlashContext(null)
+      pendingCaretRef.current = before.length
+      return
+    }
+
     const trailingSpace = after && !/^\s/.test(after) ? ' ' : ''
     const nextText = `${before}${command.insertText}${trailingSpace}${after}`
     const nextCaret = before.length + command.insertText.length + trailingSpace.length
@@ -862,17 +902,21 @@ export default function Composer(): JSX.Element {
   const submit = async (cutIn = false): Promise<void> => {
     const value = text.trim()
     const atts = attachments
-    if (!value && atts.length === 0) return
+    // 挂着命令胶囊时，光有胶囊也能发（`/status` 这种不需要参数）。
+    if (!value && atts.length === 0 && !activeCommand) return
     // /usage 是 Tran 原生命令：打开用量面板，不发给 agent。
-    if (value === '/usage' && atts.length === 0) {
+    if ((value === '/usage' || (activeCommand === 'usage' && !value)) && atts.length === 0) {
       setText('')
+      setActiveCommand(null)
       setSlashContext(null)
       useUiStore.getState().setUsageOpen(true)
       return
     }
     ++attachmentActionSeqRef.current
-    const finalText = value
+    // 胶囊在这里拼回真正要发出去的文本。
+    const finalText = activeCommand ? `/${activeCommand}${value ? ` ${value}` : ''}` : value
     setText('')
+    setActiveCommand(null)
     setSlashContext(null)
     setAttachments([])
     void sendMessage(finalText, atts.length ? atts : undefined, cutIn ? { cutIn: true } : undefined)
@@ -1152,7 +1196,17 @@ export default function Composer(): JSX.Element {
                     >
                       <span className="min-w-0 flex-1">
                         <span className="flex min-w-0 items-center gap-2">
-                          <span className="truncate font-mono text-[12px] text-zinc-200">/{command.name}</span>
+                          {/* 主标题用别名（`skill:` 前缀在这里剥掉——一屏全是它，
+                              除了占地方没有信息量）；原名降级成旁边的灰色小字，
+                              仍然看得到、也仍然能搜到。 */}
+                          <span className="truncate text-[12px] text-zinc-200">
+                            {displayName(command.name, agentBackend, aliases)}
+                          </span>
+                          {hasFriendlyName(command.name, agentBackend, aliases) && (
+                            <span className="shrink-0 truncate font-mono text-[10px] text-zinc-600">
+                              /{command.name}
+                            </span>
+                          )}
                           {command.argumentHint && (
                             <span className="truncate font-mono text-[10px] text-zinc-600">{command.argumentHint}</span>
                           )}
@@ -1166,6 +1220,28 @@ export default function Composer(): JSX.Element {
                           {command.source === 'template' ? command.label : command.description}
                         </span>
                       </span>
+                      {command.source === 'skill' && (
+                        // 改名入口。用 span+role 而不是嵌套 <button>（button 里套
+                        // button 是非法 HTML，浏览器会把内层踢出去）。
+                        <span
+                          role="button"
+                          tabIndex={-1}
+                          title="给这个命令起个别名"
+                          aria-label="重命名"
+                          onMouseDown={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            const current = displayName(command.name, agentBackend, aliases)
+                            const next = window.prompt(`给 /${command.name} 起个显示名（留空恢复默认）`, current)
+                            if (next === null) return
+                            writeAlias(agentBackend, command.name, next)
+                            setAliases(readAliases(agentBackend))
+                          }}
+                          className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-zinc-600 transition hover:bg-white/10 hover:text-zinc-300"
+                        >
+                          改名
+                        </span>
+                      )}
                     </button>
                   ))
                 )}
@@ -1196,6 +1272,32 @@ export default function Composer(): JSX.Element {
               </div>
             </div>
           </div>
+          {/* 命令胶囊：选中后端命令后，它从输入框文本里"提"出来变成一枚胶囊，
+              textarea 只留参数（Codex 同款观感）。发送时再拼回 `/name 参数`。
+              为什么不做成 textarea 内联的富文本：那要把整个输入框换成
+              contenteditable，输入法组词、草稿、撤销栈、粘贴全得重做，代价远
+              大于收益。 */}
+          {activeCommand && (
+            <div className="mb-1.5 flex flex-wrap items-center gap-1.5 px-1">
+              <span className="tran-enter inline-flex max-w-full items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/[0.12] py-1 pl-2 pr-1 text-[12px] text-zinc-100">
+                <SkillGlyph />
+                <span className="truncate">{displayName(activeCommand, agentBackend, aliases)}</span>
+                <span className="shrink-0 font-mono text-[10px] text-zinc-500">/{activeCommand}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveCommand(null)
+                    textareaRef.current?.focus()
+                  }}
+                  title="移除命令"
+                  aria-label="移除命令"
+                  className="ml-0.5 shrink-0 rounded px-1 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+                >
+                  ×
+                </button>
+              </span>
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             value={text}
