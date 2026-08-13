@@ -1160,7 +1160,7 @@ export default function Composer(): JSX.Element {
           <ChipPopover kind={openChip} anchor={chipAnchor} onClose={() => setOpenChip(null)} />
         )}
         <div
-          className={`glass-panel composer-panel rounded-[18px] p-3 transition ${
+          className={`glass-panel composer-panel rounded-[20px] p-3 transition ${
             dragActive ? 'border-accent/60 bg-white/[0.035] shadow-[0_0_0_1px_rgba(139,92,246,0.28)]' : ''
           } ${composerResizing ? 'is-resizing' : ''}`}
           onDragEnter={onDragEnter}
@@ -1569,7 +1569,7 @@ export default function Composer(): JSX.Element {
             </div>
           </div>
           {dragActive && (
-            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-[18px] border border-dashed border-accent/70 bg-black/55 backdrop-blur-sm">
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-[20px] border border-dashed border-accent/70 bg-black/55 backdrop-blur-sm">
               <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm font-medium text-zinc-100 shadow-lg">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="shrink-0 text-accent">
                   <path

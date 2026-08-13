@@ -1775,9 +1775,35 @@ textarea:focus-visible {
   flex-shrink: 0;
 }
 
+/**
+ * 输入框外壳：**无边框感**（2026-08 用户要求，对齐 Codex）。
+ *
+ * 它套的 .glass-panel 画了 1px / 16% 白的边，还叠一道 24% 的高光内阴影——
+ * 那两样加起来就是用户说的「明显的边框感」。Codex 那边实测是
+ * `--composer-layout-surface-background: var(--color-token-bg-secondary)` +
+ * 边框 `color-mix(foreground 5~8%)`，也就是**靠底色深浅分层，不靠描边**。
+ *
+ * 这里同样改成：不描边、去高光，只用比页面底色亮一档的实色把区域托出来。
+ * .glass-panel 在 @layer components 里，本规则不在任何 layer 中，无论顺序都
+ * 覆盖得到（层内样式优先级恒低于无层样式）。
+ */
 .composer-panel {
   z-index: 30;
   overflow: visible;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  background: var(--color-bg-elev, #262626);
+  box-shadow: none;
+}
+
+/* 聚焦反馈同样收敛：原来是 14% 白的内描边 + 一道紫色底边，在无边框的底子上
+   显得突兀。改成极淡的一圈，够表达"焦点在这"即可。 */
+.composer-focus-ring {
+  border-radius: 20px;
+}
+
+.composer-panel:focus-within .composer-focus-ring {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
 }
 
 .composer-resize-zone {
