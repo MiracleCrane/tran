@@ -42,6 +42,36 @@ import { emitForgeEvent } from '../events'
  *  否则切走再切回来 chip 会被 init 覆盖回 default。 */
 const PERMISSION_MODE_KEY_PREFIX = 'forge.permissionMode.'
 
+/**
+ * 上次用过的模型，按 agent 后端各记一个。
+ *
+ * 此前只有"当前会话的 model"这一处状态：会话内切换记得住，`newChat` 也沿用，
+ * 但**冷启动就丢**——每次开 Tran 都得重新选一遍（2026-08 用户反馈）。
+ * 两个后端分开记：Kimi 与 Claude Code 的模型 id 互不通用，串了必然启动失败。
+ */
+const LAST_MODEL_KEY_PREFIX = 'forge.lastModel.'
+
+function lastModelKey(agentBackend: AgentBackendId | undefined): string {
+  return LAST_MODEL_KEY_PREFIX + (agentBackend ?? 'kimi')
+}
+
+function readLastModel(agentBackend: AgentBackendId | undefined): string | undefined {
+  try {
+    return window.localStorage.getItem(lastModelKey(agentBackend)) ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+function storeLastModel(agentBackend: AgentBackendId | undefined, model: string | undefined): void {
+  try {
+    if (model) window.localStorage.setItem(lastModelKey(agentBackend), model)
+    else window.localStorage.removeItem(lastModelKey(agentBackend))
+  } catch {
+    /* ignore */
+  }
+}
+
 /** localStorage 里的值是历史遗留，不能直接 as。取值集变过（也还会再变），
  *  老版本写下的字符串会被原样重放给后端——后端拿到不认识的档位，行为不可预期。
  *  校验一次，认不出就当没存过（回落到调用方给的默认档）。 */
@@ -1811,7 +1841,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const newId = uid()
       const prefs = await window.api.getPreferences().catch(() => null)
       const agentBackend = prefs?.agentBackend
-      const model = modelForAgent(agentBackend, args.model)
+      // 冷启动没人传 model（Onboarding 只给 cwd）：用上次选过的那个，而不是
+      // 每次都掉回默认——这正是"每次开 Tran 都要重新选模型"的根因。
+      const requestedModel = args.model ?? readLastModel(agentBackend)
+      const model = modelForAgent(agentBackend, requestedModel)
       const permissionMode = prefs?.defaultPermissionMode ?? 'default'
       const effort = prefs?.defaultEffort ?? 'high'
       const opts: StartSessionOptions = {
@@ -1831,7 +1864,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           sessionId: newId,
           ...(agentBackend ? { agentBackend } : {}),
           cwd: args.cwd,
-          model: displayModelForAgent(agentBackend, args.model),
+          model: displayModelForAgent(agentBackend, requestedModel),
           permissionMode,
           tools: []
         },
@@ -2115,6 +2148,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // Kimi ACP 支持会话内实时切换模型（session/set_config_option），无需重启
     // 会话；切换失败时后端只记录日志，本地状态保持新值即可。
     set({ meta: { ...meta, model } })
+    // 记住这个选择：否则下次开 Tran 又回到默认模型，得重新选一遍。
+    storeLastModel(meta.agentBackend, model)
     await window.api.setModel(meta.sessionId, model).catch(() => {})
   },
 
@@ -2197,12 +2232,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
    * 「怎么起」记进 pendingSessionStart，等真的发第一条消息再起后端。没说话
    * 就没有会话，也就没有空壳要清理。
    */
-  async openStartupProject(cwd: string, model?: string) {
+  async openStartupProject(cwd: string, requestedModel?: string) {
     const newId = uid()
     const requestSeq = nextSessionNavigationSeq()
     const isLatestRequest = (): boolean => isCurrentSessionNavigation(get, requestSeq, newId)
     const prefs = await window.api.getPreferences().catch(() => null)
     const agentBackend = prefs?.agentBackend
+    // 冷启动这条路径最要紧：调用方不传 model，掉回默认就等于"每次开 Tran
+    // 都要重新选模型"。改为优先用上次选过的那个。
+    const model = requestedModel ?? readLastModel(agentBackend)
     const permissionMode = prefs?.defaultPermissionMode ?? 'default'
     const effort = prefs?.defaultEffort ?? 'high'
     // 启动路径没有"上一个会话"要快照，判导航序号即可（用户可能在偏好还没
