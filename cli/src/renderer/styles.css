@@ -3331,14 +3331,25 @@ div:has(textarea:focus) .composer-shortcut-hint {
     background: #2b2b2b;
     border: 1px solid rgba(255, 255, 255, 0.04);
     border-radius: 20px;
-    /* !important 是被迫的：玻璃主题下线后留了一条
-         :root[data-glass-glow='off'] .glass-panel { box-shadow: … !important }
-       而 glassGlow 现在恒为 off，于是每个面板都被强行套上一圈 1px 内环——
-       叠在边框上就是两条边。同特异度下只能用 !important 压回去。 */
-    box-shadow: none !important;
+    box-shadow: none;
     transition:
       border-color var(--motion-med) var(--easing-out),
       background-color var(--motion-med) var(--easing-out);
+  }
+  /**
+   * 干掉那圈多余的 1px 内环。
+   *
+   * 玻璃主题下线后留了一条：
+   *   :root[data-glass-glow='off'] .glass-panel { box-shadow: … !important }
+   * 而 glassGlow 现在恒为 off，于是每个面板都被强行套上一圈内环，叠在边框上
+   * 就是两条边——这也是「边框感」的一部分。
+   *
+   * 光加 !important 不够：两条同为 (0,3,0) 且都 !important 时由源码顺序决定，
+   * 而构建会把 @layer 里的规则提前，我这条反而排在它前面（DevTools 的
+   * getMatchedStylesForNode 实测确认）。多带一个 .glass-panel 提到 (0,4,0)
+   * 才压得住。 */
+  :root[data-ui='flat'] .composer-panel.glass-panel {
+    box-shadow: none !important;
   }
   :root[data-ui='flat'] .composer-panel:focus-within {
     /* 聚焦只把面再抬一档：面已经立住了，不必再靠描边喊一嗓子。 */
