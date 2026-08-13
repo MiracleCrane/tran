@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.93 - 2026-08-13
+
+后台把 Tran 当普通用户跑了一轮（Kimi + Claude Code 各走完整流程),抓到三个真机才暴露的问题。
+
+### 中文
+
+- 修复:**点导航条永远跳到底部**——也就是「点了跟没点一样」的真正原因。react-virtuoso 这两处用的不是同一套下标:`rangeChanged` 上报**绝对**下标(含 firstItemIndex 基数),`scrollToIndex` 收的却是**相对**下标。两边都按绝对算,传进去的是百万级数字,被一律 clamp 到末项。这个 bug 从导航条第一版就在,静态看代码看不出来。
+- 修复:**Claude Code 会话一打开就整片 Transcript 崩溃**(v1.0.91 引入)。导航条摘要要取该轮回复的开头,而流式期间 `blocks` 数组会有空洞,少了一次判空——整个转录区被 React 错误边界接管,只剩「渲染出错」。
+- 修复:**Claude Code 的权限档位接反了**。选「自动通过」这个中间档,实际拿到的是 Claude 最危险的 `bypassPermissions`(连权限询问都一并绕开);而标着「慎用」的「完全自主」反倒是更保守的 `acceptEdits`。现已对齐:自动通过 → acceptEdits,完全自主 → bypassPermissions。
+
+### English
+
+- Fixed: **clicking the nav rail always jumped to the bottom** — the real reason clicks felt dead. react-virtuoso reports *absolute* indices in `rangeChanged` but expects *relative* ones in `scrollToIndex`; passing the absolute index meant a million-scale number that got clamped to the last item. Present since the rail's first version.
+- Fixed: **the whole Transcript crashed on opening a Claude Code session** (introduced in v1.0.91) — the rail's reply preview read `blocks` without the null-guard the rest of the file uses, and streamed content can leave holes in that array.
+- Fixed: **Claude Code's permission tiers were inverted.** Picking "自动通过" (the middle tier) actually got you Claude's most permissive `bypassPermissions`, while the tier labelled "慎用" got the safer `acceptEdits`.
+
 ## v1.0.92 - 2026-08-13
 
 ### 中文

@@ -1207,8 +1207,11 @@ export default function Transcript({
         const nextItem = next.node.item
         if (nextItem.kind === 'user') break
         if (nextItem.kind !== 'assistant') continue
-        const text = nextItem.blocks
-          .filter((b): b is Extract<AssistantBlock, { kind: 'text' }> => b.kind === 'text')
+        // blocks 里可能有空洞（流式期间先占位、后填充），全文件其它地方都先
+        // `!!b` 过一道再用。这里漏了这一步，Claude Code 会话一开就整片
+        // Transcript 崩掉（v1.0.91 引入，后台跑真机流程时抓到）。
+        const text = (nextItem.blocks ?? [])
+          .filter((b): b is Extract<AssistantBlock, { kind: 'text' }> => !!b && b.kind === 'text')
           .map((b) => b.text)
           .join(' ')
           .replace(/\s+/g, ' ')
@@ -1295,14 +1298,16 @@ export default function Transcript({
     lockFollowOutput()
     markScrollIntent()
     setPinnedAtBottom(false)
-    // 传了 firstItemIndex 之后，Virtuoso 对外的下标空间是**绝对**的
-    // （rangeChanged 上报的、scrollToIndex 接收的都含基数偏移），而
-    // userNavEntries.rowIndex 是 displayRows 里的相对下标——必须先加基数，
-    // 否则跳转会偏到十万八千里。
+    // react-virtuoso 在这两处用的**不是同一套下标**（4.18.7 实测）：
+    //   · rangeChanged 上报的是含 firstItemIndex 基数的**绝对**下标；
+    //   · scrollToIndex 收的却是 data 数组里的**相对**下标。
+    // 之前两边都按绝对算，于是传进去的是 100 万级的数字，Virtuoso 一律 clamp
+    // 到末项 —— 表现就是「点导航条永远跳到底部」，也就是点了跟没点一样。
+    // 这个 bug 从导航条第一版就在，静态看代码看不出来，是后台真机点出来的。
     const absoluteIndex = firstItemIndexRef.current + entry.rowIndex
     const distance = Math.abs(absoluteIndex - lastRenderedRangeRef.current.startIndex)
     virtuosoRef.current?.scrollToIndex({
-      index: absoluteIndex,
+      index: entry.rowIndex,
       align: 'start',
       // 长距 smooth 会边滚边补渲染重测高，卡在半途并持续闪；拖动刷条时调用方
       // 直接要 auto（smooth 排队补间跟不上手）。

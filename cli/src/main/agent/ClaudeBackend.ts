@@ -39,8 +39,14 @@ import { log } from '../logger'
 const PERMISSION_MODE_MAP: Record<string, string> = {
   default: 'default',
   plan: 'plan',
-  auto: 'acceptEdits',
-  yolo: 'bypassPermissions'
+  // Tran 的档位语义见 Composer.tsx：
+  //   yolo =「自动通过」自动批准工具、关键问题仍会问  → acceptEdits
+  //   auto =「完全自主」完全无人值守、什么都不问      → bypassPermissions
+  // 这两个此前接反了：选「自动通过」这个中间档，实际拿到的是 Claude 最危险的
+  // bypassPermissions（连权限询问通道都一并绕开）；而标着「慎用」的「完全自主」
+  // 反倒是更保守的 acceptEdits。
+  yolo: 'acceptEdits',
+  auto: 'bypassPermissions'
 }
 
 /** Composer 下拉的默认模型清单（用户可在设置里覆盖）。 */
