@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.98 - 2026-08-13
+
+### 中文
+
+- 新增:**命令胶囊**。在 `/` 面板里选中一条后端命令后,它会从输入框文本里"提"出来变成一枚胶囊(图标 + 名称 + 原名 + ×),输入框只留参数;发送时自动拼回。只挂胶囊不写参数也能直接发(`/status` 这类不需要参数)。
+- 新增:**命令别名,可自己改**。Kimi 只给命令的原名和一整句英文描述,没有任何"显示名"——所以 Tran 自己补了一层:内置命令给了一套默认中文名(压缩上下文 / 会话状态 / Token 用量…),`skill:` 前缀在列表里剥掉,原名降级成旁边的灰色小字(仍看得到、仍可搜)。每条命令右侧有「改名」,按后端保存,留空恢复默认。
+
+### English
+
+- New: **command chips.** Picking a backend command from the `/` palette lifts it out of the input text into a chip (icon + name + raw name + ×); the textarea keeps only the arguments and they are recombined on send. A chip alone can be sent (for commands like `/status` that take no arguments).
+- New: **editable command aliases.** Kimi exposes only a raw name and a full-sentence English description — no display name — so Tran adds one: built-in commands ship with Chinese names, the `skill:` prefix is dropped in the list, and the raw name is demoted to dim text beside it. Each command has a rename action, stored per backend.
+
 ## v1.0.97 - 2026-08-13
 
 ### 中文
