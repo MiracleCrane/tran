@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.90 - 2026-08-13
+
+### 中文
+
+- 修复:**Claude Code 会话的上下文环虚高 5 倍**。窗口此前写死 200k,而实测 Claude Code 的窗口是 1m——33.3k 的占用被画成 17%,实际只有 3%。现改用 Claude Code 自己的 `/context` 命令取权威值(占用、窗口上限、真实模型名一并拿到)。这条命令不走 API、不花钱(实测 `num_turns=0`、`cost=0`),所以每轮结束自动刷一次,不必等你悬停上下文环。整轮对界面不可见:不进对话流、不闪「正在运行」。
+
+### English
+
+- Fixed: **the context ring read ~5× too full in Claude Code sessions.** The window was hardcoded to 200k, but Claude Code's actual window here is 1m — 33.3k of usage was drawn as 17% when it was really 3%. Tran now asks Claude Code's own `/context` command for the authoritative numbers (usage, window size, and the real model name). That command makes no API call and costs nothing (`num_turns=0`, `cost=0`), so it refreshes after every turn instead of waiting for a hover. The hidden turn is invisible in the UI — no transcript entry, no "running" flicker.
+
 ## v1.0.89 - 2026-08-13
 
 ### 中文
