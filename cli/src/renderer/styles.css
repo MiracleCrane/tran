@@ -3331,7 +3331,11 @@ div:has(textarea:focus) .composer-shortcut-hint {
     background: #2b2b2b;
     border: 1px solid rgba(255, 255, 255, 0.04);
     border-radius: 20px;
-    box-shadow: none;
+    /* !important 是被迫的：玻璃主题下线后留了一条
+         :root[data-glass-glow='off'] .glass-panel { box-shadow: … !important }
+       而 glassGlow 现在恒为 off，于是每个面板都被强行套上一圈 1px 内环——
+       叠在边框上就是两条边。同特异度下只能用 !important 压回去。 */
+    box-shadow: none !important;
     transition:
       border-color var(--motion-med) var(--easing-out),
       background-color var(--motion-med) var(--easing-out);
