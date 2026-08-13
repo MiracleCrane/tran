@@ -78,6 +78,23 @@ interface ActiveClaudeSession {
   /** system/init 里带的技能名与 MCP 服务器状态（只读展示用）。 */
   skills: string[]
   mcpServers: McpServerEntry[]
+  /** 隐藏 `/context` 轮进行中：这一轮的所有消息都不推给渲染层。 */
+  hiddenTurn: boolean
+  hiddenText: string
+  /** `/context` 解析出的真实上下文占用与窗口上限。 */
+  contextInfo?: { used: number; total: number; model?: string }
+}
+
+/** `**Tokens:** 29.3k / 1m (3%)` → { used: 29300, total: 1000000 }。 */
+function parseContextUsage(text: string): { used: number; total: number; model?: string } | null {
+  const m = text.match(/\*\*Tokens:\*\*\s*([\d.]+)\s*([kmKM]?)\s*\/\s*([\d.]+)\s*([kmKM]?)/)
+  if (!m) return null
+  const scale = (unit: string): number => (unit.toLowerCase() === 'm' ? 1e6 : unit.toLowerCase() === 'k' ? 1e3 : 1)
+  const used = Math.round(Number(m[1]) * scale(m[2] ?? ''))
+  const total = Math.round(Number(m[3]) * scale(m[4] ?? ''))
+  if (!Number.isFinite(used) || !Number.isFinite(total) || total <= 0) return null
+  const modelMatch = text.match(/\*\*Model:\*\*\s*(\S+)/)
+  return { used, total, ...(modelMatch?.[1] ? { model: modelMatch[1] } : {}) }
 }
 
 /** stderr 只留尾部用于报错，避免长会话把内存吃掉（同 AcpClient 的取舍）。 */
@@ -128,7 +145,9 @@ export class ClaudeBackend {
       interruptRequestId: null,
       interruptTimer: null,
       skills: [],
-      mcpServers: []
+      mcpServers: [],
+      hiddenTurn: false,
+      hiddenText: ''
     }
     this.spawnChild(session)
     this.sessions.set(sessionId, session)
@@ -250,6 +269,31 @@ export class ClaudeBackend {
       }
     }
 
+    // 隐藏 `/context` 轮：整轮都不推给渲染层（那是一大张 markdown 表格，
+    // 落进对话流就是噪声），只把文本攒起来解析，result 一到就收尾。
+    // 也不能翻 running——界面会闪一下"正在运行"。
+    if (session.hiddenTurn) {
+      if (msg.type === 'assistant') {
+        const content = (msg['message'] as { content?: unknown } | undefined)?.content
+        if (Array.isArray(content)) {
+          for (const raw of content) {
+            const b = raw as Record<string, unknown>
+            if (b['type'] === 'text' && typeof b['text'] === 'string') session.hiddenText += b['text']
+          }
+        }
+      }
+      if (msg.type === 'result') {
+        const parsed = parseContextUsage(session.hiddenText)
+        if (parsed) {
+          session.contextInfo = parsed
+          log('claude', `/context → ${parsed.used}/${parsed.total} model=${parsed.model ?? '-'}`)
+        }
+        session.hiddenTurn = false
+        session.hiddenText = ''
+      }
+      return
+    }
+
     if (msg.type === 'assistant' && !session.running) {
       session.running = true
       this.h.onSessionRunning?.(session.id, true, session.claudeSessionId ?? undefined, Date.now())
@@ -274,6 +318,10 @@ export class ClaudeBackend {
       session.pendingPermissions.clear()
       session.running = false
       this.h.onSessionRunning?.(session.id, false, session.claudeSessionId ?? undefined)
+      // 每轮结束顺手刷一次真实上下文占用。`/context` 不走 API、不花钱，
+      // 所以不必等用户悬停上下文环才去取。放到下一个 tick，让这条 result
+      // 先推给渲染层。
+      setTimeout(() => void this.requestUsageRefresh(session.id), 0)
     }
 
     // 直通：形状与渲染层期待的一致，不做翻译。
@@ -517,15 +565,38 @@ export class ClaudeBackend {
     return skills.map((name) => ({ name, description: 'Claude Code 内置技能' }))
   }
 
+  /**
+   * 隐藏 `/context` 轮：拿真实的上下文占用与窗口上限。
+   *
+   * 这条命令**完全不花钱**——实测 `num_turns: 0`、`total_cost_usd: 0`、
+   * `duration_api_ms: 0`、usage 全零，是纯本地渲染，不走 API。所以悬停上下文环
+   * 时随手刷一次没有任何代价。
+   *
+   * 只在会话空闲时跑：用户轮在途时直接放弃，不跟对话抢 stdin 的先后。
+   */
+  async requestUsageRefresh(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.disposed || session.running || session.hiddenTurn) return
+    if (!this.isAlive(session)) return
+    session.hiddenTurn = true
+    session.hiddenText = ''
+    if (!this.writeLine(session, { type: 'user', message: { role: 'user', content: '/context' } })) {
+      session.hiddenTurn = false
+    }
+  }
+
   async getSessionUsage(sessionId: string): Promise<SessionUsageInfo> {
     const session = this.sessions.get(sessionId)
+    const ctx = session?.contextInfo
+    // `/context` 给的是权威值：占用和窗口都由 CLI 自己算（实测这台机器上窗口
+    // 是 1m，而不是此前写死的 200k——环整整虚高了 5 倍）。拿不到时才退回
+    // result 里的 usage 估算，窗口按 200k 保守计。
     return {
       inputTokens: session?.lastUsage?.inputTokens,
       outputTokens: session?.lastUsage?.outputTokens,
-      totalTokens: session?.lastUsage?.totalTokens,
-      // Claude 系列的上下文窗口按 200k 计（result 消息不下发窗口上限）。
-      contextSize: 200_000,
-      ...(session?.model ? { model: session.model } : {})
+      totalTokens: ctx ? ctx.used : session?.lastUsage?.totalTokens,
+      contextSize: ctx ? ctx.total : 200_000,
+      ...(ctx?.model ?? session?.model ? { model: ctx?.model ?? session?.model } : {})
     }
   }
 
