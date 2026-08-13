@@ -3324,17 +3324,22 @@ div:has(textarea:focus) .composer-shortcut-hint {
      即靠明度台阶分区，边只是收口。这里照此：底色抬到 #262626（比主区 #1e1e1e
      亮一档，和 .glass-control 同级），边留 6%，圆角 14→20px 更接近它的观感。 */
   :root[data-ui='flat'] .composer-panel {
-    background: #262626;
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    /* 明暗台阶要够大，边才能退到听不见。
+       #262626 vs 主区 #1e1e1e 只差 8 级，台阶太弱，视觉重心还是落在那圈线上
+       （2026-08 实测截图确认）。抬到 #2b2b2b，同时把边压到 4%、彻底去掉内阴影
+       ——原先边框上还叠着一道 8% 的 inset ring，等于画了两条边。 */
+    background: #2b2b2b;
+    border: 1px solid rgba(255, 255, 255, 0.04);
     border-radius: 20px;
+    box-shadow: none;
     transition:
       border-color var(--motion-med) var(--easing-out),
       background-color var(--motion-med) var(--easing-out);
   }
   :root[data-ui='flat'] .composer-panel:focus-within {
-    /* 聚焦只做很轻的提亮：面已经立住了，不需要再靠描边喊一嗓子。 */
-    border-color: rgba(255, 255, 255, 0.11);
-    background: #2a2a2a;
+    /* 聚焦只把面再抬一档：面已经立住了，不必再靠描边喊一嗓子。 */
+    border-color: rgba(255, 255, 255, 0.07);
+    background: #303030;
   }
   :root[data-ui='flat'] .composer-focus-ring {
     display: none;
