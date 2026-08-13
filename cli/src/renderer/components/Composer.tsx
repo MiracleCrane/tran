@@ -273,6 +273,8 @@ export default function Composer(): JSX.Element {
   const elicitationCount = useSessionStore((s) => s.elicitationQueue.length)
   /** 只有这两种情况需要用户动手，值得在输入框上方常驻一行提示。 */
   const waitingOnUser = pendingPermissionCount > 0 || elicitationCount > 0
+  /** `/` 面板里给「后端下发的命令」打的徽标：跟着当前后端走。 */
+  const backendLabel = useSessionStore((s) => (s.meta?.agentBackend === 'claude' ? 'Claude' : 'Kimi'))
   const hasBackgroundSubagent = useSessionStore((s) =>
     s.tasks.some((t) => t.isBackgrounded && t.status === 'running')
   )
@@ -1104,7 +1106,9 @@ export default function Composer(): JSX.Element {
                             <span className="truncate font-mono text-[10px] text-zinc-600">{command.argumentHint}</span>
                           )}
                           <span className="shrink-0 rounded bg-white/[0.055] px-1.5 py-0.5 text-[9px] text-zinc-500">
-                            {command.source === 'skill' ? 'Kimi' : '模板'}
+                            {/* 徽标跟着当前后端走。原来写死 'Kimi'，在 Claude Code
+                                会话里 19 个 Claude 的命令全被标成 Kimi。 */}
+                            {command.source === 'skill' ? backendLabel : '模板'}
                           </span>
                         </span>
                         <span className="mt-0.5 block truncate text-[11px] text-zinc-500">

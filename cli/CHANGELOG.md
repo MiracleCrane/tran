@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.96 - 2026-08-13
+
+### 中文
+
+- 新增:**Claude Code 后端进程意外退出时,对话流里给出提示**。此前进程死了界面上一个字都没有,正文停在半截输出上,分不清是还在想还是已经死了(Kimi 那边一直是有断线卡片的)。提示同时说明「再发一条消息即可自动重开并接着上下文」——这条路本来就通,只是没人告诉你。
+- 修复:**`/` 面板里后端下发的命令一律被标成「Kimi」**。在 Claude Code 会话里,19 条 Claude 的命令全打着 Kimi 的徽标。改成跟着当前后端走。
+
+### English
+
+- New: **the transcript now says so when the Claude Code process dies unexpectedly.** Previously nothing appeared at all — the output just stopped mid-stream with no way to tell "still thinking" from "dead" (Kimi has always shown a disconnect card). The notice also points out that sending another message re-opens the session with context intact.
+- Fixed: **backend-provided commands in the `/` palette were always badged "Kimi"**, including the 19 Claude commands in a Claude Code session.
+
 ## v1.0.94 - 2026-08-13
 
 ### 中文

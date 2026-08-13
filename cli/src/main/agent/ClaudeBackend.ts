@@ -213,6 +213,22 @@ export class ClaudeBackend {
       const detail =
         session.stderr.trim() ||
         (code === 0 ? undefined : `Claude Code 进程退出（code ${code ?? 'null'}）`)
+      // 进程意外没了：先在对话流里说一声，再收尾。
+      //
+      // 之前这里只 onEnded，界面上**一个字都没有**——正文停在半截输出上，
+      // 用户不知道是它还在想还是已经死了（真机 QA：杀掉 claude 子进程后转录区
+      // 只剩数字，没有任何提示；kimi 那边一直是有断线卡片的）。
+      // 下一条消息会带 --resume 自动重开，所以措辞是「可继续」而不是「已结束」。
+      if (!session.disposed) {
+        // detail 本身就已经是「Claude Code 进程退出（code 1）」这种整句，别再
+        // 套一层同样的话（实测套出来是「进程意外退出（进程退出（code 1））」）。
+        const reason = session.stderr.trim() || `退出码 ${code ?? 'null'}`
+        this.emitNotice(
+          session,
+          `Claude Code 进程意外退出（${reason}）。这一轮已中断；` +
+            '直接再发一条消息即可自动重开并接着上下文。'
+        )
+      }
       this.endSession(session, detail)
     })
 
@@ -370,6 +386,15 @@ export class ClaudeBackend {
       ...(suggestions ? { suggestions } : {}),
       ...(description ? { decisionReason: description } : {})
     })
+  }
+
+  /** 往对话流里插一张系统状态卡（与 KimiBackend 的断线通告同一个通道/形状）。 */
+  private emitNotice(session: ActiveClaudeSession, text: string): void {
+    this.h.onMessage(session.id, {
+      type: 'system',
+      subtype: 'query_result',
+      query: { command: '/status', text, at: Date.now() }
+    } as unknown as SDKMessage)
   }
 
   private writeLine(session: ActiveClaudeSession, payload: unknown): boolean {
