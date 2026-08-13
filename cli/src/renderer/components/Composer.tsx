@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -10,6 +11,7 @@ import {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent
 } from 'react'
+import RichInput from './RichInput'
 import { useSessionStore } from '../store/sessionStore'
  import { displayName, hasFriendlyName, readAliases, writeAlias } from '../lib/commandAliases'
 import { useUiStore } from '../store/uiStore'
@@ -324,6 +326,7 @@ export default function Composer(): JSX.Element {
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
   /** 用户自定义别名。改名后要立刻重渲染，所以进 state 而不是每次读 localStorage。 */
   const [aliases, setAliases] = useState<Record<string, string>>({})
+
   const hasBackgroundSubagent = useSessionStore((s) =>
     s.tasks.some((t) => t.isBackgrounded && t.status === 'running')
   )
@@ -431,6 +434,21 @@ export default function Composer(): JSX.Element {
    * 于是：拿到过一次就按后端存起来，下次开局立刻显示；真会话起来后照常覆盖。
    */
   const agentBackend = useSessionStore((s) => s.meta?.agentBackend)
+  /** 实验开关：富文本输入框（内联胶囊）。默认关。 */
+  const [richComposer, setRichComposer] = useState(false)
+  useEffect(() => {
+    void window.api.getPreferences().then((p) => setRichComposer(p.richComposer === true)).catch(() => {})
+  }, [])
+  /** 给 RichInput 的分词回调：只有真实存在的命令才画成胶囊。 */
+  const resolveCommandForChip = useCallback(
+    (name: string) => {
+      const known = slashSkills.some((s) => normalizeSlashName(s.name) === name)
+      if (!known) return null
+      return { label: displayName(name, agentBackend, aliases) }
+    },
+    [slashSkills, agentBackend, aliases]
+  )
+
   useEffect(() => {
     if (useSessionStore.getState().slashCommands.length > 0) return
     const cached = readCachedSlashCommands(agentBackend)
@@ -1326,7 +1344,27 @@ export default function Composer(): JSX.Element {
               maxHeight: heightBounds.max
             }}
             className="composer-textarea w-full resize-none rounded-xl border border-transparent bg-transparent px-3 py-2 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-white/10 focus:bg-white/[0.025]"
+            hidden={richComposer}
           />
+          {/* 实验：富文本输入框。两条路都在，靠设置切——地基换了但旧路一行没动，
+              不合适随时切回去。 */}
+          {richComposer && (
+            <RichInput
+              value={text}
+              onChange={(next) => {
+                setText(next)
+                // caret 由 RichInput 的 selectionchange 单独上报，这里给末尾兜底。
+                updateSlashContext(next, next.length)
+              }}
+              onSelectionChange={(caret) => updateSlashContext(text, caret)}
+              onKeyDown={(e) => onKey(e as unknown as KeyboardEvent<HTMLTextAreaElement>)}
+              onPaste={(e) => void onPaste(e as unknown as ClipboardEvent<HTMLTextAreaElement>)}
+              placeholder={running ? 'Tran 正在处理…(可继续发送,消息会排队)' : '给 Tran 发消息…'}
+              ariaLabel="消息输入框"
+              resolveCommand={resolveCommandForChip}
+              className="rich-input rounded-xl border border-transparent bg-transparent px-3 py-2 text-sm leading-relaxed text-zinc-200 outline-none focus:border-white/10 focus:bg-white/[0.025]"
+            />
+          )}
           {attachments.length > 0 && (
             <div className="flex flex-wrap items-end gap-1.5 px-1 pt-2">
               {attachments.map((a, i) =>

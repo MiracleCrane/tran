@@ -268,6 +268,9 @@ export interface Preferences {
   minimizeToTray?: boolean
   /** 启动时直接最大化主窗口（默认关）。 */
   startMaximized?: boolean
+  /** 实验性：输入框换成富文本（`/命令` 就地渲染成内联胶囊）。默认关——
+   *  它把 textarea 换成 contenteditable，中文输入法的表现只有真人打字才验得出来。 */
+  richComposer?: boolean
   /** Show OS native notifications when a session ends while the window is
    *  inactive (default true). */
   nativeNotifications?: boolean

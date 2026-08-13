@@ -145,6 +145,7 @@ export default function SettingsPanel(): JSX.Element {
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   const [minimizeToTray, setMinimizeToTray] = useState(false)
   const [startMaximized, setStartMaximized] = useState(false)
+  const [richComposer, setRichComposer] = useState(false)
   const [nativeNotifications, setNativeNotifications] = useState(true)
   const [aiNaming, setAiNaming] = useState(true)
   const [summaryApiBaseUrl, setSummaryApiBaseUrl] = useState('https://api.deepseek.com')
@@ -213,6 +214,8 @@ export default function SettingsPanel(): JSX.Element {
         setWslSupportEnabled(!!p.wslSupportEnabled)
         setMinimizeToTray(!!p.minimizeToTray)
         setStartMaximized(!!p.startMaximized)
+    setRichComposer(p.richComposer === true)
+        setRichComposer(p.richComposer === true)
         setNativeNotifications(p.nativeNotifications !== false)
         setAiNaming(p.aiNamingEnabled !== false)
         setSummaryApiBaseUrl(p.summaryApiBaseUrl ?? 'https://api.deepseek.com')
@@ -279,6 +282,17 @@ export default function SettingsPanel(): JSX.Element {
       flashSaved()
     } catch {
       setStartMaximized(!next)
+    }
+  }
+
+  /** 富文本输入框（实验）。改完要重开窗口才换那一层 DOM。 */
+  const toggleRichComposer = async (next: boolean): Promise<void> => {
+    setRichComposer(next)
+    try {
+      await window.api.savePreferences({ richComposer: next })
+      flashSaved()
+    } catch {
+      setRichComposer(!next)
     }
   }
 
@@ -639,6 +653,7 @@ export default function SettingsPanel(): JSX.Element {
     setWslSupportEnabled(!!p.wslSupportEnabled)
     setMinimizeToTray(!!p.minimizeToTray)
     setStartMaximized(!!p.startMaximized)
+    setRichComposer(p.richComposer === true)
     setNativeNotifications(p.nativeNotifications !== false)
     setAskOnClose(!p.closePromptDismissed)
   }
@@ -1036,6 +1051,18 @@ export default function SettingsPanel(): JSX.Element {
               description="应用启动时主窗口直接最大化显示。"
               checked={startMaximized}
               onChange={(checked) => void toggleStartMaximized(checked)}
+            />
+            <ToggleControl
+              label="富文本输入框（实验）"
+              description={
+                '把 `/命令` 就地渲染成内联胶囊(Codex 那种观感),而不是一串裸文本。\n\n' +
+                '**默认关,因为它把输入框从 textarea 换成了 contenteditable** —— ' +
+                '中文输入法在这两者上的行为差别很大(组词、选字、光标位置),而合成事件测不出来,' +
+                '只能真人打中文才验得到。打开后请正常用一阵子中文输入,不对劲随时关回去,旧输入框一行没动。\n\n' +
+                '改完需要重开窗口生效。'
+              }
+              checked={richComposer}
+              onChange={(checked) => void toggleRichComposer(checked)}
             />
             <ToggleControl
               label="会话完成通知"

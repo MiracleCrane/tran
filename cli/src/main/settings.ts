@@ -83,6 +83,8 @@ interface PersistedSettings {
   minimizeToTray?: boolean
   /** 启动时最大化主窗口（默认关）。 */
   startMaximized?: boolean
+  /** 实验：富文本输入框（内联命令胶囊）。默认关。 */
+  richComposer?: boolean
   /** User has already answered the first-close prompt (don't ask again). */
   closePromptDismissed?: boolean
   /** AI 自动命名（会话短标题，云端生成；默认开，关闭后任何路径不调 API）。 */
@@ -345,6 +347,7 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.vulkanBackend = optionalBoolean(source.vulkanBackend)
   settings.minimizeToTray = optionalBoolean(source.minimizeToTray)
   settings.startMaximized = optionalBoolean(source.startMaximized)
+  settings.richComposer = optionalBoolean(source.richComposer)
   settings.closePromptDismissed = optionalBoolean(source.closePromptDismissed)
   settings.aiNamingEnabled = optionalBoolean(source.aiNamingEnabled)
   settings.cloudUsageEnabled = optionalBoolean(source.cloudUsageEnabled)
