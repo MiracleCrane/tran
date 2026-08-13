@@ -1787,18 +1787,14 @@ textarea:focus-visible {
  * .glass-panel 在 @layer components 里，本规则不在任何 layer 中，无论顺序都
  * 覆盖得到（层内样式优先级恒低于无层样式）。
  */
+/* 注意：输入框外壳的**观感**不由这里决定。
+   简约风（:root[data-ui='flat']，也是现在唯一的皮肤）在文件末尾有一条
+   `:root[data-ui='flat'] .composer-panel`，特异度 (0,3,0) 恒高于这里的
+   (0,1,0)——底色/边框/圆角要改就得改那一条。我在这儿改过两版，全是死代码，
+   界面上一点没变（2026-08 实测踩坑，留此备忘）。 */
 .composer-panel {
   z-index: 30;
   overflow: visible;
-  /* 8% —— 就是 Codex 的 --color-token-border-default（foreground 8%）。
-     Tran 原来是 16%（一圈亮边，用户说"边框感太明显"），我上一版直接改成
-     transparent 又矫枉过正：边没了，区域的定义感也一起没了。8% 是"看得出有个
-     边界，但不会跳出来"的那个量。 */
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
-  background: var(--color-bg-elev, #262626);
-  /* 去掉的是顶部那道 24% 高光内阴影——"棱"的来源是它，不是边框本身。 */
-  box-shadow: none;
 }
 
 /* 聚焦反馈同样收敛：原来是 14% 白的内描边 + 一道紫色底边，在无边框的底子上
@@ -3319,18 +3315,26 @@ div:has(textarea:focus) .composer-shortcut-hint {
         底色上。而聚焦时又跳到一圈会呼吸的紫色渐变描边，反差过大。
         这里给它一个常驻的淡底 + 发丝描边，聚焦只把描边染成低饱和的紫，
         呼吸光环在简约风下整个关掉。 */
+  /* 2026-08 再调（用户："不要明显的边框感"）：改成**实色面 + 近乎看不见的边**。
+     原先底色只有 2.8% 白（几乎等于页面底色），整个区域全靠那圈 7.5% 的边勾出来
+     ——看到的是一条线，不是一个面，这就是"边框感"的来源。
+     Codex 的做法反过来（实测其 CSS）：
+       --composer-layout-surface-background: var(--color-token-bg-secondary)
+       --color-token-border-default: color-mix(in oklab, foreground 8%, transparent)
+     即靠明度台阶分区，边只是收口。这里照此：底色抬到 #262626（比主区 #1e1e1e
+     亮一档，和 .glass-control 同级），边留 6%，圆角 14→20px 更接近它的观感。 */
   :root[data-ui='flat'] .composer-panel {
-    background: rgba(255, 255, 255, 0.028);
-    border: 1px solid rgba(255, 255, 255, 0.075);
-    border-radius: 14px;
+    background: #262626;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 20px;
     transition:
       border-color var(--motion-med) var(--easing-out),
       background-color var(--motion-med) var(--easing-out);
   }
   :root[data-ui='flat'] .composer-panel:focus-within {
-    /* 2026-08：聚焦不再用紫色描边，中性提亮 + 微抬底。 */
-    border-color: rgba(255, 255, 255, 0.14);
-    background: rgba(255, 255, 255, 0.045);
+    /* 聚焦只做很轻的提亮：面已经立住了，不需要再靠描边喊一嗓子。 */
+    border-color: rgba(255, 255, 255, 0.11);
+    background: #2a2a2a;
   }
   :root[data-ui='flat'] .composer-focus-ring {
     display: none;
