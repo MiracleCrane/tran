@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.88 - 2026-08-12
+
+### 中文
+
+- 新增:**Claude Code 的历史会话进侧栏了**。此前 Tran 只读 Kimi 的历史,Claude Code 会话完全不进列表——关掉 Tran 那段对话就再也找不回来(恢复的能力一直都在,只是没有入口)。现在两家历史合并后按时间排,项目分组、置顶、重命名、搜索一视同仁。
+- 修复:**点开 Claude Code 历史会话是空白的**。`claude --resume` 只恢复上下文、不重放消息;现改为自己读回会话记录(实测 12MB 的会话 75ms 读完,最多回放最近 400 条)。
+- 修复:**恢复会话时用错后端**。此前取的是当前会话的后端,两家历史混排后,拿 Kimi 去恢复一条 Claude Code 会话必然失败;现在由会话条目自己决定。
+- 修复:**Claude Code 会话中途换模型无效**。模型此前只在启动进程时用一次,下拉里换了不起作用;现走控制协议热切,当轮即生效。
+- 修复:**删不掉 Claude Code 会话**。删除只走 Kimi 的存储路径,对 Claude 的会话表面成功、刷新那一行又回来了。
+
+### English
+
+- New: **Claude Code sessions now appear in the sidebar.** Tran only read Kimi's history before, so Claude Code conversations never made the list — closing Tran lost them (resume worked all along; there was just no entry point). Both histories are merged and sorted by time, with the same grouping, pinning, renaming and search.
+- Fixed: **opening a Claude Code session showed a blank transcript** — `claude --resume` restores context without replaying messages, so Tran now reads the session log itself (12MB session in 75ms, last 400 messages).
+- Fixed: **resuming used the wrong backend** (the current session's instead of the target session's), which could never work once both histories were listed together.
+- Fixed: **switching models mid-session did nothing** for Claude Code; it now hot-swaps over the control protocol.
+- Fixed: **deleting a Claude Code session silently failed** and the row came back on refresh.
+
 ## v1.0.87 - 2026-08-12
 
 ### 中文
