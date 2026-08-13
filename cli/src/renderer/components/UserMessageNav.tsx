@@ -121,7 +121,11 @@ export default function UserMessageNav({
       data-user-msg-nav
       data-follow-no-lock
       aria-label="用户消息"
-      className="absolute right-3 top-1/2 z-20 -translate-y-1/2"
+      // 离右缘的距离不能小：转录区是 scrollbar-gutter: stable both-edges + 10px
+      // 滚动条。贴太近有两个后果——一是点击命中的是滚动条而不是刻度（v1.0.92
+      // 之前就栽在这），二是视觉上和滚动条挤成一坨（2026-08 用户反馈：right-3
+      // 时净空只剩 2px）。right-5 = 20px，给滚动条留 10px 净空。
+      className="absolute right-5 top-1/2 z-20 -translate-y-1/2"
       onMouseLeave={() => setHovered(null)}
     >
       {hovered && (

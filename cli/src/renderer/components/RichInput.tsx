@@ -220,6 +220,9 @@ export default function RichInput({
       contentEditable
       suppressContentEditableWarning
       data-placeholder={placeholder}
+      // contenteditable 空的时候浏览器常留一个 <br>，`:empty` 选择器就失效了，
+      // 占位符要么不显示、要么该消失时不消失。用值本身判断，别信 :empty。
+      data-empty={value.length === 0 ? 'true' : undefined}
       className={className}
       onInput={() => {
         // 组词中间的每一帧都会触发 input，但此时**不能**回写 props（回写会

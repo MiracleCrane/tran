@@ -711,9 +711,13 @@ export default function Composer(): JSX.Element {
     const before = text.slice(0, slashContext.start)
     const after = text.slice(slashContext.end)
 
+    // 富文本模式下**不要**把命令提到上面去：那儿已经能把 `/xxx` 就地画成
+    // 内联胶囊了，再提一枚独立胶囊出来就是同一件事出现两次（用户实测反馈）。
+    // 让它照常留在文本里，交给 RichInput 渲染。
+    //
     // 后端命令 → 胶囊：把 `/xxx` 从文本里摘掉，命令本身挂到 activeCommand 上。
     // 模板不走这条（它插入的是一整段 prompt 正文，本来就该留在文本里）。
-    if (command.source === 'skill') {
+    if (command.source === 'skill' && !richComposer) {
       const nextText = `${before}${after.replace(/^\s+/, '')}`
       setText(nextText)
       setActiveCommand(command.name)
@@ -1297,10 +1301,14 @@ export default function Composer(): JSX.Element {
               大于收益。 */}
           {activeCommand && (
             <div className="mb-1.5 flex flex-wrap items-center gap-1.5 px-1">
-              <span className="tran-enter inline-flex max-w-full items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/[0.12] py-1 pl-2 pr-1 text-[12px] text-zinc-100">
+              {/* 原名不再平铺在胶囊里：它跟别名说的是同一件事，挤在一起只是噪声
+                  （2026-08 用户反馈「这个灰字是什么」）。挪进 title，悬停即可看到。 */}
+              <span
+                title={`/${activeCommand}`}
+                className="tran-enter inline-flex max-w-full items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/[0.12] py-1 pl-2 pr-1 text-[12px] text-zinc-100"
+              >
                 <SkillGlyph />
                 <span className="truncate">{displayName(activeCommand, agentBackend, aliases)}</span>
-                <span className="shrink-0 font-mono text-[10px] text-zinc-500">/{activeCommand}</span>
                 <button
                   type="button"
                   onClick={() => {
