@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CompositionEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 
 /**
@@ -177,6 +177,16 @@ export default function RichInput({
 }: RichInputProps): JSX.Element {
   const ref = useRef<HTMLDivElement | null>(null)
   const composingRef = useRef(false)
+  /**
+   * 组词中（用 state 而不是只用 ref：占位符要靠它立刻消失）。
+   *
+   * 组词期间我们**故意不回写 value**（回写→重排→打断组词），于是 React 眼里
+   * 输入框一直是空的，占位符不肯走；而占位符是 ::before 伪元素、占行内空间，
+   * 正在组的拼音就被挤到它后面去了（实测：「给 Tran 发消息…ce'ui」）。
+   *
+   * 这里只改根节点上的一个属性，不碰任何子节点、不动选区，对输入法是安全的。
+   */
+  const [composing, setComposing] = useState(false)
   /** 最近一次由本组件写出去的值：用来判断 props 是不是"我们自己刚发出去的回声"。 */
   const lastEmittedRef = useRef<string>('')
 
@@ -222,7 +232,7 @@ export default function RichInput({
       data-placeholder={placeholder}
       // contenteditable 空的时候浏览器常留一个 <br>，`:empty` 选择器就失效了，
       // 占位符要么不显示、要么该消失时不消失。用值本身判断，别信 :empty。
-      data-empty={value.length === 0 ? 'true' : undefined}
+      data-empty={value.length === 0 && !composing ? 'true' : undefined}
       className={className}
       onInput={() => {
         // 组词中间的每一帧都会触发 input，但此时**不能**回写 props（回写会
@@ -232,9 +242,11 @@ export default function RichInput({
       }}
       onCompositionStart={() => {
         composingRef.current = true
+        setComposing(true)
       }}
       onCompositionEnd={(_e: CompositionEvent<HTMLDivElement>) => {
         composingRef.current = false
+        setComposing(false)
         emit()
       }}
       onKeyDown={(event) => {

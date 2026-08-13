@@ -3629,6 +3629,7 @@ div:has(textarea:focus) .composer-shortcut-hint {
    ============================================================ */
 
 .rich-input {
+  position: relative;
   width: 100%;
   min-height: 1.5rem;
   outline: none;
@@ -3637,10 +3638,18 @@ div:has(textarea:focus) .composer-shortcut-hint {
   word-break: break-word;
 }
 
+/* 占位符必须**脱离文档流**。
+   它原本是行内 ::before，会占据行内空间——组词期间（此时值还没回写、占位符
+   还在）正在组的拼音就被挤到占位符后面去了，界面上是「给 Tran 发消息…ce'ui」
+   （2026-08 用户实测）。绝对定位之后，即使时序差一帧，文字也永远从最左开始。 */
 .rich-input[data-empty='true']::before {
   content: attr(data-placeholder);
+  position: absolute;
+  top: 0;
+  left: 0;
   color: rgb(113, 113, 122);
   pointer-events: none;
+  user-select: none;
 }
 
 .rich-input-chip {
