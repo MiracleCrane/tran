@@ -1790,9 +1790,14 @@ textarea:focus-visible {
 .composer-panel {
   z-index: 30;
   overflow: visible;
-  border: 1px solid transparent;
+  /* 8% —— 就是 Codex 的 --color-token-border-default（foreground 8%）。
+     Tran 原来是 16%（一圈亮边，用户说"边框感太明显"），我上一版直接改成
+     transparent 又矫枉过正：边没了，区域的定义感也一起没了。8% 是"看得出有个
+     边界，但不会跳出来"的那个量。 */
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
   background: var(--color-bg-elev, #262626);
+  /* 去掉的是顶部那道 24% 高光内阴影——"棱"的来源是它，不是边框本身。 */
   box-shadow: none;
 }
 
