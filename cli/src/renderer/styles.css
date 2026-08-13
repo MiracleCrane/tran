@@ -1938,7 +1938,9 @@ html.composer-resizing * {
   /* 底色与面板同色（原来是接近纯黑的 rgba(8,9,13,.96) 压在 #1a1a1a 的界面上，
      像挖了个黑洞）。这一层必须不透明：它悬在正文之上，透出来就看不清。 */
   background: var(--color-bg-elev, #262626);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
+  /* 阴影必须克制：面板抬高让开 chip 行之后，下方露出的是空白区，34px 的浓
+     投影落在那儿会被看成"框下面挂了一条黑影"（2026-08 用户反馈）。 */
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
 }
 
 .slash-command-list,

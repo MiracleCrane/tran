@@ -12,7 +12,7 @@ import {
 } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
-import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, PermissionMode } from '../../shared/ipc'
+import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, PermissionMode, SkillInfo } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
 import ModePanel from './ModePanel'
 import { AGENT_TOOL_NAMES, BASH_TOOL_NAMES, countRunningTools, countTotalTools } from '../utils/toolStats'
@@ -189,6 +189,35 @@ function getToolChipStats(s: SessionSnapshot): ToolChipStats {
   }
   toolChipStatsCache.set(s.items, { swarmTasks: s.swarmTasks, running, stats })
   return stats
+}
+
+/** 斜杠命令缓存键：按 agent 后端分开存（Kimi 与 Claude Code 的命令完全不同）。 */
+function slashCacheKey(backend: string | undefined): string {
+  return `forge.slashCommands.${backend ?? 'kimi'}`
+}
+
+function readCachedSlashCommands(backend: string | undefined): SkillInfo[] {
+  try {
+    const raw = localStorage.getItem(slashCacheKey(backend))
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    // 形状防御：缓存是上一版写的，字段可能对不上。
+    return parsed.filter(
+      (x): x is SkillInfo =>
+        !!x && typeof (x as SkillInfo).name === 'string' && typeof (x as SkillInfo).description === 'string'
+    )
+  } catch {
+    return []
+  }
+}
+
+function writeCachedSlashCommands(backend: string | undefined, commands: SkillInfo[]): void {
+  try {
+    localStorage.setItem(slashCacheKey(backend), JSON.stringify(commands))
+  } catch {
+    /* 配额满了就算了，缓存不是关键路径 */
+  }
 }
 
 /** 1s 心跳：让忙碌态计时/无响应时长随时间递增。 */
@@ -370,6 +399,28 @@ export default function Composer(): JSX.Element {
     (s.swarmTasks?.some((t) => t.kind === 'subagent' && t.status === 'running') ?? false) ||
     getToolChipStats(s).swarmToolActive
   )
+
+  /**
+   * 命令列表先用缓存顶上（新对话第一句话之前也能按 `/`）。
+   *
+   * Kimi 的会话是**懒启动**的——桥接 id 只是渲染层生成的本地 uid，ACP 后端要
+   * 等你发出第一条消息才真正起来。所以「新建对话 → 直接按 /」必然一条后端命令
+   * 都没有，只剩自带模板。而这 40 条命令其实是**装机级别**的属性，不会因会话
+   * 而变，没道理每次都等会话起来才能看见。
+   *
+   * 于是：拿到过一次就按后端存起来，下次开局立刻显示；真会话起来后照常覆盖。
+   */
+  const agentBackend = useSessionStore((s) => s.meta?.agentBackend)
+  useEffect(() => {
+    if (useSessionStore.getState().slashCommands.length > 0) return
+    const cached = readCachedSlashCommands(agentBackend)
+    if (cached.length) useSessionStore.setState({ slashCommands: cached })
+  }, [agentBackend])
+
+  // 真值一到就刷新缓存（命令增删、换后端都靠这里跟上）。
+  useEffect(() => {
+    if (slashSkills.length > 0) writeCachedSlashCommands(agentBackend, slashSkills)
+  }, [slashSkills, agentBackend])
 
   // 兜底：订阅仍为空时通过 listSkills IPC 主动拉一次（后端 listSkills 返回
   // session.skills，缓冲队列修复后它在 start 期间已被正确赋值）。订阅优先，

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.97 - 2026-08-13
+
+### 中文
+
+- 修复:**新建对话时 `/` 面板一条后端命令都没有**。Kimi 的会话是懒启动的——你发出第一条消息之前后端根本没起来,所以开局按 `/` 必然只剩几个自带模板。而这些命令其实是装机级别的属性(不会因会话而变),现在按后端缓存下来,开局立刻可用,真会话起来后照常覆盖。
+- 修复:**`/` 面板下方一条黑影**。面板抬高让开 chip 行之后,下面露出的空白区被 34px 的浓投影盖住,看着像框底挂了道黑边。投影收敛。
+
+### English
+
+- Fixed: **the `/` palette had no backend commands in a fresh chat.** Kimi's session is created lazily — the backend doesn't start until you send the first message, so opening `/` before that showed only the built-in templates. The command list is an install-level property, so it's now cached per backend and shown immediately, then refreshed once the real session reports.
+- Fixed: **a black smear under the `/` palette** — after raising the panel clear of the chip row, its heavy 34px drop shadow fell on empty space. Toned down.
+
 ## v1.0.96 - 2026-08-13
 
 ### 中文
