@@ -1,84 +1,186 @@
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
-/** #48 用户消息定位导航条。2026-08-12 改版（Codex 同款交互，用户录屏指定）：
- *  对话区**右缘**一列小横线——每条用户消息一节。常态无框无底；鼠标移到某一
- *  节上时**只有那一节**变白变长，并在旁边浮出该条消息的摘要标签。
+/**
+ * #48 用户消息导航条。2026-08-13 重写：**照搬 Codex 的
+ * `thread-user-message-navigation-rail`**（从本机安装包的 app.asar 里读的实现），
+ * 只把方向镜像到右侧。
  *
- *  与上一版的区别：上一版一悬停整条刻度就淡出、改弹一个 224px 宽的摘要列表，
- *  等于"想点第 3 条，一靠近目标就消失了"——Codex 不是这么做的，刻度始终在，
- *  悬停只强化当前那一节。点击跳转，最新在下。无用户消息时整体隐藏。 */
+ * 从原实现学到、也是之前几版一直没做对的四件事：
+ *
+ * 1. **命中区和刻度是两回事**。Codex 的按钮是 `h-2.5 w-9`（10×36px）的透明带，
+ *    刻度只是里面一根 26px×2px 的线。之前把按钮做得跟线一样大，等于要求用户
+ *    精准戳中十个像素。
+ * 2. **刻度靠 scaleX 变长，不改布局宽度**。布局宽度恒 26px，视觉长度由
+ *    `scaleX(0.2308 → 1)` 给（6px → 26px）。改宽度会引起重排、动画发抖。
+ * 3. **悬停是一条涟漪，不是一个点**。当前节满格，相邻 .7、次邻 .4、再次 .2，
+ *    纯 CSS 兄弟选择器实现（见 styles.css 的 .tran-nav-marker）。
+ * 4. **可以按住拖着刷**（scrub）。按下后 setPointerCapture，移动时用
+ *    `elementFromPoint` 取当前 y 对应的那一节并即时跳过去；拖动期间过渡时长
+ *    归零。松手时吞掉那一次 click，否则会再跳一次。
+ *
+ * 另外两处也跟着对齐：高亮的是**视口内的一整段**（可能多条同时亮，Codex 用
+ * IntersectionObserver 求可见区间），以及跳转后目标气泡**闪一下**。
+ *
+ * 唯一有意偏离原作的地方：Codex 在左侧（`left-3`），Tran 放右侧——这是用户
+ * 明确要求的。因此刻度的生长方向、悬停卡片的浮出方向都做了镜像。
+ */
 
 export interface UserNavEntry {
   id: string
   /** 该消息在 Virtuoso displayRows 里的行号（scrollToIndex 目标）。 */
   rowIndex: number
-  /** 前 ~24 字摘要。 */
+  /** 用户这句话的前 ~24 字。 */
   summary: string
+  /** 这一轮 AI 回复的开头（悬停卡片的第二段，最多三行）。 */
+  preview?: string
 }
 
 interface UserMessageNavProps {
   entries: UserNavEntry[]
-  /** 当前视口顶部附近对应的条目 id（高亮），由 Transcript 按视口几何推导。 */
-  activeId: string | null
-  onJump: (rowIndex: number) => void
+  /** 视口内可见的条目 id 集合（可能多条，对齐 Codex 的可见区间高亮）。 */
+  activeIds: ReadonlySet<string>
+  onJump: (entry: UserNavEntry, behavior: 'smooth' | 'auto') => void
+}
+
+/** 拖动时用来找「当前 y 对应哪一节」。 */
+function itemIdAt(list: HTMLElement, clientY: number): string | null {
+  const rect = list.getBoundingClientRect()
+  const y = Math.max(rect.top, Math.min(clientY, rect.bottom - 1))
+  const el = document.elementFromPoint(rect.left + rect.width / 2, y)
+  const button = el?.closest<HTMLElement>('[data-nav-item-id]')
+  if (!button || !list.contains(button)) return null
+  return button.dataset.navItemId ?? null
 }
 
 export default function UserMessageNav({
   entries,
-  activeId,
+  activeIds,
   onJump
 }: UserMessageNavProps): JSX.Element | null {
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const [hovered, setHovered] = useState<{ entry: UserNavEntry; top: number } | null>(null)
+  const [scrubId, setScrubId] = useState<string | null>(null)
+  /** 拖动过程中已经跳过了：随后那一次 click 必须吞掉，否则重复跳转。 */
+  const scrubbedRef = useRef(false)
+  const pointerRef = useRef<number | null>(null)
+
+  /** 悬停卡片要浮在刻度列**外面**，而列本身是 overflow-y-auto（横向也会被裁），
+   *  所以卡片渲染在列的外层容器里，靠这里量出来的 y 定位。 */
+  const showPreviewFor = useCallback((entry: UserNavEntry, button: HTMLElement): void => {
+    const host = listRef.current?.parentElement
+    if (!host) return
+    const b = button.getBoundingClientRect()
+    const h = host.getBoundingClientRect()
+    setHovered({ entry, top: b.top - h.top + b.height / 2 })
+  }, [])
 
   if (entries.length === 0) return null
+
+  const endScrub = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (pointerRef.current !== event.pointerId) return
+    pointerRef.current = null
+    setScrubId(null)
+    const list = listRef.current
+    if (list?.hasPointerCapture?.(event.pointerId)) list.releasePointerCapture(event.pointerId)
+    // 下一个 tick 再解锁：中间夹着的那次 click 要被吞掉。
+    window.setTimeout(() => {
+      scrubbedRef.current = false
+    }, 0)
+  }
+
   return (
     // data-user-msg-nav：Transcript 的 wheel 捕获据此豁免导航条自身的滚动。
-    // data-follow-no-lock：点这里是"我要跳到那条"，不是"我在读当前这段"，
-    // 不该顺手吃掉跟随锁。
-    // right-3 而不是贴边：贴边会正好压在滚动条上，点下去命中的是滚动条不是刻度。
-    <div
+    // data-follow-no-lock：点导航是「我要跳到那条」，不该被当成「我在读当前
+    // 这段」而吃掉跟随锁。
+    <nav
       data-user-msg-nav
       data-follow-no-lock
+      aria-label="用户消息"
       className="absolute right-3 top-1/2 z-20 -translate-y-1/2"
-      onMouseLeave={() => setHoveredId(null)}
+      onMouseLeave={() => setHovered(null)}
     >
-      {/* 这里**不能**有 overflow-hidden：摘要标签是往左浮出到刻度列外面的，
-          一裁就整条看不见——表现就是"悬停没有摘要"（2026-08 用户反馈的 bug）。 */}
-      <div className="flex flex-col items-end gap-[2px] py-2">
-        {entries.map((entry) => {
-          const active = entry.id === activeId
-          const hovered = entry.id === hoveredId
-          return (
-            // 整行都是命中区（w-10 的透明带，右对齐）：只把 3px 的横线做成按钮
-            // 的话，鼠标得精准戳中十来个像素，实际体验就是"点了没反应"。宽度
-            // 停在 40px——再宽就会盖住正文右侧、把选中文本的点击也吃掉。
-            <button
-              key={entry.id}
-              type="button"
-              onClick={() => onJump(entry.rowIndex)}
-              onMouseEnter={() => setHoveredId(entry.id)}
-              aria-label={`跳转到：${entry.summary}`}
-              className="relative flex h-[7px] w-10 items-center justify-end"
-            >
-              {/* 摘要标签：只在悬停那一节旁边浮出，跟着这一节的垂直位置走。 */}
-              {hovered && (
-                <span className="pointer-events-none absolute right-full mr-2 max-w-[15rem] truncate whitespace-nowrap rounded-md border border-border-subtle bg-bg-elev px-2 py-1 text-[11px] text-zinc-200 shadow-lg shadow-black/40">
-                  {entry.summary}
-                </span>
-              )}
-              <span
-                className={`block h-[3px] rounded-full transition-all ${
-                  hovered
-                    ? 'w-6 bg-zinc-100'
-                    : active
-                      ? 'w-4 bg-accent'
-                      : 'w-2.5 bg-zinc-600/60'
-                }`}
-              />
-            </button>
-          )
-        })}
+      {hovered && (
+        <div
+          className="pointer-events-none absolute right-full mr-2 w-80 max-w-[calc(100vw-1rem)] -translate-y-1/2 overflow-hidden rounded-xl border border-border-subtle bg-bg-elev/95 p-2 text-sm leading-5 text-zinc-100 shadow-xl shadow-black/50 backdrop-blur-sm"
+          style={{ top: hovered.top }}
+        >
+          <div className="min-w-0 truncate font-medium">{hovered.entry.summary}</div>
+          {hovered.entry.preview && (
+            <div className="mt-1 line-clamp-3 text-[13px] leading-5 text-zinc-400">
+              {hovered.entry.preview}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div
+        ref={listRef}
+        className="tran-nav-rail-list flex max-h-[min(70vh,40rem)] flex-col overflow-y-auto overscroll-contain"
+        data-scrubbing={scrubId !== null ? true : undefined}
+        onPointerDownCapture={(event) => {
+          if (event.button !== 0) return
+          const list = listRef.current
+          if (!list) return
+          const id = itemIdAt(list, event.clientY)
+          if (id === null) return
+          const entry = entries.find((e) => e.id === id)
+          if (!entry) return
+          pointerRef.current = event.pointerId
+          scrubbedRef.current = false
+          setScrubId(id)
+          list.setPointerCapture?.(event.pointerId)
+        }}
+        onPointerMove={(event) => {
+          const list = listRef.current
+          if (!list) return
+          if (pointerRef.current !== event.pointerId) return
+          // 按键已松开（拖出列外松手等）：收尾。
+          if (event.buttons % 2 === 0) {
+            endScrub(event)
+            return
+          }
+          const id = itemIdAt(list, event.clientY)
+          if (id === null || id === scrubId) return
+          const entry = entries.find((e) => e.id === id)
+          if (!entry) return
+          setScrubId(id)
+          scrubbedRef.current = true
+          const button = list.querySelector<HTMLElement>(`[data-nav-item-id="${CSS.escape(id)}"]`)
+          if (button) showPreviewFor(entry, button)
+          // 拖动中用 auto：smooth 会排队补间，跟不上手。
+          onJump(entry, 'auto')
+        }}
+        onPointerUpCapture={endScrub}
+        onPointerCancelCapture={endScrub}
+        onLostPointerCapture={endScrub}
+      >
+        {entries.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            data-nav-item-id={entry.id}
+            data-scrub-target={scrubId === entry.id ? true : undefined}
+            aria-current={activeIds.has(entry.id) ? 'true' : undefined}
+            aria-label={`跳转到：${entry.summary}`}
+            // 10×36px 的透明命中带；刻度只是里面那根线（Codex 同尺寸）。
+            className="flex h-2.5 w-9 shrink-0 cursor-pointer items-center justify-end outline-none"
+            onClick={(event) => {
+              if (scrubbedRef.current) {
+                scrubbedRef.current = false
+                return
+              }
+              showPreviewFor(entry, event.currentTarget)
+              onJump(entry, 'smooth')
+            }}
+            onFocus={(event) => showPreviewFor(entry, event.currentTarget)}
+            onPointerEnter={(event) => showPreviewFor(entry, event.currentTarget)}
+          >
+            <span className="flex h-0.5 w-[30px] items-center justify-end">
+              <span className="tran-nav-marker" />
+            </span>
+          </button>
+        ))}
       </div>
-    </div>
+    </nav>
   )
 }

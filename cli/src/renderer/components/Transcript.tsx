@@ -70,6 +70,13 @@ const USER_NAV_TOP_SLACK_PX = 8
 const USER_NAV_SMOOTH_MAX_ROWS = 40
 /** #45 无历史附件时的共享空 Map（避免每次渲染新引用击穿 UserMessage memo）。 */
 const EMPTY_HISTORY_ATTACHMENTS: ReadonlyMap<string, UserAttachment[]> = new Map()
+/** 导航条无高亮时的共享空 Set（同上，避免新引用触发无谓重渲染）。 */
+const EMPTY_NAV_IDS: ReadonlySet<string> = new Set()
+/** 导航条悬停卡片里 AI 回复预览的截断长度（卡片只显示三行）。 */
+const USER_NAV_PREVIEW_CHARS = 160
+/** 跳转后目标气泡的高亮闪烁（同 Codex 的时序：亮起 → 停住 35% → 淡出）。 */
+const USER_NAV_FLASH_FROM = '0 0 0 2px rgba(139, 92, 246, 0.55)'
+const USER_NAV_FLASH_TO = '0 0 0 2px rgba(139, 92, 246, 0)'
 
 /**
  * 底部状态区（只剩"正在压缩上下文…"提示和 bottomReserve 占位）。
@@ -1091,8 +1098,10 @@ export default function Transcript({
   const [showLatest, setShowLatest] = useState(false)
   const [deferHighlight, setDeferHighlight] = useState(true)
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null)
-  /** #48 视口顶部附近对应的导航条目 id（高亮）。 */
-  const [activeUserNavId, setActiveUserNavId] = useState<string | null>(null)
+  /** #48 视口内可见的导航条目 id 集合。Codex 高亮的是**一整段**（用
+   *  IntersectionObserver 求首个到最后一个可见回合的连续区间），不是单条——
+   *  一屏能看到三条消息时就该亮三格。 */
+  const [activeUserNavIds, setActiveUserNavIds] = useState<ReadonlySet<string>>(EMPTY_NAV_IDS)
   /** #45 历史用户消息补回的图片附件（itemId → 附件）。 */
   const [historyAttachments, setHistoryAttachments] = useState<ReadonlyMap<string, UserAttachment[]>>(
     EMPTY_HISTORY_ATTACHMENTS
@@ -1190,7 +1199,27 @@ export default function Transcript({
           ? '[附件]'
           : ''
       if (!summary) return
-      entries.push({ id: item.id, rowIndex, summary })
+      // 悬停卡片的第二段：这一轮 AI 回复的开头。Codex 的卡片就是「用户这句话
+      // + 回复前三行」，只看自己说过什么其实认不出是哪一轮。
+      let preview: string | undefined
+      for (let i = rowIndex + 1; i < displayRows.length; i++) {
+        const next = displayRows[i]
+        if (next.kind !== 'item') continue
+        const nextItem = next.node.item
+        if (nextItem.kind === 'user') break
+        if (nextItem.kind !== 'assistant') continue
+        const text = nextItem.blocks
+          .filter((b): b is Extract<AssistantBlock, { kind: 'text' }> => b.kind === 'text')
+          .map((b) => b.text)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+        if (text) {
+          preview = text.slice(0, USER_NAV_PREVIEW_CHARS)
+          break
+        }
+      }
+      entries.push({ id: item.id, rowIndex, summary, ...(preview ? { preview } : {}) })
     })
     return entries.slice(-USER_NAV_MAX_ENTRIES)
   }, [displayRows])
@@ -1260,7 +1289,7 @@ export default function Transcript({
   // 后 atBottomStateChange 会自动恢复跟随），并记一次滚动意图（途中延迟高亮）。
   // #50 长距跳转用 auto：1000+ 动态高度列表里 smooth 会边滚边补渲染重测高，
   // 滚动动画被高度修正反复打断（半途卡住、目标附近持续闪），auto 一次到位。
-  const jumpToUserMessage = (rowIndex: number): void => {
+  const jumpToUserMessage = (entry: UserNavEntry, behavior: 'smooth' | 'auto'): void => {
     lockFollowOutput()
     markScrollIntent()
     setPinnedAtBottom(false)
@@ -1268,12 +1297,36 @@ export default function Transcript({
     // （rangeChanged 上报的、scrollToIndex 接收的都含基数偏移），而
     // userNavEntries.rowIndex 是 displayRows 里的相对下标——必须先加基数，
     // 否则跳转会偏到十万八千里。
-    const absoluteIndex = firstItemIndexRef.current + rowIndex
+    const absoluteIndex = firstItemIndexRef.current + entry.rowIndex
     const distance = Math.abs(absoluteIndex - lastRenderedRangeRef.current.startIndex)
     virtuosoRef.current?.scrollToIndex({
       index: absoluteIndex,
       align: 'start',
-      behavior: distance > USER_NAV_SMOOTH_MAX_ROWS ? 'auto' : 'smooth'
+      // 长距 smooth 会边滚边补渲染重测高，卡在半途并持续闪；拖动刷条时调用方
+      // 直接要 auto（smooth 排队补间跟不上手）。
+      behavior: behavior === 'auto' || distance > USER_NAV_SMOOTH_MAX_ROWS ? 'auto' : 'smooth'
+    })
+    flashUserMessage(entry.id)
+  }
+
+  /** 跳转后让目标气泡闪一下（Codex 同款：底色亮起 → 停住 → 淡出）。没有这一下，
+   *  长回合里跳过去只看到一片文字，认不出落点在哪。 */
+  const flashUserMessage = (itemId: string): void => {
+    window.requestAnimationFrame(() => {
+      const host = scrollElement?.querySelector<HTMLElement>(
+        `[data-user-msg-id="${CSS.escape(itemId)}"]`
+      )
+      const bubble = host?.querySelector<HTMLElement>('.tran-user-bubble') ?? host
+      // Codex 闪的是气泡底色，但 Tran 的气泡本身铺着渐变（background-image
+      // 盖在 background-color 上面），改底色根本看不见——改成描一圈光晕。
+      bubble?.animate?.(
+        [
+          { boxShadow: USER_NAV_FLASH_FROM },
+          { boxShadow: USER_NAV_FLASH_FROM, offset: 0.35 },
+          { boxShadow: USER_NAV_FLASH_TO }
+        ],
+        { duration: 1400, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' }
+      )
     })
   }
 
@@ -1296,36 +1349,57 @@ export default function Transcript({
     }
   }
 
+  /**
+   * 高亮「视口里能看到的那一段」——从视口顶上方最近的一条用户消息，到视口
+   * 底部之前的最后一条，取连续区间（对齐 Codex：它用 IntersectionObserver
+   * 求首个/最后一个可见回合，再把中间整段标成 aria-current）。
+   *
+   * 旧实现只算单条。一屏里明明看得到三条消息，导航条却只亮一格，跟眼睛看到
+   * 的对不上。
+   */
   const updateActiveUserNav = (): void => {
     const entries = userNavEntriesRef.current
     if (entries.length === 0) {
-      setActiveUserNavId((current) => (current === null ? current : null))
+      setActiveUserNavIds((current) => (current.size === 0 ? current : EMPTY_NAV_IDS))
       return
     }
     if (!scrollElement) return
-    let active: string | null = null
-    // 贴底特判：底部时视口顶可能还落在倒数第二条消息的回合里（最新一条完整
-    // 露在视口中），纯几何规则会少算一格——用户预期"在底部 = 高亮最新条"。
-    const distanceFromBottom = scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight
-    if (distanceFromBottom <= FOLLOW_RESUME_AT_BOTTOM_THRESHOLD_PX) {
-      active = entries[entries.length - 1].id
-    } else {
-      const scrollerTop = scrollElement.getBoundingClientRect().top
-      const nodes = scrollElement.querySelectorAll<HTMLElement>('[data-user-msg-id]')
-      for (const node of nodes) {
-        if (node.getBoundingClientRect().top - scrollerTop <= USER_NAV_TOP_SLACK_PX) {
-          active = node.dataset.userMsgId ?? null
-        } else {
-          break
-        }
+    const indexOf = new Map(entries.map((entry, i) => [entry.id, i]))
+    const rect = scrollElement.getBoundingClientRect()
+    const viewTop = rect.top + USER_NAV_TOP_SLACK_PX
+    const viewBottom = rect.bottom
+    let first = -1
+    let last = -1
+    for (const node of scrollElement.querySelectorAll<HTMLElement>('[data-user-msg-id]')) {
+      const id = node.dataset.userMsgId
+      if (id === undefined) continue
+      const i = indexOf.get(id)
+      if (i === undefined) continue
+      const box = node.getBoundingClientRect()
+      // 顶在视口上方的：一路记成 first（回合本身跨越视口顶，仍算"在看"）。
+      if (box.top <= viewTop) {
+        first = i
+        if (box.bottom > viewTop) last = Math.max(last, i)
+        continue
+      }
+      if (box.top < viewBottom) {
+        if (first === -1) first = i
+        last = Math.max(last, i)
       }
     }
-    // 视口顶上方没有用户消息行（或该行在导航窗口之外，被 MAX_ENTRIES 截掉）：
-    // 视同处于窗口之上，高亮首条——与旧启发式的边界行为一致。
-    if (active === null || !entries.some((entry) => entry.id === active)) {
-      active = entries[0].id
+    // 贴底特判：底部时最新一条完整露在视口中，纯几何会少算一格。
+    const distanceFromBottom = scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight
+    if (distanceFromBottom <= FOLLOW_RESUME_AT_BOTTOM_THRESHOLD_PX) last = entries.length - 1
+    if (first === -1) first = 0
+    if (last < first) last = first
+    const next = new Set<string>()
+    for (let i = first; i <= last; i++) {
+      const entry = entries[i]
+      if (entry) next.add(entry.id)
     }
-    setActiveUserNavId((current) => (current === active ? current : active))
+    setActiveUserNavIds((current) =>
+      current.size === next.size && [...current].every((id) => next.has(id)) ? current : next
+    )
   }
 
   const scheduleActiveUserNavUpdate = (): void => {
@@ -1567,7 +1641,7 @@ export default function Transcript({
     cancelNavHighlightFrame()
     setReserveEligible(true, true)
     setPinnedAtBottom(true)
-    setActiveUserNavId(null)
+    setActiveUserNavIds(EMPTY_NAV_IDS)
     setDeferHighlight(true)
     resumeHighlightAfter(INITIAL_HIGHLIGHT_DELAY_MS)
 
@@ -1784,7 +1858,7 @@ export default function Transcript({
         components={VIRTUOSO_COMPONENTS}
         context={footerContext}
       />
-      <UserMessageNav entries={userNavEntries} activeId={activeUserNavId} onJump={jumpToUserMessage} />
+      <UserMessageNav entries={userNavEntries} activeIds={activeUserNavIds} onJump={jumpToUserMessage} />
       {/* 回到最新：底部居中（Codex 风，2026-08 用户点名）。输出中箭头挂
           紫黄流光（动态=正在干活），非输出静态箭头。按钮带 data-follow-no-lock：
           点它不吃 pointerdown 的跟随锁，否则流式期间永远差一截到不了底。 */}

@@ -3489,3 +3489,133 @@ div:has(textarea:focus) .composer-shortcut-hint {
   border-radius: 0;
   background: transparent;
 }
+
+/* ============================================================
+   消息导航条（右侧刻度列）—— 完全照搬 Codex 的
+   thread-user-message-navigation-rail，只把方向镜像到右边。
+   Codex 原始实现（app.asar 里的 _Marker_509ue_3）关键点：
+     · 刻度**布局宽度恒为 26px**，靠 scaleX 缩放呈现长度，所以变长变短不
+       引起重排、动画不抖；transform-origin 决定从哪一端生长（它在左边用
+       0，我们在右边用 100%）。
+     · 悬停/拖动的那一节 progress=1（26px），相邻 .7、次邻 .4、再次 .2
+       ——一条涟漪，而不是单节孤零零地弹出来。这就是它手感的全部秘密。
+     · 拖动中（data-scrubbing）过渡时长归零，跟手不拖泥带水。
+   ============================================================ */
+
+.tran-nav-rail-list {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* 上下边缘渐隐：条目超过一屏时不至于被硬生生切断（Codex 的
+     vertical-scroll-fade-mask，--edge-fade-distance 同为 2.5rem）。 */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 2.5rem,
+    #000 calc(100% - 2.5rem),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 2.5rem,
+    #000 calc(100% - 2.5rem),
+    transparent 100%
+  );
+}
+
+.tran-nav-rail-list::-webkit-scrollbar {
+  display: none;
+}
+
+.tran-nav-marker {
+  --marker-progress: 0;
+  display: block;
+  width: 26px;
+  height: 2px;
+  border-radius: 1px;
+  background-color: #a1a1aa;
+  opacity: 0.4;
+  transform: scaleX(calc(0.2308 + 0.7692 * var(--marker-progress)));
+  /* 右侧栏：从右端生长（Codex 在左侧，用的是 0）。 */
+  transform-origin: 100%;
+  transition: transform 160ms
+    linear(0, 0.398 10%, 0.682 20%, 0.843 30%, 0.925 40%, 0.972 50%, 1.004 60%, 1.008 70%, 1.003 80%, 1);
+}
+
+/* 视口内的那一段（可能是连续多条，与 Codex 一致）。 */
+.tran-nav-rail-list button[aria-current='true'] .tran-nav-marker {
+  background-color: #f4f4f5;
+  opacity: 0.6;
+}
+
+/* 拖动目标 / 键盘焦点：满格。 */
+.tran-nav-rail-list :is(button:focus-visible, button[data-scrub-target]) .tran-nav-marker {
+  --marker-progress: 1;
+  background-color: #f4f4f5;
+  opacity: 1;
+}
+
+/* 拖动目标的涟漪：相邻 .7 / 次邻 .4 / 再次 .2，前后对称。 */
+.tran-nav-rail-list
+  :is(button:has(+ button[data-scrub-target]), button[data-scrub-target] + button)
+  .tran-nav-marker {
+  --marker-progress: 0.7;
+}
+.tran-nav-rail-list
+  :is(button:has(+ button + button[data-scrub-target]), button[data-scrub-target] + button + button)
+  .tran-nav-marker {
+  --marker-progress: 0.4;
+}
+.tran-nav-rail-list
+  :is(
+    button:has(+ button + button + button[data-scrub-target]),
+    button[data-scrub-target] + button + button + button
+  )
+  .tran-nav-marker {
+  --marker-progress: 0.2;
+}
+
+/* 拖动中：不要过渡，跟手；同时把「视口段」的高亮压掉，只留拖动目标。 */
+.tran-nav-rail-list[data-scrubbing] .tran-nav-marker {
+  transition-duration: 0s;
+}
+.tran-nav-rail-list[data-scrubbing] button[aria-current='true']:not([data-scrub-target]) .tran-nav-marker {
+  background-color: #a1a1aa;
+  opacity: 0.4;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  /* 鼠标在条上时，「视口段」的高亮让位给悬停涟漪——否则两套高亮打架。 */
+  .tran-nav-rail-list:not([data-scrubbing]):hover
+    button[aria-current='true']:not(:hover):not(:focus-visible)
+    .tran-nav-marker {
+    background-color: #a1a1aa;
+    opacity: 0.4;
+  }
+  .tran-nav-rail-list:not([data-scrubbing])
+    :is(button:has(+ button:hover), button:hover + button)
+    .tran-nav-marker {
+    --marker-progress: 0.7;
+  }
+  .tran-nav-rail-list:not([data-scrubbing])
+    :is(button:has(+ button + button:hover), button:hover + button + button)
+    .tran-nav-marker {
+    --marker-progress: 0.4;
+  }
+  .tran-nav-rail-list:not([data-scrubbing])
+    :is(button:has(+ button + button + button:hover), button:hover + button + button + button)
+    .tran-nav-marker {
+    --marker-progress: 0.2;
+  }
+  .tran-nav-rail-list:not([data-scrubbing]) button:hover .tran-nav-marker {
+    --marker-progress: 1;
+    background-color: #f4f4f5;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tran-nav-marker {
+    transition-duration: 0s;
+  }
+}
