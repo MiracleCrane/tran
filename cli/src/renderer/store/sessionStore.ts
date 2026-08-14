@@ -283,7 +283,9 @@ interface SessionStore {
   pruneSessionHistoryCache: (visibleSessionIds: string[]) => void
   setTranscriptScrolling: (scrolling: boolean) => void
   renameSession: (sessionId: string, title: string, backend?: ClaudeExecutionBackend) => Promise<void>
-  deleteSession: (sessionId: string, backend?: ClaudeExecutionBackend) => Promise<void>
+  /** 永久删除。成功返回 null；失败返回错误文案（调用方必须显式提示——
+   *  2026-08-14 用户反馈"删了没反应"：只塞 status.error 的小字没人看得见）。 */
+  deleteSession: (sessionId: string, backend?: ClaudeExecutionBackend) => Promise<string | null>
   /** 批量永久删除（侧栏多选）：串行逐个 IPC，个别失败不中断整批，
    *  完成后统一刷新；返回成功/失败计数。 */
   deleteSessions: (
@@ -2997,7 +2999,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   async deleteSession(sessionId: string, backend?: ClaudeExecutionBackend) {
     const meta = get().meta
-    if (!meta) return
+    if (!meta) return null
     // 销毁仍活着的后端会话（后台缓冲的 / 当前活跃的）：否则 turn 继续在后台烧。
     const bg = takeBackgroundSession(sessionId)
     if (bg) void window.api.destroySession(bg.bridgeSessionId).catch(() => {})
@@ -3012,11 +3014,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const result = await window.api.deleteSession(sessionId, meta.cwd, backend)
       // 主进程校验失败（路径穿越防护等）：不删列表项，提示错误。
       if (result && result.ok === false) {
-        set((s) => ({ status: { ...s.status, error: result.error ?? '删除会话失败' } }))
-        return
+        const message = result.error ?? '删除会话失败'
+        set((s) => ({ status: { ...s.status, error: message } }))
+        return message
       }
-    } catch {
-      /* ignore */
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      set((s) => ({ status: { ...s.status, error: message } }))
+      return message
     }
     deleteSessionHistoryCache(meta.cwd, sessionId, backend)
     forgetSessionLocalState(sessionId)
@@ -3027,6 +3032,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       await get().newChat()
     }
     void get().refreshSessions()
+    return null
   },
 
   async deleteSessions(targets) {

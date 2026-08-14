@@ -354,6 +354,20 @@ const ToolCallCard = memo(function ToolCallCard({
             {block.name}
           </span>
         )}
+        {/* 状态（2026-08 定稿）：完成**什么都不显示**——成功是默认态，满屏绿勾
+            纯噪声；失败/被拒改走行首小红叉（同上）。运行中/排队中的文字挪到
+            工具名后面（用户：「不要占用上下的位置，可以放到左边」——行尾右端
+            那条移过来），运行中的秒数挂流光。 */}
+        {!(block.status === 'done' && !bg?.running) && block.status !== 'error' && block.status !== 'denied' && (
+          <span key={block.status} className={`shrink-0 text-[11px] ${meta.text}`}>
+            {statusLabel}
+            {block.elapsed ? (
+              <span className={block.status === 'running' ? 'tran-shimmer' : undefined}>
+                {` · ${block.elapsed.toFixed(1)}s`}
+              </span>
+            ) : null}
+          </span>
+        )}
         {/* 摘要与工具名重复时（Skill/TodoList 这种没参数的）不再显示第二遍。 */}
         {summary && summary !== block.name && (
           <span className="truncate font-mono text-xs text-zinc-500">{summary}</span>
@@ -365,16 +379,6 @@ const ToolCallCard = memo(function ToolCallCard({
             · {commandNote}
           </span>
         )}
-        {/* 状态（2026-08 定稿）：完成**什么都不显示**——成功是默认态，满屏绿勾
-            纯噪声；失败/被拒改走行首小红叉（同上），行尾只剩 运行中/排队中/手动停止。 */}
-        <span key={block.status} className={`ml-auto shrink-0 text-[11px] ${meta.text}`}>
-          {block.status === 'done' && !bg?.running ? null : block.status === 'error' || block.status === 'denied' ? null : (
-            <>
-              {statusLabel}
-              {block.elapsed ? ` · ${block.elapsed.toFixed(1)}s` : ''}
-            </>
-          )}
-        </span>
       </button>
 
       <Collapse open={!collapsed}>

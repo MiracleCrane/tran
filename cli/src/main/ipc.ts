@@ -73,9 +73,10 @@ import { explainCommand, summarizeThinking, translateThinking } from './cheapNot
 import { fetchSessionTodos } from './kimiTodos'
 import { getPlanUsageCached } from './usageService'
 import { getDeepseekBalanceCached, invalidateDeepseekBalanceCache } from './deepseekService'
-import { listKimiSessions } from './kimiHistory'
+import { disposeKimiHistoryClient, listKimiSessions } from './kimiHistory'
 import { deleteClaudeSession, listClaudeSessions, readClaudeSessionMessages } from './claudeHistory'
 import { deleteKimiSession } from './sessionDelete'
+import { markSessionDeleted } from './deletedSessions'
 import { removeSessionTitle, recordManualTitle } from './sessionTitles'
 import {
   archiveSession,
@@ -1316,6 +1317,11 @@ export function registerIpc(
       if (result.ok) {
         removeSessionTitle(sessionId)
         dropArchivedSession(sessionId)
+        // 历史查询客户端缓存着 session/list 快照（实测列表冻结，见 kimiHistory
+        // 的 TTL 注释）：不丢掉的话删除后第一次刷新会把已删会话带回来——
+        // 「删当前会话删不掉、过会儿自己又消失」就是它（2026-08-14 实测复现）。
+        disposeKimiHistoryClient()
+        markSessionDeleted(sessionId)
       }
       return result
     }

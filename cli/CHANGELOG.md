@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.12 - 2026-08-14
+
+### 中文
+
+- 修复:**删除当前会话"删不掉"**——磁盘删除成功,但 kimi 的 query-store 缓存还把这条会话吐给 session/list,一刷新就复活(kimi 要自己加载失败才清缓存,所以你"进入一下那个对话"它就没了)。现在删除成功即记墓碑(deleted-sessions.json),侧栏列表一律过滤;同时丢弃历史查询客户端的冻结快照。
+- 优化:**删除失败不再静默**——失败弹模态框给具体原因(原先只有输入框上方一行小字);批量删除有失败也弹。
+- 优化:**运行中工具卡的紫色描边光圈删除**(紫底一并去掉),运行信号只留文字:「运行中」挪到工具名后面,秒数挂流光。
+- 优化:本轮计时从对话区顶部挪到**左侧栏底部**(工具区上方),不占对话区纵向空间,数字带流光。
+
+### English
+
+- Fixed: **deleting the current session "didn't stick".** The files were deleted, but kimi's query-store cache kept returning the session in session/list, so it resurrected on refresh (kimi only prunes the cache after a failed load — which is why opening the conversation made it vanish). Deletions now record a tombstone (deleted-sessions.json) that the sidebar always filters, and the frozen history-client snapshot is dropped.
+- Delete failures now surface as a modal with the reason instead of a tiny status line; batch failures too.
+- The running tool card's purple ring/background is gone;「运行中 + elapsed」moved next to the tool name with a shimmer on the seconds.
+- Turn timer moved from the top of the chat to the bottom of the left sidebar — no vertical space taken, digits shimmer.
+
 ## v1.1.11 - 2026-08-14
 
 ### 中文

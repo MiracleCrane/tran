@@ -2740,23 +2740,8 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   position: relative;
 }
 
-.tool-call-card::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: 0;
-  box-shadow:
-    inset 0 0 0 1px rgba(139, 92, 246, 0.38),
-    0 0 14px rgba(139, 92, 246, 0.1);
-  transition: opacity var(--motion-med) var(--easing-out);
-}
-
-.tool-call-card.is-running::after {
-  opacity: 1;
-  animation: tran-glow-breathe 2.8s ease-in-out infinite;
-}
+/* 运行中的紫色描边光圈已删（2026-08-14 用户：「这么丑的紫色框怎么没改掉」）。
+   运行信号由「运行中」流光文字 + 计时承担，不再需要框。 */
 
 /* 思考块：完全裸排版（Codex 风），无框无竖条无底。类名本身保留——
  *  TRANSCRIPT_BAR_SELECTOR 用它做滚动定位。动态信号只有流式标题的 flow-text。 */
@@ -2923,7 +2908,7 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   mask-composite: exclude;
 }
 
-/* 本轮计时条（TurnTimerStrip）：钉在对话区顶部左侧，不随转录滚动。
+/* 本轮计时（TurnTimerStrip）：钉在左侧栏底部，不占对话区纵向空间。
    数字用 Bahnschrift（Windows 自带窄体，计时器数字辨识度高），等宽数字防跳动。 */
 .tran-turn-timer {
   display: inline-flex;
@@ -3168,14 +3153,11 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   }
 
   /* 3. 工具卡彻底裸排版（2026-08 用户定夺）：无底无框，和思考块同一语言；
-     只有运行中给一丝紫色底作信号。 */
+     运行中的紫色描边光圈与紫底都已删（用户嫌丑），信号只留流光文字与计时。 */
   :root[data-ui='flat'] .tool-call-card {
     border: 0;
     box-shadow: none;
     background: transparent;
-  }
-  :root[data-ui='flat'] .tool-call-card.is-running {
-    background: rgba(139, 92, 246, 0.07);
   }
 
   /* 4. 主按钮降调：「新建对话」不该是全屏最响的东西 */

@@ -4,6 +4,7 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore, type View } from '../store/uiStore'
 import Collapse from './Collapse'
 import ConfirmDialog from './ConfirmDialog'
+import TurnTimerStrip from './TurnTimerStrip'
 import { AppLogo } from './AppLogo'
 import ProjectSwitcher from './ProjectSwitcher'
 import type { ClaudeExecutionBackend, SessionListItem, SessionPreview } from '../../shared/ipc'
@@ -418,6 +419,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  /** 删除失败的显式报错（模态）。 */
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   // Codex 式三段布局固定用 project 分组（time 分支保留给未来可能的切换）。
   const [groupMode] = useState<SessionGroupMode>('project')
   /** 「全部」视图里被折叠的 cwd 组（label = 完整路径）。 */
@@ -994,10 +997,13 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     }
     setEditingId(null)
   }
-  const doDelete = (key: string): void => {
+  const doDelete = async (key: string): Promise<void> => {
     setConfirmDeleteId(null)
     const target = sessions.find((session) => sessionKey(session) === key)
-    if (target) void deleteSession(target.sessionId, target.runtimeBackend)
+    if (!target) return
+    // 失败必须当面报出来（2026-08-14 用户：「不要删了没反应静默失败」）。
+    const error = await deleteSession(target.sessionId, target.runtimeBackend)
+    if (error) setDeleteError(error)
   }
   const confirmDeleteTarget = confirmDeleteId
     ? sessions.find((session) => sessionKey(session) === confirmDeleteId)
@@ -1035,7 +1041,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     if (!targets.length) return
     setBatchDeleting(true)
     try {
-      await deleteSessions(targets)
+      const { failed, deleted } = await deleteSessions(targets)
+      if (failed > 0) setDeleteError(`批量删除完成：成功 ${deleted} 个，失败 ${failed} 个（失败的仍在列表里）`)
     } finally {
       setBatchDeleting(false)
       exitMultiMode()
@@ -1815,6 +1822,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         onMouseEnter={() => setNavHover(true)}
         onMouseLeave={() => setNavHover(false)}
       >
+        {/* 本轮计时（运行中才出现）：钉在侧栏底部，不占对话区纵向空间。 */}
+        <TurnTimerStrip />
         <div>
           <button
             onClick={toggleNav}
@@ -1912,6 +1921,16 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
           if (confirmDeleteId) doDelete(confirmDeleteId)
         }}
         onCancel={() => setConfirmDeleteId(null)}
+      />
+
+      {/* 删除失败显式报错（原先只塞进输入框上方的小字，等于静默失败） */}
+      <ConfirmDialog
+        open={deleteError !== null}
+        title="删除失败"
+        message={deleteError ?? ''}
+        confirmLabel="知道了"
+        onConfirm={() => setDeleteError(null)}
+        onCancel={() => setDeleteError(null)}
       />
 
       {/* 多选批量删除确认 */}

@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { AcpClient } from './agent/AcpClient'
 import { resolveWindowsKimiCommand } from './windowsKimi'
 import { localSessionTitle, manualSessionTitle } from './sessionTitles'
+import { isSessionDeleted } from './deletedSessions'
 import { aiSessionTitle } from './aiTitles'
 import { log } from './logger'
 import type { SessionListItem } from '../shared/ipc'
@@ -182,6 +183,9 @@ export async function listKimiSessions(
       if (!entry) continue
       const sessionId = asString(entry.sessionId) ?? asString(entry.id)
       if (!sessionId) continue
+      // 已删墓碑：kimi 的 query-store 缓存会把刚删的会话继续吐出来（见
+      // deletedSessions.ts），Tran 侧一律滤掉。
+      if (isSessionDeleted(sessionId)) continue
       const entryCwd = asString(entry.cwd)
       // 「当前项目」只列本目录的会话（条目不带 cwd 时保守放行）；「全部」不过滤。
       if (!allProjects && entryCwd && normalizeCwd(entryCwd) !== targetCwd) continue
