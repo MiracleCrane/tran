@@ -1404,7 +1404,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             >
               <div
                 className={`sidebar-session-row relative w-full rounded-xl border px-2.5 py-1.5 text-left ${
-                  active ? 'is-active glass-active text-zinc-100' : 'border-transparent text-zinc-400'
+                  active ? 'is-active border-transparent bg-white/[0.07] text-zinc-100' : 'border-transparent text-zinc-400'
                 }`}
               >
                 {active && (
@@ -1694,7 +1694,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                         multiMode ? '' : 'pr-20'
                       } ${
                         active
-                          ? 'is-active glass-active text-zinc-100'
+                          // 选中态减重（2026-08-14 用户：「当前会话这个框太重」）：
+                          // glass-active 会填实底色 + 画一圈亮边，改成像导航行
+                          // 那样只垫一层淡底——选中信号已有左侧紫色指示条。
+                          ? 'is-active border-transparent bg-white/[0.07] text-zinc-100'
                           : multiMode && selectedKeys.has(key)
                             ? 'border-accent/40 bg-accent/[0.08] text-zinc-200'
                             : 'border-transparent text-zinc-400'

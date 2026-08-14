@@ -229,7 +229,11 @@ function rowKeyOf(row: DisplayRow): string {
   return row.kind === 'item' ? row.node.item.id : row.id
 }
 
-function buildDisplayRows(roots: ItemNode[], shouldFold: (groupKey: string) => boolean): DisplayRow[] {
+function buildDisplayRows(
+  roots: ItemNode[],
+  shouldFold: (groupKey: string) => boolean,
+  holdLiveOpen = false
+): DisplayRow[] {
   const rows: DisplayRow[] = []
   let toolRun: { node: ItemNode; blocks: AssistantBlock[] }[] = []
   let envelopeRun: ItemNode[] = []
@@ -289,7 +293,10 @@ function buildDisplayRows(roots: ItemNode[], shouldFold: (groupKey: string) => b
     if (isHiddenEnvelope(node)) continue
     // B 方案：思考消息也进 run（原先只有 toolBlocksOf，中间夹一条思考就断开）。
     const blocks = activityBlocksOf(node)
-    if (blocks) {
+    // turn 进行中：本轮的 live（非历史）活动消息不折叠、不成组——整轮输出完
+    // 再一次性折（2026-08-14 用户：「新块一开始就把之前的全折叠，输出完又
+    // 展开，这不对」）。此刻它们在 AssistantMessage 里以 holdOpen 保持展开。
+    if (blocks && !(holdLiveOpen && !node.item.isHistory)) {
       flushEnvelopes()
       toolRun.push({ node, blocks })
       continue
@@ -665,10 +672,8 @@ const ThinkingBlock = memo(function ThinkingBlock({
           }`}
         >
           思考过程 · {text.length} 字
-          {/* 本轮计时。原来挂在输入框上方那条「AI 正在输出中（00:18）」上，
-              用户嫌它多余——信息并进这里，正文里流光的那一行本来就是"它在动"
-              的最强信号，时间跟着它走最自然（2026-08 用户要求）。 */}
-          {streaming && <TurnClock />}
+          {/* 本轮计时已挪到对话区顶部的 TurnTimerStrip（2026-08-14 用户要求：
+              钉住不动、贴左、数字换 Bahnschrift），标题行不再挂。 */}
         </span>
         {!open && (
           <span className="min-w-0 truncate font-normal text-zinc-600">{preview}</span>
@@ -953,42 +958,21 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
   )
 })
 
-/**
- * 本轮已运行时长（mm:ss），挂在正文里正在流的那一行标题上。
- *
- * 只在流式期间挂载，所以 1s 心跳不会在空闲时空转。turn 没在跑（startedAt 为
- * 空）时不渲染任何东西。
- */
-function TurnClock(): JSX.Element | null {
-  const startedAt = useSessionStore((s) => s.status.startedAt)
-  const [, tick] = useState(0)
-  useEffect(() => {
-    if (!startedAt) return
-    const t = window.setInterval(() => tick((n) => n + 1), 1000)
-    return () => window.clearInterval(t)
-  }, [startedAt])
-  if (!startedAt) return null
-  const total = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
-  const mm = String(Math.floor(total / 60)).padStart(2, '0')
-  const ss = String(total % 60).padStart(2, '0')
-  return (
-    <span className="ml-1 font-mono tabular-nums">
-      · {mm}:{ss}
-    </span>
-  )
-}
-
 const AssistantMessage = memo(function AssistantMessage({
   item,
   depth,
   deferHighlight = false,
-  expandedBlockKey = null
+  expandedBlockKey = null,
+  holdOpen = false
 }: {
   item: AssistantItem
   depth: number
   deferHighlight?: boolean
   /** "最新块"的 key（toolUseId 或 `${item.id}:thinking`），该块保持展开。 */
   expandedBlockKey?: string | null
+  /** turn 进行中且本条是本轮 live 消息：全部活动块保持展开、不折叠成组——
+   *  整轮输出完再由外层一次性折（2026-08-14 用户定稿）。 */
+  holdOpen?: boolean
 }): JSX.Element {
   const isStreaming = !!item.streaming
   const at = messageTime(item.id)
@@ -1037,7 +1021,7 @@ const AssistantMessage = memo(function AssistantMessage({
                 <ThinkingBlock
                   text={block.text}
                   streaming={isStreaming}
-                  forceExpanded={expandedBlockKey === `${item.id}:thinking`}
+                  forceExpanded={holdOpen || expandedBlockKey === `${item.id}:thinking`}
                 />
               </div>
             )
@@ -1046,12 +1030,13 @@ const AssistantMessage = memo(function AssistantMessage({
             <ToolCallCard
               key={i}
               block={block}
-              forceExpanded={expandedBlockKey === block.toolUseId}
+              forceExpanded={holdOpen || expandedBlockKey === block.toolUseId}
             />
           )
         }
 
-        if (isStreaming) return entries.map(renderBlock)
+        // holdOpen（本轮 live + turn 在跑）与流式一样：块逐个平铺，不做轮内折叠。
+        if (isStreaming || holdOpen) return entries.map(renderBlock)
 
         const rows: JSX.Element[] = []
         let run: ActivityEntry[] = []
@@ -1109,6 +1094,10 @@ export default function Transcript({
   const starting = useSessionStore((s) => s.starting)
   // running / compacting 已下沉到 TranscriptFooter 自订阅：主组件不再因它们
   // 变化而重渲染（每个 turn 起止都会触发一次全列表重渲染）。
+  // 例外（2026-08-14）：turnRunning 回到主组件——折叠节奏改为「整轮输出完再
+  // 一次性折叠」需要它（见 buildDisplayRows 的 holdLiveOpen）。turn 起止各一次
+  // 重渲染，可接受。
+  const turnRunning = useSessionStore((s) => s.status.running)
   const setTranscriptScrolling = useSessionStore((s) => s.setTranscriptScrolling)
   // #36：turn 运行中发送会进 pendingQueue 而不是 items，只看 items 的话
   // 这一路不会回底（而排队恰恰是运行中发送的默认路径）。
@@ -1217,7 +1206,7 @@ export default function Transcript({
    * 分组（toolGroup/envelopeGroup）导致的行数变化也一并算对。
    */
   const { displayRows, firstItemIndex } = useMemo(() => {
-    const rows = buildDisplayRows(roots, foldDecisionFor)
+    const rows = buildDisplayRows(roots, foldDecisionFor, turnRunning)
     // 换会话：整表重来，基数复位，别把上个会话的偏移带过来。
     if (prevSessionKeyRef.current !== sessionKey) {
       prevSessionKeyRef.current = sessionKey
@@ -1234,7 +1223,7 @@ export default function Transcript({
     }
     prevFirstRowKeyRef.current = firstKey
     return { displayRows: rows, firstItemIndex: firstItemIndexRef.current }
-  }, [roots, sessionKey])
+  }, [roots, sessionKey, turnRunning])
   // #48 导航条目：顶层用户消息（排除系统信封；子代理转发的本就不在顶层行），
   // 按行号顺序排列，最新在下；条数封顶只留最近若干条。
   const userNavEntries = useMemo(() => {
@@ -1283,7 +1272,11 @@ export default function Transcript({
   }, [displayRows])
   // "最新块"保持展开：最新一条 live（非历史）assistant 消息里的最后一个思考/
   // 工具块。纯文本段落开头的消息 → 无最新块（上一个收起）；最新是历史 → 不收。
+  // 2026-08-14：只在 turn 运行中生效——turn 一结束回 null，本轮活动块整体折起
+  // （用户：「就整个折叠块都输出完再折叠」；此前 lastExpandableKey 在收尾后仍
+  // 指着最后一块，于是"输出完又展开"）。
   const lastExpandableKey = useMemo(() => {
+    if (!turnRunning) return null
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i]
       if (it.kind !== 'assistant') continue
@@ -1296,7 +1289,7 @@ export default function Transcript({
       return null
     }
     return null
-  }, [items])
+  }, [items, turnRunning])
   const scrollTuning = useMemo(
     () =>
       agentBackend === 'kimi'
@@ -1816,6 +1809,7 @@ export default function Transcript({
         depth={0}
         deferHighlight={deferHighlight}
         expandedBlockKey={lastExpandableKey}
+        holdOpen={turnRunning && !row.node.item.isHistory}
       />
     )
   }

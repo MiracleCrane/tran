@@ -8,6 +8,7 @@ import Transcript from './components/Transcript'
 import Composer from './components/Composer'
 import ElicitationCard from './components/ElicitationCard'
 import SessionChangesPill from './components/SessionChangesPill'
+import TurnTimerStrip from './components/TurnTimerStrip'
 import PlanCard from './components/PlanCard'
 import GoalCard from './components/GoalCard'
 import ErrorDiagnosticPanel from './components/ErrorDiagnosticPanel'
@@ -323,6 +324,8 @@ function MainViewContent({
       <ChatTopbar collapsed={chatTopbarCollapsed} onToggle={onToggleChatTopbar} />
       <GoalCard />
       <PlanCard />
+      {/* 本轮计时条：钉在转录上方不滚动，贴左（见组件注释）。 */}
+      <TurnTimerStrip />
       {/* McpStatusBar 按用户要求下线（2026-08）：常驻一行的收益太低，后续挪到
           左侧边栏做插件式入口。组件保留，这里不再挂载。 */}
       <div className="min-h-0 flex-1 overflow-hidden" onPointerDownCapture={requestCloseGitDrawer}>

@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.11 - 2026-08-14
+
+### 中文
+
+- 修复:**归档页删除失败**——KIMI_CODE_HOME 重定向之前创建的会话存在旧的默认 home（~/.kimi-code）里,session/list 两个 home 都列,删除却只查新 home → 永远找不到。现在当前 home 找不到自动回退旧 home 删;两个 home 都没有按「已删除」成功返回(归档页的幽灵条目才能清掉)。
+- 优化:**当前会话选中行减重**——不再套实底 + 亮边的重框,只垫一层淡底,选中信号由左侧紫色指示条表达。
+- 优化:**本轮计时挪到对话区顶部**——钉住不随转录滚动、贴左缘,数字换 Bahnschrift 窄体;思考块标题行不再挂计时。
+- 优化:**折叠节奏修正**——turn 运行中,本轮的思考/工具块全部保持展开,不再"新块一开始就把前一个折掉、输出完又展开";整轮输出完才一次性折成摘要行。中途手动折/展过的块仍以你的选择为准。
+
+### English
+
+- Fixed: **archived sessions failing to delete.** Sessions created before the KIMI_CODE_HOME redirect live in the legacy home (~/.kimi-code); session/list enumerates both homes but deletion only checked the new one. Deletion now falls back to the legacy home, and a session absent from both counts as deleted (so ghost archive entries can be cleared).
+- The active sidebar row loses its heavy filled frame — just a light wash plus the existing accent bar.
+- The turn timer moved to a pinned, left-aligned strip above the transcript (Bahnschrift digits); thinking-block titles no longer carry it.
+- Fold rhythm fixed: during a running turn all of its thinking/tool blocks stay expanded; everything folds into the summary row once, when the turn completes. Manual toggles still win.
+
 ## v1.1.10 - 2026-08-14
 
 ### 中文

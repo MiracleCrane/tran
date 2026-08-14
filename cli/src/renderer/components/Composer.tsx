@@ -297,7 +297,7 @@ export default function Composer(): JSX.Element {
   const running = useSessionStore((s) => s.status.running)
   // #41 忙碌态计时（turn 开始时间戳）与疑似无响应提示。
   const turnStartedAt = useSessionStore((s) => s.status.startedAt)
-  void turnStartedAt // 计时已挪到正文的流式标题上（见 Transcript 的 TurnClock）
+  void turnStartedAt // 计时已挪到对话区顶部的 TurnTimerStrip（2026-08-14）
   const turnStall = useSessionStore((s) => s.status.stall)
   const dismissTurnStall = useSessionStore((s) => s.dismissTurnStall)
   const starting = useSessionStore((s) => s.starting)

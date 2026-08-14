@@ -2923,6 +2923,22 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   mask-composite: exclude;
 }
 
+/* 本轮计时条（TurnTimerStrip）：钉在对话区顶部左侧，不随转录滚动。
+   数字用 Bahnschrift（Windows 自带窄体，计时器数字辨识度高），等宽数字防跳动。 */
+.tran-turn-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'Bahnschrift', 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  color: rgb(113, 113, 122); /* zinc-500 */
+}
+.tran-turn-timer svg {
+  color: rgb(82, 82, 91); /* zinc-600 */
+}
+
 /* 侧栏选中指示条：静态紫色渐变 + 呼吸微光（opacity）。 */
 .session-active-bar {
   background-image: linear-gradient(180deg, #8b5cf6, #a78bfa, #8b5cf6);
