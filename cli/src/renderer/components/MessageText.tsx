@@ -372,17 +372,18 @@ const InlineLine = memo(function InlineLine({ line }: { line: string }): JSX.Ele
 
 /** 轻量行内 markdown（2026-08，思考块/译文用）：只渲染 加粗/斜体/行内代码/
  *  链接/删除线，不做段落级排版——思考是写给自己的推理，full markdown 不值
- *  那个成本。按行切开渲染，保留换行结构。 */
+ *  那个成本。按行切开渲染，保留换行结构。外包 prose-forge：加粗等样式都挂在
+ *  .prose-forge 选择器下，裸渲染时加粗不可见（用户实测反馈"加粗没了"）。 */
 export const InlineMarkdown = memo(function InlineMarkdown({
   children
 }: {
   children: string
 }): JSX.Element {
   return (
-    <>
+    <div className="prose-forge">
       {children.split('\n').map((line, i) => (
         <InlineLine key={i} line={line} />
       ))}
-    </>
+    </div>
   )
 })

@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.9 - 2026-08-13
+
+### 中文
+
+- 新增:**发送后等待提示**——消息发出到首个输出之前，对话底部出现「✦ 正在思考…」（火花图标 + 紫黄流光）；思考块一开始流式就自动接棒消失。
+- 优化:思考块轻量渲染补样式（之前渲染了但没挂 prose-forge 容器,加粗等行内样式不可见）;思考翻译回收尾统一翻（边输出边翻会卡,撤了）。
+- 优化:工具行工具名与摘要行同色系微光（patch 编辑紫 / read_file 天青 / Bash 琥珀 / 搜索蓝 / Skill 紫红）。
+- 修复:favicon 走本机代理 127.0.0.1:7897（探测通才挂,localhost 直连不受影响）——GitHub 等被墙站点的图标终于能取到,检查更新顺带也走代理了。
+
+### English
+
+- New: a "正在思考…" waiting indicator (sparkle + shimmer) between sending and the first output, handing off to the thinking block's own shimmer.
+- Thinking blocks' light markdown now actually shows bold etc. (missing prose-forge wrapper); thinking translation reverted to after-completion only.
+- Tool names get the same per-action shimmer hues as the summary segments.
+- Favicons (and update checks) now go through the local proxy 127.0.0.1:7897 when reachable — GitHub icons finally load.
+
 ## v1.0.98 - 2026-08-13
 
 ### 中文

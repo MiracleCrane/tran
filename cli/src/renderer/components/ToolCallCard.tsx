@@ -6,7 +6,7 @@ import CodeBlock, { langForTool } from './CodeBlock'
 import DiffView from './DiffView'
 import SwarmCard from './SwarmCard'
 import { useCheapNote } from '../hooks/useCheapNote'
-import { ToolGlyph, FoldChevron } from './toolIcons'
+import { ToolGlyph } from './toolIcons'
 
 function normalizeResult(result: unknown): string {
   if (result == null) return ''
@@ -236,6 +236,28 @@ function toolGlyphKind(name: string): string {
   }
 }
 
+/** 图标种类 → 微光色调（与摘要行 seg-shimmer-* 同一套，2026-08 用户要求
+ *  工具行和摘要行同色系）。glob/grep 归到 web 的蓝色系。 */
+function toolShimmerTone(name: string): string | null {
+  switch (toolGlyphKind(name)) {
+    case 'bash':
+      return 'bash'
+    case 'read':
+      return 'read'
+    case 'edit':
+      return 'edit'
+    case 'glob':
+    case 'grep':
+    case 'web':
+      return 'web'
+    case 'agent':
+    case 'skill':
+      return 'agent'
+    default:
+      return null
+  }
+}
+
 const ToolCallCard = memo(function ToolCallCard({
   block,
   forceExpanded = false
@@ -308,7 +330,15 @@ const ToolCallCard = memo(function ToolCallCard({
             )}
           </>
         ) : (
-          <span className="shrink-0 font-mono text-xs font-medium text-zinc-300">{block.name}</span>
+          <span
+            className={`shrink-0 font-mono text-xs font-medium ${
+              toolShimmerTone(block.name)
+                ? `seg-shimmer seg-shimmer-${toolShimmerTone(block.name)}`
+                : 'text-zinc-300'
+            }`}
+          >
+            {block.name}
+          </span>
         )}
         {/* 摘要与工具名重复时（Skill/TodoList 这种没参数的）不再显示第二遍。 */}
         {summary && summary !== block.name && (
@@ -331,7 +361,6 @@ const ToolCallCard = memo(function ToolCallCard({
             </>
           )}
         </span>
-        <FoldChevron open={!collapsed} />
       </button>
 
       <Collapse open={!collapsed}>

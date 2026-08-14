@@ -2,7 +2,6 @@ import { memo, useState } from 'react'
 import type { ToolBlock } from '../types'
 import Collapse from './Collapse'
 import ToolCallCard from './ToolCallCard'
-import { FoldChevron } from './toolIcons'
 
 const WrenchGlyph = (): JSX.Element => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
@@ -57,9 +56,7 @@ const ToolGroupCard = memo(function ToolGroupCard({
             {running ? '进行中' : '已完成（含失败）'}
           </span>
         )}
-        <span className="ml-auto shrink-0">
-          <FoldChevron open={!collapsed} />
-        </span>
+        <span className="ml-auto shrink-0" />
       </button>
       <Collapse open={!collapsed}>
         <div className="ml-2 border-l border-white/[0.07] px-2 py-1">

@@ -1,5 +1,6 @@
-import { app, BrowserWindow, Notification, shell } from 'electron'
+import { app, BrowserWindow, Notification, session, shell } from 'electron'
 import { readdir } from 'node:fs/promises'
+import net from 'node:net'
 import { join } from 'node:path'
 import {
   configureWindowsGpuBackend,
@@ -340,6 +341,39 @@ function createWindow(): void {
   }
 }
 
+/** 本机代理地址（Clash 混合端口）。用户机器固定配置，见 AGENTS.md。 */
+const LOCAL_PROXY = 'http://127.0.0.1:7897'
+
+/** 探测 7897 通才挂代理：Clash 没开时挂了反而全断。 */
+async function applyLocalProxyIfReachable(): Promise<void> {
+  const reachable = await new Promise<boolean>((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port: 7897 })
+    socket.setTimeout(1500)
+    socket.once('connect', () => {
+      socket.destroy()
+      resolve(true)
+    })
+    socket.once('timeout', () => {
+      socket.destroy()
+      resolve(false)
+    })
+    socket.once('error', () => resolve(false))
+  })
+  if (!reachable) {
+    log('proxy', '本地代理 7897 不可达，保持直连')
+    return
+  }
+  try {
+    await session.defaultSession.setProxy({
+      proxyRules: LOCAL_PROXY,
+      proxyBypassRules: '<local>;127.0.0.1;localhost'
+    })
+    log('proxy', `渲染层/网络栈走本地代理 ${LOCAL_PROXY}`)
+  } catch (error) {
+    log('proxy', `setProxy 失败：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 if (!hasSingleInstanceLock) {
   app.quit()
 } else {
@@ -349,6 +383,12 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(() => {
     seedDefaultIfNeeded()
+    // 2026-08 favicon/外网资源走本机代理（用户指定 127.0.0.1:7897，Clash）：
+    // 系统代理常年关着，Chromium 默认直连，GitHub 这类站点的 favicon 必然
+    // 取不到。先探测端口，通才挂；localhost/127.0.0.1 直连（kimi server 等
+    // 本地服务不能被代理拦）。影响面：渲染层 img/fetch + 主进程 net.fetch
+    // （更新检查顺带也能走代理了）。
+    void applyLocalProxyIfReachable()
     // Tray is created after the window; pass a getter so registerIpc's closures
     // pick up the live tray (used for tooltip updates on session end).
     agentBridge = registerIpc(

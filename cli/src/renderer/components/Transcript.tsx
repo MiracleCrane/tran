@@ -5,7 +5,7 @@ import { useUiStore } from '../store/uiStore'
 import { probeCommit } from '../utils/streamProbe'
 import type { AssistantBlock, AssistantItem, UserAttachment, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
 import MessageText, { InlineMarkdown } from './MessageText'
-import { ToolGlyph, FoldChevron } from './toolIcons'
+import { ToolGlyph } from './toolIcons'
 import { showImageContextMenu } from './ImageContextMenu'
 import { formatTimeFull, formatTimeShort, messageTime } from '../utils/messageTimes'
 import { initSentImageRecording, loadSentImages, matchHistoryImages } from '../utils/sentImages'
@@ -98,9 +98,26 @@ const TranscriptFooter = memo(function TranscriptFooter({
   context?: { bottomReserve: number }
 }): JSX.Element {
   const compacting = useSessionStore((s) => s.status.compacting)
+  // 2026-08 用户要求：发消息后到首个输出之前的等待提示（Codex 风）。
+  // running 且最后一条 assistant 还没有任何块（思考/正文都还没来）时显示；
+  // 思考块一开始流式，它自己的流光标题就接棒了。
+  const waitingFirstOutput = useSessionStore((s) => {
+    if (!s.status.running) return false
+    const last = s.items[s.items.length - 1]
+    if (!last || last.kind !== 'assistant') return true
+    return last.blocks.every((b) => !b || (b.kind === 'text' && !b.text.trim()))
+  })
   const bottomReserve = context?.bottomReserve ?? 0
   return (
     <div className="mx-auto w-full max-w-5xl px-6 py-2">
+      {waitingFirstOutput && (
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-zinc-500">
+            <ToolGlyph kind="think" size={12} />
+          </span>
+          <span className="flow-text flow-text-violet">正在思考…</span>
+        </div>
+      )}
       {compacting && <div className="text-center text-xs text-zinc-500">正在压缩上下文…</div>}
       {bottomReserve > 0 && <div aria-hidden="true" style={{ height: bottomReserve }} />}
     </div>
@@ -607,18 +624,11 @@ const ThinkingBlock = memo(function ThinkingBlock({
   const worthSummarizing = !streaming && text.length >= THINKING_SUMMARY_MIN_CHARS
   const note = useCheapNote(fetchThinkingNote, text, worthSummarizing).value
 
-  // 展开即翻译（2026-08 用户要"边输出边翻译"）：流式期间翻展开那一刻的快照
-  // （只打一发，不逐帧烧额度），流式收尾后自动按全文再翻一发（内容 hash 变了
-  // 自然触发）。不展开不翻。
+  // 展开且**思考收尾后**才翻译（2026-08 用户定夺：边输出边翻会卡——流式期间
+  // 快照译文和滚动的原文对不上，回退到收尾统一翻）。不展开不翻。
   const [showOriginal, setShowOriginal] = useState(false)
-  const openSnapshotRef = useRef('')
-  useEffect(() => {
-    if (open) openSnapshotRef.current = text
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
-  const wantsTranslation = open && looksEnglish(text)
-  const translateInput = streaming && openSnapshotRef.current ? openSnapshotRef.current : text
-  const translationState = useCheapNote(fetchThinkingTranslation, translateInput, wantsTranslation)
+  const wantsTranslation = open && !streaming && looksEnglish(text)
+  const translationState = useCheapNote(fetchThinkingTranslation, text, wantsTranslation)
   // auto 在没配百度时会回落到付费的摘要 API——回落必须可见，否则就是悄悄花钱。
   const translateStatus = useThinkingTranslateStatus(wantsTranslation)
   const translated = translationState.value
@@ -638,7 +648,6 @@ const ThinkingBlock = memo(function ThinkingBlock({
         onClick={() => setUserToggled(!open)}
         className="flex w-full cursor-pointer select-none items-center gap-1.5 text-left text-xs font-medium text-zinc-500 hover:text-zinc-400"
       >
-        <FoldChevron open={open} />
         {/* 火花图标 + 微光（2026-08 用户点名"思考也要有图标和流光"）：
             流式中保留紫黄 flow-text（动态=正在想），完成后落到收敛的灰紫微光。 */}
         <span className={`shrink-0 ${streaming ? 'text-accent/80' : 'text-zinc-500'}`}>
@@ -880,7 +889,6 @@ const ActivityGroupRow = memo(function ActivityGroupRow({
         onClick={() => setOpen((v) => !v)}
         className="flex w-fit cursor-pointer select-none items-center gap-1.5 rounded-lg bg-white/[0.03] px-2 py-1 text-left text-xs text-zinc-500 transition hover:bg-white/[0.055] hover:text-zinc-400"
       >
-        <FoldChevron open={open} />
         <ActivitySummary segments={summarizeActivity(entries.map((e) => e.block))} />
       </button>
       {open && entries.map(renderBlock)}
@@ -914,7 +922,6 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
         onClick={() => setUserToggled(!open)}
         className="flex w-fit cursor-pointer select-none items-center gap-1.5 rounded-lg bg-white/[0.03] px-2 py-1 text-left text-xs text-zinc-500 transition hover:bg-white/[0.055] hover:text-zinc-400"
       >
-        <FoldChevron open={open} />
         <ActivitySummary segments={summarizeActivity(blocks)} />
       </button>
       {open &&
@@ -1654,9 +1661,9 @@ export default function Transcript({
     if (!nextAtBottom && atBottomRef.current) {
       const userScrolledUp = scrollWentUpRef.current && scrollIntentActiveRef.current
       if (!userScrolledUp) {
-        if (window.performance.now() >= followOutputLockedUntilRef.current) {
-          virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'auto' })
-        }
+        // 2026-08 再修：不补滚。展开/自动收起造成的增长不该挪动用户的视图
+        // （补滚就是"展开思考往上展开"的体感来源）；跟随由 followOutput 在
+        // 下一次内容变化时自己接上。
         return
       }
     }
