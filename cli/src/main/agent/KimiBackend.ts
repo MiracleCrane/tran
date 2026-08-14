@@ -2814,16 +2814,24 @@ function parseUsedText(text: string): number | undefined {
  *  `- Context: 45.6k / 1,048,576 (5.0%)` → usedText/total/pct
  *  `- Total: input 6,465, output 1,911, cache read 199,168` → 会话 token（可选） */
 function parseContextUsage(text: string): ContextUsage | null {
-  const match = text.match(/Context:\s*([\d.,a-zA-Z]+)\s*\/\s*([\d,]+)\s*\(\s*([\d.]+)\s*%\)/)
+  // 2026-08-14 实测（kimi 0.36）：输出变成 `Context: 504527 / 1048576 tokens (48%)`
+  // ——数字和百分比之间多了 "tokens" 一词，旧正则将 `(48%)` 紧跟第二个数字，
+  // 永不命中，上下文环恒「暂无数据」。tokens 词做成可选，兼容两种格式。
+  const match = text.match(/Context:\s*([\d.,a-zA-Z]+)\s*\/\s*([\d,]+)(?:\s*tokens?)?\s*\(\s*([\d.]+)\s*%\)/)
   if (!match) return null
   const total = Number(match[2].replace(/,/g, ''))
   const pct = Number(match[3])
   const used = parseUsedText(match[1])
   if (!Number.isFinite(total) || !Number.isFinite(pct) || used === undefined) return null
   const usage: ContextUsage = { usedText: match[1], used, total, pct }
-  const totalMatch = text.match(/Total:\s*input\s*([\d,]+),\s*output\s*([\d,]+),\s*cache read\s*([\d,]+)/i)
+  // Total 行两种格式：新 `Session total: 802798887 input, 870386 output`（无 cache read）、
+  // 旧 `Total: input X, output Y, cache read Z`。
+  const totalMatch =
+    text.match(/Session total:\s*([\d,]+)\s*input\s*,\s*([\d,]+)\s*output/i) ??
+    text.match(/Total:\s*input\s*([\d,]+),\s*output\s*([\d,]+),\s*cache read\s*([\d,]+)/i)
   if (totalMatch) {
-    const parse = (v: string): number | undefined => {
+    const parse = (v: string | undefined): number | undefined => {
+      if (!v) return undefined
       const n = Number(v.replace(/,/g, ''))
       return Number.isFinite(n) ? n : undefined
     }

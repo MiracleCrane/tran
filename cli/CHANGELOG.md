@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.13 - 2026-08-14
+
+### 中文
+
+- 修复:**上下文窗口恒「暂无数据」**。kimi 0.36 的 /usage 输出格式变了——`Context: 504527 / 1048576 tokens (48%)`(数字和百分比之间多了 "tokens" 一词;Total 行变成 `Session total: N input, M output` 语序也不同),旧正则永不命中。解析器兼容两种格式,实测 48% / 805M 输入正常显示。
+
+### English
+
+- Fixed: the context-window ring stuck at "no data". kimi 0.36 changed the /usage output (`Context: 504527 / 1048576 tokens (48%)` — a "tokens" word the old regex didn't expect, and a reordered Session-total line). The parser now accepts both formats; verified live (48%, 805M input).
+
 ## v1.1.12 - 2026-08-14
 
 ### 中文
