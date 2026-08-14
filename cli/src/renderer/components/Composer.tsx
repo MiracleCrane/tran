@@ -18,7 +18,7 @@ import { useUiStore } from '../store/uiStore'
 import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, PermissionMode, SkillInfo } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
 import ModePanel from './ModePanel'
-import { AGENT_TOOL_NAMES, BASH_TOOL_NAMES, countRunningTools, countTotalTools } from '../utils/toolStats'
+import { AGENT_TOOL_NAMES, collectBackgroundTaskBlocks, countRunningBackgroundTasks, countRunningTools, countTotalTools } from '../utils/toolStats'
 import { pickedFileToUserAttachment, splitPickedFiles, userAttachmentToPickedFile } from '../utils/attachments'
 import ChipPopover, { type ChipAnchor, type ChipKind } from './ChipPopover'
 import UsageRings from './UsageRings'
@@ -177,8 +177,9 @@ function getToolChipStats(s: SessionSnapshot): ToolChipStats {
     return cached.stats
   }
   const stats: ToolChipStats = {
-    bashTotal: countTotalTools(s.items, BASH_TOOL_NAMES),
-    runningBash: countRunningTools(s.items, BASH_TOOL_NAMES, s.swarmTasks, running),
+    // 「后台命令」chip 只数真后台任务（run_in_background），见 toolStats 注释。
+    bashTotal: collectBackgroundTaskBlocks(s.items).length,
+    runningBash: countRunningBackgroundTasks(s.items, s.swarmTasks),
     agentTotal: countTotalTools(s.items, AGENT_TOOL_NAMES),
     runningAgents: countRunningTools(s.items, AGENT_TOOL_NAMES, s.swarmTasks, running),
     swarmToolActive: s.items.some(
@@ -1015,7 +1016,7 @@ export default function Composer(): JSX.Element {
   }
 
   return (
-    <div className="composer-shell bg-transparent px-6 pb-3 pt-2">
+    <div className="composer-shell bg-transparent px-6 pb-2 pt-1">
       <div className="mx-auto max-w-5xl">
         {pending.length > 0 && (
           <div className="mb-1.5">
@@ -1082,7 +1083,7 @@ export default function Composer(): JSX.Element {
         )}
         {/* 状态行（输入框上方）：左侧瞬态错误/常驻 chips（计数=会话累计，0 置灰，
             点击展开任务面板），右侧常驻 Usage 圆环（自退役的 StatusBar 上移）。 */}
-        <div ref={chipRowRef} data-chip-row className="mb-1.5 flex items-center gap-3 px-1 text-[11px] text-zinc-500">
+        <div ref={chipRowRef} data-chip-row className="mb-1 flex items-center gap-3 px-1 text-[11px] text-zinc-500">
           {statusError && (
             <span className="flex min-w-0 items-center gap-1 text-red-400">
               <span className="truncate">{statusError}</span>
@@ -1160,7 +1161,7 @@ export default function Composer(): JSX.Element {
           <ChipPopover kind={openChip} anchor={chipAnchor} onClose={() => setOpenChip(null)} />
         )}
         <div
-          className={`glass-panel composer-panel rounded-[20px] p-3 transition ${
+          className={`glass-panel composer-panel rounded-[20px] px-3 py-2 transition ${
             dragActive ? 'border-accent/60 bg-white/[0.035] shadow-[0_0_0_1px_rgba(139,92,246,0.28)]' : ''
           } ${composerResizing ? 'is-resizing' : ''}`}
           onDragEnter={onDragEnter}
@@ -1440,7 +1441,7 @@ export default function Composer(): JSX.Element {
               </button>
             </div>
           )}
-          <div className="composer-toolbar flex flex-wrap items-center gap-2 px-1 pt-2">
+          <div className="composer-toolbar flex flex-wrap items-center gap-2 px-1 pt-1.5">
             <button
               type="button"
               onClick={() => void pickAttachment()}

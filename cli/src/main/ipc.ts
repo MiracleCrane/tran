@@ -3,6 +3,7 @@ import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { readFile, readdir, stat as statAsync, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { homedir } from 'node:os'
 import { AgentBridge } from './agent/AgentBridge'
 import { AGENT_BACKENDS } from '../shared/agentBackends'
 import {
@@ -1053,6 +1054,8 @@ export function registerIpc(
   )
 
   ipcMain.handle('forge:listProjects', async (): Promise<Project[]> => listProjects())
+  // 「不在项目中工作」：无项目会话落在用户主目录（Codex 的 no-project 选项）。
+  ipcMain.handle('forge:getHomeDir', async (): Promise<string> => homedir())
   ipcMain.handle('forge:addProject', async (_e, path: string, name?: string): Promise<Project[]> =>
     addProject(requireString(path, 'path').trim(), name)
   )

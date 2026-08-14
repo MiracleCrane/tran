@@ -52,6 +52,17 @@ const ChevronIcon = ({ up }: { up: boolean }): JSX.Element => (
     />
   </svg>
 )
+const HomeIcon = (): JSX.Element => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+    <path
+      d="M3 11.5 12 4l9 7.5M5.5 10v9a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5v-9"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
 
 const PROJECT_SWITCHER_CLOSE_ELEVATION_MS = 560
 
@@ -133,8 +144,20 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
   const current = currentCwd
     ? projects.find((p) => normalizeCwdForCompare(p.path) === currentCwd) ?? null
     : null
-  const currentLabel =
-    current?.name ?? (meta?.cwd ? meta.cwd.split(/[\\/]/).pop() : '项目')
+  // cwd 不在已添加项目里 = 无项目会话（Codex 的 "no project" 形态），
+  // 标签直说，不再拿目录末段冒充项目名；完整路径仍在 title 上。
+  const currentLabel = current?.name ?? (meta?.cwd ? '无项目' : '项目')
+
+  /** 「不在项目中工作」：会话落在用户主目录，不进项目列表（addProject 只收
+   *  显式添加的目录——switchProject 不会污染项目列表）。 */
+  const switchToNoProject = async (): Promise<void> => {
+    ++projectActionSeqRef.current
+    setOpen(false)
+    const home = await window.api.getHomeDir().catch(() => null)
+    if (!home) return
+    if (currentCwd && normalizeCwdForCompare(home) === currentCwd) return
+    void switchProject(home)
+  }
 
   const inferBackendFromPath = (
     path: string,
@@ -166,6 +189,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
     const list = await window.api.addProject(dir)
     if (projectActionSeqRef.current !== actionSeq) return
     setProjects(list)
+    emitForgeEvent('projectsChanged')
     const normalizedDir = normalizePickedProjectPath(dir, targetBackend)
     const savedPath = list.find((p) => p.path === normalizedDir)?.path ?? normalizedDir
     void switchProject(savedPath)
@@ -183,6 +207,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
     const list = await window.api.renameProject(path, editText)
     if (projectActionSeqRef.current !== actionSeq) return
     setProjects(list)
+    emitForgeEvent('projectsChanged')
     setEditingPath(null)
   }
 
@@ -192,6 +217,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
     const list = await window.api.removeProject(path)
     if (projectActionSeqRef.current !== actionSeq) return
     setProjects(list)
+    emitForgeEvent('projectsChanged')
     if (currentCwd && normalizeCwdForCompare(path) === currentCwd) {
       if (list[0]) void switchProject(list[0].path)
       else reset() // removed the last project → back to Onboarding
@@ -341,6 +367,19 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
         })}
       </div>
       <div className="mt-0.5 border-t border-white/[0.06] pt-0.5">
+        {/* 无项目入口（Codex 同款 "work without a project"）：cwd 落到主目录，
+            不进项目列表。当前就是无项目态时禁用显示「当前」。 */}
+        <button
+          type="button"
+          onClick={() => void switchToNoProject()}
+          className="mb-0.5 flex min-h-8 w-full items-center gap-2 rounded-xl px-2.5 py-1 text-left text-[11px] text-zinc-400 transition hover:bg-white/[0.055] hover:text-zinc-200"
+        >
+          <HomeIcon />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">不在项目中工作</span>
+            <span className="block truncate text-[10px] text-zinc-600">会话落在主目录，不占用项目位</span>
+          </span>
+        </button>
         <div
           className={`grid ${
             wslSupportEnabled ? 'grid-cols-2' : 'grid-cols-1'

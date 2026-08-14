@@ -13,6 +13,7 @@ import SkillCard, { matchSkillInvocation } from './SkillCard'
 import ToolCallCard from './ToolCallCard'
 import ToolGroupCard from './ToolGroupCard'
 import CompactionDivider from './CompactionDivider'
+import Collapse from './Collapse'
 import EmptyState from './EmptyState'
 import QueryResultCard from './QueryResultCard'
 import TurnChangesCard from './TurnChangesCard'
@@ -423,7 +424,6 @@ function EnvelopeGroupRow({ entries }: { entries: Array<{ id: string; text: stri
           <span>系统消息 ×{entries.length}</span>
           {completed > 0 && <span className="text-emerald-400/70">{completed} 完成</span>}
           {failed > 0 && <span className="text-red-300/70">{failed} 失败</span>}
-          <span className="text-[9px]">{expanded ? '▾' : '▸'}</span>
         </button>
         {expanded && (
           <div className="mt-1 max-h-64 space-y-1 overflow-y-auto">
@@ -573,6 +573,12 @@ const ThinkingBlock = memo(function ThinkingBlock({
   // 出现下一个块后收回；用户手动点击后以其选择为准。展开态定高 200px 内部滚动。
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const open = userToggled ?? (forceExpanded || streaming)
+  // 懒挂载：从没展开过的思考块不渲染正文（长会话里几十段全文 markdown 白
+  // 渲染）；第一次展开后常驻，之后开合才能走 Collapse 的高度动画。
+  const [everOpened, setEverOpened] = useState(open)
+  useEffect(() => {
+    if (open) setEverOpened(true)
+  }, [open])
   const bodyRef = useRef<HTMLDivElement | null>(null)
   /** 是否还跟随底部。用户在框内往上滚就置 false，滚回底部自动恢复。 */
   const followBodyRef = useRef(true)
@@ -668,8 +674,10 @@ const ThinkingBlock = memo(function ThinkingBlock({
           <span className="min-w-0 truncate font-normal text-zinc-600">{preview}</span>
         )}
       </button>
-      {open && (
-        <>
+      {everOpened && (
+        // 开合走 Collapse 原语（grid-rows 0fr↔1fr 高度动画 + 内容淡入淡出），
+        // 收起不再瞬时消失（2026-08-14 用户：「收起来不要这么突兀，丝滑一点」）。
+        <Collapse open={open}>
           {/* 只在真的译出来了才给切换；没译出来（限流/失败）就安静地显示原文，
               不留任何"出错了"的痕迹。 */}
           {translated && (
@@ -716,7 +724,7 @@ const ThinkingBlock = memo(function ThinkingBlock({
                 ——加粗/行内代码/链接可见，不开段落级排版（2026-08 用户拍板）。 */}
             {streaming ? bodyText : <InlineMarkdown>{bodyText}</InlineMarkdown>}
           </div>
-        </>
+        </Collapse>
       )}
     </div>
   )
@@ -783,8 +791,8 @@ const TOOL_ACTIVITY_META: Record<string, { label: string; icon: string; tone: st
   web_search: { label: '搜索网页', icon: 'web', tone: 'web' },
   FetchURL: { label: '抓取网页', icon: 'web', tone: 'web' },
   WebFetch: { label: '抓取网页', icon: 'web', tone: 'web' },
-  TodoList: { label: '更新待办', icon: '', tone: 'todo' },
-  todo_list: { label: '更新待办', icon: '', tone: 'todo' },
+  TodoList: { label: '更新待办', icon: 'todo', tone: 'todo' },
+  todo_list: { label: '更新待办', icon: 'todo', tone: 'todo' },
   Skill: { label: '使用 Skill', icon: 'skill', tone: 'agent' },
   skill: { label: '使用 Skill', icon: 'skill', tone: 'agent' }
 }
@@ -914,6 +922,12 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
 }): JSX.Element {
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const open = userToggled ?? forceOpen
+  // 与 ThinkingBlock 同款懒挂载：收起态不渲染整组卡片，第一次展开后常驻，
+  // 之后开合走 Collapse 高度动画（2026-08-14 用户：收起要丝滑）。
+  const [everOpened, setEverOpened] = useState(open)
+  useEffect(() => {
+    if (open) setEverOpened(true)
+  }, [open])
   return (
     <div className="my-1">
       <button
@@ -924,14 +938,17 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
       >
         <ActivitySummary segments={summarizeActivity(blocks)} />
       </button>
-      {open &&
-        blocks.map((block, i) =>
-          block.kind === 'thinking' ? (
-            <ThinkingBlock key={i} text={block.text} streaming={false} />
-          ) : block.kind === 'tool' ? (
-            <ToolCallCard key={i} block={block} forceExpanded={expandedBlockKey === block.toolUseId} />
-          ) : null
-        )}
+      {everOpened && (
+        <Collapse open={open}>
+          {blocks.map((block, i) =>
+            block.kind === 'thinking' ? (
+              <ThinkingBlock key={i} text={block.text} streaming={false} />
+            ) : block.kind === 'tool' ? (
+              <ToolCallCard key={i} block={block} forceExpanded={expandedBlockKey === block.toolUseId} />
+            ) : null
+          )}
+        </Collapse>
+      )}
     </div>
   )
 })
@@ -1872,6 +1889,15 @@ export default function Transcript({
           const prevItem = prevRow && prevRow.kind === 'item' ? prevRow.node.item : null
           const curItem = row.kind === 'item' ? row.node.item : null
           const showHistoryDivider = !!prevItem?.isHistory && !!curItem && !curItem.isHistory
+          // 裸活动行（整条消息只有思考/工具块，无正文）：行距收紧（2026-08-14
+          // 用户：折叠成摘要块之前行与行间隔大）。kimi 流式常把每个工具/每段
+          // 思考拆成独立消息，每条都吃一整行 py-1.5，视觉上稀稀拉拉；收成
+          // py-0.5 后行距 ≈ 折叠后的密度。带正文的行保持原节奏。
+          const isBareActivityRow =
+            !!curItem &&
+            curItem.kind === 'assistant' &&
+            curItem.blocks.length > 0 &&
+            curItem.blocks.every((b) => !!b && (b.kind === 'tool' || b.kind === 'thinking'))
           // #50 顶层用户消息行打标：导航高亮按 DOM 几何定位（见 updateActiveUserNav）。
           const userMsgId =
             row.kind === 'item' && row.node.item.kind === 'user' && envelopeTextOf(row.node) === null
@@ -1880,7 +1906,7 @@ export default function Transcript({
           return (
             <div
               data-user-msg-id={userMsgId}
-              className={`mx-auto w-full max-w-5xl px-6 py-1.5 ${isNew ? 'tran-msg-enter' : ''}`}
+              className={`mx-auto w-full max-w-5xl px-6 ${isBareActivityRow ? 'py-0.5' : 'py-1.5'} ${isNew ? 'tran-msg-enter' : ''}`}
               style={isNew ? { animationDelay: `${Math.min(relIndex * 24, 280)}ms` } : undefined}
             >
               {showHistoryDivider && (

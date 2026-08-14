@@ -3718,17 +3718,19 @@ div:has(textarea:focus) .composer-shortcut-hint {
   color: transparent;
 }
 
+/* 斜杠命令胶囊：对齐 Codex——无框无底，小立方体图标 + 浅蓝文字，直接嵌在
+   正文里（2026-08-14 用户定稿；此前是紫底白字胶囊）。 */
 .rich-input-chip {
   display: inline-flex;
   align-items: center;
-  margin-right: 0.25rem;
-  border: 1px solid rgba(139, 92, 246, 0.3);
-  border-radius: 0.5rem;
-  background: rgba(139, 92, 246, 0.12);
-  padding: 0.05rem 0.4rem;
-  font-size: 0.92em;
-  line-height: 1.5;
-  color: rgb(244, 244, 245);
+  gap: 0.2em;
+  margin-right: 0.25em;
+  color: rgb(134, 172, 248);
   /* 胶囊整体不可编辑：光标不会停进内部，选中/退格都以整枚为单位。 */
   user-select: none;
+}
+.rich-input-chip-icon {
+  width: 0.95em;
+  height: 0.95em;
+  flex-shrink: 0;
 }

@@ -231,6 +231,10 @@ function toolGlyphKind(name: string): string {
       return 'agent'
     case 'Skill':
       return 'skill'
+    case 'TodoList':
+    case 'TodoWrite':
+    case 'todo_list':
+      return 'todo'
     default:
       return ''
   }
@@ -253,6 +257,8 @@ function toolShimmerTone(name: string): string | null {
     case 'agent':
     case 'skill':
       return 'agent'
+    case 'todo':
+      return 'todo'
     default:
       return null
   }
@@ -278,14 +284,15 @@ const ToolCallCard = memo(function ToolCallCard({
   const statusLabel = bg?.isBackground && bg.running && block.status === 'done' ? '已挂后台' : meta.label
   const summary = summaryForTool(block.name, block.input)
   const resultText = collapsed ? '' : normalizeResult(block.result)
-  const inputText =
-    !collapsed && block.name === 'Bash' ? ((block.input as { command?: string })?.command ?? '') : ''
+  const bashInfo = bashCommandFor(block)
+  // 命令盒覆盖 Bash 与 kimi 的 terminal（2026-08-14：原先只认 Bash，terminal
+  // 落进「输入」JSON 明细——裸 JSON 盒就是用户截图里那个丑东西）。
+  const inputText = !collapsed && bashInfo.isBash ? bashInfo.command : ''
   const streaming = isSubagent && block.status === 'running'
 
   // 命令一句话说明（便宜模型）。只在 Kimi **没给** description 时问——给了就说明
   // 意图已经有了，再问一遍是白花额度。pending 期间不问：那时 command 可能还在
   // 流式拼接（见 #30），拿到的是半条命令。
-  const bashInfo = bashCommandFor(block)
   const wantsNote = bashInfo.isBash && !bashInfo.hasDescription && block.status !== 'pending'
   const commandNote = useCheapNote(fetchCommandNote, bashInfo.command, wantsNote).value
 
@@ -310,6 +317,13 @@ const ToolCallCard = memo(function ToolCallCard({
       >
         {/* 状态圆点已删（2026-08 用户：和右侧状态重复）；运行中的信号由
             is-running 淡紫底 + 右侧"运行中"表达。 */}
+        {/* 失败/被拒：行首小红叉（2026-08-14 用户：「出错了就在前面打个红叉，
+            小小的那种，不要在后面体现」），行尾不再出「出错」状态文字。 */}
+        {(block.status === 'error' || block.status === 'denied') && (
+          <span className="shrink-0 text-[10px] leading-none text-red-400" title={meta.label}>
+            ✗
+          </span>
+        )}
         {/* Codex 风工具图标（2026-08）：不同操作不同小图标，SVG 为 Codex 桌面版
             实测提取的原版（见 toolIcons.tsx）。子代理行同样给图标，在徽章前。 */}
         <span className="shrink-0 text-zinc-500">
@@ -352,9 +366,9 @@ const ToolCallCard = memo(function ToolCallCard({
           </span>
         )}
         {/* 状态（2026-08 定稿）：完成**什么都不显示**——成功是默认态，满屏绿勾
-            纯噪声；只有 运行中/失败/被拒 才出现文字。 */}
+            纯噪声；失败/被拒改走行首小红叉（同上），行尾只剩 运行中/排队中/手动停止。 */}
         <span key={block.status} className={`ml-auto shrink-0 text-[11px] ${meta.text}`}>
-          {block.status === 'done' && !bg?.running ? null : (
+          {block.status === 'done' && !bg?.running ? null : block.status === 'error' || block.status === 'denied' ? null : (
             <>
               {statusLabel}
               {block.elapsed ? ` · ${block.elapsed.toFixed(1)}s` : ''}
@@ -365,15 +379,17 @@ const ToolCallCard = memo(function ToolCallCard({
 
       <Collapse open={!collapsed}>
         <div className="ml-2 border-l border-white/[0.07] px-3 py-1.5">
-          {block.name === 'Bash' && inputText && (
+          {bashInfo.isBash && inputText && (
+            // 2026-08-14 用户反馈"有点丑"：近黑底（#0b0c10）比周围深太多 +
+            // 长命令不换行顶出原生横向滚动条。收成淡底 + 强制换行，滚动条消失。
             <CodeBlock
               text={inputText}
               lang="bash"
-              className="mb-2 overflow-auto rounded bg-[#0b0c10] p-2.5 text-xs text-zinc-300"
+              className="mb-2 whitespace-pre-wrap break-all rounded-md bg-white/[0.035] px-2.5 py-2 text-xs leading-relaxed text-zinc-400"
             />
           )}
 
-          {!isSubagent && block.name !== 'Bash' && block.input != null && (
+          {!isSubagent && !bashInfo.isBash && block.input != null && (
             <details className="mb-2">
               <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300">
                 输入
@@ -445,7 +461,15 @@ const ToolCallCard = memo(function ToolCallCard({
               {streaming && <span className="tran-stream-cursor" aria-hidden />}
             </>
           )}
-          {!isSubagent && resultText && (
+          {!isSubagent && resultText && bashInfo.isBash && (
+            // 命令输出是纯文本日志，不是补丁：走 DiffView 会硬解析出 "+0 -0"
+            // 和「统一/拆分」开关，文不对题（2026-08-14 用户：这块丑）。
+            <CodeBlock
+              text={resultText}
+              className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white/[0.035] px-2.5 py-2 text-xs leading-relaxed text-zinc-400"
+            />
+          )}
+          {!isSubagent && resultText && !bashInfo.isBash && (
             <DiffView text={resultText} lang={langForTool(block.name, block.input)} />
           )}
 

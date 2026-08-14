@@ -171,21 +171,24 @@ function groupSessionsByProject(
     .map(([label, items]) => ({ label, items }))
 }
 
-/** 「全部」视图：按完整 cwd 分组，组间按组内最新会话倒序（组内已按时间倒序）。 */
+/** 「全部」视图：按完整 cwd 分组，组间按组内最新会话倒序（组内已按时间倒序）。
+ *  分组键用归一化路径（正反斜杠/盘符大小写殊途同归），label 取首个原始写法——
+ *  否则同一项目的会话会按路径拼写拆成两个组（2026-08-14 实测：C:\ 与 C:/ 并存）。 */
 function groupSessionsByCwd(
   sessions: SessionListItem[],
   fallbackCwd: string
 ): SessionGroup[] {
-  const map = new Map<string, SessionListItem[]>()
+  const map = new Map<string, { label: string; items: SessionListItem[] }>()
   for (const session of sessions) {
-    const label = session.cwd ?? fallbackCwd
-    const arr = map.get(label)
-    if (arr) arr.push(session)
-    else map.set(label, [session])
+    const raw = session.cwd ?? fallbackCwd
+    const key = normalizeCwdForCompare(raw)
+    const entry = map.get(key)
+    if (entry) entry.items.push(session)
+    else map.set(key, { label: raw, items: [session] })
   }
-  return [...map.entries()]
-    .sort(([, a], [, b]) => (b[0]?.lastModified ?? 0) - (a[0]?.lastModified ?? 0))
-    .map(([label, items]) => ({ label, items }))
+  return [...map.values()]
+    .sort((a, b) => (b.items[0]?.lastModified ?? 0) - (a.items[0]?.lastModified ?? 0))
+    .map(({ label, items }) => ({ label, items }))
 }
 
 function toAnimatedSessionGroups(
@@ -214,6 +217,16 @@ const SearchIcon = (): JSX.Element => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
     <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
     <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+  </svg>
+)
+const FolderIcon = (): JSX.Element => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+    <path
+      d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinejoin="round"
+    />
   </svg>
 )
 const ArchiveIcon = (): JSX.Element => (
@@ -382,6 +395,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const reloadForBackendSwitch = useSessionStore((s) => s.reloadForBackendSwitch)
   const loadMoreSessions = useSessionStore((s) => s.loadMoreSessions)
   const newChat = useSessionStore((s) => s.newChat)
+  const switchProject = useSessionStore((s) => s.switchProject)
   const openSession = useSessionStore((s) => s.openSession)
   const openSessionCrossProject = useSessionStore((s) => s.openSessionCrossProject)
   const prefetchSessionHistory = useSessionStore((s) => s.prefetchSessionHistory)
@@ -410,6 +424,18 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const [collapsedGroupLabels, setCollapsedGroupLabels] = useState<Set<string>>(() => new Set())
   const [appVersion, setAppVersion] = useState('')
   const [aiNamingBusy, setAiNamingBusy] = useState(false)
+  /** 已添加项目的归一化路径集合：决定会话归「项目」段还是「最近」段。 */
+  const [addedProjectPaths, setAddedProjectPaths] = useState<Set<string>>(() => new Set())
+  useEffect(() => {
+    const load = (): void => {
+      void window.api
+        .listProjects()
+        .then((list) => setAddedProjectPaths(new Set(list.map((p) => normalizeCwdForCompare(p.path)))))
+        .catch(() => {})
+    }
+    load()
+    return onForgeEvent('projectsChanged', load)
+  }, [])
   const previewTimerRef = useRef<number | null>(null)
   /** 预览请求代际号（见 schedulePreview 的竞态守卫）。 */
   const previewSeqRef = useRef(0)
@@ -928,6 +954,18 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     })
   }
 
+  /** 项目组头上的「+」：在该项目下直接开新对话。当前项目走懒创建的 newChat；
+      其他项目只能 switchProject——会话进程绑定 cwd，换目录必须在那边另起。 */
+  const newChatInProject = (cwd: string): void => {
+    hidePreview()
+    if (meta && normalizeCwdForCompare(cwd) === normalizeCwdForCompare(meta.cwd)) {
+      void newChat()
+    } else {
+      void switchProject(cwd)
+    }
+    setView('chat')
+  }
+
   /** 「全部」视图点其他项目的会话：先切项目再 resume；本项目内直接打开。 */
   const handleOpenSession = (s: SessionListItem): void => {
     // 点下去就收预览。原先只挂在行的 onPointerLeave 上——切会话会重建列表
@@ -1070,30 +1108,32 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     return next
   }, [filteredSessions, pinnedSessionKeys])
 
-  // Codex 式三段布局（2026-08-12 用户定稿）：置顶 → 项目（按 cwd 折叠组）→
-  // 最近。三段互斥（同一会话只出现一次——渲染/多选/动画都按 sessionKey 索引，
-  // 重复会撞 key）：置顶的进置顶段；其余最新 8 条进「最近」；剩下按项目分组。
-  const RECENT_SECTION_SIZE = 8
+  // 三段布局（2026-08-14 用户改定稿）：置顶 → 项目（cwd 折叠组）→ 最近。
+  // 项目优先：cwd 属于已添加项目的会话只出现在项目分组里，不再占「最近」；
+  // 「最近」只收无项目会话（cwd 不在项目列表，含「不在项目中工作」的主目录
+  // 会话），按时间倒序全量列出——它们没有别的归属，截断就再也找不到了。
+  // 三段互斥（同一会话只出现一次——渲染/多选/动画都按 sessionKey 索引，
+  // 重复会撞 key）。
   const sessionGroups = useMemo(() => {
     if (groupMode === 'time') return groupSessionsByTime(orderedSessions)
     const pinned = orderedSessions.filter((s) => pinnedSessionKeys.has(sessionKey(s)))
     const rest = orderedSessions.filter((s) => !pinnedSessionKeys.has(sessionKey(s)))
+    const inProject = rest.filter(
+      (s) => s.cwd && addedProjectPaths.has(normalizeCwdForCompare(s.cwd))
+    )
     const recent = rest
-      .slice()
+      .filter((s) => !s.cwd || !addedProjectPaths.has(normalizeCwdForCompare(s.cwd)))
       .sort((a, b) => b.lastModified - a.lastModified)
-      .slice(0, RECENT_SECTION_SIZE)
-    const recentKeys = new Set(recent.map(sessionKey))
-    const projectRest = rest.filter((s) => !recentKeys.has(sessionKey(s)))
     const cwdGroups =
       sessionScope === 'all'
-        ? groupSessionsByCwd(projectRest, meta?.cwd ?? '')
-        : groupSessionsByProject(projectRest, meta?.cwd ?? '')
+        ? groupSessionsByCwd(inProject, meta?.cwd ?? '')
+        : groupSessionsByProject(inProject, meta?.cwd ?? '')
     return [
       ...(pinned.length ? [{ label: '置顶', items: pinned, section: true }] : []),
-      ...(recent.length ? [{ label: '最近', items: recent, section: true }] : []),
-      ...cwdGroups
+      ...cwdGroups,
+      ...(recent.length ? [{ label: '最近', items: recent, section: true }] : [])
     ]
-  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys])
+  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjectPaths])
   sessionGroupsRef.current = sessionGroups
 
   const visibleSessionKeys = useMemo(
@@ -1555,24 +1595,40 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                 项目
               </div>
             )}
-            {/* 组头（项目 / 时间段）。原先是 10px、zinc-500/70 —— 比会话行还
-                淡，看着不像"这些属于哪个项目"的标题，倒像一行灰噪声。抬到
-                11px/zinc-400 并加粗一档；下面的会话再缩进一格，从属关系才
-                读得出来。 */}
+            {/* 组头（项目 / 时间段）。项目头要压过下面的会话行：文件夹图标 +
+                亮一档的字色（zinc-200，会话行是 zinc-300/400 的 13px 正文），
+                行尾悬停出「+」——直接在该项目下开新对话。外层用 div 不用
+                button：「+」是独立按钮，HTML 不允许按钮套按钮。 */}
             {cwdGroupHeader ? (
-              <button
-                type="button"
-                onClick={() => toggleGroupCollapsed(g.label)}
-                className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[11px] font-semibold tracking-wide text-zinc-400 transition hover:text-zinc-200"
-                title={g.label}
-              >
-                <span className="text-[8px] text-zinc-500">{groupCollapsed ? '▸' : '▾'}</span>
-                <span className="truncate">{g.label}</span>
-                {meta && normalizeCwdForCompare(g.label) === normalizeCwdForCompare(meta.cwd) && (
-                  <span className="shrink-0 rounded bg-accent/15 px-1 font-normal text-accent">当前</span>
-                )}
-                <span className="ml-auto shrink-0 font-normal text-zinc-500">{g.items.length}</span>
-              </button>
+              <div className="group/projhead flex w-full items-center gap-1 px-2 py-1">
+                <button
+                  type="button"
+                  onClick={() => toggleGroupCollapsed(g.label)}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[11px] font-semibold tracking-wide text-zinc-200 transition hover:text-white"
+                  title={g.label}
+                >
+                  <span className="text-[8px] text-zinc-500">{groupCollapsed ? '▸' : '▾'}</span>
+                  <span className="shrink-0 text-zinc-400"><FolderIcon /></span>
+                  <span className="truncate">{g.label}</span>
+                  {meta && normalizeCwdForCompare(g.label) === normalizeCwdForCompare(meta.cwd) && (
+                    <span className="shrink-0 rounded bg-accent/15 px-1 font-normal text-accent">当前</span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    newChatInProject(g.label)
+                  }}
+                  className="shrink-0 rounded p-0.5 text-zinc-500 opacity-0 transition hover:bg-white/10 hover:text-zinc-200 group-hover/projhead:opacity-100"
+                  title="在此项目下新建对话"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </button>
+                <span className="shrink-0 text-[11px] font-normal text-zinc-500">{g.items.length}</span>
+              </div>
             ) : (
               <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-semibold tracking-wide text-zinc-400">
                 <span className="truncate">{g.label}</span>

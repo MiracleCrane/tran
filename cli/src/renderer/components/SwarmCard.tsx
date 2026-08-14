@@ -126,7 +126,6 @@ export default function SwarmCard({ block }: { block: ToolBlock }): JSX.Element 
         <span className={`ml-auto shrink-0 text-[11px] ${running ? 'text-blue-400' : 'text-zinc-500'}`}>
           {running ? '进行中' : block.status === 'error' ? '出错' : '已完成'}
         </span>
-        <span className="shrink-0 text-xs text-zinc-600">{collapsed ? '▸' : '▾'}</span>
       </button>
       {!collapsed && (
         <div className="border-t border-border-subtle bg-[#0f1015] px-3 py-2.5">

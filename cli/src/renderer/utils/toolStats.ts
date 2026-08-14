@@ -1,7 +1,8 @@
 import type { KimiTaskInfo } from '../../shared/ipc'
 import type { ToolBlock, TranscriptItem } from '../types'
 
-/** 工具调用统计（Composer 上方 chips + 任务面板；chips 计数=会话累计）。 */
+/** 工具调用统计（Composer 上方 chips + 任务面板）。子 Agent chip 计数=会话累计；
+ *  「后台命令」chip 只数真后台任务（见 collectBackgroundTaskBlocks）。 */
 
 /** Kimi 把命令行工具映射为 'terminal'（旧 Claude 后端为 'Bash'）。 */
 export const BASH_TOOL_NAMES = new Set(['Bash', 'terminal'])
@@ -53,6 +54,23 @@ export function countRunningTools(
 /** 会话累计总数（chips 计数语义；含已完成/失败/停止）。 */
 export function countTotalTools(items: TranscriptItem[], names: Set<string>): number {
   return collectToolBlocks(items, names).length
+}
+
+/** 真正的后台命令（run_in_background=true）——「后台命令」chip 的口径
+ *  （2026-08-14：原先数的是本会话全部 shell 调用，标签说"后台"数字却是
+ *  总账，且随历史尾部窗口摆动（431→98 跳变），用户以为是泄漏）。 */
+export function collectBackgroundTaskBlocks(items: TranscriptItem[]): ToolBlock[] {
+  return collectToolBlocks(items, BASH_TOOL_NAMES).filter((b) => backgroundTaskInfo(b).isBackground)
+}
+
+/** 后台命令中仍在跑的（server task 校正为准）。 */
+export function countRunningBackgroundTasks(items: TranscriptItem[], swarmTasks: KimiTaskInfo[] | null): number {
+  let count = 0
+  for (const block of collectBackgroundTaskBlocks(items)) {
+    const bg = backgroundTaskInfo(block)
+    if (withServerTaskStatus(bg, swarmTasks).running) count += 1
+  }
+  return count
 }
 
 /** 后台任务信息（实证形态：rawInput.run_in_background=true 在 tool_call_update

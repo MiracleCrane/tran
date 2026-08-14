@@ -824,6 +824,8 @@ export interface ForgeApi {
 
   /** --- Projects (saved working directories) --- */
   listProjects(): Promise<Project[]>
+  /** 用户主目录：「不在项目中工作」的无项目会话落在这里。 */
+  getHomeDir(): Promise<string>
   /** Add a directory (idempotent) and mark it last-used. Returns the list. */
   addProject(path: string, name?: string): Promise<Project[]>
   removeProject(path: string): Promise<Project[]>

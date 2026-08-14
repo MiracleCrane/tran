@@ -1,5 +1,37 @@
 # Changelog
 
+## v1.1.10 - 2026-08-14
+
+### 中文
+
+- 新增:**侧栏项目优先分组**——属于已添加项目的会话只出现在「项目」分组里,不再占「最近」;「最近」只收无项目会话(按时间倒序全量列)。同一项目按归一化路径归并(正反斜杠拼写不再拆成两组)。
+- 新增:项目组头加文件夹图标、字色提亮,悬停出行内「+」——**直接在该项目下新建对话**。
+- 新增:项目切换器加「**不在项目中工作**」入口(Codex 同款)——会话落在用户主目录,不占用项目位;cwd 不在项目列表时切换器直显「无项目」。
+- 优化:**skill 胶囊对齐 Codex**——立方体线框图标 + 浅蓝文字裸排版(去掉紫底药丸);手敲命令命中即时成胶囊(原先只有菜单选中才变),删字失效自动退回纯文本。
+- 优化:思考块、跨消息活动组的开合接入高度动画 + 淡入淡出,收起不再瞬时消失(懒挂载,没展开过的历史块不白渲染)。
+- 优化:**工具失败/被拒改行首小红 ✗**,行尾「出错/已拒绝」文字删除;待办卡、Swarm 卡、系统消息行残余的 ▸/▾ 展开字形一并清掉。
+- 优化:TodoList 工具行补清单图标(摘要行「更新待办」同享)。
+- 优化:**Bash/terminal 卡片重做**——命令盒淡底 + 长命令换行(原生横向滚动条没了);kimi 的 terminal 工具也走高亮命令盒(原先错落成「输入」JSON 明细盒);命令输出改纯文本块(原先错套 DiffView,硬解析出「+0 -0」「统一/拆分」)。
+- 优化:「后台命令」chip 与浮层**只数真后台任务**(run_in_background)——原先数的是本会话全部 shell 调用总账,还随历史加载窗口摆动。注意:重开的老会话显示 0,因为 kimi 的 ACP 历史回放本身不含后台调用(实测,非计数 bug)。
+- 优化:整条只有思考/工具块的「裸活动行」行距收紧(折叠成摘要块之前不再稀稀拉拉);输入框上下留白收紧,正文多出约 20px。
+- 修复:**切换对话不再丢排队消息**——切走时队列随快照进后台缓冲,后台每收尾一个 turn 同步弹队,切回时剩余队列原样恢复。
+- 优化:**改动胶囊按会话过滤**——只算本对话造成的改动(各轮 TurnChangesCard 并集),这个对话一行没改就整枚隐藏;不再把工作区里别人的改动挂上来。已知边界:重开的老会话没有轮次卡片,只计新产生的改动。
+
+### English
+
+- New: **project-first sidebar.** Sessions belonging to an added project only appear under their project group; 「最近」 now lists only project-less sessions. Same-project groups merge across path spellings (slash/case).
+- New: project group headers get a folder icon, brighter text, and a hover「+」to start a chat directly in that project.
+- New: **"work without a project"** entry in the switcher (Codex-style) — the session runs in the home directory without occupying a project slot.
+- Skill chips now match Codex: cube outline icon + light-blue text, no pill; hand-typed commands chip the moment they resolve, and revert when they stop matching.
+- Thinking blocks and activity groups expand/collapse with a height animation (lazy-mounted bodies).
+- Failed/denied tools show a small red ✗ at the row start instead of trailing status text; leftover ▸/▾ glyphs removed from todo/swarm/system rows.
+- TodoList rows get a checklist icon.
+- Bash/terminal cards reworked: light command box with wrapping (no horizontal scrollbar), kimi's `terminal` tool uses the highlighted command box too, and command output renders as plain text instead of a misparsed diff view.
+- The「后台命令」chip and popover now count only real background tasks (run_in_background) instead of every shell call in the session. Reopened sessions show 0 because kimi's ACP replay omits background calls entirely (verified, not a counting bug).
+- Tighter spacing for bare activity rows (thinking/tool-only messages) and around the composer.
+- Fixed: **queued messages no longer vanish when switching sessions** — the queue rides along in the background snapshot and is restored on re-attach.
+- The changes pill is now session-scoped: hidden when this conversation changed nothing, and counts only files this conversation touched.
+
 ## v1.1.9 - 2026-08-13
 
 ### 中文

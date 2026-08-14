@@ -43,6 +43,13 @@ ICONS['think'] = {
   html: '<path d="M10 2.5c.35 3.9 2.1 5.65 6 6-3.9.35-5.65 2.1-6 6-.35-3.9-2.1-5.65-6-6 3.9-.35 5.65-2.1 6-6Z" fill="currentColor"/><path d="M15.2 12.6c.18 1.95 1.05 2.82 3 3-1.95.18-2.82 1.05-3 3-.18-1.95-1.05-2.82-3-3 1.95-.18 2.82-1.05 3-3Z" fill="currentColor" opacity="0.65"/>'
 }
 
+/** 待办清单图标（2026-08-14 用户：「todoList 前面也要加图标」）：首行打勾 +
+ *  两条横线的清单造型。Codex 提取集里没有这一类，手绘补齐。 */
+ICONS['todo'] = {
+  viewBox: '0 0 20 20',
+  html: '<path d="M2.6 5.2 4.4 7 7.6 3.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 5.2h7.4M2.6 10.4h14.8M2.6 15.6h14.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>'
+}
+
 export function ToolGlyph({ kind, size = 13 }: { kind: string; size?: number }): JSX.Element {
   const icon = ICONS[kind]
   if (!icon) return <></>

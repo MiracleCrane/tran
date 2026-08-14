@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GitFileChange } from '../../shared/ipc'
 import { useSessionStore } from '../store/sessionStore'
 import { emitForgeEvent } from '../events'
@@ -6,9 +6,11 @@ import { emitForgeEvent } from '../events'
 /**
  * 输入框正上方的「N 个文件已更改 +X -Y」悬浮胶囊（Codex 同款）。
  *
- * 与 TurnChangesCard 的分工：那张卡片钉在对话流里，记的是**某一轮**干了什么，
- * 属于历史；这枚胶囊是**当下工作区**相对 HEAD 的总账，跟着改动实时变、干净了
- * 就消失。跑一整晚的会话里，前者是流水，后者是余额——两个都要。
+ * 口径（2026-08-14 用户拍板）：只算**本会话**造成的改动——并集来自对话流里
+ * 每张 TurnChangesCard 的文件清单（轮开始/结束的 git 快照差，见 sessionStore
+ * 的 #TurnChanges）。工作区里别人/别的会话改的文件不再算进来；这个对话一行
+ * 没改就整枚隐藏。注意没改的文件若后来被还原回 HEAD，numstat 里查无此项，
+ * 自然也不再显示。
  *
  * 数据走 gitWorkingChanges（git diff --numstat，无网络无写盘）。轮跑动时每 4 秒
  * 一次、轮结束补一次；非 git 目录或 git 不可用时整枚隐藏，不打扰。
@@ -25,6 +27,20 @@ function fileName(path: string): string {
 export default function SessionChangesPill(): JSX.Element | null {
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
   const running = useSessionStore((s) => s.status.running)
+  // 本会话改过的文件集合：对话流里所有 turnChanges 卡片的并集。路径两边同出
+  // gitWorkingChanges，格式一致可直接比。
+  const sessionPaths = useSessionStore((s) => {
+    let key = ''
+    for (const it of s.items) {
+      if (it.kind !== 'turnChanges') continue
+      for (const f of it.files) key += `${f.path}`
+    }
+    return key
+  })
+  const sessionPathSet = useMemo(
+    () => new Set(sessionPaths ? sessionPaths.split('') : []),
+    [sessionPaths]
+  )
   const [files, setFiles] = useState<GitFileChange[]>([])
   const [open, setOpen] = useState(false)
   // 切目录/并发刷新竞态：迟到的响应不许覆盖新目录的数据（同 ChangesPanel）。
@@ -72,13 +88,15 @@ export default function SessionChangesPill(): JSX.Element | null {
     return () => window.removeEventListener('focus', onFocus)
   }, [load])
 
-  const counted = files.filter((f) => !f.binary)
+  // 会话口径过滤：本会话没碰过的文件不进计数；这个对话一行没改 → 整枚隐藏。
+  const sessionFiles = sessionPathSet.size > 0 ? files.filter((f) => sessionPathSet.has(f.path)) : []
+  const counted = sessionFiles.filter((f) => !f.binary)
   const addedTotal = counted.reduce((n, f) => n + (f.additions ?? 0), 0)
   const removedTotal = counted.reduce((n, f) => n + (f.deletions ?? 0), 0)
-  if (files.length === 0) return null
+  if (sessionFiles.length === 0) return null
 
-  const shown = files.slice(0, FILES_SHOWN)
-  const rest = files.length - shown.length
+  const shown = sessionFiles.slice(0, FILES_SHOWN)
+  const rest = sessionFiles.length - shown.length
   const review = (): void => {
     setOpen(false)
     emitForgeEvent('openChangesPanel')
@@ -125,7 +143,7 @@ export default function SessionChangesPill(): JSX.Element | null {
           title="查看本次会话的工作区改动"
           className="mb-1.5 flex items-center gap-2 rounded-full border border-border-subtle bg-bg-elev px-3.5 py-1.5 text-[12px] text-zinc-300 shadow-lg shadow-black/30 transition hover:bg-bg-hover"
         >
-          <span>{files.length} 个文件已更改</span>
+          <span>{sessionFiles.length} 个文件已更改</span>
           <span className="tabular-nums text-emerald-400">+{addedTotal}</span>
           <span className="tabular-nums text-red-400">-{removedTotal}</span>
         </button>

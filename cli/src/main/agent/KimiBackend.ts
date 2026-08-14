@@ -1826,6 +1826,9 @@ export class KimiBackend {
     if (type === 'tool_call_update') {
       const toolUseId = asString(update.toolCallId)
       if (!toolUseId || replay.terminalToolCalls.has(toolUseId)) return
+      // rawInput 随 update 才到（后台标记 run_in_background）：回填进 tool_use 块。
+      const rawInput = asRecord(update.rawInput)
+      if (rawInput) mergeReplayToolInput(replay, toolUseId, rawInput)
       const status = asString(update.status)
       const content = stringifyToolResult(update.rawOutput ?? update.content ?? update.title ?? status ?? '')
       if (status === 'completed' || status === 'failed') {
@@ -2673,6 +2676,30 @@ function pushReplayToolResult(
     },
     parent_tool_use_id: null
   })
+}
+
+/** 重放回填工具输入：tool_call 首帧的 rawInput 常缺 run_in_background（它在
+ *  后续 tool_call_update 才到达，见 handleSessionUpdate 2042 行注释）。update
+ *  带 rawInput 时合并进已入列的 tool_use 块——否则重放出的后台命令丢失后台
+ *  标记，「后台命令」chip 在重开的老会话里恒 0（2026-08-14 实测）。 */
+function mergeReplayToolInput(
+  replay: ReplayAccumulator,
+  toolUseId: string,
+  rawInput: Record<string, unknown>
+): void {
+  for (let i = replay.messages.length - 1; i >= 0; i--) {
+    const msg = replay.messages[i] as { type?: string; message?: { content?: unknown } }
+    if (msg.type !== 'assistant') continue
+    const content = msg.message?.content
+    if (!Array.isArray(content)) continue
+    for (const c of content as Array<Record<string, unknown>>) {
+      if (c.type === 'tool_use' && c.id === toolUseId) {
+        const prev = c.input && typeof c.input === 'object' ? (c.input as Record<string, unknown>) : {}
+        c.input = { ...prev, ...rawInput }
+        return
+      }
+    }
+  }
 }
 
 /** 压缩文本检出：kimi 宿主直返的压缩提示（/compact 或自动压缩）。 */

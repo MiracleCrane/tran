@@ -258,7 +258,6 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
               · {staleLabel(staleSince)}
             </span>
           )}
-          <span className="ml-auto shrink-0 text-xs text-zinc-600">{collapsed ? '▸' : '▾'}</span>
         </button>
         {/* 催更已经发出去了：这一轮是 Tran 自己发的，必须让用户看见——否则就是
             幽灵行为（对话里凭空多出一轮，用户不知道是谁触发的）。 */}

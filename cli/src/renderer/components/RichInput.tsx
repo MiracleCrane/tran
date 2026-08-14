@@ -150,8 +150,22 @@ function render(root: HTMLElement, segments: Segment[]): void {
       chip.dataset.raw = seg.text
       chip.contentEditable = 'false'
       chip.className = 'rich-input-chip'
-      chip.textContent = seg.label ?? seg.text
       chip.title = seg.text
+      // Codex 式：小立方体图标 + 蓝色文字，裸排版无胶囊底框。
+      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      icon.setAttribute('viewBox', '0 0 24 24')
+      icon.setAttribute('fill', 'none')
+      icon.setAttribute('class', 'rich-input-chip-icon')
+      for (const d of ['M12 3 4 7.5v9L12 21l8-4.5v-9L12 3z', 'M4 7.5 12 12l8-4.5', 'M12 12v9']) {
+        const p = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+        p.setAttribute('d', d)
+        p.setAttribute('stroke', 'currentColor')
+        p.setAttribute('stroke-width', '1.7')
+        p.setAttribute('stroke-linejoin', 'round')
+        icon.appendChild(p)
+      }
+      chip.appendChild(icon)
+      chip.appendChild(document.createTextNode(seg.label ?? seg.text))
       root.appendChild(chip)
       continue
     }
@@ -195,9 +209,17 @@ export default function RichInput({
     const root = ref.current
     if (!root) return
     if (composingRef.current) return
-    if (serialize(root) === value) return
+    const segments = tokenize(value, resolveCommand)
+    // 手敲即时胶囊化（2026-08-14 用户要求对齐 Codex）：值与 DOM 一致不代表
+    // 结构一致——逐字敲出 '/handoff' 时值一路等于 DOM（都是自己刚发的回声），
+    // 旧逻辑不重排，胶囊只有菜单选中/草稿恢复才出现。这里比对「行首命令是否
+    // 已解析」与「首节点是否已是胶囊」，不一致就重排。重排只在命令命中/失效
+    // 的翻转瞬间发生一次，正常逐字打字不受影响。
+    const wantChip = segments[0]?.kind === 'command'
+    const hasChip = root.firstElementChild?.classList.contains('rich-input-chip') ?? false
+    if (serialize(root) === value && wantChip === hasChip) return
     const caret = caretOffset(root)
-    render(root, tokenize(value, resolveCommand))
+    render(root, segments)
     if (caret !== null && document.activeElement === root) placeCaret(root, Math.min(caret, value.length))
   }, [value, resolveCommand])
 

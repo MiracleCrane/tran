@@ -155,6 +155,7 @@ const api: ForgeApi = {
     ipcRenderer.invoke('forge:saveComposerModelsForBackend', backend, models),
 
   listProjects: () => ipcRenderer.invoke('forge:listProjects'),
+  getHomeDir: () => ipcRenderer.invoke('forge:getHomeDir'),
   addProject: (path, name) => ipcRenderer.invoke('forge:addProject', path, name),
   removeProject: (path) => ipcRenderer.invoke('forge:removeProject', path),
   renameProject: (path, name) => ipcRenderer.invoke('forge:renameProject', path, name),

@@ -1095,6 +1095,13 @@ interface BackgroundSessionState {
   /** #29 后台 turn 出错时回收的未确认直达消息：attach 时落入 pendingQueue，
    *  走 #20 的重发/清空出路（与前台错误收尾同款语义）。 */
   recycledQueue?: PendingMessage[]
+  /** 切走时的 pendingQueue 镜像。排队消息早已送达后端（SDK 内部排队，见
+   *  sendMessage 注释 "Always push to the SDK"），这里存的只是 renderer 侧的
+   *  显示镜像：原先切走直接清空，用户排了一半的队从界面上凭空消失。后台
+   *  每收尾一个 turn 弹掉队首（对齐前台 result 的 slice(1)），attach 时把
+   *  剩余队列接回 pendingQueue。与 recycledQueue 分开存：那边是没送到后端、
+   *  等待重发的，这边是后端已知、只等消费的，弹队首绝不能弹错那一边。 */
+  queuedMirror?: PendingMessage[]
 }
 
 const backgroundSessions = new Map<string, BackgroundSessionState>()
@@ -1138,7 +1145,9 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
     mcpServers: s.mcpServers,
     elicitationQueue: s.elicitationQueue,
     swarmTasks: s.swarmTasks,
-    modePanel: s.modePanel
+    modePanel: s.modePanel,
+    // 排队消息随快照走（显示镜像，详见 queuedMirror 注释）。
+    ...(s.pendingQueue.length > 0 ? { queuedMirror: s.pendingQueue } : {})
   })
   // 优先淘汰空闲会话；全都在跑时（长 turn 叠着开）此前直接 break，Map 会
   // 无上限增长——每个缓冲还在持续累积 items，底下的 bridge 会话也不释放。
@@ -1633,10 +1642,13 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
     }
     case 'result': {
       const r = msg as unknown as { subtype: string; errors?: string[] }
-      // turn 结束：清流式标记。后台缓冲没有 pendingQueue（切走时队列已清空，
-      // 后续消息靠后端回显进入 items），running 以后端推送/下一个事件为准。
-      bg.running = false
-      markSdkSessionRunning(bg.sdkSessionId, false)
+      // turn 结束：清流式标记。队列镜像每个收尾弹一次队首（对齐前台 result
+      // 的 slice(1)）：后端收下一条排队消息继续跑，running 保持 true；队列
+      // 已空才是真的闲下来。
+      const queuedBefore = bg.queuedMirror?.length ?? 0
+      if (queuedBefore > 0) bg.queuedMirror = bg.queuedMirror!.slice(1)
+      bg.running = queuedBefore > 0
+      if (queuedBefore === 0) markSdkSessionRunning(bg.sdkSessionId, false)
       delete bg.startedAt
       delete bg.stall
       bg.items = sealHungToolBlocks(
@@ -2783,8 +2795,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         // 没变）：整体克隆一份再入 store，保证 memo 化的行组件拿到新引用。
         items: cloneTranscriptItems(bg.items),
         tasks: bg.tasks,
-        // #29 后台 turn 出错时回收的直达消息在这里落回队列（无则空）。
-        pendingQueue: bg.recycledQueue ?? [],
+        // 队列恢复：#29 回收的未送达消息在前，切走时带走的排队镜像在后。
+        pendingQueue: [...(bg.recycledQueue ?? []), ...(bg.queuedMirror ?? [])],
         sessionConfigDirty: false,
         sessionModelDirty: false,
         bridgeEnded: false,

@@ -35,7 +35,7 @@ const ToolGroupCard = memo(function ToolGroupCard({
 
   return (
     // 2026-08：组卡也裸掉（与单行工具/思考块同一语言）——框没有信息量，
-    // 可展开由右缘的旋转箭头表达；运行中留一丝紫底信号。
+    // 展开箭头也于 1.1.9 全删；运行中留一丝紫底信号。
     <div
       className={`tool-call-card my-[3px] overflow-hidden ${running ? 'is-running' : ''}`}
     >
@@ -45,16 +45,20 @@ const ToolGroupCard = memo(function ToolGroupCard({
         onClick={() => setUserToggled(!collapsed)}
         className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-white/[0.04]"
       >
+        {/* 与单行工具同一约定：完成态什么都不显示；含失败 → 行首小红叉（不出
+            文字），进行中 → 行尾「进行中」。 */}
+        {hasError && !running && (
+          <span className="shrink-0 text-[10px] leading-none text-red-400" title="含失败的调用">
+            ✗
+          </span>
+        )}
         <span className="shrink-0 text-zinc-400">
           <WrenchGlyph />
         </span>
         <span className="shrink-0 text-xs font-medium text-zinc-200">{blocks.length} 个工具调用</span>
         <span className="min-w-0 truncate font-mono text-[11px] text-zinc-500">{toolNames}</span>
-        {/* 与单行工具同一约定：完成态什么都不显示，只有 进行中/含失败 出文字。 */}
-        {(running || hasError) && (
-          <span className={`shrink-0 text-[11px] ${hasError ? 'text-red-400' : 'text-zinc-500'}`}>
-            {running ? '进行中' : '已完成（含失败）'}
-          </span>
+        {running && (
+          <span className="shrink-0 text-[11px] text-zinc-500">进行中</span>
         )}
         <span className="ml-auto shrink-0" />
       </button>

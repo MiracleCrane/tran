@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useSessionStore } from '../store/sessionStore'
-import { AGENT_TOOL_NAMES, BASH_TOOL_NAMES, collectToolBlocks, countRunningTools } from '../utils/toolStats'
+import { AGENT_TOOL_NAMES, collectBackgroundTaskBlocks, collectToolBlocks, countRunningTools } from '../utils/toolStats'
 import { isToolRowActive, PlanRow, ToolRow } from './taskRows'
 
 /** chips 独立浮层（kimi web 同款）：点哪个 chip 弹哪个自己的面板，portal 挂
@@ -47,7 +47,8 @@ export default function ChipPopover({
     return () => document.removeEventListener('pointerdown', onPointerDown, true)
   }, [onClose])
 
-  const bashBlocks = kind === 'bash' ? collectToolBlocks(items, BASH_TOOL_NAMES) : []
+  // 「后台命令」面板只列真后台任务（口径同 chip 计数）。
+  const bashBlocks = kind === 'bash' ? collectBackgroundTaskBlocks(items) : []
   const agentBlocks = kind === 'agent' ? collectToolBlocks(items, AGENT_TOOL_NAMES) : []
   const runningAgents =
     kind === 'agent' ? countRunningTools(items, AGENT_TOOL_NAMES, swarmTasks, turnRunning) : 0
