@@ -435,13 +435,19 @@ textarea:focus-visible {
     border-radius: 0;
   }
 
-  /* 侧栏贴满左侧与顶部：去掉圆角和外边框，只保留与主区相接的那条分隔线。 */
+  /* 侧栏贴满左侧与顶部：去掉圆角和外边框。2026-08-17 用户：与主区相接的分隔线
+     也不要了（Codex 式——靠侧栏/主区的明度台阶分区，不画线）；右投的那道
+     阴影一并去掉，那是"两块板拼起来"观感的另一半来源。 */
   .app-shell-merged .glass-sidebar {
     border-radius: 0;
-    border-top: none;
-    border-left: none;
-    border-bottom: none;
-    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    border: none;
+    box-shadow: none;
+  }
+
+  /* 玻璃主题下侧栏的 ::after 会沿右缘画一圈 inset 亮边——不画线的决定把
+     它也算上（否则 border 没了、亮边还在）。 */
+  .app-shell-merged .glass-sidebar::after {
+    content: none;
   }
 
   /* 合体后标题栏只盖在主区上方，底部那条紫色渐变线是"两块拼接"的最后痕迹，去掉。 */
@@ -3124,11 +3130,11 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
     display: none;
   }
 
-  /* 2. 侧栏贴边，与主区之间只留一条发丝线。
-     Codex 配色：侧栏比主区暗一档（#171717 vs #1e1e1e），靠明度台阶分区。 */
+  /* 2. 侧栏贴边，与主区之间不画线——只靠明度台阶分区（Codex 式）。
+     Codex 配色：侧栏比主区暗一档（#171717 vs #1e1e1e），靠明度台阶分区——
+     不画分界线（2026-08-17 用户：不要那条隔开的线）。 */
   :root[data-ui='flat'] .glass-sidebar {
     background: #171717;
-    border-right: 1px solid rgba(255, 255, 255, 0.07);
   }
   /* 主区与卡片：实色台阶，不再靠半透明叠加。 */
   :root[data-ui='flat'] .main-surface {

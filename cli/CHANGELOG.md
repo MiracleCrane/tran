@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.15 - 2026-08-17
+
+### 中文
+
+- 优化:**侧栏与主区的分界线删除**（Codex 式）——只留侧栏比主区暗一档的明度台阶,不再画竖线;玻璃主题的 inset 亮边与右投阴影一并清掉。
+- 优化:**会话标题显示长度恢复**——之前为悬停操作组预留的 pr-28 右内边距让标题七八个字就省略号;现在标题占满行宽,操作组悬停时以深色小底板浮在文字上方。
+
+### English
+
+- The sidebar/content divider line is gone (Codex-style brightness step only), including the glass theme's inset edge and cast shadow.
+- Session titles use the full row width again — the pr-28 reservation for hover actions truncated them to ~8 chars; the action buttons now float over the text on a small dark chip.
+
 ## v1.1.14 - 2026-08-17
 
 ### 中文

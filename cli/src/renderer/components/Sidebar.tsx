@@ -1697,7 +1697,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                       onPointerMove={handleSidebarPointerGlow}
                       onPointerLeave={hidePreview}
                       className={`sidebar-session-row relative w-full rounded-xl border px-2.5 py-1.5 text-left ${
-                        multiMode ? '' : 'pr-28'
+                        // 标题给足宽度：不再为悬停操作组预留 pr-28（那是标题
+                        // 七八个字就省略号的元凶，2026-08-17 用户反馈）。操作组
+                        // 悬停浮在上方，自带深色小底板遮住下面的文字。
+                        multiMode ? '' : 'pr-2'
                       } ${
                         active
                           // 选中态减重（2026-08-14 用户：「当前会话这个框太重」）：
@@ -1747,7 +1750,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                   )}
 
                   {!editing && !exiting && !multiMode && (
-                    <div className="absolute bottom-1 right-1 z-10 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                    <div className="absolute bottom-1 right-1 z-10 flex items-center gap-0.5 rounded-lg bg-[#16171c]/95 px-0.5 opacity-0 shadow-lg shadow-black/30 transition-opacity duration-150 group-hover:opacity-100">
                       {/* 会话操作组：置顶 / 重命名 / 归档（进归档页）/ 删除 */}
                       <button
                         onClick={(e) => {
