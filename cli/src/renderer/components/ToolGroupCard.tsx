@@ -37,13 +37,13 @@ const ToolGroupCard = memo(function ToolGroupCard({
     // 2026-08：组卡也裸掉（与单行工具/思考块同一语言）——框没有信息量，
     // 展开箭头也于 1.1.9 全删；运行中留一丝紫底信号。
     <div
-      className={`tool-call-card my-[3px] overflow-hidden ${running ? 'is-running' : ''}`}
+      className={`tool-call-card my-px overflow-hidden ${running ? 'is-running' : ''}`}
     >
       <button
         type="button"
         aria-expanded={!collapsed}
         onClick={() => setUserToggled(!collapsed)}
-        className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-white/[0.04]"
+        className="flex w-full items-center gap-2 rounded-lg px-1.5 py-0.5 text-left transition-colors hover:bg-white/[0.04]"
       >
         {/* 与单行工具同一约定：完成态什么都不显示；含失败 → 行首小红叉（不出
             文字），进行中 → 行尾「进行中」。 */}

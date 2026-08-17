@@ -2920,11 +2920,33 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  position: relative;
+  padding-bottom: 3px;
   font-family: 'Bahnschrift', 'JetBrains Mono', ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   font-size: 12px;
   letter-spacing: 0.05em;
   color: rgb(113, 113, 122); /* zinc-500 */
+}
+/* G 方案：底部一道紫光往返扫（叠加在 A 的流光数字上，2026-08-17 用户选 A+G）。 */
+.tran-turn-timer::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(167, 139, 250, 0.85), transparent);
+  background-size: 45% 100%;
+  background-repeat: no-repeat;
+  animation: tran-timer-scan 2.6s ease-in-out infinite alternate;
+}
+@keyframes tran-timer-scan {
+  from { background-position: 0% 0; }
+  to { background-position: 100% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tran-turn-timer::after { animation: none; opacity: 0.4; }
 }
 .tran-turn-timer svg {
   color: rgb(82, 82, 91); /* zinc-600 */
@@ -3130,15 +3152,15 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
     display: none;
   }
 
-  /* 2. 侧栏贴边，与主区之间不画线——只靠明度台阶分区（Codex 式）。
-     Codex 配色：侧栏比主区暗一档（#171717 vs #1e1e1e），靠明度台阶分区——
-     不画分界线（2026-08-17 用户：不要那条隔开的线）。 */
+  /* 2. 侧栏贴边，与主区不画线——明度台阶分区。
+     2026-08-17 色值改为 Codex 桌面端实测采样（拆包 + 截图像素）：侧栏 #202020、
+     主区 #181818（注意 Codex 是侧栏比主区**亮**一档，跟直觉相反）。 */
   :root[data-ui='flat'] .glass-sidebar {
-    background: #171717;
+    background: #202020;
   }
   /* 主区与卡片：实色台阶，不再靠半透明叠加。 */
   :root[data-ui='flat'] .main-surface {
-    background: #1e1e1e;
+    background: #181818;
   }
   :root[data-ui='flat'] .glass-panel,
   :root[data-ui='flat'] .glass-panel-soft {

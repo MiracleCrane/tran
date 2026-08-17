@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.1.16 - 2026-08-17
+
+### 中文
+
+- 优化:**Codex 化全套**——色值按 Codex 桌面端拆包 + 截图像素采样对齐:侧栏 #202020 / 正文 #181818（侧栏比正文亮一档）、会话行 13px #c3c3c3、选中行 #313131 淡底无框;项目分组头只显示项目名（路径收进悬停提示）;组内导轨线删除。
+- 优化:**顶栏两行并一行**——Git/待办/目标停靠图标并进窗口标题栏,正文上移一整行。
+- 修复:**轮末不折叠**——折叠判定从"成组瞬间是否在底部"改为「轮刚结束一律折」,不再被跟随状态机的中间态卡成永久摊开。
+- 优化:本轮计时动画（A+G）——数字流光扫过 + 底部一道紫光往返。
+- 优化:MCP 工具行只显示叶名（全名收进悬停）,摘要行收敛为「使用 MCP 工具」,配插头图标。
+- 优化:工具/思考行行距收紧（~10px → 1~2px）。
+
+### English
+
+- Full Codex alignment: sidebar #202020 / content #181818 (sidebar lighter, per pixel sampling of the real Codex app), 13px #c3c3c3 rows, #313131 active row; project groups show only the project name (path on hover); guide rail removed.
+- Topbar merged into the window titlebar — one less chrome row.
+- Fixed turns not folding at completion (fold-at-turn-end regardless of the at-bottom intermediate state).
+- Timer animation: shimmer digits + a scanning light line underneath.
+- MCP tools show the leaf name with a plug icon; summaries read「使用 MCP 工具」.
+- Tighter activity row spacing.
+
 ## v1.1.15 - 2026-08-17
 
 ### 中文

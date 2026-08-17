@@ -50,6 +50,12 @@ ICONS['todo'] = {
   html: '<path d="M2.6 5.2 4.4 7 7.6 3.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 5.2h7.4M2.6 10.4h14.8M2.6 15.6h14.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>'
 }
 
+/** MCP 工具图标（2026-08-17）：插头造型（两个插脚 + 插身 + 引出导线）。 */
+ICONS['mcp'] = {
+  viewBox: '0 0 20 20',
+  html: '<path d="M7 2.8v3.4M13 2.8v3.4M4.8 6.2h10.4v3.1a5.2 5.2 0 0 1-10.4 0V6.2zM10 14.5v2.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'
+}
+
 export function ToolGlyph({ kind, size = 13 }: { kind: string; size?: number }): JSX.Element {
   const icon = ICONS[kind]
   if (!icon) return <></>

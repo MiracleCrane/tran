@@ -203,8 +203,10 @@ const STATUS_META: Record<
   stopped: { label: '手动停止', dot: 'bg-zinc-500', text: 'text-zinc-400' }
 }
 
-/** 工具名 → Codex 风图标种类（toolIcons.tsx）。未收录的工具返回空串（不渲染图标）。 */
+/** 工具名 → Codex 风图标种类（toolIcons.tsx）。未收录的工具返回空串（不渲染图标）。
+ *  MCP 工具（mcp__server__tool）一律给插头图标。 */
 function toolGlyphKind(name: string): string {
+  if (name.startsWith('mcp__')) return 'mcp'
   switch (name) {
     case 'Bash':
     case 'terminal':
@@ -259,6 +261,8 @@ function toolShimmerTone(name: string): string | null {
       return 'agent'
     case 'todo':
       return 'todo'
+    case 'mcp':
+      return 'web'
     default:
       return null
   }
@@ -305,7 +309,7 @@ const ToolCallCard = memo(function ToolCallCard({
     // 搞 bar 试试看"）——裸排版，与思考块同款；状态靠左边圆点+图标表达，
     // 展开区用左侧发丝线引导，不再盒子里套盒子。
     <div
-      className={`tool-call-card my-[3px] overflow-hidden ${
+      className={`tool-call-card my-px overflow-hidden ${
         block.status === 'running' ? 'is-running' : ''
       }`}
     >
@@ -313,10 +317,10 @@ const ToolCallCard = memo(function ToolCallCard({
         type="button"
         aria-expanded={!collapsed}
         onClick={() => setUserToggled(!collapsed)}
-        className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-white/[0.04]"
+        className="flex w-full items-center gap-2 rounded-lg px-1.5 py-0.5 text-left transition-colors hover:bg-white/[0.04]"
       >
         {/* 状态圆点已删（2026-08 用户：和右侧状态重复）；运行中的信号由
-            is-running 淡紫底 + 右侧"运行中"表达。 */}
+            「运行中」文字 + 秒数流光表达（紫色光圈/紫底已删，用户嫌丑）。 */}
         {/* 失败/被拒：行首小红叉（2026-08-14 用户：「出错了就在前面打个红叉，
             小小的那种，不要在后面体现」），行尾不再出「出错」状态文字。 */}
         {(block.status === 'error' || block.status === 'denied') && (
@@ -345,13 +349,15 @@ const ToolCallCard = memo(function ToolCallCard({
           </>
         ) : (
           <span
+            // MCP 全名（mcp__server__tool）太长，行内只显示工具叶名，全名进 title。
+            title={block.name.startsWith('mcp__') ? block.name : undefined}
             className={`shrink-0 font-mono text-xs font-medium ${
               toolShimmerTone(block.name)
                 ? `seg-shimmer seg-shimmer-${toolShimmerTone(block.name)}`
                 : 'text-zinc-300'
             }`}
           >
-            {block.name}
+            {block.name.startsWith('mcp__') ? (block.name.split('__').pop() ?? block.name) : block.name}
           </span>
         )}
         {/* 状态（2026-08 定稿）：完成**什么都不显示**——成功是默认态，满屏绿勾

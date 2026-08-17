@@ -1400,7 +1400,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         <div className="px-2 py-1 text-[11px] font-semibold tracking-wide text-zinc-400">
           {g.label}
         </div>
-        <div className="ml-2.5 border-l border-white/[0.07] pl-1.5">
+        <div className={g.section ? '' : 'ml-3.5 pl-1'}>
         {g.items.map((s) => {
           const active = s.sessionId === snapshot.activeSessionId && view === 'chat'
           return (
@@ -1409,16 +1409,13 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               className="group relative [content-visibility:auto] [contain-intrinsic-size:auto_34px]"
             >
               <div
-                className={`sidebar-session-row relative w-full rounded-xl border px-2.5 py-1.5 text-left ${
-                  active ? 'is-active border-transparent bg-white/[0.07] text-zinc-100' : 'border-transparent text-zinc-400'
+                className={`sidebar-session-row relative w-full rounded-md border px-2 py-1 text-left ${
+                  active ? 'is-active border-transparent bg-[#313131] text-zinc-100' : 'border-transparent text-[#c3c3c3]'
                 }`}
               >
-                {active && (
-                  <span className="session-active-bar absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-accent" />
-                )}
                 {/* 单行标题（2026-08 用户定稿）：一行尽量放长，时间不再占第二行，
                     收进 hover 提示（title）。 */}
-                <div className="flex items-center gap-1.5 text-xs" title={relTime(s.lastModified)}>
+                <div className="flex items-center gap-1.5 text-[13px]" title={relTime(s.lastModified)}>
                   <span className="min-w-0 flex-1 truncate">{s.summary || '(未命名)'}</span>
                   <span className={`session-runtime-badge ${snapshot.showRuntimeBadges ? 'is-visible' : ''}`}>
                     {backendLabel(s.runtimeBackend)}
@@ -1601,8 +1598,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                 项目
               </div>
             )}
-            {/* 组头（项目 / 时间段）。项目头要压过下面的会话行：文件夹图标 +
-                亮一档的字色（zinc-200，会话行是 zinc-300/400 的 13px 正文），
+            {/* 组头（项目 / 时间段）。Codex 式（2026-08-17）：只显示项目名（路径
+                末段），完整路径收进悬停提示；文件夹图标 + 亮一档字色压过会话行，
                 行尾悬停出「+」——直接在该项目下开新对话。外层用 div 不用
                 button：「+」是独立按钮，HTML 不允许按钮套按钮。 */}
             {cwdGroupHeader ? (
@@ -1610,12 +1607,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                 <button
                   type="button"
                   onClick={() => toggleGroupCollapsed(g.label)}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[11px] font-semibold tracking-wide text-zinc-200 transition hover:text-white"
+                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[13px] font-medium text-zinc-200 transition hover:text-white"
                   title={g.label}
                 >
                   <span className="text-[8px] text-zinc-500">{groupCollapsed ? '▸' : '▾'}</span>
                   <span className="shrink-0 text-zinc-400"><FolderIcon /></span>
-                  <span className="truncate">{g.label}</span>
+                  <span className="truncate">{g.label.split(/[\\/]/).pop()}</span>
                   {meta && normalizeCwdForCompare(g.label) === normalizeCwdForCompare(meta.cwd) && (
                     <span className="shrink-0 rounded bg-accent/15 px-1 font-normal text-accent">当前</span>
                   )}
@@ -1642,7 +1639,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               </div>
             )}
             {!groupCollapsed && (
-            <div className="ml-2.5 border-l border-white/[0.07] pl-1.5">
+            <div className={g.section ? '' : 'ml-3.5 pl-1'}>
             {g.items.map((item, rowIndex) => {
               const s = item.session
               const key = sessionKey(s)
@@ -1696,26 +1693,22 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                       }}
                       onPointerMove={handleSidebarPointerGlow}
                       onPointerLeave={hidePreview}
-                      className={`sidebar-session-row relative w-full rounded-xl border px-2.5 py-1.5 text-left ${
+                      className={`sidebar-session-row relative w-full rounded-md border px-2 py-1 text-left ${
                         // 标题给足宽度：不再为悬停操作组预留 pr-28（那是标题
                         // 七八个字就省略号的元凶，2026-08-17 用户反馈）。操作组
                         // 悬停浮在上方，自带深色小底板遮住下面的文字。
                         multiMode ? '' : 'pr-2'
                       } ${
                         active
-                          // 选中态减重（2026-08-14 用户：「当前会话这个框太重」）：
-                          // glass-active 会填实底色 + 画一圈亮边，改成像导航行
-                          // 那样只垫一层淡底——选中信号已有左侧紫色指示条。
-                          ? 'is-active border-transparent bg-white/[0.07] text-zinc-100'
+                          // 选中态照抄 Codex（2026-08-17 用户：「完全照抄 codex」）：
+                          // 淡灰底圆角小行，不要紫色指示条、不要框。
+                          ? 'is-active border-transparent bg-[#313131] text-zinc-100'
                           : multiMode && selectedKeys.has(key)
                             ? 'border-accent/40 bg-accent/[0.08] text-zinc-200'
-                            : 'border-transparent text-zinc-400'
+                            : 'border-transparent text-[#c3c3c3]'
                       }`}
                       disabled={exiting}
                     >
-                      {active && !multiMode && (
-                        <span className="session-active-bar absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-accent" />
-                      )}
                       <span className="flex items-start">
                         {multiMode && (
                           <span
@@ -1731,7 +1724,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                         <span className="min-w-0 flex-1">
                           {/* 单行标题：时间收进 hover 提示，不再占第二行（2026-08
                               用户定稿）；运行中圆点跟在标题后面。 */}
-                          <div className="flex items-center gap-1.5 text-xs" title={relTime(s.lastModified)}>
+                          <div className="flex items-center gap-1.5 text-[13px]" title={relTime(s.lastModified)}>
                             <span className="min-w-0 flex-1 truncate">{s.summary || '(未命名)'}</span>
                             {/* #5b：列表条目自带的 running 之外，还叠加 store 实时上报的
                                 runningSdkSessionIds（当前正在跑 turn 的会话）。

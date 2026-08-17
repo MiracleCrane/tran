@@ -148,6 +148,14 @@ function WindowTitlebar(): JSX.Element {
           </button>
         )}
       </div>
+      {/* 停靠面板图标（Git/待办/目标）并进标题栏——原先单列一行的顶栏撤销，
+          顶部两行 chrome 并成一行（2026-08-17 用户：「上面这块正文空间没用起来」）。 */}
+      <div
+        className="flex shrink-0 items-center gap-1 pr-2"
+        style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
+      >
+        <DockButtons />
+      </div>
       <div className="window-controls flex h-full shrink-0 items-stretch">
         <button
           type="button"
@@ -182,38 +190,6 @@ function WindowTitlebar(): JSX.Element {
         </button>
       </div>
     </div>
-  )
-}
-
-function ChatTopbarToggle({
-  collapsed,
-  onClick,
-  tabIndex
-}: {
-  collapsed: boolean
-  onClick: () => void
-  tabIndex?: number
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      className="chat-topbar-toggle"
-      aria-label={collapsed ? '展开 Git 和运营商顶栏' : '折叠 Git 和运营商顶栏'}
-      title={collapsed ? '展开 Git 和运营商顶栏' : '折叠 Git 和运营商顶栏'}
-      onClick={onClick}
-      tabIndex={tabIndex}
-    >
-      <svg
-        width="13"
-        height="13"
-        viewBox="0 0 24 24"
-        fill="none"
-        className="chat-topbar-toggle-chevron"
-        aria-hidden="true"
-      >
-        <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </button>
   )
 }
 
@@ -280,70 +256,6 @@ function DockButtons(): JSX.Element {
   )
 }
 
-function ChatTopbar({
-  collapsed,
-  onToggle
-}: {
-  collapsed: boolean
-  onToggle: (expandDelta?: number) => void
-}): JSX.Element {
-  const [allowOverflow, setAllowOverflow] = useState(!collapsed)
-  const shellRef = useRef<HTMLDivElement | null>(null)
-  const contentRef = useRef<HTMLDivElement | null>(null)
-  const bodyRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    if (collapsed) {
-      setAllowOverflow(false)
-      return
-    }
-
-    const timeout = window.setTimeout(() => setAllowOverflow(true), 440)
-    return () => window.clearTimeout(timeout)
-  }, [collapsed])
-
-  const measureExpandDelta = (): number => {
-    if (!collapsed) return 0
-    const shell = shellRef.current
-    const content = contentRef.current
-    const body = bodyRef.current
-    if (!shell || !content || !body) return 0
-
-    const currentHeight = Math.ceil(shell.getBoundingClientRect().height)
-    const expandedHeight = Math.ceil(
-      Math.max(content.scrollHeight, body.scrollHeight, body.getBoundingClientRect().height)
-    )
-    return Math.max(0, expandedHeight - currentHeight)
-  }
-
-  const toggle = (): void => {
-    if (!collapsed) requestCloseGitDrawer()
-    onToggle(measureExpandDelta())
-  }
-
-  return (
-    <div ref={shellRef} className={`chat-topbar-shell shrink-0 ${collapsed ? 'is-collapsed' : ''}`}>
-      <div className="chat-topbar-collapsed-handle" aria-hidden={!collapsed}>
-        <ChatTopbarToggle collapsed={collapsed} onClick={toggle} tabIndex={collapsed ? 0 : -1} />
-      </div>
-      <div
-        ref={contentRef}
-        className={`chat-topbar-content ${allowOverflow ? 'is-overflow-visible' : ''}`}
-        aria-hidden={collapsed}
-      >
-        <div ref={bodyRef} className="chat-topbar-body">
-          {/* 2026-08-17 zcode 式布局：整条 GitToolbar 收进右侧停靠面板（RightDock），
-              顶栏只剩一排停靠图标；RuntimeStatusStrip 早前已下线。 */}
-          <div className="flex items-center justify-end gap-1 px-3 py-1">
-            <DockButtons />
-            <ChatTopbarToggle collapsed={false} onClick={toggle} />
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function BlockingOverlay({ label }: { label: string }): JSX.Element {
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/72 p-6 backdrop-blur-md">
@@ -357,20 +269,16 @@ function BlockingOverlay({ label }: { label: string }): JSX.Element {
 
 function MainViewContent({
   view,
-  chatTopbarCollapsed,
   chatTopbarLayoutMotion,
   chatTopbarScrollReserve,
   chatTopbarScrollReserveVersion,
-  onTranscriptAtBottomChange,
-  onToggleChatTopbar
+  onTranscriptAtBottomChange
 }: {
   view: View
-  chatTopbarCollapsed: boolean
   chatTopbarLayoutMotion: boolean
   chatTopbarScrollReserve: number
   chatTopbarScrollReserveVersion: number
   onTranscriptAtBottomChange: (atBottom: boolean) => void
-  onToggleChatTopbar: (expandDelta?: number) => void
 }): JSX.Element {
   const lazyPanel = LAZY_PANELS[view as keyof typeof LAZY_PANELS]
   if (lazyPanel) {
@@ -386,9 +294,8 @@ function MainViewContent({
 
   return (
     <>
-      <ChatTopbar collapsed={chatTopbarCollapsed} onToggle={onToggleChatTopbar} />
-      {/* GoalCard / PlanCard 已收进右侧停靠面板（RightDock，2026-08-17 zcode 式
-          布局），不再常驻正文上方。 */}
+      {/* ChatTopbar 已撤销：停靠图标并进了窗口标题栏（2026-08-17）。GoalCard /
+          PlanCard 在右侧停靠面板（RightDock）。 */}
       <div className="relative min-h-0 flex-1 overflow-hidden" onPointerDownCapture={requestCloseGitDrawer}>
         <Transcript
           layoutTransitioning={chatTopbarLayoutMotion}
@@ -820,27 +727,23 @@ export default function App(): JSX.Element {
                 >
                   <MainViewContent
                     view={displayView}
-                    chatTopbarCollapsed={chatTopbarCollapsed}
                     chatTopbarLayoutMotion={chatTopbarLayoutMotion}
                     chatTopbarScrollReserve={chatTopbarScrollReserve}
                     chatTopbarScrollReserveVersion={chatTopbarScrollReserveVersion}
                     onTranscriptAtBottomChange={(atBottom) => {
                       transcriptAtBottomRef.current = atBottom
                     }}
-                    onToggleChatTopbar={toggleChatTopbar}
                   />
                 </div>
               ) : (
                 <MainViewContent
                   view={displayView}
-                  chatTopbarCollapsed={chatTopbarCollapsed}
                   chatTopbarLayoutMotion={chatTopbarLayoutMotion}
                   chatTopbarScrollReserve={chatTopbarScrollReserve}
                   chatTopbarScrollReserveVersion={chatTopbarScrollReserveVersion}
                   onTranscriptAtBottomChange={(atBottom) => {
                     transcriptAtBottomRef.current = atBottom
                   }}
-                  onToggleChatTopbar={toggleChatTopbar}
                 />
               )}
             </div>

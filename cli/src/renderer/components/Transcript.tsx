@@ -659,7 +659,7 @@ const ThinkingBlock = memo(function ThinkingBlock({
   return (
     // 完全裸排版（Codex 风）：无框无竖条无底，唯一的动态信号是流式时
     // 标题的紫黄流光（flow-text）。.thinking-block 类名保留给 TRANSCRIPT_BAR_SELECTOR。
-    <div className="thinking-block my-[3px] py-0.5">
+    <div className="thinking-block my-px py-0.5">
       <button
         type="button"
         aria-expanded={open}
@@ -822,6 +822,10 @@ interface ActivitySegment {
  * "区分度不够"就是这个。分段后每段带 Codex 原版小图标 + 一种淡色微光，
  * 思考段保持收敛（无图标、暗色）。
  */
+/** MCP 工具（mcp__server__tool）在折叠摘要里的统一条目：全名太长（2026-08-17
+ *  用户：「为什么这么长」），摘要么显示叶名要么大类——成组摘要里按大类收敛。 */
+const MCP_ACTIVITY_META = { label: '使用 MCP 工具', icon: 'mcp', tone: 'web' }
+
 function summarizeActivity(blocks: AssistantBlock[]): ActivitySegment[] {
   let thinking = 0
   const tools = new Map<string, number>()
@@ -834,7 +838,7 @@ function summarizeActivity(blocks: AssistantBlock[]): ActivitySegment[] {
   // 微光（用户点名），只是色调比动作段更收敛（灰紫）。
   if (thinking > 0) segments.push({ kind: 'thinking', label: '思考', count: thinking, icon: 'think', tone: 'think' })
   for (const [name, count] of tools) {
-    const meta = TOOL_ACTIVITY_META[name]
+    const meta = TOOL_ACTIVITY_META[name] ?? (name.startsWith('mcp__') ? MCP_ACTIVITY_META : undefined)
     segments.push({
       kind: 'tool',
       label: meta?.label ?? `使用了 ${name}`,
@@ -1182,16 +1186,14 @@ export default function Transcript({
    * 才折成摘要行；在上翻阅读时出现的组保持展开——布局绝不在用户脚下变化。
    * 一旦定了就不再翻转（已经折的组不因为你上翻而重新展开，反之亦然），
    * 换会话时清空（见下面 useMemo 里的 prevSessionKeyRef 分支）。
+   *
+   * 例外（2026-08-17 用户：「对话都结束了还不会把这些 bar 收起来」）：成组
+   * 被 holdLiveOpen 推迟到轮末之后，"是否在底部"的判定落在轮末瞬间——跟随
+   * 钉底时 atBottom 可能是 false（增长不补滚的中间态），整轮就此永久摊开。
+   * 所以**轮刚结束时新成的组一律折**，sticky 只约束轮次中途冒出的组。
    */
   const foldDecisionsRef = useRef(new Map<string, boolean>())
-  const foldDecisionFor = (groupKey: string): boolean => {
-    const map = foldDecisionsRef.current
-    const existing = map.get(groupKey)
-    if (existing !== undefined) return existing
-    const decision = atBottomRef.current
-    map.set(groupKey, decision)
-    return decision
-  }
+  const prevTurnRunningRef = useRef(false)
   /**
    * 历史渐进注水会往 items **头部**插入旧消息（每次 50 条）。虚拟列表默认按
    * 下标定位，头部多出 N 条 = 当前可视内容整体往下推 N 条的高度——表现就是
@@ -1204,6 +1206,16 @@ export default function Transcript({
    * 分组（toolGroup/envelopeGroup）导致的行数变化也一并算对。
    */
   const { displayRows, firstItemIndex } = useMemo(() => {
+    const turnJustEnded = prevTurnRunningRef.current && !turnRunning
+    prevTurnRunningRef.current = turnRunning
+    const foldDecisionFor = (groupKey: string): boolean => {
+      const map = foldDecisionsRef.current
+      const existing = map.get(groupKey)
+      if (existing !== undefined) return existing
+      const decision = turnJustEnded ? true : atBottomRef.current
+      map.set(groupKey, decision)
+      return decision
+    }
     const rows = buildDisplayRows(roots, foldDecisionFor, turnRunning)
     // 换会话：整表重来，基数复位，别把上个会话的偏移带过来。
     if (prevSessionKeyRef.current !== sessionKey) {
