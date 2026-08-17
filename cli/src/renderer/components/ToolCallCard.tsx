@@ -309,7 +309,7 @@ const ToolCallCard = memo(function ToolCallCard({
     // 搞 bar 试试看"）——裸排版，与思考块同款；状态靠左边圆点+图标表达，
     // 展开区用左侧发丝线引导，不再盒子里套盒子。
     <div
-      className={`tool-call-card my-px overflow-hidden ${
+      className={`tool-call-card my-0 overflow-hidden ${
         block.status === 'running' ? 'is-running' : ''
       }`}
     >

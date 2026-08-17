@@ -214,6 +214,14 @@ function createWindow(): void {
     mainWindow?.webContents.send('forge:window-maximized-changed', false)
   })
 
+  // 任务栏角标（轮末提醒）：窗口重新聚焦即清。打标在渲染层（轮结束且无焦点
+  // 时），清除放主进程——即使渲染层正忙，用户切回来图标也一定复位。
+  mainWindow.on('focus', () => {
+    if (process.platform === 'win32' && !mainWindow?.isDestroyed()) {
+      mainWindow?.setOverlayIcon(null, '')
+    }
+  })
+
   // 设置项「启动时最大化」：show 之前最大化，避免先出普通窗口再跳变。
   if (loadSettings().startMaximized) mainWindow.maximize()
 

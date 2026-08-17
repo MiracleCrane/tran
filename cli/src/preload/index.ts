@@ -64,6 +64,7 @@ const api: ForgeApi = {
   getPathForFile,
   revealInExplorer: (cwd, pathStr) => ipcRenderer.invoke('forge:revealInExplorer', cwd, pathStr),
   openImageWindow: (dataUrl, name) => ipcRenderer.invoke('forge:openImageWindow', dataUrl, name),
+  setOverlayBadge: (dataUrl, description) => ipcRenderer.invoke('forge:setOverlayBadge', dataUrl, description),
   copyImage: (src) => ipcRenderer.invoke('forge:copyImage', src),
   saveImageAs: (src, suggestedName) => ipcRenderer.invoke('forge:saveImageAs', src, suggestedName),
 

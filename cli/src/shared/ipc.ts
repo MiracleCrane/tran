@@ -791,6 +791,9 @@ export interface ForgeApi {
   revealInExplorer(cwd: string, pathStr: string): Promise<boolean>
   /** 图片附件在独立窗口中打开（不进右侧预览面板）。 */
   openImageWindow(dataUrl: string, name: string): Promise<void>
+  /** 任务栏 overlay 角标（Codex 式小标）：传 PNG dataURL 打标，null 清除。
+   *  仅 Windows 生效，其它平台主进程直接忽略。 */
+  setOverlayBadge(dataUrl: string | null, description: string): Promise<void>
   /** Copy an image to the system clipboard. `src` may be a data:/file:/http(s):
    *  URL or an absolute filesystem path (blob: URLs must be converted to data:
    *  by the renderer first). */

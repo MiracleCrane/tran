@@ -62,7 +62,9 @@ const PlanCard = memo(function PlanCard({ docked = false }: { docked?: boolean }
   const swarmTasks = useSessionStore((s) => s.swarmTasks)
   // 默认收起：待办是"想看时才看"的东西，展开着就长期占住正文顶部——一屏
   // 五六条，把真正在读的对话往下挤。标题行本身已经带了"已完成 2/5"。
-  const [collapsed, setCollapsed] = useState(true)
+  // 例外（2026-08-17）：docked（右侧停靠面板的待办页）默认展开——用户点
+  // 「待办」图标就是为了看清单，再折叠一层没道理。
+  const [collapsed, setCollapsed] = useState(!docked)
   // 陈旧文案要随时间走，但待办本身不会再变——用一个低频 tick 驱动重算。
   const [, setTick] = useState(0)
   // 自动催更：最近一次催更时刻（界面标注用）。防重复的账记在模块级

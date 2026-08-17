@@ -4,7 +4,7 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import { probeCommit } from '../utils/streamProbe'
 import type { AssistantBlock, AssistantItem, UserAttachment, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
-import MessageText, { InlineMarkdown } from './MessageText'
+import MessageText from './MessageText'
 import { ToolGlyph } from './toolIcons'
 import { showImageContextMenu } from './ImageContextMenu'
 import { formatTimeFull, formatTimeShort, messageTime } from '../utils/messageTimes'
@@ -177,6 +177,8 @@ function buildForest(items: TranscriptItem[]): ItemNode[] {
  *  单个工具调用/单个信封仍按普通消息渲染）。 */
 type DisplayRow =
   | { kind: 'item'; node: ItemNode }
+  /** 轮级折叠下的混合消息：只渲染文本块（思考/工具已收进轮级集合组）。 */
+  | { kind: 'itemText'; node: ItemNode }
   | { kind: 'toolGroup'; id: string; blocks: ToolBlock[] }
   /** B 方案：跨消息的「思考 + 工具」活动组（含思考时才用，纯工具仍走 toolGroup）。 */
   | { kind: 'activityGroup'; id: string; blocks: AssistantBlock[] }
@@ -225,7 +227,20 @@ function isHiddenEnvelope(node: ItemNode): boolean {
 
 /** 行的稳定 key（与 Virtuoso 的 computeItemKey 同一套，务必保持一致）。 */
 function rowKeyOf(row: DisplayRow): string {
-  return row.kind === 'item' ? row.node.item.id : row.id
+  return row.kind === 'item' || row.kind === 'itemText' ? row.node.item.id : row.id
+}
+
+/** 轮级折叠时混合消息的"只留文本块"过滤结果缓存：以原 item 引用为键——
+ *  流式合帧只换 streaming 消息的引用，已完成消息全程命中缓存，不破坏
+ *  AssistantMessage 的 memo。 */
+const textOnlyItemCache = new WeakMap<AssistantItem, AssistantItem>()
+function textOnlyItemOf(item: AssistantItem): AssistantItem {
+  let cached = textOnlyItemCache.get(item)
+  if (!cached) {
+    cached = { ...item, blocks: item.blocks.filter((b): b is AssistantBlock => !!b && b.kind === 'text') }
+    textOnlyItemCache.set(item, cached)
+  }
+  return cached
 }
 
 function buildDisplayRows(
@@ -234,39 +249,10 @@ function buildDisplayRows(
   holdLiveOpen = false
 ): DisplayRow[] {
   const rows: DisplayRow[] = []
-  let toolRun: { node: ItemNode; blocks: AssistantBlock[] }[] = []
   let envelopeRun: ItemNode[] = []
-  const flushTools = (): void => {
-    const all = toolRun.flatMap((r) => r.blocks)
-    // 聚合门槛按**块数**而不是消息数：重放历史里一条消息常常只有 1 个块，
-    // 按消息数算永远够不着 2。
-    // 2026-08 滚动稳定：折叠与否交给 shouldFold 判定（组件侧按"组创建时用户
-    // 是否在底部" sticky 记忆）——用户上翻阅读时新收尾的活动**不折叠**，
-    // 已折叠的组也不因上翻而展开，布局在阅读位置脚下绝不变。
-    if (all.length >= 2) {
-      const pureTools = all.every((b): b is ToolBlock => b.kind === 'tool')
-      if (pureTools) {
-        const key = `tool-group-${all[0].toolUseId}`
-        if (shouldFold(key)) {
-          // 纯工具组维持原有的 ToolGroupCard（带运行/错误态），不回归现有设计。
-          rows.push({ kind: 'toolGroup', id: key, blocks: all })
-        } else {
-          for (const r of toolRun) rows.push({ kind: 'item', node: r.node })
-        }
-      } else {
-        const key = `activity-group-${toolRun[0].node.item.id}`
-        if (shouldFold(key)) {
-          // 含思考的混合组：走一行规则摘要，点开还原完整渲染。
-          rows.push({ kind: 'activityGroup', id: key, blocks: all })
-        } else {
-          for (const r of toolRun) rows.push({ kind: 'item', node: r.node })
-        }
-      }
-    } else {
-      for (const r of toolRun) rows.push({ kind: 'item', node: r.node })
-    }
-    toolRun = []
-  }
+  /** 当前轮（上一条轮边界消息之后）的助手消息。 */
+  let turnNodes: ItemNode[] = []
+
   const flushEnvelopes = (): void => {
     // 连续 ≥2 个信封才折叠；单个维持单张卡。组 id 取首条 id——live 期间新到
     // 的信封进尾部已有组时组 id 不变，展开状态和位置都不闪。
@@ -286,31 +272,88 @@ function buildDisplayRows(
     }
     envelopeRun = []
   }
+
+  /** 混合消息（既有正文又有思考/工具）里的活动块。 */
+  const mixedActivityOf = (node: ItemNode): AssistantBlock[] | null => {
+    const item = node.item
+    if (item.kind !== 'assistant' || item.error || item.streaming) return null
+    if (activityBlocksOf(node)) return null // 纯活动消息不在这里
+    const acts = item.blocks.filter((b): b is AssistantBlock => !!b && (b.kind === 'tool' || b.kind === 'thinking'))
+    const hasText = item.blocks.some((b) => !!b && b.kind === 'text')
+    return acts.length > 0 && hasText ? acts : null
+  }
+
+  /**
+   * 轮级收尾（2026-08-18 用户拍板：「一整个思考块命令块执行完了就整个收起来」）：
+   * 同一轮里的**全部**思考/工具块——哪怕中间夹了解说文本——收成一条集合摘要行，
+   * 落在本轮第一个活动块的位置；解说/回答文本保持原位可见（混合消息只留文本）。
+   * 此前按「连续相邻 ≥2 块」成组，解说文本一断就再也合不上（实测：每步一句解说的
+   * 轮次结束只剩一梯子单独的小 bar）。
+   * live（本轮还在跑）消息不参与攒组：正在跑的活动必须实时可见。
+   */
+  const flushTurn = (): void => {
+    if (turnNodes.length === 0) return
+    const live = (node: ItemNode): boolean => holdLiveOpen && !node.item.isHistory
+    // 第一遍：攒活动块。
+    const groupBlocks: AssistantBlock[] = []
+    let firstActivityId: string | null = null
+    for (const node of turnNodes) {
+      if (live(node)) continue
+      const pure = activityBlocksOf(node)
+      const blocks = pure ?? mixedActivityOf(node)
+      if (blocks) {
+        if (!firstActivityId) firstActivityId = node.item.id
+        groupBlocks.push(...blocks)
+      }
+    }
+    const fold =
+      groupBlocks.length >= 2 && firstActivityId !== null && shouldFold(`turn-group-${firstActivityId}`)
+    // 第二遍：产行。折叠时组行落在第一个活动块的位置。
+    let groupInserted = false
+    for (const node of turnNodes) {
+      if (live(node)) {
+        rows.push({ kind: 'item', node })
+        continue
+      }
+      const pure = activityBlocksOf(node)
+      const mixed = pure ? null : mixedActivityOf(node)
+      if (fold && (pure || mixed)) {
+        if (!groupInserted) {
+          const id = `turn-group-${firstActivityId}`
+          const pureTools = groupBlocks.every((b): b is ToolBlock => b.kind === 'tool')
+          rows.push(
+            pureTools
+              ? { kind: 'toolGroup', id, blocks: groupBlocks as ToolBlock[] }
+              : { kind: 'activityGroup', id, blocks: groupBlocks }
+          )
+          groupInserted = true
+        }
+        // 混合消息的文本保持原位可见；纯活动消息整条进组。
+        if (mixed) rows.push({ kind: 'itemText', node })
+        continue
+      }
+      rows.push({ kind: 'item', node })
+    }
+    turnNodes = []
+  }
+
   for (const node of roots) {
-    // 噪音信封：整条丢弃，且**不打断**前后的聚合 run——它在视觉上根本不存在，
-    // 不该让一条看不见的消息把两组工具调用劈成两块。
+    // 噪音信封：整条丢弃，不打断轮（它在视觉上根本不存在）。
     if (isHiddenEnvelope(node)) continue
-    // B 方案：思考消息也进 run（原先只有 toolBlocksOf，中间夹一条思考就断开）。
-    const blocks = activityBlocksOf(node)
-    // turn 进行中：本轮的 live（非历史）活动消息不成组——「多条命令收成一行
-    // 摘要」这一层等整轮输出完再折（2026-08-14 用户澄清：单卡完成照样收起，
-    // 等的是成组这层；此前中途成组 + lastExpandableKey 收尾回指造成"折了又展开"）。
-    if (blocks && !(holdLiveOpen && !node.item.isHistory)) {
-      flushEnvelopes()
-      toolRun.push({ node, blocks })
+    if (node.item.kind === 'assistant') {
+      turnNodes.push(node)
       continue
     }
+    // 用户发言 / 压缩分隔 / 轮末改动卡 / 信封：轮边界，先把上一轮收掉。
+    flushTurn()
     if (envelopeTextOf(node) !== null) {
-      flushTools()
       envelopeRun.push(node)
       continue
     }
-    // 正常消息：两类 run 都在此断开，不跨消息合并。
-    flushTools()
     flushEnvelopes()
     rows.push({ kind: 'item', node })
   }
-  flushTools()
+  flushTurn()
   flushEnvelopes()
   return rows
 }
@@ -659,7 +702,7 @@ const ThinkingBlock = memo(function ThinkingBlock({
   return (
     // 完全裸排版（Codex 风）：无框无竖条无底，唯一的动态信号是流式时
     // 标题的紫黄流光（flow-text）。.thinking-block 类名保留给 TRANSCRIPT_BAR_SELECTOR。
-    <div className="thinking-block my-px py-0.5">
+    <div className="thinking-block my-0 py-0.5">
       <button
         type="button"
         aria-expanded={open}
@@ -720,9 +763,11 @@ const ThinkingBlock = memo(function ThinkingBlock({
             // 没有它的话，你在框里往回翻、一碰到边界就连带整个对话一起滚走。
             className="mt-1.5 max-h-[200px] overflow-auto overscroll-contain whitespace-pre-wrap pl-1.5 text-xs leading-relaxed text-zinc-500"
           >
-            {/* 流式期间纯文本（每帧重渲 markdown 不值）；收尾后轻量行内渲染
-                ——加粗/行内代码/链接可见，不开段落级排版（2026-08 用户拍板）。 */}
-            {streaming ? bodyText : <InlineMarkdown>{bodyText}</InlineMarkdown>}
+            {/* 流式期间纯文本（每帧重渲 markdown 不值）；收尾后走完整 markdown
+                渲染（代码块/列表/标题都有，2026-08-18 用户：「思考里面的渲染做多
+                一点」）——译文落地即渲染译文；翻译失败也照样渲染（bodyText 回退
+                原文），不会因为没有译文就不渲。 */}
+            {streaming ? bodyText : <MessageText>{bodyText}</MessageText>}
           </div>
         </Collapse>
       )}
@@ -894,7 +939,7 @@ const ActivityGroupRow = memo(function ActivityGroupRow({
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   return (
-    <div className="my-1">
+    <div className="my-0">
       <button
         type="button"
         aria-expanded={open}
@@ -933,7 +978,7 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
     if (open) setEverOpened(true)
   }, [open])
   return (
-    <div className="my-1">
+    <div className="my-0">
       <button
         type="button"
         aria-expanded={open}
@@ -1796,6 +1841,17 @@ export default function Transcript({
     if (row.kind === 'envelopeGroup') {
       return <EnvelopeGroupRow entries={row.entries} />
     }
+    if (row.kind === 'itemText') {
+      // 轮级折叠下的混合消息：活动块已进集合组，这里只渲染文本（过滤结果
+      // 走 WeakMap 缓存，item 引用不变就不破坏 memo）。
+      return (
+        <AssistantMessage
+          item={textOnlyItemOf(row.node.item as AssistantItem)}
+          depth={0}
+          deferHighlight={deferHighlight}
+        />
+      )
+    }
     if (row.node.item.kind === 'user')
       return (
         <UserMessage
@@ -1893,15 +1949,9 @@ export default function Transcript({
           const prevItem = prevRow && prevRow.kind === 'item' ? prevRow.node.item : null
           const curItem = row.kind === 'item' ? row.node.item : null
           const showHistoryDivider = !!prevItem?.isHistory && !!curItem && !curItem.isHistory
-          // 裸活动行（整条消息只有思考/工具块，无正文）：行距收紧（2026-08-14
-          // 用户：折叠成摘要块之前行与行间隔大）。kimi 流式常把每个工具/每段
-          // 思考拆成独立消息，每条都吃一整行 py-1.5，视觉上稀稀拉拉；收成
-          // py-0.5 后行距 ≈ 折叠后的密度。带正文的行保持原节奏。
-          const isBareActivityRow =
-            !!curItem &&
-            curItem.kind === 'assistant' &&
-            curItem.blocks.length > 0 &&
-            curItem.blocks.every((b) => !!b && (b.kind === 'tool' || b.kind === 'thinking'))
+          // 行距统一（2026-08-17 用户：「间距不固定不稳定」）：不再给裸活动行
+          // 单独开小灶（py-0.5 与 py-1.5 混排就是时松时紧的根源），一律 py-1；
+          // 卡片自身的外边距已清零，节奏全由这里一处说了算。
           // #50 顶层用户消息行打标：导航高亮按 DOM 几何定位（见 updateActiveUserNav）。
           const userMsgId =
             row.kind === 'item' && row.node.item.kind === 'user' && envelopeTextOf(row.node) === null
@@ -1910,7 +1960,7 @@ export default function Transcript({
           return (
             <div
               data-user-msg-id={userMsgId}
-              className={`mx-auto w-full max-w-5xl px-6 ${isBareActivityRow ? 'py-0.5' : 'py-1.5'} ${isNew ? 'tran-msg-enter' : ''}`}
+              className={`mx-auto w-full max-w-5xl px-6 py-1 ${isNew ? 'tran-msg-enter' : ''}`}
               style={isNew ? { animationDelay: `${Math.min(relIndex * 24, 280)}ms` } : undefined}
             >
               {showHistoryDivider && (

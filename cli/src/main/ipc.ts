@@ -1,7 +1,7 @@
 import { app, ipcMain, dialog, shell, clipboard, nativeImage, net, screen, Notification, BrowserWindow } from 'electron'
-import { readFileSync, existsSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { readFile, readdir, stat as statAsync, writeFile } from 'node:fs/promises'
-import { basename, extname, isAbsolute, resolve } from 'node:path'
+import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { AgentBridge } from './agent/AgentBridge'
@@ -675,9 +675,19 @@ export function registerIpc(
   })
 
   // 图片附件独立窗口预览（2026-08-14 用户：「不要在右边展示详情，直接打开一个
-  // 额外的窗口」）。data: URL 整页注入，沙箱窗口，无 node 权限。
+  // 额外的窗口」）。大图别走 data: URL 整页注入——base64 过长 loadURL 直接拒载
+  // （2026-08-17 实测"预览加载不出来"）。落成临时文件再 loadFile；窗口关闭即删。
   ipcMain.handle('forge:openImageWindow', async (_e, dataUrl: unknown, name: unknown): Promise<void> => {
     if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return
+    const m = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/s)
+    if (!m) return
+    const ext = (m[1].split('/')[1] ?? 'png').replace(/[^a-z0-9]/gi, '') || 'png'
+    const buf = Buffer.from(m[2], 'base64')
+    if (!buf.length) return
+    const dir = join(app.getPath('temp'), 'tran-img-preview')
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`)
+    writeFileSync(file, buf)
     const title = typeof name === 'string' && name.trim() ? name.trim() : '图片预览'
     const win = new BrowserWindow({
       width: 960,
@@ -689,9 +699,24 @@ export function registerIpc(
       backgroundColor: '#0b0c10',
       webPreferences: { sandbox: true }
     })
-    const safeTitle = title.replace(/[<>&"]/g, '')
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${safeTitle}</title><style>html,body{margin:0;height:100%;background:#0b0c10;display:flex;align-items:center;justify-content:center;overflow:auto}img{max-width:100%;max-height:100%;object-fit:contain}</style></head><body><img src="${dataUrl}" alt=""></body></html>`
-    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+    win.on('closed', () => {
+      try { unlinkSync(file) } catch { /* 尽力删 */ }
+    })
+    await win.loadFile(file)
+  })
+
+  // 任务栏 overlay 角标（2026-08-18 用户：「每轮回答完像 Codex 一样有个小标」）。
+  // 渲染层在轮结束且窗口无焦点时用 canvas 画好数字徽章（PNG dataURL）传上来；
+  // 窗口重新聚焦即清（index.ts 的 focus 监听）。setOverlayIcon 仅 Windows 支持。
+  ipcMain.handle('forge:setOverlayBadge', (_e, dataUrl: unknown, description: unknown) => {
+    if (process.platform !== 'win32') return
+    withWindow((win) => {
+      if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/png')) {
+        win.setOverlayIcon(nativeImage.createFromDataURL(dataUrl), typeof description === 'string' ? description : '')
+      } else {
+        win.setOverlayIcon(null, '')
+      }
+    })
   })
 
   // --- 图片右键菜单（#22）：复制到剪贴板 / 另存为。src 支持 data:/file:/http(s):

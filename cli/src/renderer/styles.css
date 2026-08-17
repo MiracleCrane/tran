@@ -2611,6 +2611,24 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   margin: 0.8em 0;
 }
 
+/* 思考体内的 markdown（2026-08-18 用户：「思考里面的渲染做多一点，代码块要能
+   渲染」——收尾后走完整 MessageText）。整体比正文暗一档、字号跟随思考体；
+   代码块内边距收紧一档，避免在 200px 高的滚动框里太占地。 */
+.thinking-block .prose-forge {
+  color: #8b8b93;
+  font-size: 12px;
+}
+.thinking-block .prose-forge pre {
+  padding: 8px 10px;
+  margin: 0.4em 0;
+}
+.thinking-block .prose-forge pre code {
+  font-size: 11.5px;
+}
+.thinking-block .prose-forge p {
+  margin: 0.45em 0;
+}
+
 /* ── Streaming text gradient / bloom effects ─────────────────────── */
 
 /** Applied only to the newly appended text tail. Previously the animation lived

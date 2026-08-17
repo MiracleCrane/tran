@@ -37,7 +37,7 @@ const ToolGroupCard = memo(function ToolGroupCard({
     // 2026-08：组卡也裸掉（与单行工具/思考块同一语言）——框没有信息量，
     // 展开箭头也于 1.1.9 全删；运行中留一丝紫底信号。
     <div
-      className={`tool-call-card my-px overflow-hidden ${running ? 'is-running' : ''}`}
+      className={`tool-call-card my-0 overflow-hidden ${running ? 'is-running' : ''}`}
     >
       <button
         type="button"

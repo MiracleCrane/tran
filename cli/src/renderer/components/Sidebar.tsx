@@ -79,6 +79,9 @@ function SessionPreviewCard({
     }
   }, [])
   if (!preview) return null
+  // Codex 式预览卡（2026-08-17 用户给的参照图）：标题 + 时间一行，文件夹
+  // 图标 + 项目名（路径末段）一行，首条消息摘要垫底。
+  const projectName = preview.cwd ? preview.cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : null
   return createPortal(
     <div
       className="glass-panel tran-enter fixed z-[90] w-64 rounded-2xl p-3 shadow-2xl"
@@ -86,16 +89,21 @@ function SessionPreviewCard({
       onPointerEnter={onHoldOpen}
       onPointerLeave={onClose}
     >
-      <div className="truncate text-xs font-medium text-zinc-100">{preview.summary}</div>
-      {preview.firstPrompt && (
-        <div className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-zinc-400">
-          {preview.firstPrompt}
+      <div className="flex items-baseline gap-2">
+        <div className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-100">{preview.summary}</div>
+        <div className="shrink-0 text-[10px] text-zinc-600">{relTime(preview.lastModified)}</div>
+      </div>
+      {projectName && (
+        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400" title={preview.cwd}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" className="shrink-0 text-zinc-500" aria-hidden>
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+          </svg>
+          <span className="truncate">{projectName}</span>
         </div>
       )}
-      <div className="mt-1.5 text-[10px] text-zinc-600">{relTime(preview.lastModified)}</div>
-      {preview.cwd && (
-        <div className="mt-0.5 truncate font-mono text-[10px] text-zinc-600" title={preview.cwd}>
-          {preview.cwd}
+      {preview.firstPrompt && (
+        <div className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-zinc-500">
+          {preview.firstPrompt}
         </div>
       )}
     </div>,
@@ -220,7 +228,7 @@ const SearchIcon = (): JSX.Element => (
   </svg>
 )
 const FolderIcon = (): JSX.Element => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
     <path
       d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"
       stroke="currentColor"
@@ -1397,10 +1405,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     snapshot.groups.map((g) => (
       <div key={g.label} className="mb-2">
         {/* 组头/缩进与实时列表保持一致，否则过渡快照一换就整体位移。 */}
-        <div className="px-2 py-1 text-[11px] font-semibold tracking-wide text-zinc-400">
+        <div className="px-2 py-1 text-[11px] font-medium text-zinc-500">
           {g.label}
         </div>
-        <div className={g.section ? '' : 'ml-3.5 pl-1'}>
+        <div className={g.section ? '' : 'ml-[31px]'}>
         {g.items.map((s) => {
           const active = s.sessionId === snapshot.activeSessionId && view === 'chat'
           return (
@@ -1415,7 +1423,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               >
                 {/* 单行标题（2026-08 用户定稿）：一行尽量放长，时间不再占第二行，
                     收进 hover 提示（title）。 */}
-                <div className="flex items-center gap-1.5 text-[13px]" title={relTime(s.lastModified)}>
+                <div className="flex items-center gap-1.5 text-sm" title={relTime(s.lastModified)}>
                   <span className="min-w-0 flex-1 truncate">{s.summary || '(未命名)'}</span>
                   <span className={`session-runtime-badge ${snapshot.showRuntimeBadges ? 'is-visible' : ''}`}>
                     {backendLabel(s.runtimeBackend)}
@@ -1478,7 +1486,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
 
       {/* session list label */}
       <div className="flex items-center justify-between px-4 py-0.5">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500/80">
+        <span className="text-[11px] font-medium text-zinc-500">
           会话
         </span>
         <span className="flex items-center gap-1">
@@ -1582,11 +1590,11 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
           // 其余情况用纯文本组头。
           const cwdGroupHeader = !g.section && sessionScope === 'all' && groupMode === 'project'
           const groupCollapsed = cwdGroupHeader && collapsedGroupLabels.has(g.label)
-          // Codex 式段标题：第一个项目组前面立一块「项目」分隔（置顶/最近的
-          // 段名就是组名，项目段的组名是各自路径，需要一个总标题）。
+          // Codex 式段标题：第一个项目组前面立一块「项目」分隔（2026-08-18
+          // 用户：「项目置顶最近这几个字得有啊」——原先还要求置顶/最近段存在
+          // 才显示，全是项目的列表就一个段标都没有）。
           const firstCwdIndex = groups.findIndex((x) => !x.section)
-          const showProjectDivider =
-            cwdGroupHeader && groupIndex === firstCwdIndex && groups.some((x) => x.section)
+          const showProjectDivider = cwdGroupHeader && groupIndex === firstCwdIndex
           return (
           <div
             key={g.label}
@@ -1594,7 +1602,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             style={{ '--session-grow-delay': `${Math.min(groupIndex * 28, 120)}ms` } as CSSProperties}
           >
             {showProjectDivider && (
-              <div className="mb-0.5 mt-1 px-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500/80">
+              <div className="mb-0.5 mt-1 px-2 text-[11px] font-medium text-zinc-500">
                 项目
               </div>
             )}
@@ -1607,11 +1615,11 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                 <button
                   type="button"
                   onClick={() => toggleGroupCollapsed(g.label)}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[13px] font-medium text-zinc-200 transition hover:text-white"
+                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm font-medium text-zinc-200 transition hover:text-white"
                   title={g.label}
                 >
                   <span className="text-[8px] text-zinc-500">{groupCollapsed ? '▸' : '▾'}</span>
-                  <span className="shrink-0 text-zinc-400"><FolderIcon /></span>
+                  <span className="shrink-0 text-zinc-300"><FolderIcon /></span>
                   <span className="truncate">{g.label.split(/[\\/]/).pop()}</span>
                   {meta && normalizeCwdForCompare(g.label) === normalizeCwdForCompare(meta.cwd) && (
                     <span className="shrink-0 rounded bg-accent/15 px-1 font-normal text-accent">当前</span>
@@ -1633,13 +1641,16 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                 <span className="shrink-0 text-[11px] font-normal text-zinc-500">{g.items.length}</span>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-semibold tracking-wide text-zinc-400">
+              <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium text-zinc-500">
                 <span className="truncate">{g.label}</span>
                 <span className="ml-auto shrink-0 font-normal text-zinc-500">{g.items.length}</span>
               </div>
             )}
             {!groupCollapsed && (
-            <div className={g.section ? '' : 'ml-3.5 pl-1'}>
+            // Codex 对齐（2026-08-18 像素实测）：项目下的会话行文字与项目名
+            // 左边对齐——实测项目名文字 x=52、会话行自带 px-2，容器再让 31px
+            // 时两边重合。图标/间距改了这里要跟着改。
+            <div className={g.section ? '' : 'ml-[31px]'}>
             {g.items.map((item, rowIndex) => {
               const s = item.session
               const key = sessionKey(s)
@@ -1724,7 +1735,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                         <span className="min-w-0 flex-1">
                           {/* 单行标题：时间收进 hover 提示，不再占第二行（2026-08
                               用户定稿）；运行中圆点跟在标题后面。 */}
-                          <div className="flex items-center gap-1.5 text-[13px]" title={relTime(s.lastModified)}>
+                          <div className="flex items-center gap-1.5 text-sm" title={relTime(s.lastModified)}>
                             <span className="min-w-0 flex-1 truncate">{s.summary || '(未命名)'}</span>
                             {/* #5b：列表条目自带的 running 之外，还叠加 store 实时上报的
                                 runningSdkSessionIds（当前正在跑 turn 的会话）。

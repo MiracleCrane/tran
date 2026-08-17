@@ -16,6 +16,7 @@ import AttachmentPreviewPane from './components/AttachmentPreviewPane'
 import SessionSearchPalette from './components/SessionSearchPalette'
 import PermissionModal from './components/PermissionModal'
 import ImageContextMenuHost from './components/ImageContextMenu'
+import TooltipHost from './components/TooltipHost'
 /**
  * 全屏工具面板一律懒加载：它们只有点进去才用得上，却占了首屏 bundle 相当一块
  * （设置页一个就一千多行）。聊天主链路的组件保持静态导入——那些是首屏就要画的。
@@ -49,6 +50,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import ClosePromptDialog from './components/ClosePromptDialog'
 import UpdateAvailableDialog from './components/UpdateAvailableDialog'
 import { useApplyAppearanceSettings } from './store/appearanceStore'
+import { useTaskbarBadge } from './hooks/useTaskbarBadge'
 import { AppLogo } from './components/AppLogo'
 import { pushAgentEvent, flushAgentEvents } from './store/streamBatcher'
 import type { Provider, UpdateCheckResult } from '../shared/ipc'
@@ -116,6 +118,10 @@ function WindowTitlebar(): JSX.Element {
   const [maximized, setMaximized] = useState(false)
   const sidebarHidden = useUiStore((s) => s.sidebarHidden)
   const toggleSidebarHidden = useUiStore((s) => s.toggleSidebarHidden)
+  const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
+  // 当前项目名（路径末段）显示在标题栏左侧——「这个会话属于哪个项目」一眼可见
+  //（2026-08-17 用户要求；zcode 顶栏的项目 chip 同款位置）。
+  const projectName = cwd ? cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : null
   useEffect(() => {
     let alive = true
     void window.api.isWindowMaximized().then((v) => {
@@ -146,6 +152,18 @@ function WindowTitlebar(): JSX.Element {
               <path d="M9.5 4v16" stroke="currentColor" strokeWidth="1.7" />
             </svg>
           </button>
+        )}
+        {projectName && (
+          <span
+            className="flex items-center gap-1.5 text-[11px] text-zinc-500"
+            title={cwd}
+            style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+            </svg>
+            {projectName}
+          </span>
         )}
       </div>
       {/* 停靠面板图标（Git/待办/目标）并进标题栏——原先单列一行的顶栏撤销，
@@ -281,6 +299,7 @@ function MainViewContent({
   onTranscriptAtBottomChange: (atBottom: boolean) => void
 }): JSX.Element {
   const lazyPanel = LAZY_PANELS[view as keyof typeof LAZY_PANELS]
+  const rightDock = useUiStore((s) => s.rightDock)
   if (lazyPanel) {
     const Panel = lazyPanel
     return (
@@ -299,12 +318,20 @@ function MainViewContent({
       <div
         className="relative min-h-0 flex-1 overflow-hidden"
         onPointerDownCapture={(event) => {
-          // dock 里的点击不算"点正文"：不然在停靠面板里点「改动」抽屉刚开就被
-          // 这个 capture 秒关（2026-08-17 用户：「diff 页面点不开了」）。
-          if ((event.target as HTMLElement).closest?.('.right-dock-root')) return
+          // dock / 抽屉里的点击不算"点正文"：不然在停靠面板里点「改动」抽屉刚开
+          // 就被这个 capture 秒关（2026-08-17 用户：「diff 页面点不开了」）。
+          if ((event.target as HTMLElement).closest?.('.right-dock-root, .git-drawer-host')) return
           requestCloseGitDrawer()
         }}
       >
+        {/* dock 模式下 GitToolbar 抽屉的 portal 宿主：抽屉回到正文上方整宽展开
+            （2026-08-18 用户：「diff 搞这么小谁能看清，还是在上面展开」）。
+            右侧给开着的 dock 让位；宿主本身不吃点击，由抽屉自己开关。 */}
+        <div
+          id="git-drawer-host"
+          className="git-drawer-host pointer-events-none absolute left-0 top-0 z-40 transition-[right] duration-300"
+          style={{ right: rightDock ? 'min(360px, 88vw)' : 0 }}
+        />
         <Transcript
           layoutTransitioning={chatTopbarLayoutMotion}
           bottomReserve={chatTopbarScrollReserve}
@@ -325,6 +352,7 @@ function MainViewContent({
 
 export default function App(): JSX.Element {
   useApplyAppearanceSettings()
+  useTaskbarBadge()
 
   const meta = useSessionStore((s) => s.meta)
   const bootstrapped = useSessionStore((s) => s.bootstrapped)
@@ -761,6 +789,7 @@ export default function App(): JSX.Element {
           </div>
           <PermissionModal />
           <ImageContextMenuHost />
+          <TooltipHost />
           <SessionSearchPalette />
           <ClosePromptDialog open={closePromptOpen} onClose={() => setClosePromptOpen(false)} />
           <UpdateAvailableDialog

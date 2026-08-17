@@ -273,7 +273,11 @@ async function cheapCompleteOnce(
    * 同一域名后面挂什么模型取决于接入点，逐个判断迟早漏。
    */
   const knownAcceptsThinkingField =
-    /^https:\/\/api\.deepseek\.com(?:\/|$)/i.test(baseUrl) || /(?:^|\.)volces\.com/i.test(baseUrl)
+    /^https:\/\/api\.deepseek\.com(?:\/|$)/i.test(baseUrl) ||
+    /(?:^|\.)volces\.com/i.test(baseUrl) ||
+    // 智谱（GLM-4.7-Flash 这类混合思考模型）：不关思考的话 12 字摘要也要先推理
+    // 几秒（2026-08-17 用户实测"智谱那条慢得像卡住"）。
+    /(?:^|\.)bigmodel\.cn/i.test(baseUrl)
   const disableThinking = loadSettings().summaryThinkingEnabled !== true && knownAcceptsThinkingField
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {

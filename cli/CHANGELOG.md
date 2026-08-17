@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.1.18 - 2026-08-17
+
+### 中文
+
+- 优化:**整轮活动轮末一次收齐**——同一轮的思考/命令（哪怕中间夹解说文字）收成一条集合摘要行,解说与回答原文保留原位;此前按「连续相邻≥2块」聚合,解说一断就只剩一梯子单独的小 bar。
+- 优化:**思考体完整 markdown 渲染**——代码块（带语法高亮）/列表/标题都渲（块收尾后;流式期间保持纯文本）,译文落地即渲译文,翻译失败回退原文也照渲。
+- 优化:**侧栏段标与缩进对齐 Codex**——「项目」段标常显（修复全是项目时一个段标都没有）;项目内会话行文字与项目名左边严格对齐（像素级实测）;置顶/最近段标样式统一,会话行字号统一 14px。
+- 优化:**Git 抽屉回到正文上方整宽展开**——dock 只留按钮行,改动/提交/日志等抽屉在正文顶部整宽打开（360px 的 dock 里 diff 没法看）;待办/目标保持 dock 现状。
+- 新增:**任务栏完成角标**（Codex 同款）——一轮答完且窗口不在前台时,任务栏图标右上角出数字小标并累加,切回前台自动消除（仅 Windows）。
+- 修复:**图片预览加载不出来**——大图 data: URL 过长被 loadURL 拒载,改落临时文件再 loadFile,窗口关闭即删。
+- 修复:**活动行间距时松时紧**——裸活动行 py-0.5/py-1.5 混排是根因,统一 py-1、卡片外边距 my-0,节奏全列表一致。
+- 优化:翻译通道统一走「摘要/命名 API」;思考翻译只翻手动展开或整轮最终块（治一轮 N 段的翻译洪峰）;摘要 API 连续失败上报运行状态条;智谱 bigmodel.cn 入关思考白名单。
+- 优化:悬停提示统一为应用内样式（不再是浏览器默认 tooltip）;待办点开自动展开;会话预览卡改 Codex 式（标题+时间/项目名/首条摘要）。
+
+### English
+
+- Whole-turn fold: all thinking/tool activity of a turn collapses into one summary row at turn end, even when narration text sits in between; narration and the final answer stay in place.
+- Thinking bodies now render full markdown once finished (fenced code blocks with syntax highlighting, lists, headings); translations render when ready, and the original renders as-is if translation fails.
+- Sidebar matches Codex: the「项目」section label always shows, session rows align exactly with the project name, section labels and 14px row font unified.
+- Git drawers (changes/commit/log/...) open full-width at the top of the content area again instead of being squeezed into the 360px dock; todos/goals stay docked.
+- New: Codex-style taskbar badge — a count chip appears on the taskbar icon when a turn finishes while the window is unfocused; cleared on focus (Windows only).
+- Fixed image preview not loading (large data: URLs were rejected by loadURL; now written to a temp file and loaded via loadFile).
+- Fixed inconsistent activity-row spacing (mixed py-0.5/py-1.5 rhythms unified to py-1/my-0).
+- Translation all goes through the summary/naming API channel; thinking translation only fires on manual expand or the final block of a turn; repeated summary-API failures surface in the runtime status strip.
+- Hover tooltips use in-app styling; the todo panel auto-expands; session preview cards redesigned Codex-style.
+
 ## v1.1.17 - 2026-08-17
 
 ### 中文
