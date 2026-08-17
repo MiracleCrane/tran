@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.17 - 2026-08-17
+
+### 中文
+
+- 修复:**侧栏与正文交界线彻底消除**——真身是 glow-off 模式给侧栏和主区各套的 inset 1px 亮环,合体模式下整圈摘掉（像素级验证:#202020 直连 #181818）。
+- 修复:**停靠面板里改动抽屉点不开**——面板挂在"点一下就关抽屉"的全局手势容器里,抽屉刚开就被秒关;面板内点击不再触发该手势。
+- 优化:停靠面板左侧改圆角。
+
+### English
+
+- Junction line between sidebar and content finally gone (the inset 1px rings on both surfaces removed in merged mode; pixel-verified).
+- Fixed the git drawer being instantly closed when clicked inside the dock panel.
+- Dock panel corners rounded.
+
 ## v1.1.16 - 2026-08-17
 
 ### 中文

@@ -429,10 +429,13 @@ textarea:focus-visible {
   }
 
   /* 主列自己留出呼吸位；原先靠 workspace-shell 的 p-4 统一给，现在侧栏要贴边，
-     只能由主列单独承担。左侧不留——那正是与侧栏相接的一侧，留了就又出现缝。 */
+     只能由主列单独承担。左侧不留——那正是与侧栏相接的一侧，留了就又出现缝。
+     2026-08-17：主区的整圈 border 也去掉——它的左缘就是交界处那条线的真身
+     （侧栏 border 删了之后线还在，查出来是 main-surface 的 1px border）。 */
   .app-shell-merged .workspace-shell > .main-surface {
     margin-left: 0;
     border-radius: 0;
+    border: none;
   }
 
   /* 侧栏贴满左侧与顶部：去掉圆角和外边框。2026-08-17 用户：与主区相接的分隔线
@@ -3759,4 +3762,12 @@ div:has(textarea:focus) .composer-shortcut-hint {
   width: 0.95em;
   height: 0.95em;
   flex-shrink: 0;
+}
+
+/* 交界线最终版（2026-08-17）：glow-off 给 .glass-sidebar/.main-surface 都套了
+   inset 1px 亮环（!important），侧栏右缘 + 主区左缘两条拼成交界那条竖线。
+   合体模式下两个元素整圈摘掉。源码序在最后 + 更高特异度，压得住 !important。 */
+:root[data-glass-glow='off'] .app-shell-merged .glass-sidebar,
+:root[data-glass-glow='off'] .app-shell-merged .main-surface {
+  box-shadow: none !important;
 }

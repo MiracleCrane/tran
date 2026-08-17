@@ -27,12 +27,13 @@ export default function RightDock(): JSX.Element | null {
   const title = dock === 'git' ? 'Git 工具' : dock === 'plan' ? '待办' : '目标'
   return (
     <div
-      className={`absolute inset-y-0 right-0 z-30 w-[360px] max-w-[88vw] transition-transform duration-300 ease-spring ${
+      className={`right-dock-root absolute inset-y-0 right-0 z-30 w-[360px] max-w-[88vw] transition-transform duration-300 ease-spring ${
         open ? 'translate-x-0' : 'pointer-events-none translate-x-full'
       }`}
       aria-hidden={!open}
     >
-      <div className="flex h-full flex-col border-l border-white/[0.07] bg-[#0d0e13]/[0.97] shadow-[-18px_0_44px_rgba(0,0,0,0.35)]">
+      {/* 圆角（2026-08-17 用户：尖角框不行）+ overflow-hidden 裁掉内容出界。 */}
+      <div className="flex h-full flex-col overflow-hidden rounded-l-2xl border-l border-white/[0.07] bg-[#0d0e13]/[0.97] shadow-[-18px_0_44px_rgba(0,0,0,0.35)]">
         <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-2">
           <span className="flex-1 text-xs font-medium text-zinc-300">{title}</span>
           <button

@@ -296,7 +296,15 @@ function MainViewContent({
     <>
       {/* ChatTopbar 已撤销：停靠图标并进了窗口标题栏（2026-08-17）。GoalCard /
           PlanCard 在右侧停靠面板（RightDock）。 */}
-      <div className="relative min-h-0 flex-1 overflow-hidden" onPointerDownCapture={requestCloseGitDrawer}>
+      <div
+        className="relative min-h-0 flex-1 overflow-hidden"
+        onPointerDownCapture={(event) => {
+          // dock 里的点击不算"点正文"：不然在停靠面板里点「改动」抽屉刚开就被
+          // 这个 capture 秒关（2026-08-17 用户：「diff 页面点不开了」）。
+          if ((event.target as HTMLElement).closest?.('.right-dock-root')) return
+          requestCloseGitDrawer()
+        }}
+      >
         <Transcript
           layoutTransitioning={chatTopbarLayoutMotion}
           bottomReserve={chatTopbarScrollReserve}
