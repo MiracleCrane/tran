@@ -789,6 +789,8 @@ export interface ForgeApi {
   getPathForFile(file: File): string
   /** Reveal a file (path resolved against cwd) in the OS file manager. */
   revealInExplorer(cwd: string, pathStr: string): Promise<boolean>
+  /** 图片附件在独立窗口中打开（不进右侧预览面板）。 */
+  openImageWindow(dataUrl: string, name: string): Promise<void>
   /** Copy an image to the system clipboard. `src` may be a data:/file:/http(s):
    *  URL or an absolute filesystem path (blob: URLs must be converted to data:
    *  by the renderer first). */

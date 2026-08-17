@@ -55,6 +55,10 @@ interface UiStore {
   /** 用量预览卡钉住开关（UsageRings；/usage 命令或点击圆环钉住，点别处关闭）。 */
   usageOpen: boolean
   setUsageOpen: (open: boolean) => void
+  /** 右侧停靠面板（2026-08-17 zcode 式布局）：Git 工具 / 待办 / 目标 从右缘滑出，
+   *  不再常驻正文上方。null = 收起。面板常驻挂载（隐藏仅位移），内部组件状态不掉。 */
+  rightDock: 'git' | 'plan' | 'goal' | null
+  setRightDock: (dock: 'git' | 'plan' | 'goal' | null) => void
 }
 
 function overlayId(): string {
@@ -128,7 +132,15 @@ export const useUiStore = create<UiStore>((set) => ({
   navCollapsed: true,
   toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
   attachmentPreview: null,
-  openAttachmentPreview: (attachment) => set({ attachmentPreview: { ...attachment } }),
+  openAttachmentPreview: (attachment) => {
+    // 图片不走右侧详情面板：直接开一个独立窗口（2026-08-14 用户要求）。
+    // 文本/目录预览仍走面板。
+    if (attachment.kind === 'image' && attachment.dataUrl) {
+      void window.api.openImageWindow(attachment.dataUrl, attachment.name)
+      return
+    }
+    set({ attachmentPreview: { ...attachment } })
+  },
   closeAttachmentPreview: () => set({ attachmentPreview: null }),
   blockingOverlay: null,
   showBlockingOverlay: (label = '正在等待资源管理器响应...') => {
@@ -139,5 +151,7 @@ export const useUiStore = create<UiStore>((set) => ({
   hideBlockingOverlay: (id) =>
     set((s) => (s.blockingOverlay?.id === id ? { blockingOverlay: null } : {})),
   usageOpen: false,
-  setUsageOpen: (open) => set({ usageOpen: open })
+  setUsageOpen: (open) => set({ usageOpen: open }),
+  rightDock: null,
+  setRightDock: (dock) => set({ rightDock: dock })
 }))

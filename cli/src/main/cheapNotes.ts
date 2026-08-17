@@ -5,9 +5,6 @@ import { readJsonSafe, writeFileAtomic } from './atomicWrite'
 import { log } from './logger'
 import { cheapSummarize, cheapComplete } from './cheapModel'
 import { loadSettings } from './settings'
-import { getBaiduCreds, resolveThinkingTranslateEngine } from './translateConfig'
-import { baiduTripped, translateLongTextViaBaidu } from './baidu'
-import { getApiKey } from './settings'
 
 /**
  * 总结类杂活的第二、第三项：**命令一句话说明**与**思考块摘要**。
@@ -246,13 +243,9 @@ async function summarizeRaw(prompt: string): Promise<string | null> {
  * - 展开后 → 全文翻译（真要读的时候）
  * 两者都缓存，键不同。
  *
- * 通道统一由「翻译」面板的引擎设置决定（translateEngine，2026-08 整合——
- * 此前思考翻译在「系统」页另有一个开关，和翻译面板重复了）：
- * - baidu：百度机翻，认证后 100 万字符/月免费，质量"能看懂"级；
- *   走 translateLongTextViaBaidu 按行切块保格式。没配百度密钥 → null。
- * - llm：摘要旁路那把 key 的 DeepSeek，质量更好、按量计费（实测一个月十几块）。
- * 两边都不可用就是 null——没有也不该有"拿主 agent 额度兜底"这一层（2026-08
- * 用户明确要求：翻不了就显示原文，界面给一句轻提示）。
+ * 通道（2026-08-14 用户定稿）：与命名/摘要/命令说明共用同一条「摘要 / 命名 API」
+ * 通道，不再有百度/运营商引擎之分。没配 key 就是 null——没有也不该有"拿主 agent
+ * 额度兜底"这一层（翻不了就显示原文，界面给一句轻提示）。
  */
 export async function translateThinking(text: string): Promise<string | null> {
   if (!notesEnabled()) return null
@@ -266,17 +259,9 @@ export async function translateThinking(text: string): Promise<string | null> {
   const pending = inflight.get(key)
   if (pending) return pending
 
-  // 思考翻译有自己的引擎开关（与技能描述翻译分离，见 shared/ipc 的
-  // ThinkingTranslateEngine 注释）。'auto' 在这里已被解析成具体通道。
-  // 百度被熔断（欠费/未授权，见 baidu.ts）时自动落到 LLM 通道——配了摘要
-  // key 的用户不该因为百度欠费就整个失去翻译，那正是 2026-08 刷屏事故的形态。
-  let engine = resolveThinkingTranslateEngine()
-  if (engine === 'baidu' && baiduTripped() && getApiKey()) engine = 'llm'
-  const run = (
-    engine === 'baidu'
-      ? translateViaBaiduEngine(input)
-      : summarizeRaw(buildTranslatePrompt(input))
-  )
+  // 通道统一（2026-08-14 用户定稿）：翻译/命名/摘要全部走「摘要 / 命名 API」
+  // 一条通道，不再有百度/运营商之分。没配 key → null（界面显示原文 + 轻提示）。
+  const run = summarizeRaw(buildTranslatePrompt(input))
     .then((result) => {
       const value = result?.trim() ?? ''
       // 判废也存空串：同一段思考每次展开都重打一发不划算。
@@ -285,7 +270,7 @@ export async function translateThinking(text: string): Promise<string | null> {
       return value || null
     })
     .catch((error) => {
-      log('cheap-notes', `思考翻译失败(${engine}): ${error instanceof Error ? error.message : String(error)}`)
+      log('cheap-notes', `思考翻译失败: ${error instanceof Error ? error.message : String(error)}`)
       return null
     })
     .finally(() => {
@@ -308,16 +293,6 @@ function buildTranslatePrompt(input: string): string {
     '原文：',
     input
   ].join('\n')
-}
-
-/** 百度机翻通道：没配密钥就回 null（调用方显示原文 + 轻提示）。 */
-async function translateViaBaiduEngine(input: string): Promise<string | null> {
-  const creds = getBaiduCreds()
-  if (!creds) {
-    log('cheap-notes', '思考翻译走百度但未配置百度密钥（设置 → 翻译），显示原文')
-    return null
-  }
-  return translateLongTextViaBaidu(input, creds.appId, creds.secretKey)
 }
 
 /** 一段思考在做什么。折叠态用它替掉"正文前 60 字截断"。 */

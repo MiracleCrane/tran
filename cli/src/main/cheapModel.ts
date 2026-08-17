@@ -131,7 +131,7 @@ function isRateLimited(status: number | undefined, detail: string): boolean {
  * 故障，静默下去的表现是"功能悄悄不工作了"，用户完全无从察觉——2026-08 用户
  * 明确要求"没额度了要提示"。限流不算：它会自愈，退避重试兜得住。
  */
-export type SummaryIssueKind = 'quota' | 'auth'
+export type SummaryIssueKind = 'quota' | 'auth' | 'network'
 
 export function classifySummaryIssue(
   status: number | undefined,
@@ -167,6 +167,21 @@ function reportIssue(status: number | undefined, detail: string): void {
   lastIssueNotifiedAt.set(kind, now)
   log('cheap-model', `摘要 API 故障[${kind}]：${detail.slice(0, 160)}`)
   issueListener?.(kind, detail.slice(0, 200))
+}
+
+/** 连续网络失败计数（超时/断连，无 HTTP 状态码）。名义上"会自愈"所以不在
+ *  classifySummaryIssue 里，但一挂一下午的表现就是「AI 命名/翻译悄悄不工作」
+ *  （2026-08-14 用户实测：火山端点连不上，命名全部静默回退）。连满阈值才报，
+ *  成功一次清零。 */
+const NETWORK_FAILURE_THRESHOLD = 3
+let consecutiveNetFailures = 0
+
+function reportNetworkIssue(detail: string): void {
+  const now = Date.now()
+  if (now - (lastIssueNotifiedAt.get('network') ?? 0) < ISSUE_NOTIFY_INTERVAL_MS) return
+  lastIssueNotifiedAt.set('network', now)
+  log('cheap-model', `摘要 API 连续 ${consecutiveNetFailures} 次网络失败：${detail.slice(0, 160)}`)
+  issueListener?.('network', detail.slice(0, 200))
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
@@ -217,6 +232,13 @@ export async function cheapComplete(opts: CheapCallOptions): Promise<CheapCallRe
   }
   // 额度耗尽/凭证失效这类不会自愈的故障要浮到界面上，否则功能只是"悄悄不工作"。
   if (!result.ok) reportIssue(result.status, result.error)
+  // 网络层失败（超时/断连，无状态码）：连续满阈值也报一次（见 reportNetworkIssue）。
+  if (result.ok) {
+    consecutiveNetFailures = 0
+  } else if (result.status === undefined) {
+    consecutiveNetFailures += 1
+    if (consecutiveNetFailures >= NETWORK_FAILURE_THRESHOLD) reportNetworkIssue(result.error)
+  }
   return result
 }
 

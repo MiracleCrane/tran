@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.1.14 - 2026-08-17
+
+### 中文
+
+- 新增:**右侧停靠面板（zcode/Codex 式布局）**——Git 工具、待办、目标收进右缘滑出的面板,顶栏收成右上角一排图标（有待办未完/目标进行中带紫点）。GoalCard 与待办卡不再常驻正文上方,正文独占全高。改动胶囊的「审核」自动打开 Git 页。
+- 优化:本轮计时悬浮在**对话区左下角**（输出的左缘）,不占纵向空间,数字流光 + Bahnschrift。
+- 优化:**翻译/命名/摘要通道统一**——全部只走「摘要 / 命名 API」,翻译页的引擎选择（运营商/百度）与思考块「未配百度」提示下线。
+- 优化:图片附件点开改为**独立窗口**,不再占右侧详情面板（文本/目录预览不变）。
+- 修复:**折叠两层语义**——单个命令卡完成照样收起;「多条命令收成摘要行」这一层等整轮输出完再折,不再中途折叠、收尾又展开。
+- 优化:侧栏会话行悬停出操作按钮时,运行中圆点/环境徽标淡出避让,不再叠在一起。
+- 修复:**思考翻译变慢的主因**——整轮展开让每段思考都触发一次翻译调用（洪峰排队）。现在只有手动展开的块和整轮最终块自动翻。
+- 新增:摘要 API 连续网络失败（超时/断连 ≥3 次）上浮到状态条「摘要 API 连不上」——AI 命名/翻译悄悄不工作时一眼可见（此前静默回退）。
+- 优化:改动口径标注——轮次卡「本轮编辑」与输入框上方「本会话已更改」分得清了。
+
+### English
+
+- New: **right-side dock panel (zcode/Codex-style)** — Git tools, todos and goal slide out from the right edge; the topbar is now just a row of icons (dots mark pending todos/active goals). GoalCard and the todo card no longer sit above the transcript; the chat owns the full height.「审核」opens the Git tab automatically.
+- The turn timer floats at the bottom-left of the chat area — no vertical space taken, shimmering Bahnschrift digits.
+- Translation/naming/summary all go through the single「摘要 / 命名 API」channel; the engine picker and baidu hints are gone.
+- Image attachments open in a separate window instead of the right preview pane.
+- Fixed the two-layer fold semantics: individual cards collapse when done; the multi-command summary fold waits for the whole turn.
+- Sidebar running dot / backend badge fade out on hover so the action buttons no longer overlap.
+- Fixed the thinking-translation slowdown: only explicitly opened blocks and the turn's final block auto-translate (no more per-turn translation flood).
+- Consecutive summary-API network failures surface in the status strip ("摘要 API 连不上") instead of silently degrading naming/translation.
+- Labels clarified: per-turn card「本轮编辑」vs the session-wide「本会话已更改」pill.
+
 ## v1.1.13 - 2026-08-14
 
 ### 中文

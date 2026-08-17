@@ -8,10 +8,10 @@ import Transcript from './components/Transcript'
 import Composer from './components/Composer'
 import ElicitationCard from './components/ElicitationCard'
 import SessionChangesPill from './components/SessionChangesPill'
-import PlanCard from './components/PlanCard'
-import GoalCard from './components/GoalCard'
+import TurnTimerStrip from './components/TurnTimerStrip'
+import RightDock from './components/RightDock'
 import ErrorDiagnosticPanel from './components/ErrorDiagnosticPanel'
-import GitToolbar, { requestCloseGitDrawer } from './components/GitToolbar'
+import { requestCloseGitDrawer } from './components/GitToolbar'
 import AttachmentPreviewPane from './components/AttachmentPreviewPane'
 import SessionSearchPalette from './components/SessionSearchPalette'
 import PermissionModal from './components/PermissionModal'
@@ -217,6 +217,69 @@ function ChatTopbarToggle({
   )
 }
 
+/** 顶栏右侧的停靠面板图标（Git / 待办 / 目标，zcode 式）。有待办未完或目标
+ *  进行中时图标带小圆点。 */
+function DockButtons(): JSX.Element {
+  const dock = useUiStore((s) => s.rightDock)
+  const setRightDock = useUiStore((s) => s.setRightDock)
+  const planPending = useSessionStore((s) => s.planEntries.some((e) => e.status !== 'completed'))
+  const goalActive = useSessionStore((s) => s.goal?.status === 'active')
+  const items = [
+    {
+      key: 'git' as const,
+      title: 'Git 工具',
+      dot: false,
+      icon: (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <circle cx="6" cy="6" r="2.4" stroke="currentColor" strokeWidth="1.6" />
+          <circle cx="6" cy="18" r="2.4" stroke="currentColor" strokeWidth="1.6" />
+          <circle cx="17" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M6 8.4v7.2M17 12.4c0 3-2.5 4.6-6 4.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      )
+    },
+    {
+      key: 'plan' as const,
+      title: '待办',
+      dot: planPending,
+      icon: (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      )
+    },
+    {
+      key: 'goal' as const,
+      title: '目标',
+      dot: goalActive,
+      icon: (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.6" />
+          <circle cx="12" cy="12" r="3.5" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      )
+    }
+  ]
+  return (
+    <>
+      {items.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          onClick={() => setRightDock(dock === item.key ? null : item.key)}
+          title={item.title}
+          className={`relative flex h-7 w-7 items-center justify-center rounded-lg transition hover:bg-white/[0.07] ${
+            dock === item.key ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          {item.icon}
+          {item.dot && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-accent" />}
+        </button>
+      ))}
+    </>
+  )
+}
+
 function ChatTopbar({
   collapsed,
   onToggle
@@ -269,9 +332,12 @@ function ChatTopbar({
         aria-hidden={collapsed}
       >
         <div ref={bodyRef} className="chat-topbar-body">
-          {/* RuntimeStatusStrip（● Windows / Agent Kimi Code CLI x.y.z 那一行）
-              按用户要求移除（2026-08）：信息密度低、白占一行，空间还给正文。 */}
-          <GitToolbar cornerAction={<ChatTopbarToggle collapsed={false} onClick={toggle} />} />
+          {/* 2026-08-17 zcode 式布局：整条 GitToolbar 收进右侧停靠面板（RightDock），
+              顶栏只剩一排停靠图标；RuntimeStatusStrip 早前已下线。 */}
+          <div className="flex items-center justify-end gap-1 px-3 py-1">
+            <DockButtons />
+            <ChatTopbarToggle collapsed={false} onClick={toggle} />
+          </div>
         </div>
       </div>
     </div>
@@ -321,17 +387,18 @@ function MainViewContent({
   return (
     <>
       <ChatTopbar collapsed={chatTopbarCollapsed} onToggle={onToggleChatTopbar} />
-      <GoalCard />
-      <PlanCard />
-      {/* McpStatusBar 按用户要求下线（2026-08）：常驻一行的收益太低，后续挪到
-          左侧边栏做插件式入口。组件保留，这里不再挂载。 */}
-      <div className="min-h-0 flex-1 overflow-hidden" onPointerDownCapture={requestCloseGitDrawer}>
+      {/* GoalCard / PlanCard 已收进右侧停靠面板（RightDock，2026-08-17 zcode 式
+          布局），不再常驻正文上方。 */}
+      <div className="relative min-h-0 flex-1 overflow-hidden" onPointerDownCapture={requestCloseGitDrawer}>
         <Transcript
           layoutTransitioning={chatTopbarLayoutMotion}
           bottomReserve={chatTopbarScrollReserve}
           bottomReserveVersion={chatTopbarScrollReserveVersion}
           onAtBottomChange={onTranscriptAtBottomChange}
         />
+        {/* 本轮计时：悬浮对话区左下角（输出的左边），不占纵向空间。 */}
+        <TurnTimerStrip />
+        <RightDock />
       </div>
       <ElicitationCard />
       <SessionChangesPill />

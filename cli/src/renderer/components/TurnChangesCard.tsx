@@ -73,7 +73,7 @@ export default function TurnChangesCard({
           </span>
           <div className="min-w-0 flex-1">
             <div className="text-[13px] text-zinc-200">
-              {reverted ? '已撤销本轮改动' : `已编辑 ${item.files.length} 个文件`}
+              {reverted ? '已撤销本轮改动' : `本轮编辑 ${item.files.length} 个文件`}
             </div>
             {!reverted && (
               <div className="mt-0.5 flex gap-2 text-[11px] tabular-nums">

@@ -2908,7 +2908,7 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   mask-composite: exclude;
 }
 
-/* 本轮计时（TurnTimerStrip）：钉在左侧栏底部，不占对话区纵向空间。
+/* 本轮计时（TurnTimerStrip）：悬浮对话区左下角（输出的左边），不占纵向空间。
    数字用 Bahnschrift（Windows 自带窄体，计时器数字辨识度高），等宽数字防跳动。 */
 .tran-turn-timer {
   display: inline-flex;

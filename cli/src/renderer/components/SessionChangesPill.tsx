@@ -143,7 +143,7 @@ export default function SessionChangesPill(): JSX.Element | null {
           title="查看本次会话的工作区改动"
           className="mb-1.5 flex items-center gap-2 rounded-full border border-border-subtle bg-bg-elev px-3.5 py-1.5 text-[12px] text-zinc-300 shadow-lg shadow-black/30 transition hover:bg-bg-hover"
         >
-          <span>{sessionFiles.length} 个文件已更改</span>
+          <span>本会话 {sessionFiles.length} 个文件已更改</span>
           <span className="tabular-nums text-emerald-400">+{addedTotal}</span>
           <span className="tabular-nums text-red-400">-{removedTotal}</span>
         </button>

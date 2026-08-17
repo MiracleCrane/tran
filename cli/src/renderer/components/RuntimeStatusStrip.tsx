@@ -122,7 +122,13 @@ export default function RuntimeStatusStrip(): JSX.Element {
 点击前往「AI 辅助」检查配置；点掉即忽略本次提示。`}
           >
             <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-            <span>{summaryIssue.kind === 'quota' ? '摘要额度已用尽' : '摘要 Key 失效'}</span>
+            <span>
+              {summaryIssue.kind === 'quota'
+                ? '摘要额度已用尽'
+                : summaryIssue.kind === 'network'
+                  ? '摘要 API 连不上'
+                  : '摘要 Key 失效'}
+            </span>
           </button>
         )}
         <div className={`runtime-provider-reveal ${showProvider ? 'is-visible' : ''}`}>

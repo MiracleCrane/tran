@@ -63,6 +63,7 @@ const api: ForgeApi = {
   readFiles: (cwd, paths) => ipcRenderer.invoke('forge:readFiles', cwd, paths),
   getPathForFile,
   revealInExplorer: (cwd, pathStr) => ipcRenderer.invoke('forge:revealInExplorer', cwd, pathStr),
+  openImageWindow: (dataUrl, name) => ipcRenderer.invoke('forge:openImageWindow', dataUrl, name),
   copyImage: (src) => ipcRenderer.invoke('forge:copyImage', src),
   saveImageAs: (src, suggestedName) => ipcRenderer.invoke('forge:saveImageAs', src, suggestedName),
 

@@ -21,7 +21,7 @@ const GoalIcon = (): JSX.Element => (
   </svg>
 )
 
-const GoalCard = memo(function GoalCard(): JSX.Element | null {
+const GoalCard = memo(function GoalCard({ docked = false }: { docked?: boolean }): JSX.Element | null {
   const goal = useSessionStore((s) => s.goal)
   const meta = useSessionStore((s) => s.meta)
   const [expanded, setExpanded] = useState(false)
@@ -34,7 +34,7 @@ const GoalCard = memo(function GoalCard(): JSX.Element | null {
   const statusMeta = STATUS_META[goal.status]
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-6 pt-3">
+    <div className={docked ? 'w-full' : 'mx-auto w-full max-w-5xl px-6 pt-3'}>
       {/* 与待办条、工具 bar、AI 正文同一条列（简约风下居中）。 */}
       <div className="tool-call-card tran-ai-col overflow-hidden rounded-lg border border-accent/30 bg-[#101116]">
         <div className="flex items-center gap-2 px-3 py-2">

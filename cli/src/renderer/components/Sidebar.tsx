@@ -4,7 +4,6 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore, type View } from '../store/uiStore'
 import Collapse from './Collapse'
 import ConfirmDialog from './ConfirmDialog'
-import TurnTimerStrip from './TurnTimerStrip'
 import { AppLogo } from './AppLogo'
 import ProjectSwitcher from './ProjectSwitcher'
 import type { ClaudeExecutionBackend, SessionListItem, SessionPreview } from '../../shared/ipc'
@@ -1698,7 +1697,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                       onPointerMove={handleSidebarPointerGlow}
                       onPointerLeave={hidePreview}
                       className={`sidebar-session-row relative w-full rounded-xl border px-2.5 py-1.5 text-left ${
-                        multiMode ? '' : 'pr-20'
+                        multiMode ? '' : 'pr-28'
                       } ${
                         active
                           // 选中态减重（2026-08-14 用户：「当前会话这个框太重」）：
@@ -1732,11 +1731,13 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                           <div className="flex items-center gap-1.5 text-xs" title={relTime(s.lastModified)}>
                             <span className="min-w-0 flex-1 truncate">{s.summary || '(未命名)'}</span>
                             {/* #5b：列表条目自带的 running 之外，还叠加 store 实时上报的
-                                runningSdkSessionIds（当前正在跑 turn 的会话）。 */}
+                                runningSdkSessionIds（当前正在跑 turn 的会话）。
+                                悬停时操作组从右缘淡入，圆点/徽标淡出避让（2026-08-14
+                                用户：运行标识和归档按钮叠在一起）。 */}
                             {(s.running || runningSdkSessionIds.includes(s.sessionId)) && (
-                              <span className="session-running-dot" title="运行中" />
+                              <span className="session-running-dot transition-opacity group-hover:opacity-0" title="运行中" />
                             )}
-                            <span className={`session-runtime-badge ${wslSupportEnabled ? 'is-visible' : ''}`}>
+                            <span className={`session-runtime-badge transition-opacity group-hover:opacity-0 ${wslSupportEnabled ? 'is-visible' : ''}`}>
                               {backendLabel(s.runtimeBackend)}
                             </span>
                           </div>
@@ -1822,8 +1823,6 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         onMouseEnter={() => setNavHover(true)}
         onMouseLeave={() => setNavHover(false)}
       >
-        {/* 本轮计时（运行中才出现）：钉在侧栏底部，不占对话区纵向空间。 */}
-        <TurnTimerStrip />
         <div>
           <button
             onClick={toggleNav}

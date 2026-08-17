@@ -205,6 +205,8 @@ const KIND_STYLE: Record<FileKind, { dot: string; text: string; label: string }>
 
 interface GitToolbarProps {
   cornerAction?: JSX.Element
+  /** 右侧停靠面板形态：按钮行换行、去掉底部分隔线与右侧留白（2026-08-17）。 */
+  docked?: boolean
 }
 
 /** A single file row inside the commit drawer: status dot + name (click → diff)
@@ -264,7 +266,7 @@ function DrawerLoading({ label }: { label: string }): JSX.Element {
   )
 }
 
-export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.Element {
+export default function GitToolbar({ cornerAction, docked = false }: GitToolbarProps = {}): JSX.Element {
   // '' when there's no active project; every git call is guarded by
   // `if (!cwd)` / `if (!branch)` so the empty string never reaches git.
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
@@ -667,9 +669,9 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   const drawerShellMaxHeight = renderedDrawer === 'branches' ? 'max-h-none' : 'max-h-[46vh]'
 
   return (
-    <div className="relative z-30 shrink-0 border-b border-white/[0.06]">
+    <div className={docked ? 'relative z-30 shrink-0' : 'relative z-30 shrink-0 border-b border-white/[0.06]'}>
       {/* --- toolbar row --- */}
-      <div className="flex items-center gap-1.5 px-2.5 py-1 pr-10 text-zinc-400">
+      <div className={`flex items-center gap-1.5 px-2.5 py-1 text-zinc-400 ${docked ? 'flex-wrap' : 'pr-10'}`}>
         {/* Branch + ahead/behind */}
         <button
           onClick={() => toggleDrawer('branches')}

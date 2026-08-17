@@ -53,8 +53,9 @@ const ListGlyph = (): JSX.Element => (
 )
 
 /** 待办清单卡片：ACP plan 事件驱动，整体样式对齐 ToolCallCard 玻璃风。
- *  completed 打勾、in_progress 紫色高亮（优先显示 activeForm）。 */
-const PlanCard = memo(function PlanCard(): JSX.Element | null {
+ *  completed 打勾、in_progress 紫色高亮（优先显示 activeForm）。
+ *  docked=true 时去掉顶部常驻条的带宽/分隔线（右侧停靠面板里用）。 */
+const PlanCard = memo(function PlanCard({ docked = false }: { docked?: boolean }): JSX.Element | null {
   const entries = useSessionStore((s) => s.planEntries)
   const planUpdatedAt = useSessionStore((s) => s.planUpdatedAt)
   const running = useSessionStore((s) => s.status.running)
@@ -235,7 +236,7 @@ const PlanCard = memo(function PlanCard(): JSX.Element | null {
 
   return (
     // pb + 底部发丝线：和正文之间要有明确分隔（2026-08 用户反馈"待办和正文之间没有分隔"）。
-    <div className="mx-auto w-full max-w-5xl border-b border-white/[0.05] px-6 pb-2.5 pt-3">
+    <div className={docked ? 'w-full' : 'mx-auto w-full max-w-5xl border-b border-white/[0.05] px-6 pb-2.5 pt-3'}>
       {/* #44 与工具 bar 同宽（宽度统一由 .tran-ai-col 给，见 styles.css）。
           tran-ai-col：简约风把正文列居中，待办条要跟着走，否则它左对齐、
           底下的回复居中，两条边界对不上。 */}

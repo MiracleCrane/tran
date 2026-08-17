@@ -20,7 +20,6 @@ import TurnChangesCard from './TurnChangesCard'
 import { emitForgeEvent } from '../events'
 import UserMessageNav, { type UserNavEntry } from './UserMessageNav'
 import { useCheapNote } from '../hooks/useCheapNote'
-import { useThinkingTranslateStatus } from '../hooks/useThinkingTranslateStatus'
 
 const INITIAL_HIGHLIGHT_DELAY_MS = 420
 const SCROLL_HIGHLIGHT_RESUME_MS = 180
@@ -293,9 +292,9 @@ function buildDisplayRows(
     if (isHiddenEnvelope(node)) continue
     // B 方案：思考消息也进 run（原先只有 toolBlocksOf，中间夹一条思考就断开）。
     const blocks = activityBlocksOf(node)
-    // turn 进行中：本轮的 live（非历史）活动消息不折叠、不成组——整轮输出完
-    // 再一次性折（2026-08-14 用户：「新块一开始就把之前的全折叠，输出完又
-    // 展开，这不对」）。此刻它们在 AssistantMessage 里以 holdOpen 保持展开。
+    // turn 进行中：本轮的 live（非历史）活动消息不成组——「多条命令收成一行
+    // 摘要」这一层等整轮输出完再折（2026-08-14 用户澄清：单卡完成照样收起，
+    // 等的是成组这层；此前中途成组 + lastExpandableKey 收尾回指造成"折了又展开"）。
     if (blocks && !(holdLiveOpen && !node.item.isHistory)) {
       flushEnvelopes()
       toolRun.push({ node, blocks })
@@ -569,12 +568,18 @@ const UserMessage = memo(function UserMessage({
 const ThinkingBlock = memo(function ThinkingBlock({
   text,
   streaming = false,
-  forceExpanded = false
+  forceExpanded = false,
+  autoTranslate = false
 }: {
   text: string
   streaming?: boolean
   /** "最新块"保持展开（渲染期派生，见 Transcript 的 lastExpandableKey）。 */
   forceExpanded?: boolean
+  /** 允许自动翻译：仅「整轮的最新块」（且非 holdOpen 撑开的轮次中途块）。
+   *  2026-08-14：holdOpen 让整轮所有块都展开，open 即翻译的规则把一轮里每段
+   *  思考都打成一次 LLM 翻译调用——洪峰排队，翻译变慢。回到旧口径：自动翻的
+   *  只有最终那块，其余块用户手动展开（userToggled）才翻。 */
+  autoTranslate?: boolean
 }): JSX.Element {
   // 默认收起（一行摘要"思考过程 · N 字"）；流式期间或作为"最新块"时自动展开，
   // 出现下一个块后收回；用户手动点击后以其选择为准。展开态定高 200px 内部滚动。
@@ -639,11 +644,11 @@ const ThinkingBlock = memo(function ThinkingBlock({
 
   // 展开且**思考收尾后**才翻译（2026-08 用户定夺：边输出边翻会卡——流式期间
   // 快照译文和滚动的原文对不上，回退到收尾统一翻）。不展开不翻。
+  // 自动翻只给「用户手动展开」或「整轮最终块」（autoTranslate，见组件注释）——
+  // holdOpen 撑开的中途块不自动翻，防一轮 N 段的翻译洪峰。
   const [showOriginal, setShowOriginal] = useState(false)
-  const wantsTranslation = open && !streaming && looksEnglish(text)
+  const wantsTranslation = open && !streaming && looksEnglish(text) && (userToggled === true || autoTranslate)
   const translationState = useCheapNote(fetchThinkingTranslation, text, wantsTranslation)
-  // auto 在没配百度时会回落到付费的摘要 API——回落必须可见，否则就是悄悄花钱。
-  const translateStatus = useThinkingTranslateStatus(wantsTranslation)
   const translated = translationState.value
 
   if (!text) return <></>
@@ -694,16 +699,6 @@ const ThinkingBlock = memo(function ThinkingBlock({
               >
                 {showOriginal ? '看译文' : '看原文'}
               </button>
-              {/* 回落提示：没配百度 → 走的是按量计费的摘要 API。设置里选了
-                  「自动」的人未必知道这一点，不说等于替他做了花钱的决定。 */}
-              {translateStatus.autoFellBack && (
-                <span
-                  className="text-[10px] text-amber-500/70"
-                  title="翻译引擎选的是「自动」，但未配置百度密钥，因此走了摘要 / 命名 API（按量计费）。在 设置 → 翻译 里填百度密钥即可免费。"
-                >
-                  未配百度 · 本次用模型翻译（计费）
-                </span>
-              )}
             </span>
           )}
           {wantsTranslation && !translated && !translationState.settled && (
@@ -970,8 +965,8 @@ const AssistantMessage = memo(function AssistantMessage({
   deferHighlight?: boolean
   /** "最新块"的 key（toolUseId 或 `${item.id}:thinking`），该块保持展开。 */
   expandedBlockKey?: string | null
-  /** turn 进行中且本条是本轮 live 消息：全部活动块保持展开、不折叠成组——
-   *  整轮输出完再由外层一次性折（2026-08-14 用户定稿）。 */
+  /** turn 进行中且本条是本轮 live 消息：消息内不做成组折叠（等整轮结束）；
+   *  单个卡片的完成即收起不受影响（2026-08-14 用户澄清的两层语义）。 */
   holdOpen?: boolean
 }): JSX.Element {
   const isStreaming = !!item.streaming
@@ -1021,7 +1016,8 @@ const AssistantMessage = memo(function AssistantMessage({
                 <ThinkingBlock
                   text={block.text}
                   streaming={isStreaming}
-                  forceExpanded={holdOpen || expandedBlockKey === `${item.id}:thinking`}
+                  forceExpanded={expandedBlockKey === `${item.id}:thinking`}
+                  autoTranslate={!holdOpen && expandedBlockKey === `${item.id}:thinking`}
                 />
               </div>
             )
@@ -1030,12 +1026,14 @@ const AssistantMessage = memo(function AssistantMessage({
             <ToolCallCard
               key={i}
               block={block}
-              forceExpanded={holdOpen || expandedBlockKey === block.toolUseId}
+              forceExpanded={expandedBlockKey === block.toolUseId}
             />
           )
         }
 
-        // holdOpen（本轮 live + turn 在跑）与流式一样：块逐个平铺，不做轮内折叠。
+        // holdOpen（本轮 live + turn 在跑）：延迟的只是「成组折叠」这一层
+        // （消息内 run 折叠 + 跨消息组都等整轮结束）；单个命令卡完成照样收起
+        // （2026-08-14 用户澄清两层语义）。
         if (isStreaming || holdOpen) return entries.map(renderBlock)
 
         const rows: JSX.Element[] = []

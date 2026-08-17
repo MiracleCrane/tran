@@ -1,4 +1,4 @@
-import { app, ipcMain, dialog, shell, clipboard, nativeImage, net, screen, Notification, type BrowserWindow } from 'electron'
+import { app, ipcMain, dialog, shell, clipboard, nativeImage, net, screen, Notification, BrowserWindow } from 'electron'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { readFile, readdir, stat as statAsync, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
@@ -672,6 +672,26 @@ export function registerIpc(
     }
     shell.showItemInFolder(resolved)
     return true
+  })
+
+  // 图片附件独立窗口预览（2026-08-14 用户：「不要在右边展示详情，直接打开一个
+  // 额外的窗口」）。data: URL 整页注入，沙箱窗口，无 node 权限。
+  ipcMain.handle('forge:openImageWindow', async (_e, dataUrl: unknown, name: unknown): Promise<void> => {
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return
+    const title = typeof name === 'string' && name.trim() ? name.trim() : '图片预览'
+    const win = new BrowserWindow({
+      width: 960,
+      height: 720,
+      minWidth: 320,
+      minHeight: 240,
+      autoHideMenuBar: true,
+      title,
+      backgroundColor: '#0b0c10',
+      webPreferences: { sandbox: true }
+    })
+    const safeTitle = title.replace(/[<>&"]/g, '')
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${safeTitle}</title><style>html,body{margin:0;height:100%;background:#0b0c10;display:flex;align-items:center;justify-content:center;overflow:auto}img{max-width:100%;max-height:100%;object-fit:contain}</style></head><body><img src="${dataUrl}" alt=""></body></html>`
+    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
   })
 
   // --- 图片右键菜单（#22）：复制到剪贴板 / 另存为。src 支持 data:/file:/http(s):

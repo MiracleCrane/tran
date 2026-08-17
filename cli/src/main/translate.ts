@@ -1,6 +1,4 @@
 import { getActiveProvider } from './providers'
-import { getBaiduCreds, getTranslateEngine } from './translateConfig'
-import { baiduTripped, translateViaBaidu } from './baidu'
 import { cheapComplete } from './cheapModel'
 import { getApiKey } from './settings'
 import { log } from './logger'
@@ -138,25 +136,13 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
 }
 
 /**
- * 批量 EN→ZH。路由顺序刻意是「越便宜越优先」：
+ * 批量 EN→ZH（技能/插件描述翻译）。
  *
- *   1. 显式选了百度 → 百度（免费额度内不花钱）
- *   2. 配了摘要 API Key → 走那个便宜模型（DeepSeek flash 之类，用户自己的钱）
- *   3. 都没有 → 才回退主 Agent
- *
- * 第 2 条是这次加的。此前只有 1 和 3：没配百度就直接打主 Agent 的
- * `/v1/messages`（`max_tokens: 4096`）——**烧的是用户的 Kimi 套餐额度**。而这
- * 里翻的只是技能/插件的描述句，是全 app 最不需要强模型的文本之一，用套餐额度
- * 去做纯属浪费。摘要旁路的 key 本来就是为这类杂活准备的。
+ * 通道统一（2026-08-14 用户定稿）：翻译/命名/摘要全部只走「摘要 / 命名 API」
+ * 那一条便宜通道，不再有百度/运营商引擎之分。没配摘要 key 时回退主 Agent
+ * （/v1/messages）——兜底保留，翻译功能不整个消失。
  */
 export async function translateTexts(texts: string[]): Promise<string[]> {
-  // 百度被熔断（欠费/未授权）时不再硬走百度：往下落到便宜通道/主 Agent，
-  // 别让翻译整个消失。
-  if (getTranslateEngine() === 'baidu' && !baiduTripped()) {
-    const creds = getBaiduCreds()
-    if (!creds) throw new Error('已选择百度翻译,但未配置 appId / secretKey')
-    return translateViaBaidu(texts, creds.appId, creds.secretKey)
-  }
   if (getApiKey()) {
     try {
       return await translateTextsCheap(texts)

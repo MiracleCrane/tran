@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 
-/** 本轮计时（2026-08-14 用户要求）：钉在左侧栏底部工具区上方，不占对话区
- *  纵向空间；数字带流光。只在 turn 运行中挂载：1s 心跳随组件卸载停止。 */
+/** 本轮计时（2026-08-17 用户要求）：悬浮在对话区左下角——输出的左边，不占
+ *  纵向空间（别放顶部横条，也别塞进左侧栏）。运行中才出现，数字带流光。 */
 export default function TurnTimerStrip(): JSX.Element | null {
   const running = useSessionStore((s) => s.status.running)
   const startedAt = useSessionStore((s) => s.status.startedAt)
@@ -17,7 +17,7 @@ export default function TurnTimerStrip(): JSX.Element | null {
   const mm = String(Math.floor(total / 60)).padStart(2, '0')
   const ss = String(total % 60).padStart(2, '0')
   return (
-    <div className="px-2.5 pb-1">
+    <div className="pointer-events-none absolute bottom-3 left-3 z-20">
       <span className="tran-turn-timer" title="本轮已运行时长">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden>
           <circle cx="12" cy="13" r="8" stroke="currentColor" strokeWidth="1.8" />
