@@ -8,6 +8,7 @@ import {
   setShortcutBinding,
   type ShortcutAction
 } from '../shortcuts'
+import SettingText from './SettingText'
 
 /**
  * 快捷键设置：列出全部动作、就地录制新键位、冲突检测、恢复默认。
@@ -70,11 +71,10 @@ export default function ShortcutSettings(): JSX.Element {
   return (
     <div className="space-y-2">
       <div>
-        <div className="text-xs font-medium text-zinc-300">快捷键</div>
-        <div className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
-          键位默认对齐 Codex 桌面版（从其安装包的命令表读出，非猜测）。点右侧键位即可重录，
-          录制中按 Esc 取消。改动立即生效，无需重启。
-        </div>
+        <div className="text-sm font-semibold text-zinc-200">快捷键</div>
+        <SettingText className="mt-1">
+          选择右侧键位后，按下新的组合键即可完成绑定。录制过程中按 `Esc` 取消；更改会立即生效并在重启后保留。
+        </SettingText>
       </div>
 
       <div className="divide-y divide-white/[0.05] overflow-hidden rounded-xl border border-border-subtle bg-bg-panel">
@@ -124,7 +124,7 @@ export default function ShortcutSettings(): JSX.Element {
 
       {conflict && (
         <div className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-2 py-1.5 text-[11px] text-amber-300/90">
-          这个键位已被「{conflict.withLabels.join('、')}」占用，换一个。
+          该组合键已分配给“{conflict.withLabels.join('、')}”。请选择其他组合键。
         </div>
       )}
     </div>

@@ -45,10 +45,10 @@ interface UiStore {
   /** 用量预览卡钉住开关（UsageRings；/usage 命令或点击圆环钉住，点别处关闭）。 */
   usageOpen: boolean
   setUsageOpen: (open: boolean) => void
-  /** 右侧停靠面板（2026-08-17 zcode 式布局）：Git 工具 / 待办 / 目标 从右缘滑出，
-   *  不再常驻正文上方。null = 收起。面板常驻挂载（隐藏仅位移），内部组件状态不掉。 */
-  rightDock: 'git' | 'plan' | 'goal' | null
-  setRightDock: (dock: 'git' | 'plan' | 'goal' | null) => void
+  /** 右侧停靠面板（2026-08-17 zcode 式布局）：待办 / 目标 从右缘滑出。Git 工具
+   *  2026-08-18 回正文顶部常驻，不再占 dock。null = 收起。 */
+  rightDock: 'plan' | 'goal' | null
+  setRightDock: (dock: 'plan' | 'goal' | null) => void
 }
 
 function overlayId(): string {

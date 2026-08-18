@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useSessionStore } from '../store/sessionStore'
 import type { GitBranchInfo, GitCommit, GitStatus } from '../../shared/ipc'
 import DiffView from './DiffView'
@@ -207,7 +206,6 @@ const KIND_STYLE: Record<FileKind, { dot: string; text: string; label: string }>
 interface GitToolbarProps {
   cornerAction?: JSX.Element
   /** 右侧停靠面板形态：按钮行换行、去掉底部分隔线与右侧留白（2026-08-17）。 */
-  docked?: boolean
 }
 
 /** A single file row inside the commit drawer: status dot + name (click → diff)
@@ -267,7 +265,7 @@ function DrawerLoading({ label }: { label: string }): JSX.Element {
   )
 }
 
-export default function GitToolbar({ cornerAction, docked = false }: GitToolbarProps = {}): JSX.Element {
+export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.Element {
   // '' when there's no active project; every git call is guarded by
   // `if (!cwd)` / `if (!branch)` so the empty string never reaches git.
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
@@ -302,14 +300,6 @@ export default function GitToolbar({ cornerAction, docked = false }: GitToolbarP
   cwdRef.current = cwd
   const [drawerHeight, setDrawerHeight] = useState<number | null>(null)
   const [drawerLoading, setDrawerLoading] = useState<Partial<Record<OpenDrawer, boolean>>>({})
-  // dock 模式下抽屉 portal 到正文上方的宿主（#git-drawer-host，见 App.tsx）——
-  // dock 只有 360px 宽，diff 塞里面根本没法看，抽屉回「正文上方整宽展开」
-  // （2026-08-18 用户：「diff 搞这么小谁能看清楚，还是在上面展开」）。
-  const [drawerHost, setDrawerHost] = useState<HTMLElement | null>(null)
-  useEffect(() => {
-    if (docked) setDrawerHost(document.getElementById('git-drawer-host'))
-  }, [docked])
-  const wrapDrawer = (node: JSX.Element) => (docked && drawerHost ? createPortal(node, drawerHost) : node)
   const [commitMsg, setCommitMsg] = useState('')
   const [newBranchName, setNewBranchName] = useState('')
   const [pushUpstream, setPushUpstream] = useState(false)
@@ -682,9 +672,9 @@ export default function GitToolbar({ cornerAction, docked = false }: GitToolbarP
   const drawerShellMaxHeight = renderedDrawer === 'branches' ? 'max-h-none' : 'max-h-[46vh]'
 
   return (
-    <div className={docked ? 'relative z-30 shrink-0' : 'relative z-30 shrink-0 border-b border-white/[0.06]'}>
+    <div className="relative z-30 shrink-0 border-b border-white/[0.06]">
       {/* --- toolbar row --- */}
-      <div className={`flex items-center gap-1.5 px-2.5 py-1 text-zinc-400 ${docked ? 'flex-wrap' : 'pr-10'}`}>
+      <div className="flex items-center gap-1.5 px-2.5 py-1 pr-10 text-zinc-400">
         {/* Branch + ahead/behind */}
         <button
           onClick={() => toggleDrawer('branches')}
@@ -784,8 +774,8 @@ export default function GitToolbar({ cornerAction, docked = false }: GitToolbarP
       </div>
       {cornerAction && <div className="git-toolbar-corner-action">{cornerAction}</div>}
 
-      {/* --- drawer area (one at a time) --- dock 模式下 portal 到正文上方整宽。 */}
-      {wrapDrawer(
+      {/* --- drawer area (one at a time) --- 工具条在正文顶部常驻，
+          抽屉从它下面垂下来（2026-08-18 用户拍板「git工具去上面啊」）。 */}
       <Collapse
         open={!!drawer}
         className={`git-drawer-collapse absolute left-0 right-0 top-full z-40 shadow-[0_24px_60px_rgba(0,0,0,0.28)] ${
@@ -1087,7 +1077,6 @@ export default function GitToolbar({ cornerAction, docked = false }: GitToolbarP
           </div>
         </div>
       </Collapse>
-      )}
 
       <ConfirmDialog
         open={!!confirm}

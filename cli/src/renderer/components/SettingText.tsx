@@ -1,34 +1,55 @@
-import type { JSX } from 'react'
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
-/**
- * 设置项说明文字的轻量 Markdown 渲染。
- *
- * 设置里的说明此前是纯文本直出，写在里面的 `代码`、**强调**、换行全部原样
- * 显示成字面量（用户反馈「md 也没有渲染」）。这里不引整套 markdown 管线：
- * 设置说明只需要三种记号，正则一次成型比挂 remark 便宜得多，也不会把
- * 标题/列表/图片那些说明里根本不该出现的东西放进来。
- *
- * 支持：`行内代码`、**加粗**、空行分段、单换行即换行。
- */
-
-type Segment = { kind: 'text' | 'code' | 'strong'; value: string }
-
-/** 一次扫描切出 `code` 与 **strong**；两者不嵌套（说明文字里没有这种需求）。 */
-function tokenize(line: string): Segment[] {
-  const out: Segment[] = []
-  const re = /`([^`]+)`|\*\*([^*]+)\*\*/g
-  let last = 0
-  let m: RegExpExecArray | null
-  while ((m = re.exec(line)) !== null) {
-    if (m.index > last) out.push({ kind: 'text', value: line.slice(last, m.index) })
-    if (m[1] !== undefined) out.push({ kind: 'code', value: m[1] })
-    else out.push({ kind: 'strong', value: m[2] ?? '' })
-    last = m.index + m[0].length
-  }
-  if (last < line.length) out.push({ kind: 'text', value: line.slice(last) })
-  return out
+const COMPONENTS: Components = {
+  p: ({ children }) => <p className="my-1.5 first:mt-0 last:mb-0">{children}</p>,
+  strong: ({ children }) => <strong className="font-medium text-zinc-300">{children}</strong>,
+  em: ({ children }) => <em className="text-zinc-400">{children}</em>,
+  code: ({ children, className }) => {
+    const block = typeof className === 'string' && className.startsWith('language-')
+    return block ? (
+      <code className="font-mono text-[10.5px] text-zinc-300">{children}</code>
+    ) : (
+      <code className="rounded bg-bg-elev px-1 py-px font-mono text-[10.5px] text-zinc-300">
+        {children}
+      </code>
+    )
+  },
+  pre: ({ children }) => (
+    <pre className="my-2 max-w-full overflow-x-auto rounded-lg border border-white/[0.06] bg-black/20 px-2.5 py-2">
+      {children}
+    </pre>
+  ),
+  ul: ({ children }) => <ul className="my-1.5 list-disc space-y-0.5 pl-4">{children}</ul>,
+  ol: ({ children }) => <ol className="my-1.5 list-decimal space-y-0.5 pl-4">{children}</ol>,
+  li: ({ children }) => <li className="pl-0.5">{children}</li>,
+  blockquote: ({ children }) => (
+    <blockquote className="my-2 border-l-2 border-white/10 pl-2.5 text-zinc-400">{children}</blockquote>
+  ),
+  h1: ({ children }) => <h1 className="mb-1 mt-2 text-xs font-semibold text-zinc-300">{children}</h1>,
+  h2: ({ children }) => <h2 className="mb-1 mt-2 text-xs font-semibold text-zinc-300">{children}</h2>,
+  h3: ({ children }) => <h3 className="mb-1 mt-2 text-[11px] font-semibold text-zinc-300">{children}</h3>,
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="text-sky-400/90 underline decoration-sky-400/30 underline-offset-2 hover:text-sky-300"
+    >
+      {children}
+    </a>
+  ),
+  table: ({ children }) => (
+    <div className="my-2 max-w-full overflow-x-auto rounded-lg border border-white/[0.06]">
+      <table className="w-full border-collapse text-left">{children}</table>
+    </div>
+  ),
+  th: ({ children }) => <th className="border-b border-white/[0.08] bg-white/[0.03] px-2 py-1 font-medium text-zinc-300">{children}</th>,
+  td: ({ children }) => <td className="border-b border-white/[0.05] px-2 py-1 align-top">{children}</td>,
+  hr: () => <hr className="my-2 border-white/[0.07]" />
 }
 
+/** 设置说明统一使用的受限 Markdown renderer；不启用原始 HTML。 */
 export default function SettingText({
   children,
   className = ''
@@ -36,34 +57,15 @@ export default function SettingText({
   children: string
   className?: string
 }): JSX.Element {
-  const paragraphs = children.split(/\n{2,}/)
   return (
-    <div className={`space-y-1.5 ${className}`}>
-      {paragraphs.map((para, pi) => (
-        <p key={pi} className="text-[11px] leading-relaxed text-zinc-500">
-          {para.split('\n').map((line, li) => (
-            <span key={li}>
-              {li > 0 && <br />}
-              {tokenize(line).map((seg, si) =>
-                seg.kind === 'code' ? (
-                  <code
-                    key={si}
-                    className="rounded bg-bg-elev px-1 py-px font-mono text-[10.5px] text-zinc-300"
-                  >
-                    {seg.value}
-                  </code>
-                ) : seg.kind === 'strong' ? (
-                  <strong key={si} className="font-medium text-zinc-300">
-                    {seg.value}
-                  </strong>
-                ) : (
-                  <span key={si}>{seg.value}</span>
-                )
-              )}
-            </span>
-          ))}
-        </p>
-      ))}
+    <div className={`setting-markdown text-[11px] leading-relaxed text-zinc-500 ${className}`}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={COMPONENTS}
+        urlTransform={defaultUrlTransform}
+      >
+        {children}
+      </ReactMarkdown>
     </div>
   )
 }

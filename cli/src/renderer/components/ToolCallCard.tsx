@@ -6,7 +6,7 @@ import CodeBlock, { langForTool } from './CodeBlock'
 import DiffView from './DiffView'
 import SwarmCard from './SwarmCard'
 import { useCheapNote } from '../hooks/useCheapNote'
-import { ToolGlyph } from './toolIcons'
+import { ToolGlyph, FRIENDLY_TOOL_NAMES } from './toolIcons'
 
 function normalizeResult(result: unknown): string {
   if (result == null) return ''
@@ -358,14 +358,19 @@ const ToolCallCard = memo(function ToolCallCard({
         ) : (
           <span
             // MCP 全名（mcp__server__tool）太长，行内只显示工具叶名，全名进 title。
-            title={block.name.startsWith('mcp__') ? block.name : undefined}
+            // 后台/定时类工具显示中文名（TaskStop 这类原名认不出——2026-08-18
+            // 用户：「TaskStop 是啥为啥是英文」），原名收进 title。
+            title={
+              block.name.startsWith('mcp__') || FRIENDLY_TOOL_NAMES[block.name] ? block.name : undefined
+            }
             className={`shrink-0 font-mono text-xs font-medium ${
               toolShimmerTone(block.name)
                 ? `seg-shimmer seg-shimmer-${toolShimmerTone(block.name)}`
                 : 'text-zinc-300'
             }`}
           >
-            {block.name.startsWith('mcp__') ? (block.name.split('__').pop() ?? block.name) : block.name}
+            {FRIENDLY_TOOL_NAMES[block.name] ??
+              (block.name.startsWith('mcp__') ? (block.name.split('__').pop() ?? block.name) : block.name)}
           </span>
         )}
         {/* 状态（2026-08 定稿）：完成**什么都不显示**——成功是默认态，满屏绿勾

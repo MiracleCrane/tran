@@ -25,7 +25,7 @@ export const AGENT_BACKENDS: AgentBackendInfo[] = [
   {
     id: DEFAULT_AGENT_BACKEND_ID,
     name: 'Kimi Code CLI',
-    description: 'Kimi Code CLI ACP backend (kimi acp) with streamed messages, tools, approvals, and session history.',
+    description: '使用 Kimi Code CLI 处理会话，支持流式输出、工具调用、权限确认和历史会话恢复。',
     status: 'available',
     runtimeModes: ['windows'],
     capabilities: {
@@ -42,7 +42,7 @@ export const AGENT_BACKENDS: AgentBackendInfo[] = [
     id: 'claude',
     name: 'Claude Code',
     description:
-      'Claude Code CLI（stream-json 双向流）。消息形状与 Tran 内部一致，流式、工具调用、结果统计原生直通；权限询问走控制协议接进 Tran 的确认弹窗，MCP 由 Claude Code 自己管理。',
+      '使用 Claude Code CLI 处理会话，支持流式输出、工具调用、权限确认、MCP 和历史会话恢复。',
     status: 'available',
     runtimeModes: ['windows'],
     capabilities: {

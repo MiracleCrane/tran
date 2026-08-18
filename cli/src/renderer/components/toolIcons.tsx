@@ -56,6 +56,21 @@ ICONS['mcp'] = {
   html: '<path d="M7 2.8v3.4M13 2.8v3.4M4.8 6.2h10.4v3.1a5.2 5.2 0 0 1-10.4 0V6.2zM10 14.5v2.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'
 }
 
+/** 后台/定时类工具的中文显示名（卡片头部与集合摘要共用）：这些原名不像
+ *  Bash/Edit 那样约定俗成，裸英文认不出（2026-08-18 用户：「TaskStop 是啥
+ *  为啥是英文」）。 */
+export const FRIENDLY_TOOL_NAMES: Record<string, string> = {
+  TaskStop: '停止后台任务',
+  TaskList: '查看后台任务',
+  TaskOutput: '查看任务输出',
+  CronCreate: '创建定时任务',
+  CronDelete: '删除定时任务',
+  CronList: '查看定时任务',
+  AskUserQuestion: '向你提问',
+  CreateGoal: '创建目标',
+  UpdateGoal: '更新目标'
+}
+
 /** 图片读取图标（2026-08-17 用户：「ReadMediaFile 这种也加上颜色和图标」）：
  *  相框 + 太阳 + 山峦，手绘补齐（Codex 提取集没有这一类）。 */
 ICONS['image'] = {

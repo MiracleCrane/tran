@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { BrowserBridgeStatus } from '../../shared/ipc'
 import { useTransientFlag } from '../hooks/useTransientFlag'
+import SettingText from './SettingText'
 
 /**
  * 「浏览器控制」状态块：展示 Chrome 扩展桥的连接状态、配对码与安装引导。
@@ -112,14 +113,11 @@ export default function BrowserBridgeCard(): JSX.Element {
           </button>
         </div>
       </div>
-      <p className="mt-1 text-[11px] text-zinc-500">
-        通过 Chrome 扩展让 AI 操作你日常在用的浏览器（标签页、页面读取、点击输入）。
-        {!on && enabled !== null && ' 开启后 kimi 重开会话即可使用 browser_* 工具。'}
-      </p>
-      <p className="mt-1 text-[11px] text-zinc-600">
-        对 <span className="text-zinc-500">Kimi Code</span> 与{' '}
-        <span className="text-zinc-500">Claude Code</span> 两个后端同时生效（各写各的 MCP 配置）。
-      </p>
+      <SettingText className="mt-1">
+        {`通过 Chrome 扩展允许 Agent 读取和操作当前浏览器标签页，包括页面读取、点击和输入。${
+          !on && enabled !== null ? '\n\n启用后，需要重新打开会话才能使用 \`browser_*\` 工具。' : ''
+        }\n\n此设置同时应用于 **Kimi Code** 和 **Claude Code**，Tran 会分别更新对应的 MCP 配置。`}
+      </SettingText>
       {on && connected &&
         status?.extensionVersion &&
         status?.bundledExtensionVersion &&

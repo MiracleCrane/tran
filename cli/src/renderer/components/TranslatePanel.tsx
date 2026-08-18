@@ -1,5 +1,6 @@
 import SummaryApiSettings from './SummaryApiSettings'
 import { useUiStore } from '../store/uiStore'
+import SettingText from './SettingText'
 
 /**
  * 翻译设置页（2026-08-14 用户定稿：通道统一）。
@@ -23,11 +24,11 @@ export default function TranslatePanel(): JSX.Element {
           </button>
           <h1 className="text-lg font-semibold text-zinc-100">翻译</h1>
         </div>
-        <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
-          所有翻译、命名、摘要都走同一个通道——就是下面这套「摘要 / 命名 API」，
-          不用单独区分。技能/插件描述翻译和思考块全文翻译都用它；没配 Key 时
-          描述翻译回退到当前运营商，思考块显示原文。
-        </p>
+        <SettingText className="text-xs">
+          技能与插件描述翻译、思考内容翻译、会话命名和摘要共用下方的“摘要 / 命名 API”配置。
+
+          未配置 API Key 时，描述翻译会尝试使用当前 Provider；无法翻译的思考内容将保留原文。
+        </SettingText>
         <SummaryApiSettings />
       </div>
     </div>

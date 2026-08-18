@@ -1285,7 +1285,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               className="group relative [content-visibility:auto] [contain-intrinsic-size:auto_34px]"
             >
               <div
-                className={`sidebar-session-row relative w-full rounded-md border px-2 py-1 text-left ${
+                className={`sidebar-session-row relative w-full rounded-md border px-2 py-[5px] text-left ${
                   active ? 'is-active border-transparent bg-[#313131] text-zinc-100' : 'border-transparent text-[#c3c3c3]'
                 }`}
               >
@@ -1469,20 +1469,20 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                 项目
               </div>
             )}
-            {/* 组头（项目 / 时间段）。Codex 式（2026-08-17）：只显示项目名（路径
-                末段），完整路径收进悬停提示；文件夹图标 + 亮一档字色压过会话行，
-                行尾悬停出「+」——直接在该项目下开新对话。外层用 div 不用
-                button：「+」是独立按钮，HTML 不允许按钮套按钮。 */}
+            {/* 组头（项目 / 时间段）。Codex 式（2026-08-18 像素对比）：项目名与会话
+                行同一字重同色（普通 #c3c3c3，不再半粗白字"喊"），靠文件夹图标 +
+                子行缩进区分层级；右侧计数删掉（Codex 右缘干净）。行尾悬停出「+」。
+                外层用 div 不用 button：「+」是独立按钮，HTML 不允许按钮套按钮。 */}
             {cwdGroupHeader ? (
               <div className="group/projhead flex w-full items-center gap-1 px-2 py-1">
                 <button
                   type="button"
                   onClick={() => toggleGroupCollapsed(g.label)}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm font-medium text-zinc-200 transition hover:text-white"
+                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm font-normal text-[#c3c3c3] transition hover:text-zinc-100"
                   title={g.label}
                 >
                   <span className="text-[8px] text-zinc-500">{groupCollapsed ? '▸' : '▾'}</span>
-                  <span className="shrink-0 text-zinc-300"><FolderIcon /></span>
+                  <span className="shrink-0 text-zinc-400"><FolderIcon /></span>
                   {/* 当前项目：不要「当前」徽章（2026-08-17 用户：「字太大了，搞个
                       流光文字就行」）——项目名本身上紫黄流光。 */}
                   {(() => {
@@ -1508,12 +1508,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                     <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                   </svg>
                 </button>
-                <span className="shrink-0 text-[11px] font-normal text-zinc-500">{g.items.length}</span>
               </div>
             ) : (
               <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium text-zinc-500">
                 <span className="truncate">{g.label}</span>
-                <span className="ml-auto shrink-0 font-normal text-zinc-500">{g.items.length}</span>
               </div>
             )}
             {!groupCollapsed && (
@@ -1574,7 +1572,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                       }}
                       onPointerMove={handleSidebarPointerGlow}
                       onPointerLeave={hidePreview}
-                      className={`sidebar-session-row relative w-full rounded-md border px-2 py-1 text-left ${
+                      className={`sidebar-session-row relative w-full rounded-md border px-2 py-[5px] text-left ${
                         // 标题给足宽度：不再为悬停操作组预留 pr-28（那是标题
                         // 七八个字就省略号的元凶，2026-08-17 用户反馈）。操作组
                         // 悬停浮在上方，自带深色小底板遮住下面的文字。
@@ -1750,7 +1748,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                     tabIndex={(isWslItem && !wslNavInteractive) || (isProviderItem && !showProviderNav) ? -1 : 0}
                     aria-hidden={(isWslItem && !wslNavInteractive) || (isProviderItem && !showProviderNav)}
                   >
-                    <item.icon />
+                    {/* 图标统一 18px 列宽居中（ArchiveIcon 13px、其余 16px 原来
+                        裸排，各行文字左边跟着图标宽度跑——2026-08-18 用户：
+                        「字都不一样齐」）。 */}
+                    <span className="flex w-[18px] shrink-0 items-center justify-center">
+                      <item.icon />
+                    </span>
                     {item.label}
                   </button>
                 )

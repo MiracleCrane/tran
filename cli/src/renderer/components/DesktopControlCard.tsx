@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { DisplayInfo } from '../../shared/ipc'
+import SettingText from './SettingText'
 
 /**
  * 「桌面控制」开关卡片（Codex 式 computer-use，默认关）。
@@ -84,20 +85,17 @@ export default function DesktopControlCard(): JSX.Element {
           </button>
         </div>
       </div>
-      <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-        让 AI 像 Codex 那样操作整个 Windows 桌面：截屏识别、读取窗口控件（UIA）、移动点击鼠标、
-        键盘输入、切换窗口。开关即时生效，kimi 重开会话后可用 desktop_* 工具。
-      </p>
-      <p className="mt-1 text-[11px] text-zinc-600">
-        对 <span className="text-zinc-500">Kimi Code</span> 与{' '}
-        <span className="text-zinc-500">Claude Code</span> 两个后端同时生效（各写各的 MCP 配置）。
-      </p>
+      <SettingText className="mt-1">
+        允许 Agent 操作 Windows 桌面，包括截屏、读取窗口控件、鼠标点击、键盘输入和窗口切换。
+
+        启用后，需要重新打开会话才能使用 `desktop_*` 工具。此设置同时应用于 **Kimi Code** 和 **Claude Code**，Tran 会分别更新对应的 MCP 配置。
+      </SettingText>
       {on && displays.length > 1 && (
         <div className="mt-3">
           <div className="text-[11px] font-medium text-zinc-300">分屏控制</div>
-          <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
-            把其中一块屏划给 AI：截图只截这块屏，点击/聚焦越界会被拒绝，你在另一块屏上继续干活互不干扰。
-          </p>
+          <SettingText className="mt-0.5">
+            将桌面控制限制在指定显示器。截图仅包含该显示器，超出范围的点击和窗口聚焦请求会被拒绝。
+          </SettingText>
           <div className="mt-2 flex flex-wrap gap-1.5">
             <button
               type="button"
@@ -131,10 +129,10 @@ export default function DesktopControlCard(): JSX.Element {
       )}
 
       {on && (
-        <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-950/30 px-3 py-2 text-[11px] leading-relaxed text-amber-300">
-          ⚠️ 桌面控制等同于把键盘鼠标交给 AI——它能操作屏幕上的任何程序。工具调用仍会走
-          kimi 的权限确认（逐条确认模式下每步都会问你）；不放心时把会话保持在「逐条确认」模式。
-          AI 操作期间屏幕边缘会亮起紫色光晕作提示。
+        <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-950/30 px-3 py-2">
+          <SettingText className="text-amber-300">
+            {'> **安全提示：** 桌面控制允许 Agent 操作屏幕上的其他应用。建议使用“逐条确认”权限模式，并在执行前核对每次工具调用。Agent 操作期间，屏幕边缘会显示紫色提示光晕。'}
+          </SettingText>
         </div>
       )}
     </section>

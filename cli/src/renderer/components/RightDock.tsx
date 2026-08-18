@@ -1,18 +1,13 @@
-import { useEffect } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
-import { onOpenChangesPanel } from '../events'
-import GitToolbar from './GitToolbar'
 import PlanCard from './PlanCard'
 import GoalCard from './GoalCard'
 
 /**
- * 右侧停靠面板（2026-08-17，zcode/Codex 式布局）：Git 工具 / 待办 / 目标从右缘
- * 滑出，顶栏右侧三个图标切换。原先这三块常驻正文上方吃纵向空间（整条
- * GitToolbar + GoalCard + 待办卡），现在正文默认独占全高。
- *
- * 面板常驻挂载、收起只是位移出屏——GitToolbar 的轮询与 openChangesPanel 监听
- * 不能掉（SessionChangesPill 的「审核」靠它展开改动抽屉）。
+ * 右侧停靠面板（2026-08-17，zcode/Codex 式布局）：待办 / 目标从右缘滑出，
+ * 顶栏右侧图标切换。Git 工具 2026-08-18 回正文顶部常驻（用户拍板
+ * 「git工具去上面啊，不要在右边了」），不再占这个面板——dock 只剩
+ * 待办/目标两页。
  */
 export default function RightDock(): JSX.Element | null {
   const dock = useUiStore((s) => s.rightDock)
@@ -20,11 +15,8 @@ export default function RightDock(): JSX.Element | null {
   const planCount = useSessionStore((s) => s.planEntries.length)
   const goal = useSessionStore((s) => s.goal)
 
-  // 「审核改动」入口（改动胶囊 / 轮次改动卡）→ 打开 dock 的 Git 页。
-  useEffect(() => onOpenChangesPanel(() => setRightDock('git')), [setRightDock])
-
   const open = dock !== null
-  const title = dock === 'git' ? 'Git 工具' : dock === 'plan' ? '待办' : '目标'
+  const title = dock === 'plan' ? '待办' : '目标'
   return (
     <div
       className={`right-dock-root absolute inset-y-0 right-0 z-30 w-[360px] max-w-[88vw] transition-transform duration-300 ease-spring ${
@@ -48,10 +40,6 @@ export default function RightDock(): JSX.Element | null {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
-          {/* GitToolbar 常驻挂载（见文件头注释），只切显隐。 */}
-          <div className={dock === 'git' ? '' : 'hidden'}>
-            <GitToolbar docked />
-          </div>
           {dock === 'plan' &&
             (planCount > 0 ? (
               <PlanCard docked />

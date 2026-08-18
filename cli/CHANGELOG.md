@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.1.21 - 2026-08-18
+
+### 中文
+
+- 新增:**边输出边折叠**——活动流只留「正在输出的 + 上一个」两条 bar,更早的即刻折进集合行(计数实时涨);文本落地收上面整段,轮末一律收齐。
+- 新增:**轮次改动卡即时出**——「已编辑 N 个文件 +X -Y」从本轮 Write/Edit 工具输入直接统计,轮一结束立刻落在本轮输出最下面;废弃 git 快照对(大脏仓库里快照 IPC 被轮内流量饿死约 1 分钟,卡片落地太晚位置全错)。
+- 优化:**Git 工具回正文顶部常驻**——分支/拉取/推送/改动/提交一行窄条,抽屉从它下面整宽垂下,点工具条以外的地方自动收起;右侧 dock 只剩待办/目标。
+- 优化:**侧栏观感对齐 Codex**——项目名与会话行同字重同色(不再半粗白字)、行高 32px、删掉组右侧计数;底部工具区图标统一 18px 列宽,各行文字左边严格对齐。
+- 修复:**折叠组展开后内容挤在一起**——组内每块也走 12px 行距(实测 pitch 32px 与转录一致)。
+- 优化:**后台/定时类工具中文化**——TaskStop/TaskList/TaskOutput/CronCreate/CronDelete/CronList/AskUserQuestion/CreateGoal/UpdateGoal 在单卡头部与集合摘要行显示中文名(如「停止后台任务」)。
+- 优化:设置页说明文案与结构重整(SettingText,含摘要 API/翻译/快捷键页)。
+
+### English
+
+- Fold-as-you-output: only the current bar and the previous one stay expanded; older bars fold into the summary row immediately. Segments fold when narration text lands; everything folds at turn end.
+- Turn-changes card now appears instantly at the bottom of the turn's output, computed from the turn's own Write/Edit tool inputs (the git snapshot pair could starve ~1 minute on large dirty repos, landing the card far too late).
+- Git toolbar moved back to the top of the content area (branch/pull/push/changes/commit strip); drawers drop down full-width and auto-close when clicking elsewhere; the dock keeps only todos/goals.
+- Sidebar matches Codex: project names use the same weight/color as session rows, 32px rows, group counts removed; tool-nav icons get a fixed 18px column so labels align exactly.
+- Fixed expanded groups rendering blocks with no row spacing (12px rhythm inside groups, verified).
+- Chinese labels for background/cron tools (TaskStop, TaskList, TaskOutput, CronCreate/Delete/List, AskUserQuestion, CreateGoal, UpdateGoal).
+- Settings panels' copy and structure reworked (SettingText).
+
 ## v1.1.20 - 2026-08-18
 
 ### 中文
@@ -8,6 +30,7 @@
 - 修复:**斜杠命令用显示名也能解析**——手打中文别名（如「压缩上下文」）同样识别成对应命令。
 - 优化:**段完即折**——每段思考/命令执行完、输出文本一落地,上面的 bar 立刻折进集合行;正在生长的尾巴保持展开,轮末一律收齐（覆盖轮中"上翻不折"的决定）。
 - 移除:**侧栏图标条模式整体下线**——头部只留一颗「隐藏侧边栏」按钮（换 VS Code 式面板图标）;Ctrl+B / Alt+W / Alt+Q 统一为隐藏/唤回;拖宽拖过最小值即隐藏（左缘悬停可浮出）。
+- 优化:**设置信息架构与说明文案**——分类调整为「会话 / AI 功能 / 工具 / 快捷键 / 外观 / 系统 / 备份」,快捷键成为独立页面;说明统一改为面向用户的正式表达,并由完整的安全 Markdown renderer 渲染标题、列表、引用、表格、链接与代码。
 
 ### English
 
@@ -15,6 +38,7 @@
 - Slash commands now also resolve by display name (custom Chinese aliases work when typed).
 - Segment-level folding: when a narration text lands, all activity bars above it fold into the summary row immediately; the growing tail stays visible; everything folds at turn end.
 - Sidebar icon-rail mode removed: one hide/show button with a panel-style icon; Ctrl+B / Alt+W / Alt+Q all toggle hidden; dragging past the minimum width hides the sidebar.
+- Settings information architecture and copy revised: categories are now Session / AI Features / Tools / Shortcuts / Appearance / System / Backup; Shortcuts has its own page, descriptions use user-facing language, and a safe full Markdown renderer handles headings, lists, blockquotes, tables, links, and code.
 
 ## v1.1.19 - 2026-08-18
 

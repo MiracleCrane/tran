@@ -5,7 +5,7 @@ import { useUiStore } from '../store/uiStore'
 import { probeCommit } from '../utils/streamProbe'
 import type { AssistantBlock, AssistantItem, UserAttachment, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
 import MessageText from './MessageText'
-import { ToolGlyph } from './toolIcons'
+import { ToolGlyph, FRIENDLY_TOOL_NAMES } from './toolIcons'
 import { showImageContextMenu } from './ImageContextMenu'
 import { formatTimeFull, formatTimeShort, messageTime } from '../utils/messageTimes'
 import { initSentImageRecording, loadSentImages, matchHistoryImages } from '../utils/sentImages'
@@ -290,17 +290,17 @@ function buildDisplayRows(
    * 此前按「连续相邻 ≥2 块」成组，解说文本一断就再也合不上（实测：每步一句解说的
    * 轮次结束只剩一梯子单独的小 bar）。
    *
-   * 段完即折（2026-08-18 用户：「每段思考命令执行完有输出之后，上面的这些就
-   * 收起来，这点很重要很关键」）：live 闸门只盖**当前轮的尾巴**——最后一条
-   * 含正文的消息之后的活动（还在生长，必须实时可见）。尾巴之前的活动随
-   * 输出文本落地即刻进组折起，不再等整轮结束。live 闸门只盖最后一段
-   * （当前轮）——此前按「非历史」一刀切，上一轮的消息还没落 isHistory，
-   * 新轮一开始就被判成 live，刚折好的集合行重新摊开。
+   * 段完即折 + 只留两条（2026-08-18 用户拍板：「每段思考命令执行完有输出之后，
+   * 上面的这些就收起来」「除了正在输出的这个，和上一个，其它的都收进去」）：
+   * ① 最后一条含正文的消息之前的活动随文本落地即刻进组折起；
+   * ② 正在生长的尾巴也只留**最后 2 条** bar 展开（正在输出的 + 上一个），更早的
+   * 即刻折进集合行——不再是整段尾巴都摊着。live 闸门只盖当前轮的最后一段，
+   * 上一轮已折好的组不受影响。
    */
   const flushTurn = (isLiveSegment: boolean): void => {
     if (turnNodes.length === 0) return
     // live 尾巴起点：最后一条含正文块（且非历史）的消息之后。没有正文就是
-    // 轮刚起步，整段都是尾巴（保持展开）。
+    // 轮刚起步，整段都算尾巴（先保持展开）。
     let liveTailStart = turnNodes.length
     if (isLiveSegment) {
       for (let i = turnNodes.length - 1; i >= 0; i--) {
@@ -315,8 +315,25 @@ function buildDisplayRows(
         }
       }
     }
+    // 尾巴里的活动节点：只留最后 KEEP_TAIL_OPEN 个展开（正在输出的 + 上一个）。
+    const KEEP_TAIL_OPEN = 2
+    let lastAct = -1
+    let prevAct = -1
+    if (isLiveSegment) {
+      for (let i = liveTailStart; i < turnNodes.length; i++) {
+        const node = turnNodes[i]
+        if (node.item.isHistory) continue
+        if (activityBlocksOf(node) ?? mixedActivityOf(node)) {
+          prevAct = lastAct
+          lastAct = i
+        }
+      }
+    }
     const live = (index: number, node: ItemNode): boolean =>
-      isLiveSegment && !node.item.isHistory && index >= liveTailStart
+      isLiveSegment &&
+      !node.item.isHistory &&
+      index >= liveTailStart &&
+      (index === lastAct || index === prevAct)
     // 第一遍：攒活动块。
     const groupBlocks: AssistantBlock[] = []
     let firstActivityId: string | null = null
@@ -867,7 +884,16 @@ const TOOL_ACTIVITY_META: Record<string, { label: string; icon: string; tone: st
   todo_list: { label: '更新待办', icon: 'todo', tone: 'todo' },
   Skill: { label: '使用 Skill', icon: 'skill', tone: 'agent' },
   skill: { label: '使用 Skill', icon: 'skill', tone: 'agent' },
-  ReadMediaFile: { label: '读取图片', icon: 'image', tone: 'read' }
+  ReadMediaFile: { label: '读取图片', icon: 'image', tone: 'read' },
+  TaskStop: { label: '停止后台任务', icon: 'agent', tone: 'agent' },
+  TaskList: { label: '查看后台任务', icon: 'agent', tone: 'agent' },
+  TaskOutput: { label: '查看任务输出', icon: 'agent', tone: 'agent' },
+  CronCreate: { label: '创建定时任务', icon: 'todo', tone: 'todo' },
+  CronDelete: { label: '删除定时任务', icon: 'todo', tone: 'todo' },
+  CronList: { label: '查看定时任务', icon: 'todo', tone: 'todo' },
+  AskUserQuestion: { label: '向你提问', icon: 'think', tone: 'think' },
+  CreateGoal: { label: '创建目标', icon: 'todo', tone: 'todo' },
+  UpdateGoal: { label: '更新目标', icon: 'todo', tone: 'todo' }
 }
 
 interface ActivityEntry {
@@ -979,7 +1005,7 @@ const ActivityGroupRow = memo(function ActivityGroupRow({
       >
         <ActivitySummary segments={summarizeActivity(entries.map((e) => e.block))} />
       </button>
-      {open && entries.map(renderBlock)}
+      {open && entries.map((entry) => <div key={entry.index} className="py-1.5">{renderBlock(entry)}</div>)}
     </div>
   )
 })
@@ -1020,13 +1046,17 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
       </button>
       {everOpened && (
         <Collapse open={open}>
-          {blocks.map((block, i) =>
-            block.kind === 'thinking' ? (
-              <ThinkingBlock key={i} text={block.text} streaming={false} />
-            ) : block.kind === 'tool' ? (
-              <ToolCallCard key={i} block={block} forceExpanded={expandedBlockKey === block.toolUseId} />
-            ) : null
-          )}
+          {blocks.map((block, i) => (
+            // 组内展开也走 12px 行节奏（2026-08-18 用户：「历史消息间隔怎么
+            // 这么小」——组内块原先裸排挤在一起）。
+            <div key={i} className="py-1.5">
+              {block.kind === 'thinking' ? (
+                <ThinkingBlock text={block.text} streaming={false} />
+              ) : block.kind === 'tool' ? (
+                <ToolCallCard block={block} forceExpanded={expandedBlockKey === block.toolUseId} />
+              ) : null}
+            </div>
+          ))}
         </Collapse>
       )}
     </div>

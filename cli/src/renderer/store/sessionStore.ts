@@ -427,63 +427,71 @@ let unackedDirectMessages: UnackedDirectMessage[] = []
 /** kimi 侧已确认不存在的会话 id：待办轮询遇到一次 40401 就拉黑，不再重试。 */
 const deadTodoSessions = new Set<string>()
 
-/** #TurnChanges：一轮开始时的 git 工作区快照（cwd → path → 增删行数）。
- *  统计本轮改动用「前后快照差」而不是数编辑工具调用——后者漏掉一切经 shell
- *  改的文件（sed/格式化脚本/构建产物），而那些同样是这一轮造成的。 */
-type GitStatSnapshot = Map<string, { added: number; removed: number; untracked: boolean }>
-/** 按会话存快照，不是全局单槽：Tran 可以同时挂多个会话，甲会话开轮时把乙会话
- *  的快照冲掉，乙轮结束就会拿甲的基线做差（同一 cwd 下两个会话尤其明显）。
- *  存的是 Promise 而不是值——快照是异步拍的，短轮可能先结束；存 Promise 就
- *  等得到，也不会把迟到的快照留成下一轮的脏基线。 */
-const turnStartSnapshots = new Map<string, { cwd: string; snapshot: Promise<GitStatSnapshot | null> }>()
-
-async function snapshotWorkingChanges(cwd: string): Promise<GitStatSnapshot | null> {
-  if (!cwd) return null
-  try {
-    const changes = await window.api.gitWorkingChanges(cwd)
-    const map: GitStatSnapshot = new Map()
-    for (const f of changes.files) {
-      map.set(f.path, {
-        added: f.additions ?? 0,
-        removed: f.deletions ?? 0,
-        untracked: f.status === 'untracked'
-      })
-    }
-    return map
-  } catch {
-    // 非 git 目录 / git 不可用：本功能静默降级（不该因为它影响对话）。
-    return null
-  }
+/** 文本行数（空串 0；按 \n 计数，无尾换行按一段算）。 */
+function lineCountOf(text: unknown): number {
+  if (typeof text !== 'string' || text.length === 0) return 0
+  let n = 1
+  for (let i = 0; i < text.length; i++) if (text[i] === '\n') n++
+  return n
 }
 
-/** 轮结束：与轮开始的快照做差，得到「本轮改了哪些文件、各多少行」。 */
-async function computeTurnChanges(
-  cwd: string,
-  before: GitStatSnapshot | null
-): Promise<{ files: Array<{ path: string; added: number; removed: number; untracked?: boolean }>; addedTotal: number; removedTotal: number } | null> {
-  if (!before) return null
-  const after = await snapshotWorkingChanges(cwd)
-  if (!after) return null
-  const files: Array<{ path: string; added: number; removed: number; untracked?: boolean }> = []
-  let addedTotal = 0
-  let removedTotal = 0
-  for (const [path, now] of after) {
-    const prev = before.get(path)
-    const added = now.added - (prev?.added ?? 0)
-    const removed = now.removed - (prev?.removed ?? 0)
-    // 只收本轮真正变动的：行数没变的文件是上一轮/用户自己改的，不该算在这轮头上。
-    if (added === 0 && removed === 0) continue
-    files.push({
-      path,
-      added: Math.max(0, added),
-      removed: Math.max(0, removed),
-      ...(now.untracked ? { untracked: true } : {})
-    })
-    addedTotal += Math.max(0, added)
-    removedTotal += Math.max(0, removed)
+/**
+ * 从本轮（上一条用户发言之后）的写/改工具调用统计「已编辑 N 个文件 +X -Y」。
+ * 输入全部本地可取：Write 的 content 全是新增；Edit/patch 的 old_string/new_string
+ * 差即增删（edits 数组按段累加）。不再依赖 git 快照对——2026-08-18 实测大脏仓库
+ * （200+ 改动文件）里快照 IPC 会被轮内流量饿死约 1 分钟，卡片落地太晚位置全错。
+ * 撤销仍走 gitRevertFile（checkout 失败自动退到撤索引+删除，未跟踪文件同样安全）。
+ */
+function computeTurnChangesFromItems(
+  items: TranscriptItem[]
+): { files: Array<{ path: string; added: number; removed: number }>; addedTotal: number; removedTotal: number } | null {
+  const perFile = new Map<string, { added: number; removed: number }>()
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i]
+    if (it.kind === 'user' && it.text) break // 本轮只到上一条用户发言为止
+    if (it.kind !== 'assistant') continue
+    for (const b of it.blocks) {
+      if (!b || b.kind !== 'tool') continue
+      const inp = (b.input && typeof b.input === 'object' ? b.input : {}) as Record<string, unknown>
+      const path =
+        typeof inp.file_path === 'string' ? inp.file_path : typeof inp.path === 'string' ? inp.path : ''
+      if (!path) continue
+      let added = 0
+      let removed = 0
+      if (b.name === 'Write' || b.name === 'write_file') {
+        added = lineCountOf(inp.content)
+      } else if (b.name === 'Edit' || b.name === 'edit_file' || b.name === 'patch') {
+        if (Array.isArray(inp.edits)) {
+          for (const e of inp.edits as Array<Record<string, unknown>>) {
+            removed += lineCountOf(e?.old_string)
+            added += lineCountOf(e?.new_string)
+          }
+        } else if (typeof inp.old_string === 'string' || typeof inp.new_string === 'string') {
+          removed = lineCountOf(inp.old_string)
+          added = lineCountOf(inp.new_string)
+        } else if (typeof inp.content === 'string') {
+          // kimi 的 Write 在会话事件里同样名为 patch（没有 old/new，content 是整份
+          // 文件内容，2026-08-18 实测）：整份计为新增。
+          added = lineCountOf(inp.content)
+        }
+      } else {
+        continue
+      }
+      if (added === 0 && removed === 0) continue
+      const cur = perFile.get(path) ?? { added: 0, removed: 0 }
+      cur.added += added
+      cur.removed += removed
+      perFile.set(path, cur)
+    }
   }
-  if (files.length === 0) return null
-  return { files, addedTotal, removedTotal }
+  if (perFile.size === 0) return null
+  const files = [...perFile.entries()].map(([path, v]) => ({ path, added: v.added, removed: v.removed }))
+  files.sort((a, b) => a.path.localeCompare(b.path))
+  return {
+    files,
+    addedTotal: files.reduce((n, f) => n + f.added, 0),
+    removedTotal: files.reduce((n, f) => n + f.removed, 0)
+  }
 }
 
 /** 取出（并移除）该会话的全部未确认直达消息（保持发送顺序）。 */
@@ -1921,12 +1929,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   async sendMessage(text, attachments, opts) {
     let meta = get().meta
     if (!meta) return
-    // #TurnChanges 轮开始快照：不 await——拍快照是给结束时做差用的，
-    // 拖慢发送不值得；拿不到（非 git 目录）就整套静默降级。
-    turnStartSnapshots.set(meta.sessionId, {
-      cwd: meta.cwd,
-      snapshot: snapshotWorkingChanges(meta.cwd)
-    })
     const value = text.trim()
     const atts = attachments ?? []
     if (!value && atts.length === 0) return
@@ -3811,35 +3813,27 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         markSdkSessionRunning(get().meta?.sdkSessionId, get().status.running)
         // turn 完成：kimi 此时已持久化会话，刷新侧栏"最近会话"（防抖）。
         scheduleSessionsRefresh(get)
-        // #TurnChanges：与轮开始的快照做差，改了文件就在对话流里落一张
-        // 「已编辑 N 个文件 +X -Y」的卡片（Codex 同款）。异步算，不挡收尾。
+        // #TurnChanges：从本轮的写/改工具调用直接统计行数（不再走 git 快照对——
+        // 大脏仓库里快照 IPC 会被轮内流量饿死，卡片晚一分钟才落地、位置跑到
+        // 「所有的最下面」。工具输入就在本地，轮末零等待出卡（2026-08-18 用户：
+        // 「diff 显示在本轮输出的最下面」）。
         {
-          const sid = get().meta?.sessionId
-          const pending = sid ? turnStartSnapshots.get(sid) : undefined
-          if (sid) turnStartSnapshots.delete(sid)
-          if (pending) {
-            const { cwd } = pending
-            void pending.snapshot
-              .then((before) => (before ? computeTurnChanges(cwd, before) : null))
-              .then((changes) => {
-                if (!changes) return
-                // 结果回来时用户可能已切走：只往仍是这个会话的界面上落卡片。
-                if (get().meta?.sessionId !== sid) return
-                set((s2) => ({
-                  items: [
-                    ...s2.items,
-                    {
-                      id: uid(),
-                      kind: 'turnChanges' as const,
-                      parentToolUseId: null,
-                      files: changes.files,
-                      addedTotal: changes.addedTotal,
-                      removedTotal: changes.removedTotal,
-                      at: Date.now()
-                    }
-                  ]
-                }))
-              })
+          const changes = computeTurnChangesFromItems(get().items)
+          if (changes) {
+            set((s2) => ({
+              items: [
+                ...s2.items,
+                {
+                  id: uid(),
+                  kind: 'turnChanges' as const,
+                  parentToolUseId: null,
+                  files: changes.files,
+                  addedTotal: changes.addedTotal,
+                  removedTotal: changes.removedTotal,
+                  at: Date.now()
+                }
+              ]
+            }))
           }
         }
         break

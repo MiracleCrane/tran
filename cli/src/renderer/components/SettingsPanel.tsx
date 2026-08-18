@@ -53,6 +53,7 @@ const PERMISSION_MODES: { id: PermissionMode; label: string }[] = [
 
 function RangeControl({
   label,
+  description,
   value,
   min,
   max,
@@ -61,6 +62,7 @@ function RangeControl({
   onChange
 }: {
   label: string
+  description?: string
   value: number
   min: number
   max: number
@@ -74,6 +76,7 @@ function RangeControl({
         <span className="text-xs text-zinc-500">{label}</span>
         <span className="font-mono text-xs text-zinc-400">{display}</span>
       </div>
+      {description && <SettingText className="mb-2">{description}</SettingText>}
       <input
         type="range"
         min={min}
@@ -128,7 +131,9 @@ function ToggleControl({
 /** 设置分类。顺序即用户从「最常改」到「最少改」的直觉顺序。 */
 const SETTINGS_CATEGORIES = [
   { id: 'session', label: '会话' },
-  { id: 'plugins', label: '插件' },
+  { id: 'assistant', label: 'AI 功能' },
+  { id: 'tools', label: '工具' },
+  { id: 'shortcuts', label: '快捷键' },
   { id: 'appearance', label: '外观' },
   { id: 'system', label: '系统' },
   { id: 'backup', label: '备份' }
@@ -140,10 +145,10 @@ const SECRET_CATEGORY_OPTIONS: Array<{
   label: string
   description: string
 }> = [
-  { id: 'providers', label: 'Provider 凭据', description: '自定义 Provider 的 Token/API Key' },
-  { id: 'summary', label: '摘要 API Key', description: '摘要配置中的各个 API Key' },
-  { id: 'translation', label: '翻译密钥', description: '百度翻译 Secret Key' },
-  { id: 'usage', label: '用量查询密钥', description: 'DeepSeek 余额查询 API Key' }
+  { id: 'providers', label: 'Provider 凭据', description: '自定义 Provider 使用的 Token 或 API Key。' },
+  { id: 'summary', label: '摘要服务凭据', description: '摘要与模型翻译配置中的 API Key。' },
+  { id: 'translation', label: '翻译服务凭据', description: '百度翻译使用的 Secret Key。' },
+  { id: 'usage', label: '用量查询凭据', description: 'DeepSeek 余额查询使用的 API Key。' }
 ]
 
 export default function SettingsPanel(): JSX.Element {
@@ -856,6 +861,7 @@ export default function SettingsPanel(): JSX.Element {
           <div className="space-y-4">
             <RangeControl
               label="动画速度"
+              description="调整界面展开、收起与切换动画的速度。数值越高，动画完成得越快。"
               value={appearance.motionSpeed}
               min={MOTION_SPEED_MIN}
               max={MOTION_SPEED_MAX}
@@ -872,9 +878,9 @@ export default function SettingsPanel(): JSX.Element {
         <section className="glass-panel-soft glass-overflow-visible rounded-2xl p-4">
           <div className="mb-3">
             <label className={labelCls}>Agent 后端</label>
-            <p className="text-[11px] leading-relaxed text-zinc-600">
-              控制会话由哪个 Agent 引擎接管。当前版本内置 Kimi Code CLI 后端。
-            </p>
+            <SettingText>
+              选择负责处理会话的 Agent。切换后端不会删除已有会话，但不同后端的模型、权限和 Skill 能力可能不同。
+            </SettingText>
           </div>
           {/* 只有一个后端时隐藏切换器，只展示能力说明卡片。 */}
           {agentOptions.length > 1 && (
@@ -893,9 +899,7 @@ export default function SettingsPanel(): JSX.Element {
                   {selectedAgent.status === 'available' ? '可用' : '即将支持'}
                 </span>
               </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-                {selectedAgent.description}
-              </p>
+              <SettingText className="mt-1">{selectedAgent.description}</SettingText>
               <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-zinc-500">
                 {[
                   selectedAgent.capabilities.streaming ? '流式输出' : '',
@@ -918,6 +922,9 @@ export default function SettingsPanel(): JSX.Element {
 
         <section>
           <label className={labelCls}>默认思考强度(effort)</label>
+          <SettingText className="mb-2">
+            设置新会话的默认推理强度。更高的强度通常适合复杂任务，但可能增加响应时间和用量。
+          </SettingText>
           <DisclosureSelect
             value={effort}
             options={EFFORTS.map((e) => ({ value: e.id, label: `${e.label}(${e.id})` }))}
@@ -928,6 +935,9 @@ export default function SettingsPanel(): JSX.Element {
 
         <section>
           <label className={labelCls}>默认权限模式</label>
+          <SettingText className="mb-2">
+            控制 Agent 执行工具操作前是否需要确认。`逐条确认`最稳妥；`自动通过`和`完全自主`会减少确认步骤，请仅在可信项目中使用。
+          </SettingText>
           <DisclosureSelect
             value={permMode}
             options={PERMISSION_MODES.map((p) => ({ value: p.id, label: p.label }))}
@@ -945,6 +955,9 @@ export default function SettingsPanel(): JSX.Element {
               + 添加
             </button>
           </div>
+          <SettingText className="mb-2">
+            自定义 Composer 中可选的模型名称和模型 ID。列表留空时使用当前 Agent 提供的内置模型。
+          </SettingText>
           <div className="space-y-2">
             {models.map((m, i) => (
               <div key={i} className="flex gap-2">
@@ -993,9 +1006,9 @@ export default function SettingsPanel(): JSX.Element {
         <section className="glass-panel-soft rounded-2xl p-4">
           <div className="mb-3">
             <h2 className="text-sm font-semibold text-zinc-200">设置导入 / 导出</h2>
-            <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-              备份 Tran 设置、模型、外观和命令别名。敏感凭据默认不导出。
-            </p>
+            <SettingText className="mt-1">
+              导出或导入 Tran 的会话默认值、模型、外观和命令别名。敏感凭据默认不包含在备份中。
+            </SettingText>
           </div>
           <div className="mb-3 rounded-xl border border-white/[0.06] bg-black/10 p-3">
             <div className="mb-2 text-xs font-medium text-zinc-300">可选：加密导出敏感凭据</div>
@@ -1014,7 +1027,7 @@ export default function SettingsPanel(): JSX.Element {
                     />
                     <span>
                       <span className="block text-xs text-zinc-300">{option.label}</span>
-                      <span className="block text-[10px] leading-relaxed text-zinc-600">{option.description}</span>
+                      <SettingText className="mt-0.5 text-[10px] text-zinc-600">{option.description}</SettingText>
                     </span>
                   </label>
                 )
@@ -1038,9 +1051,9 @@ export default function SettingsPanel(): JSX.Element {
                   placeholder="再次输入备份密码"
                   className={inputCls}
                 />
-                <p className="sm:col-span-2 text-[10px] leading-relaxed text-amber-300/75">
-                  密码不会保存，也无法找回。导入到另一台电脑时必须输入同一密码。
-                </p>
+                <SettingText className="sm:col-span-2 text-[10px] text-amber-300/75">
+                  **请妥善保存备份密码。** Tran 不会保存该密码，也无法协助找回。导入备份时必须输入相同密码。
+                </SettingText>
               </div>
             )}
           </div>
@@ -1110,21 +1123,21 @@ export default function SettingsPanel(): JSX.Element {
         </section>
         )}
 
-        {category === 'plugins' && <BrowserBridgeCard />}
+        {category === 'tools' && <BrowserBridgeCard />}
 
-        {category === 'plugins' && <DesktopControlCard />}
+        {category === 'tools' && <DesktopControlCard />}
 
-        {category === 'system' && (
+        {category === 'assistant' && (
         <section className="glass-panel-soft rounded-2xl p-4">
           <div className="mb-4">
-            <h2 className="text-sm font-semibold text-zinc-200">系统</h2>
+            <h2 className="text-sm font-semibold text-zinc-200">AI 功能</h2>
           </div>
           <div className="space-y-4">
             <ToggleControl
               label="AI 自动命名"
               description={
-                '新会话发出第一条消息后自动生成短标题，侧栏可一键补全历史会话。\n' +
-                '关闭后不再发起任何命名请求，命令说明与思考摘要一并停用。约 **120 token / 次**。'
+                '在新会话发送第一条消息后生成简短标题，也可用于补全历史会话标题。\n\n' +
+                '每次命名约消耗 **120 token**。关闭后，Tran 不再发起自动命名请求。'
               }
               checked={aiNaming}
               onChange={(checked) => void toggleAiNaming(checked)}
@@ -1132,10 +1145,9 @@ export default function SettingsPanel(): JSX.Element {
             <ToggleControl
               label="云端套餐额度显示"
               description={
-                '在用量卡里显示 5 小时 / 每周套餐额度。\n' +
-                '**有账号风险，默认关闭。** 额度数据只能取自 `api.kimi.com` 的非公开接口，' +
-                '需复用 CLI 登录凭证直连；已有账号因此被封的先例。\n' +
-                '关闭时这两行显示「—」，上下文占用一行来自本地 `/usage`，不受影响。'
+                '在用量卡中显示 **5 小时额度**和**每周额度**。\n\n' +
+                '> **风险提示：** 此功能调用 `api.kimi.com` 的非公开接口，并复用 Kimi Code CLI 的登录凭据。该接口可能变更，也可能带来账号风险，因此默认关闭。\n\n' +
+                '关闭后仅隐藏云端额度；本地 `/usage` 提供的上下文占用信息不受影响。'
               }
               checked={cloudUsage}
               onChange={(checked) => void toggleCloudUsage(checked)}
@@ -1143,15 +1155,12 @@ export default function SettingsPanel(): JSX.Element {
             <ToggleControl
               label="后台任务结束后自动更新待办"
               description={
-                '后台任务结束且待办仍有未完成项时，自动请求 AI 更新待办状态。\n' +
-                '**开销较大，默认关闭。** 这是一次完整对话轮，需重新读取整个会话上下文' +
-                '（42 条记录的会话实测约 **88k token**）。不开启也不会漏更新——' +
-                '你下次发消息时 AI 同样会收到完成通知并更新，区别只在于是否提前。'
+                '当后台任务结束且待办仍有未完成项时，自动发起一轮请求以刷新待办状态。\n\n' +
+                '> **用量提示：** 该请求需要重新读取当前会话上下文，长会话可能产生较高用量，因此默认关闭。关闭后，Agent 会在下一次正常对话时收到任务完成通知。'
               }
               checked={autoTodoNudge}
               onChange={(checked) => void toggleAutoTodoNudge(checked)}
             />
-            <ShortcutSettings />
             {/* 摘要 / 命名 API 已搬到「AI 辅助」页与翻译引擎合并配置：
                 翻译的「模型翻译」通道走的就是那份 baseUrl + Key，
                 分在两页配用户根本连不起来。见 SummaryApiSettings.tsx。 */}
@@ -1161,10 +1170,9 @@ export default function SettingsPanel(): JSX.Element {
               <div>
                 <div className="text-xs font-medium text-zinc-200">DeepSeek 余额</div>
                 <SettingText className="mt-1">
-                  {'在用量卡里显示 DeepSeek 账户余额（总额 / 充值 / 赠金），走官方公开的 `/user/balance` 接口。\n' +
-                    '**通常无需填写**：若「AI 辅助」中启用的配置本身就是 DeepSeek，会自动复用其 Key。' +
-                    '仅当摘要 API 用的是其他服务商、又想查看 DeepSeek 余额时才需单独填。\n' +
-                    'Key 存于系统安全存储。'}
+                  {'通过 DeepSeek 官方 `/user/balance` 接口，在用量卡中显示账户总额、充值余额和赠送余额。\n\n' +
+                    '如果当前 AI 服务配置使用 DeepSeek，Tran 会优先复用该 API Key；只有在使用其他服务商且仍需查询 DeepSeek 余额时，才需要单独填写。\n\n' +
+                    'API Key 使用系统安全存储保存。'}
                 </SettingText>
               </div>
               <div className="flex items-center gap-2">
@@ -1189,49 +1197,63 @@ export default function SettingsPanel(): JSX.Element {
                 )}
               </div>
             </div>
+          </div>
+        </section>
+        )}
+
+        {category === 'shortcuts' && (
+        <section className="glass-panel-soft rounded-2xl p-4">
+          <ShortcutSettings />
+        </section>
+        )}
+
+        {category === 'system' && (
+        <section className="glass-panel-soft rounded-2xl p-4">
+          <div className="mb-4">
+            <h2 className="text-sm font-semibold text-zinc-200">系统</h2>
+          </div>
+          <div className="space-y-4">
             <ToggleControl
               label="最小化到系统托盘"
-              description="关闭窗口时最小化到托盘而非退出应用。点击托盘图标可恢复窗口。"
+              description="关闭主窗口时保持 Tran 在系统托盘中运行。可通过托盘图标重新打开窗口。"
               checked={minimizeToTray}
               onChange={(checked) => void toggleMinimizeToTray(checked)}
             />
             <ToggleControl
               label="启动时最大化"
-              description="应用启动时主窗口直接最大化显示。"
+              description="启动 Tran 时自动将主窗口最大化。"
               checked={startMaximized}
               onChange={(checked) => void toggleStartMaximized(checked)}
             />
             <ToggleControl
               label="富文本输入框（实验）"
               description={
-                '把 `/命令` 就地渲染成内联胶囊(Codex 那种观感),而不是一串裸文本。\n\n' +
-                '**默认关,因为它把输入框从 textarea 换成了 contenteditable** —— ' +
-                '中文输入法在这两者上的行为差别很大(组词、选字、光标位置),而合成事件测不出来,' +
-                '只能真人打中文才验得到。打开后请正常用一阵子中文输入,不对劲随时关回去,旧输入框一行没动。\n\n' +
-                '改完需要重开窗口生效。'
+                '将 `/命令` 直接渲染为内联命令胶囊。\n\n' +
+                '> **实验功能：** 启用后，输入框将从 `textarea` 切换为 `contenteditable`。中文输入法的组词、选字和光标行为可能因系统环境而异。\n\n' +
+                '更改后需要重新打开窗口才能生效。'
               }
               checked={richComposer}
               onChange={(checked) => void toggleRichComposer(checked)}
             />
             <ToggleControl
               label="会话完成通知"
-              description="当 Agent 完成任务且窗口不在前台时,显示系统原生通知。"
+              description="当 Agent 完成任务且 Tran 不在前台时，显示系统通知。"
               checked={nativeNotifications}
               onChange={(checked) => void toggleNativeNotifications(checked)}
             />
             <ToggleControl
               label="每次关闭都询问"
-              description="关闭窗口时每次弹出「最小化到托盘 / 直接退出」选择框。关闭后直接按上面的设置执行,不再询问。"
+              description="每次关闭主窗口时，询问是最小化到托盘还是退出 Tran。关闭此选项后，将直接执行“最小化到系统托盘”的当前设置。"
               checked={askOnClose}
               onChange={(checked) => void toggleAskOnClose(checked)}
             />
             <div className="border-t border-white/[0.06] pt-4">
               <div className="mb-2 flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs text-zinc-500">自动更新</div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-                    启动后自动检查 GitHub Release；也可以手动检查并下载最新安装包。
-                  </p>
+                  <div className="text-xs font-medium text-zinc-200">Tran 更新</div>
+                  <SettingText className="mt-1">
+                    检查 GitHub Release 中发布的新版本，并将安装包下载到指定目录。Tran 不会自动安装更新。
+                  </SettingText>
                 </div>
                 <div className="flex shrink-0 flex-wrap justify-end gap-2">
                   <button
@@ -1263,10 +1285,10 @@ export default function SettingsPanel(): JSX.Element {
             <div className="border-t border-white/[0.06] pt-4">
               <div className="mb-2 flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs text-zinc-500">Kimi Code CLI 版本</div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-                    只检查不自动安装 —— 升级需重装全局 npm 包并重连 ACP，正在跑的对话会断，时机由你定。
-                  </p>
+                  <div className="text-xs font-medium text-zinc-200">Kimi Code CLI 版本</div>
+                  <SettingText className="mt-1">
+                    检查已安装版本和可用更新。升级会重启 Agent 连接并中断正在运行的会话，因此仅在用户确认后执行。
+                  </SettingText>
                 </div>
                 <button
                   type="button"
@@ -1373,10 +1395,10 @@ export default function SettingsPanel(): JSX.Element {
             <div className="border-t border-white/[0.06] pt-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs text-zinc-500">诊断报告</div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-                    导出运行时状态、配置快照和最近日志；敏感密钥会脱敏。
-                  </p>
+                  <div className="text-xs font-medium text-zinc-200">诊断报告</div>
+                  <SettingText className="mt-1">
+                    导出运行状态、脱敏后的配置快照和最近日志，用于问题排查。API Key、Token 等敏感字段不会以明文写入报告。
+                  </SettingText>
                 </div>
                 <button
                   type="button"
@@ -1401,8 +1423,8 @@ export default function SettingsPanel(): JSX.Element {
             <div>
               <div className="text-xs font-medium text-zinc-200">Vulkan GPU 合成后端</div>
               <SettingText className="mt-1">
-                {'让 Chromium 的界面合成走 ANGLE Vulkan 后端（默认 `D3D11`）。\n' +
-                  '**实验性，默认关闭。** 部分显卡上更流畅，也可能在某些驱动上闪烁或不稳定。重启后生效。'}
+                {'将 Chromium 界面合成后端从默认的 `D3D11` 切换为 ANGLE Vulkan。\n\n' +
+                  '> **实验功能：** Vulkan 可能改善部分设备的渲染性能，也可能引发驱动兼容问题。更改后需要重启 Tran。'}
               </SettingText>
             </div>
             <button

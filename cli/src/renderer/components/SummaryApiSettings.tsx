@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { PromptDiagnosis, SummaryModelProbe, SummaryProfile } from '../../shared/ipc'
+import SettingText from './SettingText'
 
 /** 新建配置时的预设，省得用户去翻文档抄 URL。 */
 const PRESETS: Array<{ name: string; baseUrl: string; model: string; note: string }> = [
@@ -132,14 +133,11 @@ export default function SummaryApiSettings(): JSX.Element {
           摘要 / 命名 API
           {saved && <span className="ml-2 text-[10px] text-emerald-400">已保存</span>}
         </div>
-        <div className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
-          会话命名、命令说明、思考摘要走这里；上面选「模型翻译」时，翻译也走这里。
-          支持任意 OpenAI 兼容接口。API Key 使用系统安全存储，**不会发送给 Kimi**。
-        </div>
-        <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-          可以存多套、随时切换——换服务商不会覆盖旧配置，想换回去点一下就行。
-          Tran 内置串行队列与限流退避，撞到 429 会自动退避重试，不会让说明"时有时无"。
-        </div>
+        <SettingText className="mt-1">
+          会话标题、命令说明、思考摘要和“模型翻译”共用此处配置。支持 OpenAI 兼容接口；API Key 使用系统安全存储，**不会发送给 Kimi**。
+
+          可以保存多个服务配置并按需切换。Tran 会分别记录各服务的限流状态，并在收到 `429` 响应后自动退避重试。
+        </SettingText>
       </div>
 
       {/* 已保存的配置：换服务商只是切换激活项，旧的 baseUrl/型号/Key 全部留着。
@@ -302,11 +300,9 @@ export default function SummaryApiSettings(): JSX.Element {
         />
         <span className="min-w-0">
           <span className="block text-xs text-zinc-300">开启模型思考</span>
-          <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-500">
-            默认关。这些任务是 12~16 字的短摘要，推理帮不上忙却极烧额度——实测同一条命令说明，
-            开思考多花 <span className="text-zinc-300">762 个推理 token</span>，关掉是 0，两边答案质量一样。
-            免费额度按 token 算（推理 token 也算）。只有当你发现某个模型不推理就答不准时才开。
-          </span>
+          <SettingText className="mt-0.5">
+            默认关闭。启用后，模型可在生成短标题或摘要时使用内部推理，但可能显著增加输出 token 和费用。仅在当前模型关闭推理时无法稳定完成任务的情况下启用。
+          </SettingText>
         </span>
       </label>
 
@@ -340,10 +336,9 @@ export default function SummaryApiSettings(): JSX.Element {
               {p.error && <span className="truncate text-zinc-600">{p.error}</span>}
             </div>
           ))}
-          <div className="pt-1 text-[10px] leading-relaxed text-zinc-600">
-            先读 <code className="font-mono">/models</code> 判断型号是否存在，再发一条最小请求判断是否可用。
-            部分兼容服务不提供模型目录，此时只报告接口通不通。
-          </div>
+          <SettingText className="pt-1 text-[10px] text-zinc-600">
+            Tran 会先通过 `/models` 检查模型是否存在，再发送最小请求验证可用性。部分兼容服务不提供模型目录；此时只能确认接口可访问，不能确认模型 ID 有效。
+          </SettingText>
         </div>
       )}
 
@@ -368,10 +363,9 @@ export default function SummaryApiSettings(): JSX.Element {
               )}
             </div>
           ))}
-          <div className="pt-1 text-[10px] leading-relaxed text-zinc-600">
-            形态 2 失败 = 端点不支持 stop；形态 3 失败 = 不接受 assistant 角色消息。
-            失败行显示服务端原文。正式路径用的是形态 4（多轮少样本 + stop）。
-          </div>
+          <SettingText className="pt-1 text-[10px] text-zinc-600">
+            自检会分别验证 `stop` 参数和 `assistant` 角色消息兼容性。失败项会显示服务端返回的原始错误；正式请求使用多轮少样本消息并携带 `stop` 参数。
+          </SettingText>
         </div>
       )}
     </div>

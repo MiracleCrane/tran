@@ -10,8 +10,8 @@ import ElicitationCard from './components/ElicitationCard'
 import SessionChangesPill from './components/SessionChangesPill'
 import TurnTimerStrip from './components/TurnTimerStrip'
 import RightDock from './components/RightDock'
+import GitToolbar, { requestCloseGitDrawer } from './components/GitToolbar'
 import ErrorDiagnosticPanel from './components/ErrorDiagnosticPanel'
-import { requestCloseGitDrawer } from './components/GitToolbar'
 import AttachmentPreviewPane from './components/AttachmentPreviewPane'
 import SessionSearchPalette from './components/SessionSearchPalette'
 import PermissionModal from './components/PermissionModal'
@@ -211,27 +211,14 @@ function WindowTitlebar(): JSX.Element {
   )
 }
 
-/** 顶栏右侧的停靠面板图标（Git / 待办 / 目标，zcode 式）。有待办未完或目标
- *  进行中时图标带小圆点。 */
+/** 顶栏右侧的停靠面板图标（待办 / 目标，zcode 式）。Git 工具已回正文顶部
+ *  常驻（2026-08-18），不再占 dock。有待办未完或目标进行中时图标带小圆点。 */
 function DockButtons(): JSX.Element {
   const dock = useUiStore((s) => s.rightDock)
   const setRightDock = useUiStore((s) => s.setRightDock)
   const planPending = useSessionStore((s) => s.planEntries.some((e) => e.status !== 'completed'))
   const goalActive = useSessionStore((s) => s.goal?.status === 'active')
   const items = [
-    {
-      key: 'git' as const,
-      title: 'Git 工具',
-      dot: false,
-      icon: (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-          <circle cx="6" cy="6" r="2.4" stroke="currentColor" strokeWidth="1.6" />
-          <circle cx="6" cy="18" r="2.4" stroke="currentColor" strokeWidth="1.6" />
-          <circle cx="17" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.6" />
-          <path d="M6 8.4v7.2M17 12.4c0 3-2.5 4.6-6 4.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-        </svg>
-      )
-    },
     {
       key: 'plan' as const,
       title: '待办',
@@ -299,7 +286,6 @@ function MainViewContent({
   onTranscriptAtBottomChange: (atBottom: boolean) => void
 }): JSX.Element {
   const lazyPanel = LAZY_PANELS[view as keyof typeof LAZY_PANELS]
-  const rightDock = useUiStore((s) => s.rightDock)
   if (lazyPanel) {
     const Panel = lazyPanel
     return (
@@ -313,25 +299,20 @@ function MainViewContent({
 
   return (
     <>
-      {/* ChatTopbar 已撤销：停靠图标并进了窗口标题栏（2026-08-17）。GoalCard /
-          PlanCard 在右侧停靠面板（RightDock）。 */}
+      {/* GitToolbar 回正文顶部常驻（2026-08-18 用户拍板：「git工具去上面啊，
+          不要在右边了」）——分支/拉取/推送/改动/提交一行窄条，抽屉从它下面
+          垂下来；工具条和抽屉都在下面这个 capture 容器之外，点它们不会误关
+          抽屉，点正文/输入区自动收起抽屉。 */}
+      <GitToolbar />
       <div
         className="relative min-h-0 flex-1 overflow-hidden"
         onPointerDownCapture={(event) => {
-          // dock / 抽屉里的点击不算"点正文"：不然在停靠面板里点「改动」抽屉刚开
+          // dock 里的点击不算"点正文"：不然在停靠面板里点「改动」抽屉刚开
           // 就被这个 capture 秒关（2026-08-17 用户：「diff 页面点不开了」）。
-          if ((event.target as HTMLElement).closest?.('.right-dock-root, .git-drawer-host')) return
+          if ((event.target as HTMLElement).closest?.('.right-dock-root')) return
           requestCloseGitDrawer()
         }}
       >
-        {/* dock 模式下 GitToolbar 抽屉的 portal 宿主：抽屉回到正文上方整宽展开
-            （2026-08-18 用户：「diff 搞这么小谁能看清，还是在上面展开」）。
-            右侧给开着的 dock 让位；宿主本身不吃点击，由抽屉自己开关。 */}
-        <div
-          id="git-drawer-host"
-          className="git-drawer-host pointer-events-none absolute left-0 top-0 z-40 transition-[right] duration-300"
-          style={{ right: rightDock ? 'min(360px, 88vw)' : 0 }}
-        />
         <Transcript
           layoutTransitioning={chatTopbarLayoutMotion}
           bottomReserve={chatTopbarScrollReserve}

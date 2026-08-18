@@ -65,11 +65,13 @@ const ToolGroupCard = memo(function ToolGroupCard({
       <Collapse open={!collapsed}>
         <div className="ml-2 border-l border-white/[0.07] px-2 py-1">
           {blocks.map((block) => (
-            <ToolCallCard
-              key={block.toolUseId}
-              block={block}
-              forceExpanded={expandedBlockKey === block.toolUseId}
-            />
+            // 组内展开同样走 12px 行节奏（与转录行容器一致）。
+            <div key={block.toolUseId} className="py-1.5">
+              <ToolCallCard
+                block={block}
+                forceExpanded={expandedBlockKey === block.toolUseId}
+              />
+            </div>
           ))}
         </div>
       </Collapse>
