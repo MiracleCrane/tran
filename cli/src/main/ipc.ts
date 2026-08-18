@@ -58,14 +58,13 @@ import { getTranslateConfig, saveTranslateConfig, testTranslate } from './transl
 import { getPreferences, savePreferences } from './preferences'
 import { DEFAULT_AGENT_BACKEND_ID, normalizeAgentBackend } from '../shared/agentBackends'
 import {
-  exportSettings,
   getDiagnosticLog,
   getRuntimeStatus,
-  importSettings,
   buildDiagnosticReport,
   repairWslEnvironment,
   runWslHealthCheck
 } from './runtimeDiagnostics'
+import { applyPortableSettingsBackup, createPortableSettingsBackup } from './portableSettingsBackup'
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { checkKimiVersion, upgradeKimi } from './kimiVersion'
 import { probeCheapModels, diagnoseSummaryPrompt, onSummaryIssue } from './cheapModel'
@@ -116,6 +115,9 @@ import type {
   ProviderProfiles,
   RuntimeStatus,
   SettingsBackup,
+  SettingsExportOptions,
+  SettingsImportRequest,
+  SettingsImportResult,
   WslHealthReport,
   ComposerModel,
   PickDirectoryOptions,
@@ -994,12 +996,13 @@ export function registerIpc(
   })
   ipcMain.handle(
     'forge:exportSettings',
-    async (_e, appearance?: Record<string, unknown>): Promise<SettingsBackup> =>
-      exportSettings(appearance)
+    async (_e, options?: SettingsExportOptions): Promise<SettingsBackup> =>
+      createPortableSettingsBackup(options)
   )
   ipcMain.handle(
     'forge:importSettings',
-    async (_e, backup: SettingsBackup): Promise<void> => importSettings(backup)
+    async (_e, request: SettingsImportRequest): Promise<SettingsImportResult> =>
+      applyPortableSettingsBackup(request)
   )
 
   ipcMain.handle('forge:minimizeWindow', async (): Promise<void> => {

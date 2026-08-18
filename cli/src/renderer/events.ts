@@ -3,6 +3,7 @@ export const FORGE_RENDERER_EVENTS = {
   closePrefsChanged: 'forge:close-prefs-changed',
   modelOptionsChanged: 'forge:model-options-changed',
   providerChanged: 'forge:provider-changed',
+  commandAliasesChanged: 'forge:command-aliases-changed',
   wslSupportChanged: 'forge:wsl-support-changed',
   /** 项目列表增删改（ProjectSwitcher → Sidebar 分组口径刷新）。 */
   projectsChanged: 'forge:projects-changed',

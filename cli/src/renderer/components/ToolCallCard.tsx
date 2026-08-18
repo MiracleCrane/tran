@@ -203,8 +203,8 @@ const STATUS_META: Record<
   stopped: { label: '手动停止', dot: 'bg-zinc-500', text: 'text-zinc-400' }
 }
 
-/** 工具名 → Codex 风图标种类（toolIcons.tsx）。未收录的工具返回空串（不渲染图标）。
- *  MCP 工具（mcp__server__tool）一律给插头图标。 */
+/** 工具名 → Codex 风图标种类（toolIcons.tsx）。MCP 工具（mcp__server__tool）
+ *  一律给插头图标；未收录的给通用扳手（other）——不再有不带图标的工具。 */
 function toolGlyphKind(name: string): string {
   if (name.startsWith('mcp__')) return 'mcp'
   switch (name) {
@@ -233,12 +233,16 @@ function toolGlyphKind(name: string): string {
       return 'agent'
     case 'Skill':
       return 'skill'
+    case 'ReadMediaFile':
+      return 'image'
     case 'TodoList':
     case 'TodoWrite':
     case 'todo_list':
       return 'todo'
     default:
-      return ''
+      // 未收录的工具：通用扳手图标 + 中性灰微光（2026-08-17 用户：「这种也加上
+      // 颜色和图标」），不再裸文字。
+      return 'other'
   }
 }
 
@@ -263,6 +267,10 @@ function toolShimmerTone(name: string): string | null {
       return 'todo'
     case 'mcp':
       return 'web'
+    case 'image':
+      return 'read'
+    case 'other':
+      return 'think'
     default:
       return null
   }

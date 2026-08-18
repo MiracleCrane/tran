@@ -327,6 +327,7 @@ export default function Composer(): JSX.Element {
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
   /** 用户自定义别名。改名后要立刻重渲染，所以进 state 而不是每次读 localStorage。 */
   const [aliases, setAliases] = useState<Record<string, string>>({})
+  const [aliasEditor, setAliasEditor] = useState<{ name: string; value: string } | null>(null)
 
   const hasBackgroundSubagent = useSessionStore((s) =>
     s.tasks.some((t) => t.isBackgrounded && t.status === 'running')
@@ -441,13 +442,31 @@ export default function Composer(): JSX.Element {
     void window.api.getPreferences().then((p) => setRichComposer(p.richComposer === true)).catch(() => {})
   }, [])
   /** 给 RichInput 的分词回调：只有真实存在的命令才画成胶囊。 */
+  const resolveCommandName = useCallback(
+    (inputName: string): string | null => {
+      const query = normalizeSlashName(inputName).toLowerCase()
+      if (!query) return null
+      for (const skill of slashSkills) {
+        const canonical = normalizeSlashName(skill.name)
+        if (!canonical) continue
+        if (canonical.toLowerCase() === query) return canonical
+        if ((skill.aliases ?? []).some((alias) => normalizeSlashName(alias).toLowerCase() === query)) {
+          return canonical
+        }
+        if (aliases[canonical]?.trim().toLowerCase() === query) return canonical
+      }
+      return null
+    },
+    [slashSkills, aliases]
+  )
+
   const resolveCommandForChip = useCallback(
     (name: string) => {
-      const known = slashSkills.some((s) => normalizeSlashName(s.name) === name)
-      if (!known) return null
-      return { label: displayName(name, agentBackend, aliases) }
+      const canonical = resolveCommandName(name)
+      if (!canonical) return null
+      return { label: displayName(canonical, agentBackend, aliases) }
     },
-    [slashSkills, agentBackend, aliases]
+    [resolveCommandName, agentBackend, aliases]
   )
 
   useEffect(() => {
@@ -460,6 +479,9 @@ export default function Composer(): JSX.Element {
   useEffect(() => {
     setAliases(readAliases(agentBackend))
   }, [agentBackend])
+  useEffect(() => onForgeEvent('commandAliasesChanged', () => {
+    setAliases(readAliases(agentBackend))
+  }), [agentBackend])
   useEffect(() => {
     setActiveCommand(null)
   }, [meta?.sessionId])
@@ -639,11 +661,12 @@ export default function Composer(): JSX.Element {
         command.name,
         command.label,
         command.description,
+        displayName(command.name, agentBackend, aliases),
         ...(command.aliases ?? [])
       ].map((value) => value.toLowerCase())
       return targets.some((target) => target.includes(query))
     })
-  }, [slashCommands, slashContext?.query])
+  }, [slashCommands, slashContext?.query, agentBackend, aliases])
 
   const slashMenuOpen = slashContext !== null
   const slashPanelHeight = slashMenuOpen
@@ -700,6 +723,9 @@ export default function Composer(): JSX.Element {
     if (pendingCaretRef.current === null) return
     const caret = pendingCaretRef.current
     pendingCaretRef.current = null
+    // 富文本模式：光标由 RichInput 自理（外部改值落末尾，见 RichInput 重排
+    // 注释），这里去聚焦隐藏的 textarea 只会把焦点从富文本框抢走。
+    if (richComposer) return
     const textarea = textareaRef.current
     if (textarea) {
       textarea.focus()
@@ -937,7 +963,12 @@ export default function Composer(): JSX.Element {
     }
     ++attachmentActionSeqRef.current
     // 胶囊在这里拼回真正要发出去的文本。
-    const finalText = activeCommand ? `/${activeCommand}${value ? ` ${value}` : ''}` : value
+    const typedCommand = /^\/([^\s/]+)([\s\S]*)$/.exec(value)
+    const canonicalTypedCommand = typedCommand ? resolveCommandName(typedCommand[1] ?? '') : null
+    const normalizedValue = canonicalTypedCommand && typedCommand
+      ? `/${canonicalTypedCommand}${typedCommand[2] ?? ''}`
+      : value
+    const finalText = activeCommand ? `/${activeCommand}${value ? ` ${value}` : ''}` : normalizedValue
     setText('')
     setActiveCommand(null)
     setSlashContext(null)
@@ -1212,8 +1243,8 @@ export default function Composer(): JSX.Element {
                       data-slash-index={index}
                       onMouseDown={(event) => {
                         event.preventDefault()
-                        applySlashCommand(command)
                       }}
+                      onClick={() => applySlashCommand(command)}
                       className={`slash-command-item ${index === slashSelectedIndex ? 'is-active' : ''}`}
                       aria-selected={index === slashSelectedIndex}
                     >
@@ -1254,11 +1285,11 @@ export default function Composer(): JSX.Element {
                           onMouseDown={(event) => {
                             event.preventDefault()
                             event.stopPropagation()
-                            const current = displayName(command.name, agentBackend, aliases)
-                            const next = window.prompt(`给 /${command.name} 起个显示名（留空恢复默认）`, current)
-                            if (next === null) return
-                            writeAlias(agentBackend, command.name, next)
-                            setAliases(readAliases(agentBackend))
+                            setAliasEditor({
+                              name: command.name,
+                              value: aliases[command.name] ?? displayName(command.name, agentBackend, aliases)
+                            })
+                            setSlashContext(null)
                           }}
                           className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-zinc-600 transition hover:bg-white/10 hover:text-zinc-300"
                         >
@@ -1271,6 +1302,46 @@ export default function Composer(): JSX.Element {
               </div>
             </div>
           </div>
+          {aliasEditor && (
+            <form
+              className="absolute bottom-full left-2 right-2 z-[60] mb-2 flex items-center gap-2 rounded-xl border border-white/10 bg-[#262626] p-2 shadow-xl shadow-black/35"
+              onSubmit={(event) => {
+                event.preventDefault()
+                writeAlias(agentBackend, aliasEditor.name, aliasEditor.value)
+                setAliases(readAliases(agentBackend))
+                setAliasEditor(null)
+              }}
+            >
+              <span className="shrink-0 font-mono text-[11px] text-zinc-500">/{aliasEditor.name}</span>
+              <input
+                autoFocus
+                value={aliasEditor.value}
+                onChange={(event) => setAliasEditor({ ...aliasEditor, value: event.target.value })}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    setAliasEditor(null)
+                  }
+                }}
+                className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/20 px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-accent/60"
+                aria-label="命令别名"
+                placeholder="输入别名；留空恢复默认"
+              />
+              <button
+                type="button"
+                onClick={() => setAliasEditor(null)}
+                className="rounded-lg px-2 py-1.5 text-xs text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                className="rounded-lg bg-white/[0.08] px-2 py-1.5 text-xs text-zinc-200 transition hover:bg-white/[0.12]"
+              >
+                保存
+              </button>
+            </form>
+          )}
           <div
             className={`template-panel-reveal ${showTemplates ? 'is-open' : ''}`}
             style={{ height: templatePanelHeight, '--composer-chip-clearance': `${chipRowHeight}px` } as CSSProperties}

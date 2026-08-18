@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.1.19 - 2026-08-18
+
+### 中文
+
+- 新增:**便携设置备份 v2**——命令别名随设置迁移;Provider/摘要/翻译/用量查询密钥可由用户逐类勾选,用备份密码经 scrypt + AES-256-GCM 加密后导出;默认不含敏感凭据,错误密码在写入前拒绝,导入后按目标电脑的 safeStorage 重新加密。旧版 v1 备份继续可导入。
+- 新增:**完整历史回放**——绕开 kimi 的压缩回放,直接解析会话 wire.jsonl 重建全部轮次:被上下文压缩吃掉的老对话（压缩前的思考/命令/回复）全部能看到了;解析失败自动回退原回放。
+- 修复:**斜杠命令选中后菜单不关、回车发不出**——富文本框在外部改值后光标停在旧偏移,刚选中的命令被重新识别成"正在输入",菜单关了又开、回车被吃掉;现在外部改值光标一律落末尾,选中即关菜单,回车直接发送。
+- 修复:**命令别名改不了名**——window.prompt 在 Electron 不支持,改成应用内改名表单;历史误写的垃圾别名读取时自动忽略。
+- 修复:**新一轮开始后上一轮刚折好的 bar 又摊开**——live 闸门按"非历史"一刀切误伤上一轮,改成只盖当前轮。
+- 优化:**活动行距 12px**（py-1.5,与 Codex 节奏一致,全列表统一）。
+- 优化:**裸 URL 链接渲染成站点图标+短文本**——去协议头、超长中间省略,完整链接留悬停;顺带截断 autolink 误吞的全角括号（点开会 404）。
+- 优化:**侧栏三段完全对齐 Codex**——主目录一律不算项目（其会话归「最近」,「最近」段标终于出现）;「项目」段标常显;当前项目名改紫黄流光（删除「当前」徽章）。
+- 优化:**未收录工具也有图标+颜色**——ReadMediaFile 给图片图标归蓝色系,其余未知工具兜底扳手+中性灰微光;集合摘要行同步。
+- 优化:导航条适配完整历史（6k 消息实测渲染/跳转/高亮正常）;悬停预览补上折叠轮的回复文本。
+
+### English
+
+- Portable settings backup v2: command aliases migrate with settings; opt-in per-category credential export (Provider/summary/translation/usage) encrypted with a passphrase via scrypt + AES-256-GCM; secrets excluded by default, wrong passwords rejected before writing, imports re-encrypt with the destination safeStorage. v1 backups still importable.
+- Full history replay: parses the session wire.jsonl directly instead of kimi's compacted replay — turns swallowed by context compaction (thinking/tools/replies) are visible again; falls back to the old replay on parse failure.
+- Fixed slash menu staying open and Enter not sending after picking a command (stale caret re-derived a slash context; external value changes now move the caret to the end).
+- Fixed command aliasing being broken (window.prompt is unsupported in Electron; replaced with an in-app rename form; historical garbage aliases ignored on read).
+- Fixed the previous turn's folded bars re-expanding when a new turn starts (the live gate now covers only the current turn).
+- Activity row spacing now 12px (py-1.5), uniform across the transcript.
+- Bare URLs render as site icon + shortened text; autolink no longer swallows trailing fullwidth punctuation (which led to 404s).
+- Sidebar sections fully match Codex: home dir is never a project (its sessions go to 最近）, 项目 label always shows, current project name gets a violet shimmer instead of the 当前 badge.
+- Unmapped tools get icons + colors (image icon for ReadMediaFile, wrench fallback with neutral shimmer for unknown tools).
+- Navigation rail verified against full 6k-message histories; hover previews now include folded turns' reply text.
+
 ## v1.1.18 - 2026-08-17
 
 ### 中文

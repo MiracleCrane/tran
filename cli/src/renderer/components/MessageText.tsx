@@ -127,20 +127,49 @@ function LinkRenderer({
 }: LinkRendererProps): JSX.Element {
   const title = typeof href === 'string' && href ? href : undefined
 
+  const external = isExternalHref(href)
+  // 裸 URL（文本即链接本身，GFM autolink 的产物）：显示成「图标 + 短文本」——
+  // 去协议头、超 56 字符中间省略，完整 URL 留在悬停提示（2026-08-17 用户：
+  // 「链接为什么不是图标+展示文字的形式」）。markdown 自带文字的链接不动。
+  // 注意 href 可能已 URL 编码（全角括号等），判定前 decode 一份对照。
+  const hrefNorm = external ? normalizeExternalHref(href) : href
+  let hrefDecoded = hrefNorm
+  try {
+    hrefDecoded = decodeURIComponent(hrefNorm)
+  } catch { /* 非法编码就保留原样 */ }
+  const bare =
+    external &&
+    typeof children === 'string' &&
+    [hrefNorm, hrefDecoded, hrefNorm.replace(/^https?:\/\//, ''), hrefDecoded.replace(/^https?:\/\//, '')].includes(
+      children
+    )
+  // GFM autolink 会把紧跟的全角标点吞进链接（「…v1.1.18（exe」），既难看、点开
+  // 还是 404：裸链接在首个全角括号处截断，标点起回到正文。
+  let linkTarget = href
+  let trailing: string | null = null
+  if (bare) {
+    linkTarget = children as string
+    const m = linkTarget.match(/[（）【】《》「」『』]/)
+    if (m && m.index !== undefined && m.index > 0) {
+      trailing = linkTarget.slice(m.index)
+      linkTarget = linkTarget.slice(0, m.index)
+    }
+  }
+
   // 同 CodeRenderer：store 状态点击时现取，不做渲染期订阅。
   const handleClick = (event: MouseEvent<HTMLAnchorElement>): void => {
-    if (!href || event.defaultPrevented || event.button !== 0) return
+    if (!linkTarget || event.defaultPrevented || event.button !== 0) return
 
     event.preventDefault()
 
-    if (href.startsWith('#')) return
-    if (isExternalHref(href)) {
-      window.open(normalizeExternalHref(href), '_blank', 'noopener,noreferrer')
+    if (linkTarget.startsWith('#')) return
+    if (isExternalHref(linkTarget)) {
+      window.open(normalizeExternalHref(linkTarget), '_blank', 'noopener,noreferrer')
       return
     }
-    if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(href) && !href.toLowerCase().startsWith('file:')) return
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(linkTarget) && !linkTarget.toLowerCase().startsWith('file:')) return
 
-    const path = hrefToPreviewPath(href)
+    const path = hrefToPreviewPath(linkTarget)
     if (!path) return
     const cwd = useSessionStore.getState().meta?.cwd ?? ''
     if (event.ctrlKey) {
@@ -152,19 +181,37 @@ function LinkRenderer({
 
   /** 网站图标：直连站点 /favicon.ico（Codex 用的是 google s2/favicons，但那域名
    *  在国内不通）。加载失败回退为通用外跳小图标——图标只是点缀，绝不能裂图。 */
-  const external = isExternalHref(href)
   return (
-    <a
-      {...props}
-      href={href}
-      onClick={handleClick}
-      title={title}
-      className="text-[#3d9bff] no-underline transition hover:brightness-125"
-    >
-      {external && <LinkFavicon href={href} />}
-      {children}
-    </a>
+    <>
+      <a
+        {...props}
+        href={linkTarget}
+        onClick={handleClick}
+        title={title}
+        className="text-[#3d9bff] no-underline transition hover:brightness-125"
+      >
+        {external && <LinkFavicon href={href} />}
+        {bare ? shortenUrlForDisplay(linkTarget) : children}
+      </a>
+      {trailing}
+    </>
   )
+}
+
+/** 裸 URL 的展示文本：去协议头，超 56 字符中间打省略（保留 host 和尾段）。 */
+function shortenUrlForDisplay(text: string): string {
+  const bare = text.replace(/^https?:\/\//, '')
+  if (bare.length <= 56) return bare
+  let host = bare
+  let rest = ''
+  const slash = bare.indexOf('/')
+  if (slash > 0) {
+    host = bare.slice(0, slash)
+    rest = bare.slice(slash)
+  }
+  const budget = 56 - host.length - 1
+  if (budget < 10) return `${host}…`
+  return `${host}${rest.slice(0, Math.ceil(budget / 2))}…${rest.slice(-Math.floor(budget / 2))}`
 }
 
 /** 站点图标：img 加载失败回退成通用外跳小箭头（裂图比没图标难看）。 */

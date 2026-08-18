@@ -56,6 +56,16 @@ ICONS['mcp'] = {
   html: '<path d="M7 2.8v3.4M13 2.8v3.4M4.8 6.2h10.4v3.1a5.2 5.2 0 0 1-10.4 0V6.2zM10 14.5v2.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'
 }
 
+/** 图片读取图标（2026-08-17 用户：「ReadMediaFile 这种也加上颜色和图标」）：
+ *  相框 + 太阳 + 山峦，手绘补齐（Codex 提取集没有这一类）。 */
+ICONS['image'] = {
+  viewBox: '0 0 20 20',
+  html: '<rect x="2.4" y="3.4" width="15.2" height="13.2" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="7" cy="7.8" r="1.3" fill="currentColor"/><path d="M3.2 14.6 7.6 10.4l3.2 3.1 2.4-2.3 3.6 3.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'
+}
+
+/** 未收录工具的兜底图标：复用扳手，不再裸奔（只有文字没有图标）。 */
+ICONS['other'] = ICONS['skill']
+
 export function ToolGlyph({ kind, size = 13 }: { kind: string; size?: number }): JSX.Element {
   const icon = ICONS[kind]
   if (!icon) return <></>

@@ -51,7 +51,10 @@ export function readAliases(backend: string | undefined): Record<string, string>
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
     const out: Record<string, string> = {}
     for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof v === 'string' && v.trim()) out[k] = v.trim()
+      // 历史事故清理：window.prompt 在 Electron 不支持（2026-08-18 实测抛
+      // "prompt() is not supported."），旧改名流程可能把错误串当成别名写进
+      // 来——读到一律当没有。
+      if (typeof v === 'string' && v.trim() && !/prompt\(\) is not supported/i.test(v)) out[k] = v.trim()
     }
     return out
   } catch {
@@ -69,6 +72,16 @@ export function writeAlias(backend: string | undefined, name: string, alias: str
   } catch {
     /* 配额满就算了 */
   }
+}
+
+export function replaceAliases(backend: string | undefined, aliases: Record<string, string>): void {
+  const normalized: Record<string, string> = {}
+  for (const [name, alias] of Object.entries(aliases)) {
+    const key = name.trim()
+    const value = typeof alias === 'string' ? alias.trim() : ''
+    if (key && value) normalized[key] = value
+  }
+  localStorage.setItem(storeKey(backend), JSON.stringify(normalized))
 }
 
 /**

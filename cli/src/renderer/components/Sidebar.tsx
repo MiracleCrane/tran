@@ -446,6 +446,16 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     load()
     return onForgeEvent('projectsChanged', load)
   }, [])
+  /** 主目录（归一化）：主目录不是项目——落在主目录的会话一律归「最近」
+   *  （Codex 语义，2026-08-17 用户：「最近就是用来放无项目会话的」「三行字
+   *  和 Codex 完全一致」），即使主目录当初被加进了项目列表。 */
+  const [homePath, setHomePath] = useState('')
+  useEffect(() => {
+    void window.api
+      .getHomeDir()
+      .then((h) => setHomePath(normalizeCwdForCompare(h)))
+      .catch(() => {})
+  }, [])
   const previewTimerRef = useRef<number | null>(null)
   /** 预览请求代际号（见 schedulePreview 的竞态守卫）。 */
   const previewSeqRef = useRef(0)
@@ -1132,11 +1142,14 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     if (groupMode === 'time') return groupSessionsByTime(orderedSessions)
     const pinned = orderedSessions.filter((s) => pinnedSessionKeys.has(sessionKey(s)))
     const rest = orderedSessions.filter((s) => !pinnedSessionKeys.has(sessionKey(s)))
-    const inProject = rest.filter(
-      (s) => s.cwd && addedProjectPaths.has(normalizeCwdForCompare(s.cwd))
-    )
+    // 主目录不算项目：cwd 为主目录的会话归「最近」，与 Codex 三段完全一致。
+    const isProjectSession = (s: SessionListItem): boolean =>
+      !!s.cwd &&
+      addedProjectPaths.has(normalizeCwdForCompare(s.cwd)) &&
+      (!homePath || normalizeCwdForCompare(s.cwd) !== homePath)
+    const inProject = rest.filter(isProjectSession)
     const recent = rest
-      .filter((s) => !s.cwd || !addedProjectPaths.has(normalizeCwdForCompare(s.cwd)))
+      .filter((s) => !isProjectSession(s))
       .sort((a, b) => b.lastModified - a.lastModified)
     const cwdGroups =
       sessionScope === 'all'
@@ -1147,7 +1160,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       ...cwdGroups,
       ...(recent.length ? [{ label: '最近', items: recent, section: true }] : [])
     ]
-  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjectPaths])
+  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjectPaths, homePath])
   sessionGroupsRef.current = sessionGroups
 
   const visibleSessionKeys = useMemo(
@@ -1620,10 +1633,17 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                 >
                   <span className="text-[8px] text-zinc-500">{groupCollapsed ? '▸' : '▾'}</span>
                   <span className="shrink-0 text-zinc-300"><FolderIcon /></span>
-                  <span className="truncate">{g.label.split(/[\\/]/).pop()}</span>
-                  {meta && normalizeCwdForCompare(g.label) === normalizeCwdForCompare(meta.cwd) && (
-                    <span className="shrink-0 rounded bg-accent/15 px-1 font-normal text-accent">当前</span>
-                  )}
+                  {/* 当前项目：不要「当前」徽章（2026-08-17 用户：「字太大了，搞个
+                      流光文字就行」）——项目名本身上紫黄流光。 */}
+                  {(() => {
+                    const isCurrent =
+                      meta && normalizeCwdForCompare(g.label) === normalizeCwdForCompare(meta.cwd)
+                    return (
+                      <span className={`truncate ${isCurrent ? 'flow-text flow-text-violet' : ''}`}>
+                        {g.label.split(/[\\/]/).pop()}
+                      </span>
+                    )
+                  })()}
                 </button>
                 <button
                   type="button"

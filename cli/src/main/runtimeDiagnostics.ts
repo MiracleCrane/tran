@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { arch, hostname, platform, release } from 'node:os'
 import { spawn, spawnSync } from 'node:child_process'
 import { currentAgentBackend, getPreferences } from './preferences'
-import { getSettingsSnapshot, replaceSettingsSnapshot } from './settings'
+import { getSettingsSnapshot } from './settings'
 import { AGENT_BACKENDS } from '../shared/agentBackends'
 import { DEFAULT_KIMI_MODEL_ID } from '../shared/models'
 import { decodeConsoleOutput, resolveWindowsKimiCommand } from './windowsKimi'
@@ -12,7 +12,6 @@ import type {
   HealthCheckItem,
   RuntimeStatus,
   RuntimeStatusOptions,
-  SettingsBackup,
   WslHealthReport
 } from '../shared/ipc'
 
@@ -312,20 +311,4 @@ export async function buildDiagnosticReport(
     textBlock(redactLogText(diagnosticLog)),
     ''
   ].join('\n')
-}
-
-export function exportSettings(appearance?: Record<string, unknown>): SettingsBackup {
-  return {
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    settings: getSettingsSnapshot(),
-    ...(appearance ? { appearance } : {})
-  }
-}
-
-export function importSettings(backup: SettingsBackup): void {
-  if (!backup || backup.version !== 1 || !backup.settings || typeof backup.settings !== 'object') {
-    throw new Error('Invalid Tran settings backup.')
-  }
-  replaceSettingsSnapshot(backup.settings)
 }

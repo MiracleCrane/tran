@@ -12,12 +12,14 @@ import type {
   AgentBackendId,
   AgentBackendInfo,
   SettingsBackup,
+  SettingsSecretCategory,
   UpdateCheckResult,
   UpdateDownloadProgress,
   KimiVersionInfo,
   SummaryModelProbe,
   PromptDiagnosis
 } from '../../shared/ipc'
+import { readAliases, replaceAliases } from '../lib/commandAliases'
 import {
   MOTION_SPEED_MAX,
   MOTION_SPEED_MIN,
@@ -133,6 +135,17 @@ const SETTINGS_CATEGORIES = [
 ] as const
 type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number]['id']
 
+const SECRET_CATEGORY_OPTIONS: Array<{
+  id: SettingsSecretCategory
+  label: string
+  description: string
+}> = [
+  { id: 'providers', label: 'Provider 凭据', description: '自定义 Provider 的 Token/API Key' },
+  { id: 'summary', label: '摘要 API Key', description: '摘要配置中的各个 API Key' },
+  { id: 'translation', label: '翻译密钥', description: '百度翻译 Secret Key' },
+  { id: 'usage', label: '用量查询密钥', description: 'DeepSeek 余额查询 API Key' }
+]
+
 export default function SettingsPanel(): JSX.Element {
   const [category, setCategory] = useState<SettingsCategory>('session')
   const [agentBackend, setAgentBackend] = useState<AgentBackendId>('kimi')
@@ -185,6 +198,11 @@ export default function SettingsPanel(): JSX.Element {
   // 「已保存」提示：连续保存不再互相踩定时器，卸载时也会清理。
   const [savedAt, flashSaved] = useTransientFlag()
   const [importMessage, setImportMessage] = useState<string | null>(null)
+  const [secretCategories, setSecretCategories] = useState<SettingsSecretCategory[]>([])
+  const [backupPassword, setBackupPassword] = useState('')
+  const [backupPasswordConfirm, setBackupPasswordConfirm] = useState('')
+  const [pendingImport, setPendingImport] = useState<SettingsBackup | null>(null)
+  const [importPassword, setImportPassword] = useState('')
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const updateDownloadIdRef = useRef<string | null>(null)
   const appearance = useAppearanceStore((s) => s.settings)
@@ -673,14 +691,67 @@ export default function SettingsPanel(): JSX.Element {
   }, [])
 
   const exportSettings = async (): Promise<void> => {
-    const backup = await window.api.exportSettings(appearance as unknown as Record<string, unknown>)
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `tran-settings-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    setImportMessage(null)
+    if (secretCategories.length > 0) {
+      if (backupPassword.length < 8) {
+        setImportMessage('包含敏感凭据时，备份密码至少需要 8 个字符。')
+        return
+      }
+      if (backupPassword !== backupPasswordConfirm) {
+        setImportMessage('两次输入的备份密码不一致。')
+        return
+      }
+    }
+    try {
+      const backup = await window.api.exportSettings({
+        ui: {
+          appearance: appearance as unknown as Record<string, unknown>,
+          commandAliases: {
+            kimi: readAliases('kimi'),
+            claude: readAliases('claude')
+          }
+        },
+        secretCategories,
+        ...(secretCategories.length ? { passphrase: backupPassword } : {})
+      })
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `tran-settings-${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      setBackupPassword('')
+      setBackupPasswordConfirm('')
+      setImportMessage(`设置已导出${secretCategories.length ? '，所选敏感凭据已加密' : ''}。`)
+    } catch (error) {
+      setImportMessage(`导出失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  const applySettingsBackup = async (backup: SettingsBackup, passphrase?: string): Promise<void> => {
+    const result = await window.api.importSettings({ backup, passphrase })
+    if (result.ui?.appearance) {
+      const next = result.ui.appearance as Partial<typeof appearance>
+      if (typeof next.motionSpeed === 'number') updateAppearance('motionSpeed', next.motionSpeed)
+    }
+    if (result.ui?.commandAliases) {
+      for (const [backend, aliases] of Object.entries(result.ui.commandAliases)) {
+        replaceAliases(backend, aliases)
+      }
+      emitForgeEvent('commandAliasesChanged')
+    }
+    await reloadPreferenceState()
+    emitForgeEvent('providerChanged')
+    emitForgeEvent('modelOptionsChanged')
+    setPendingImport(null)
+    setImportPassword('')
+    setImportMessage(
+      result.importedSecretCategories.length
+        ? `导入成功，并恢复 ${result.importedSecretCategories.length} 类敏感凭据。`
+        : `导入成功${result.legacy ? '（旧版备份）' : ''}。`
+    )
+    flashSaved()
   }
 
   const importSettingsFile = async (file: File): Promise<void> => {
@@ -694,15 +765,13 @@ export default function SettingsPanel(): JSX.Element {
       return
     }
     try {
-      await window.api.importSettings(parsed)
-      if (parsed.appearance) {
-        const next = parsed.appearance as Partial<typeof appearance>
-        if (typeof next.motionSpeed === 'number') updateAppearance('motionSpeed', next.motionSpeed)
+      if (parsed.version === 2 && parsed.encryptedSecrets) {
+        setPendingImport(parsed)
+        setImportPassword('')
+        setImportMessage('该备份包含加密凭据，请输入备份密码后继续。')
+        return
       }
-      await reloadPreferenceState()
-      emitForgeEvent('providerChanged')
-      emitForgeEvent('modelOptionsChanged')
-      flashSaved()
+      await applySettingsBackup(parsed)
     } catch (e) {
       setImportMessage(`导入失败：${e instanceof Error ? e.message : String(e)}`)
     }
@@ -925,8 +994,55 @@ export default function SettingsPanel(): JSX.Element {
           <div className="mb-3">
             <h2 className="text-sm font-semibold text-zinc-200">设置导入 / 导出</h2>
             <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-              备份 Tran 设置、Provider 配置、模型列表和外观设置。
+              备份 Tran 设置、模型、外观和命令别名。敏感凭据默认不导出。
             </p>
+          </div>
+          <div className="mb-3 rounded-xl border border-white/[0.06] bg-black/10 p-3">
+            <div className="mb-2 text-xs font-medium text-zinc-300">可选：加密导出敏感凭据</div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {SECRET_CATEGORY_OPTIONS.map((option) => {
+                const checked = secretCategories.includes(option.id)
+                return (
+                  <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-lg p-1.5 hover:bg-white/[0.035]">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => setSecretCategories((current) => (
+                        checked ? current.filter((item) => item !== option.id) : [...current, option.id]
+                      ))}
+                      className="mt-0.5 accent-violet-500"
+                    />
+                    <span>
+                      <span className="block text-xs text-zinc-300">{option.label}</span>
+                      <span className="block text-[10px] leading-relaxed text-zinc-600">{option.description}</span>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+            {secretCategories.length > 0 && (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <input
+                  type="password"
+                  value={backupPassword}
+                  onChange={(event) => setBackupPassword(event.target.value)}
+                  autoComplete="new-password"
+                  placeholder="备份密码（至少 8 位）"
+                  className={inputCls}
+                />
+                <input
+                  type="password"
+                  value={backupPasswordConfirm}
+                  onChange={(event) => setBackupPasswordConfirm(event.target.value)}
+                  autoComplete="new-password"
+                  placeholder="再次输入备份密码"
+                  className={inputCls}
+                />
+                <p className="sm:col-span-2 text-[10px] leading-relaxed text-amber-300/75">
+                  密码不会保存，也无法找回。导入到另一台电脑时必须输入同一密码。
+                </p>
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -955,8 +1071,41 @@ export default function SettingsPanel(): JSX.Element {
               }}
             />
           </div>
+          {pendingImport && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] p-3">
+              <input
+                type="password"
+                value={importPassword}
+                onChange={(event) => setImportPassword(event.target.value)}
+                autoComplete="current-password"
+                placeholder="输入备份密码"
+                className={`${inputCls} min-w-[220px] flex-1`}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  void applySettingsBackup(pendingImport, importPassword).catch((error) => {
+                    setImportMessage(`导入失败：${error instanceof Error ? error.message : String(error)}`)
+                  })
+                }}
+                className="rounded-lg bg-white/[0.09] px-3 py-2 text-xs text-zinc-200 transition hover:bg-white/[0.13]"
+              >
+                解密并导入
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingImport(null)
+                  setImportPassword('')
+                }}
+                className="rounded-lg px-2 py-2 text-xs text-zinc-500 hover:text-zinc-200"
+              >
+                取消
+              </button>
+            </div>
+          )}
           {importMessage && (
-            <div className="mt-2 text-[11px] leading-relaxed text-red-300">{importMessage}</div>
+            <div className="mt-2 text-[11px] leading-relaxed text-zinc-400">{importMessage}</div>
           )}
         </section>
         )}

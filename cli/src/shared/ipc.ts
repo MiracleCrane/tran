@@ -478,11 +478,56 @@ export interface WslHealthReport {
   diagnostics: string
 }
 
-export interface SettingsBackup {
+export interface SettingsBackupV1 {
   version: 1
   exportedAt: string
   settings: Record<string, unknown>
   appearance?: Record<string, unknown>
+}
+
+export type SettingsSecretCategory = 'providers' | 'summary' | 'translation' | 'usage'
+
+export interface PortableUiSettings {
+  appearance?: Record<string, unknown>
+  commandAliases?: Record<string, Record<string, string>>
+}
+
+export interface EncryptedSettingsSecrets {
+  algorithm: 'aes-256-gcm'
+  kdf: 'scrypt'
+  salt: string
+  iv: string
+  authTag: string
+  ciphertext: string
+  categories: SettingsSecretCategory[]
+}
+
+export interface SettingsBackupV2 {
+  format: 'tran-portable-settings'
+  version: 2
+  exportedAt: string
+  settings: Record<string, unknown>
+  ui?: PortableUiSettings
+  encryptedSecrets?: EncryptedSettingsSecrets
+}
+
+export type SettingsBackup = SettingsBackupV1 | SettingsBackupV2
+
+export interface SettingsExportOptions {
+  ui?: PortableUiSettings
+  secretCategories?: SettingsSecretCategory[]
+  passphrase?: string
+}
+
+export interface SettingsImportRequest {
+  backup: SettingsBackup
+  passphrase?: string
+}
+
+export interface SettingsImportResult {
+  ui?: PortableUiSettings
+  importedSecretCategories: SettingsSecretCategory[]
+  legacy: boolean
 }
 
 /** Which engine translateTexts() routes to. 'llm' = active provider's
@@ -889,8 +934,8 @@ export interface ForgeApi {
   summarizeThinking(text: string): Promise<string | null>
   /** 把整段思考过程译成中文（优先免费的网页通道 + 落盘缓存）。拿不到返回 null。 */
   translateThinking(text: string): Promise<string | null>
-  exportSettings(appearance?: Record<string, unknown>): Promise<SettingsBackup>
-  importSettings(backup: SettingsBackup): Promise<void>
+  exportSettings(options?: SettingsExportOptions): Promise<SettingsBackup>
+  importSettings(request: SettingsImportRequest): Promise<SettingsImportResult>
 
   minimizeWindow(): Promise<void>
   /** 切换最大化/还原；返回切换后的最大化状态。 */

@@ -40,7 +40,7 @@ export interface RichInputProps {
 }
 
 /** 只认**行首**的命令：句子中间的 `/` 是路径分隔符，不该被吃掉。 */
-const COMMAND_RE = /^\/([\w.:-]+)/
+const COMMAND_RE = /^\/([^\s/]+)/
 
 interface Segment {
   kind: 'text' | 'command'
@@ -220,7 +220,15 @@ export default function RichInput({
     if (serialize(root) === value && wantChip === hasChip) return
     const caret = caretOffset(root)
     render(root, segments)
-    if (caret !== null && document.activeElement === root) placeCaret(root, Math.min(caret, value.length))
+    if (document.activeElement === root) {
+      // 外部改值（菜单选中命令/发送后清空/草稿恢复）：光标落**末尾**——停在
+      // 旧偏移会把刚选中的命令重新识别成「正在输入 /xxx」，斜杠菜单关了又开，
+      // 下一次回车被菜单吃掉、消息发不出去（2026-08-18 用户：「选中完还要再
+      // 打下空格才行」）。只有自己打字的回声才按旧偏移放回去。
+      const external = lastEmittedRef.current !== value
+      const offset = external ? value.length : Math.min(caret ?? value.length, value.length)
+      placeCaret(root, offset)
+    }
   }, [value, resolveCommand])
 
   useEffect(() => {

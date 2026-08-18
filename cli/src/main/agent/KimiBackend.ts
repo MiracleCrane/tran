@@ -39,6 +39,7 @@ import {
   type GoalStartOptions
 } from '../goalStore'
 import { log } from '../logger'
+import { parseWireHistory } from '../wireHistory'
 
 interface QueuedMessage {
   content: string | unknown[]
@@ -1087,7 +1088,10 @@ export class KimiBackend {
         response = await this.loadSessionWithRecovery(client, session, opts.resume)
       } finally {
         session.replaying = false
-        this.flushReplay(session)
+        // wire 全量重建优先（2026-08-18 用户拍板）：kimi 回放会应用压缩点，
+        // 压缩前的助手内容缺席；wire 是只追加全量日志，压缩前的轮次也能看。
+        // 解析失败（找不到/不可读）回退 kimi 回放。
+        if (!this.flushWireHistory(session)) this.flushReplay(session)
       }
     } else {
       response = await client.request<Record<string, unknown>>('session/new', {
@@ -1862,6 +1866,26 @@ export class KimiBackend {
     }
     replay.thinkingText = ''
     replay.text = ''
+  }
+
+  /** wire.jsonl 全量重建历史（2026-08-18 用户拍板）：kimi 的 session/load 回放
+   *  会应用压缩点，压缩前的助手内容缺席；wire 是只追加全量日志，自己解析连
+   *  压缩前的轮次也能看。成功返回 true；找不到/不可解析返回 false（调用方回退
+   *  kimi 回放）。 */
+  private flushWireHistory(session: ActiveKimiSession): boolean {
+    const path = this.resolveWirePath(session)
+    if (!path) return false
+    const messages = parseWireHistory(path)
+    if (!messages || messages.length === 0) return false
+    // wire 版替代 kimi 回放：累积器丢弃，防双份历史。
+    session.replay = undefined
+    log('kimi', `wire history: ${messages.length} messages session=${session.id}`)
+    this.h.onMessage(session.id, {
+      type: 'system',
+      subtype: 'history',
+      messages
+    } as unknown as SDKMessage)
+    return true
   }
 
   /** 重放窗口结束：封停流、补齐无终态的工具结果，整批经 system/history 发出。 */

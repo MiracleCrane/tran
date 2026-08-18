@@ -98,8 +98,8 @@ const api: ForgeApi = {
   explainCommand: (command) => ipcRenderer.invoke('forge:explainCommand', command),
   summarizeThinking: (text) => ipcRenderer.invoke('forge:summarizeThinking', text),
   translateThinking: (text) => ipcRenderer.invoke('forge:translateThinking', text),
-  exportSettings: (appearance) => ipcRenderer.invoke('forge:exportSettings', appearance),
-  importSettings: (backup) => ipcRenderer.invoke('forge:importSettings', backup),
+  exportSettings: (options) => ipcRenderer.invoke('forge:exportSettings', options),
+  importSettings: (request) => ipcRenderer.invoke('forge:importSettings', request),
   listAgentBackends: () => ipcRenderer.invoke('forge:listAgentBackends'),
   listAgentModels: () => ipcRenderer.invoke('forge:listAgentModels'),
 

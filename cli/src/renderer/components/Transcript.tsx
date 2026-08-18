@@ -289,11 +289,14 @@ function buildDisplayRows(
    * 落在本轮第一个活动块的位置；解说/回答文本保持原位可见（混合消息只留文本）。
    * 此前按「连续相邻 ≥2 块」成组，解说文本一断就再也合不上（实测：每步一句解说的
    * 轮次结束只剩一梯子单独的小 bar）。
-   * live（本轮还在跑）消息不参与攒组：正在跑的活动必须实时可见。
+   * isLiveSegment（本轮还在跑）消息不参与攒组：正在跑的活动必须实时可见。
+   * 2026-08-18 修正：live 闸门只盖**最后一段**（当前轮）——此前按「非历史」一刀切，
+   * 上一轮的消息还没落 isHistory，新轮一开始就被判成 live，刚折好的集合行
+   * 重新摊开（用户：「我新发了对话，上一轮的 bar 又自己展开了」）。
    */
-  const flushTurn = (): void => {
+  const flushTurn = (isLiveSegment: boolean): void => {
     if (turnNodes.length === 0) return
-    const live = (node: ItemNode): boolean => holdLiveOpen && !node.item.isHistory
+    const live = (node: ItemNode): boolean => isLiveSegment && !node.item.isHistory
     // 第一遍：攒活动块。
     const groupBlocks: AssistantBlock[] = []
     let firstActivityId: string | null = null
@@ -345,7 +348,8 @@ function buildDisplayRows(
       continue
     }
     // 用户发言 / 压缩分隔 / 轮末改动卡 / 信封：轮边界，先把上一轮收掉。
-    flushTurn()
+    // 已结束的段不是 live 段（live 闸门只留给最后一段，见 flushTurn 注释）。
+    flushTurn(false)
     if (envelopeTextOf(node) !== null) {
       envelopeRun.push(node)
       continue
@@ -353,7 +357,8 @@ function buildDisplayRows(
     flushEnvelopes()
     rows.push({ kind: 'item', node })
   }
-  flushTurn()
+  // 最后一段：holdLiveOpen 时就是正在跑的这一轮。
+  flushTurn(holdLiveOpen)
   flushEnvelopes()
   return rows
 }
@@ -839,7 +844,8 @@ const TOOL_ACTIVITY_META: Record<string, { label: string; icon: string; tone: st
   TodoList: { label: '更新待办', icon: 'todo', tone: 'todo' },
   todo_list: { label: '更新待办', icon: 'todo', tone: 'todo' },
   Skill: { label: '使用 Skill', icon: 'skill', tone: 'agent' },
-  skill: { label: '使用 Skill', icon: 'skill', tone: 'agent' }
+  skill: { label: '使用 Skill', icon: 'skill', tone: 'agent' },
+  ReadMediaFile: { label: '读取图片', icon: 'image', tone: 'read' }
 }
 
 interface ActivityEntry {
@@ -883,13 +889,16 @@ function summarizeActivity(blocks: AssistantBlock[]): ActivitySegment[] {
   // 微光（用户点名），只是色调比动作段更收敛（灰紫）。
   if (thinking > 0) segments.push({ kind: 'thinking', label: '思考', count: thinking, icon: 'think', tone: 'think' })
   for (const [name, count] of tools) {
-    const meta = TOOL_ACTIVITY_META[name] ?? (name.startsWith('mcp__') ? MCP_ACTIVITY_META : undefined)
+    // 未收录的工具也给兜底图标 + 中性灰微光（与单卡头部的 other 同一套）。
+    const meta =
+      TOOL_ACTIVITY_META[name] ??
+      (name.startsWith('mcp__') ? MCP_ACTIVITY_META : { label: `使用了 ${name}`, icon: 'other', tone: 'think' })
     segments.push({
       kind: 'tool',
-      label: meta?.label ?? `使用了 ${name}`,
+      label: meta.label,
       count,
-      ...(meta?.icon ? { icon: meta.icon } : {}),
-      ...(meta?.tone ? { tone: meta.tone } : {})
+      ...(meta.icon ? { icon: meta.icon } : {}),
+      ...(meta.tone ? { tone: meta.tone } : {})
     })
   }
   return segments
@@ -1300,7 +1309,8 @@ export default function Transcript({
       let preview: string | undefined
       for (let i = rowIndex + 1; i < displayRows.length; i++) {
         const next = displayRows[i]
-        if (next.kind !== 'item') continue
+        // itemText（轮级折叠下只留文本的混合消息）同样是回复文本的来源。
+        if (next.kind !== 'item' && next.kind !== 'itemText') continue
         const nextItem = next.node.item
         if (nextItem.kind === 'user') break
         if (nextItem.kind !== 'assistant') continue
@@ -1950,8 +1960,10 @@ export default function Transcript({
           const curItem = row.kind === 'item' ? row.node.item : null
           const showHistoryDivider = !!prevItem?.isHistory && !!curItem && !curItem.isHistory
           // 行距统一（2026-08-17 用户：「间距不固定不稳定」）：不再给裸活动行
-          // 单独开小灶（py-0.5 与 py-1.5 混排就是时松时紧的根源），一律 py-1；
-          // 卡片自身的外边距已清零，节奏全由这里一处说了算。
+          // 单独开小灶（py-0.5 与 py-1.5 混排就是时松时紧的根源），节奏全由
+          // 这里一处说了算；卡片自身的外边距已清零。
+          // 2026-08-17 用户：「稍微松一点，但不要像之前那个版本那么松」——
+          // py-1(行距 8px) → py-1.5(12px)，与 Codex 活动行节奏一致。
           // #50 顶层用户消息行打标：导航高亮按 DOM 几何定位（见 updateActiveUserNav）。
           const userMsgId =
             row.kind === 'item' && row.node.item.kind === 'user' && envelopeTextOf(row.node) === null
@@ -1960,7 +1972,7 @@ export default function Transcript({
           return (
             <div
               data-user-msg-id={userMsgId}
-              className={`mx-auto w-full max-w-5xl px-6 py-1 ${isNew ? 'tran-msg-enter' : ''}`}
+              className={`mx-auto w-full max-w-5xl px-6 py-1.5 ${isNew ? 'tran-msg-enter' : ''}`}
               style={isNew ? { animationDelay: `${Math.min(relIndex * 24, 280)}ms` } : undefined}
             >
               {showHistoryDivider && (
