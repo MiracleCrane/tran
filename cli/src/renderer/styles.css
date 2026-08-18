@@ -87,10 +87,9 @@ html.scrollbars-active {
   margin-inline: auto;
 }
 
-/* 侧栏展开态的宽度由 SidebarShell 经 --sidebar-w 下发（可拖拽调节）。
+/* 侧栏宽度由 SidebarShell 经 --sidebar-w 下发（可拖拽调节）。
  * Sidebar 内部写的是 Tailwind 的 w-64；工具类在 @layer utilities 里，而
- * **无层声明胜过任何 @layer**，所以这条不带 @layer 的规则能盖住它。
- * 收起态（.sidebar-collapse）是固定宽度的图标条，不受这里影响。 */
+ * **无层声明胜过任何 @layer**，所以这条不带 @layer 的规则能盖住它。 */
 .sidebar-dock .sidebar-expand {
   width: var(--sidebar-w, 16rem);
 }
@@ -461,20 +460,13 @@ textarea:focus-visible {
   /* 窗口拖拽区：标题栏本身 + 展开侧栏的顶部品牌行。
      不做的话，合体后侧栏占据了窗口左上角，那一片按住拖不动窗口——
      而左上角恰恰是大多数人下意识去拖的位置。
-     里面的按钮必须显式 no-drag，否则落在拖拽区内的按钮点不动。
-
-     2026-08：收起的图标条（.sidebar-collapse）从拖拽区里拿掉了。drag 区域
-     会吞掉真实鼠标的悬停事件——表现是只有图标按钮（no-drag）能触发 peek，
-     中间空白带全死了（用户反馈"只有上面和下面能悬停出来"）。窗口拖拽改由
-     标题栏承担。 */
+     里面的按钮必须显式 no-drag，否则落在拖拽区内的按钮点不动。 */
   .app-shell-merged .sidebar-expand > :first-child {
     -webkit-app-region: drag;
   }
 
   .app-shell-merged .sidebar-expand > :first-child button,
-  .app-shell-merged .sidebar-collapse button,
-  .app-shell-merged .sidebar-expand > :first-child a,
-  .app-shell-merged .sidebar-collapse a {
+  .app-shell-merged .sidebar-expand > :first-child a {
     -webkit-app-region: no-drag;
   }
 
@@ -2111,33 +2103,18 @@ html.composer-resizing * {
     transform: translateX(0) scaleX(1);
   }
 }
-@keyframes sidebar-collapse {
-  from {
-    width: 16rem;
-    opacity: 1;
-    transform: translateX(0) scaleX(1);
-  }
-  to {
-    width: 3.5rem;
-    opacity: 0.96;
-    transform: translateX(0) scaleX(1);
-  }
-}
-
-.sidebar-expand,
-.sidebar-collapse {
+.sidebar-expand {
   transform-origin: left center;
   animation-duration: var(--motion-sidebar);
   animation-fill-mode: both;
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-name: sidebar-expand;
   /* 不要在这里永久挂 will-change：类常驻在侧边栏根节点上，会让面板永远
      占据独立合成层；而 width 动画跑在主线程，窗口最大化/还原时合成器可能
      把过期图层纹理按旧缩放贴回屏幕，形成"幽灵侧边框"残影。动画期间
      Chromium 会自动提升图层，无需手动声明。 */
   contain: layout paint;
 }
-.sidebar-expand { animation-name: sidebar-expand; }
-.sidebar-collapse { animation-name: sidebar-collapse; }
 
 .sidebar-deferred-content {
   pointer-events: none;
@@ -2423,39 +2400,8 @@ html.composer-resizing * {
   }
 }
 
-@keyframes sidebar-collapsed-content {
-  0% {
-    opacity: 0;
-    transform: translateX(6px) scale(0.976);
-  }
-  12% {
-    opacity: 0.08;
-    transform: translateX(5px) scale(0.98);
-  }
-  30% {
-    opacity: 0.44;
-    transform: translateX(2px) scale(0.995);
-  }
-  54% {
-    opacity: 0.76;
-    transform: translateX(0.8px) scale(0.998);
-  }
-  76% {
-    opacity: 0.9;
-    transform: translateX(0.25px) scale(1);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
-}
-
 .sidebar-expand > * {
   animation: sidebar-expanded-content var(--motion-sidebar-content-open) linear var(--motion-sidebar-content-delay) both;
-}
-
-.sidebar-collapse > * {
-  animation: sidebar-collapsed-content var(--motion-sidebar-content-close) linear var(--motion-sidebar-content-delay) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3495,14 +3441,6 @@ div:has(textarea:focus) .composer-shortcut-hint {
   :root[data-theme='charcoal'] [class*='bg-bg-elev'] {
     background-color: #262626 !important;
   }
-}
-
-/* 侧栏收起（含 peek 浮出）时：主区左缘的 inset 描边在图标条分界处留下一条
-   突兀竖线，peek 浮层的半透底盖不住它（2026-08 用户反馈"浮出后竖线不消失"）。
-   分界线本就该由图标条/浮层自己的边框承担。glass-glow-off 的那条是 !important，
-   这条必须也无层 + !important + 源码序在最后才压得住。 */
-:root:has(.sidebar-collapse) .main-surface {
-  box-shadow: none !important;
 }
 
 /* 「回到最新」按钮的输出中脉冲环（LatestButton）：一圈 accent 色细环缓慢

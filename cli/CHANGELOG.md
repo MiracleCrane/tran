@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.20 - 2026-08-18
+
+### 中文
+
+- 优化:**审核改动支持文件级深链**——改动胶囊/轮次改动卡里点具体文件,改动面板直接在顶部整宽打开并自动展开、滚动定位到该文件（此前只能整包打开再自己找）。
+- 修复:**斜杠命令用显示名也能解析**——手打中文别名（如「压缩上下文」）同样识别成对应命令。
+- 优化:**段完即折**——每段思考/命令执行完、输出文本一落地,上面的 bar 立刻折进集合行;正在生长的尾巴保持展开,轮末一律收齐（覆盖轮中"上翻不折"的决定）。
+- 移除:**侧栏图标条模式整体下线**——头部只留一颗「隐藏侧边栏」按钮（换 VS Code 式面板图标）;Ctrl+B / Alt+W / Alt+Q 统一为隐藏/唤回;拖宽拖过最小值即隐藏（左缘悬停可浮出）。
+
+### English
+
+- File-level deep links for change review: clicking a file in the changes pill or turn-changes card opens the full-width changes panel at the top, auto-expanded and scrolled to that file.
+- Slash commands now also resolve by display name (custom Chinese aliases work when typed).
+- Segment-level folding: when a narration text lands, all activity bars above it fold into the summary row immediately; the growing tail stays visible; everything folds at turn end.
+- Sidebar icon-rail mode removed: one hide/show button with a panel-style icon; Ctrl+B / Alt+W / Alt+Q all toggle hidden; dragging past the minimum width hides the sidebar.
+
 ## v1.1.19 - 2026-08-18
 
 ### 中文
@@ -8,6 +24,8 @@
 - 新增:**完整历史回放**——绕开 kimi 的压缩回放,直接解析会话 wire.jsonl 重建全部轮次:被上下文压缩吃掉的老对话（压缩前的思考/命令/回复）全部能看到了;解析失败自动回退原回放。
 - 修复:**斜杠命令选中后菜单不关、回车发不出**——富文本框在外部改值后光标停在旧偏移,刚选中的命令被重新识别成"正在输入",菜单关了又开、回车被吃掉;现在外部改值光标一律落末尾,选中即关菜单,回车直接发送。
 - 修复:**命令别名改不了名**——window.prompt 在 Electron 不支持,改成应用内改名表单;历史误写的垃圾别名读取时自动忽略。
+- 优化:**Skill 展示名就是可输入别名**——本机 27 个工程 Skill 与 6 个系统 Skill 全部补齐无空格、无冲突的中文名;列表显示「任务交接」即可直接输入 `/任务交接`,发送前仍还原为真实 `skill:handoff`。
+- 修复:**点击轮次/会话里的具体文件直接定位 diff**——文件路径随顶部 Git 打开请求传递,ChangesPanel 加载后自动滚动并展开该文件;「审核」按钮仍打开全部改动。
 - 修复:**新一轮开始后上一轮刚折好的 bar 又摊开**——live 闸门按"非历史"一刀切误伤上一轮,改成只盖当前轮。
 - 优化:**活动行距 12px**（py-1.5,与 Codex 节奏一致,全列表统一）。
 - 优化:**裸 URL 链接渲染成站点图标+短文本**——去协议头、超长中间省略,完整链接留悬停;顺带截断 autolink 误吞的全角括号（点开会 404）。
@@ -21,6 +39,8 @@
 - Full history replay: parses the session wire.jsonl directly instead of kimi's compacted replay — turns swallowed by context compaction (thinking/tools/replies) are visible again; falls back to the old replay on parse failure.
 - Fixed slash menu staying open and Enter not sending after picking a command (stale caret re-derived a slash context; external value changes now move the caret to the end).
 - Fixed command aliasing being broken (window.prompt is unsupported in Electron; replaced with an in-app rename form; historical garbage aliases ignored on read).
+- Skill display names are now invocation aliases: all 27 local engineering skills plus 6 system skills have unique, whitespace-free Chinese names; typing the displayed `/任务交接` resolves back to the canonical `skill:handoff` before sending.
+- Clicking a specific file in a turn/session changes card now opens the top Git panel focused on that file, scrolls it into view, and expands its diff; the Review button still opens all changes.
 - Fixed the previous turn's folded bars re-expanding when a new turn starts (the live gate now covers only the current turn).
 - Activity row spacing now 12px (py-1.5), uniform across the transcript.
 - Bare URLs render as site icon + shortened text; autolink no longer swallows trailing fullwidth punctuation (which led to 404s).

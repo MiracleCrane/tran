@@ -29,7 +29,6 @@ const PINNED_SESSIONS_KEY = 'forge.pinnedSessions.v1'
 
 const DAY = 86_400_000
 const GROUP_ORDER = ['今天', '昨天', '本周', '更早'] as const
-const SIDEBAR_MOTION_MS = 560
 const SESSION_LIST_WSL_EXIT_MS = 220
 const SESSION_LIST_WSL_ENTER_MS = 360
 const WSL_OPEN_SESSION_STAGE_MS = 320
@@ -274,17 +273,6 @@ const PinIcon = ({ active = false }: { active?: boolean }): JSX.Element => (
     />
   </svg>
 )
-const ChevronIcon = ({ collapsed }: { collapsed: boolean }): JSX.Element => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-    <path
-      d={collapsed ? 'M9 6l6 6-6 6' : 'M15 6l-6 6 6 6'}
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-)
 const ShieldIcon = (): JSX.Element => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
     <path
@@ -378,10 +366,9 @@ const NAV_ITEMS: { view: View; label: string; icon: () => JSX.Element }[] = [
 ]
 
 /**
- * @param forceExpanded 强制按展开态渲染，忽略 store 里的 sidebarCollapsed。
- *   仅供 SidebarShell 的「悬停浮出」使用：收起态下鼠标移上图标条时要在浮层里
- *   画一份完整面板，而此时 store 的 collapsed 必须保持 true——一旦翻成 false，
- *   在流的那一列会被撑开、把正文推走，那就不是浮层而是真展开了。
+ * @param forceExpanded 强制按展开态渲染。仅供 SidebarShell 的「隐藏态悬停浮出」
+ *   使用：侧栏隐藏时鼠标移上左缘触发带，要在浮层里画一份完整面板——浮层的
+ *   意义就是快速触达各入口，工具区也随之永远展开（不再要求二次悬停）。
  */
 export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boolean } = {}): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
@@ -412,9 +399,6 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const deleteSession = useSessionStore((s) => s.deleteSession)
   const view = useUiStore((s) => s.view)
   const setView = useUiStore((s) => s.setView)
-  const collapsedState = useUiStore((s) => s.sidebarCollapsed)
-  const collapsed = collapsedState && !forceExpanded
-  const toggleSidebar = useUiStore((s) => s.toggleSidebar)
   const navCollapsed = useUiStore((s) => s.navCollapsed)
   const toggleNav = useUiStore((s) => s.toggleNav)
   /** 鼠标停在底部工具区上——临时浮出，移开即收，不写进 store。 */
@@ -548,7 +532,6 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const [newlyInsertedSessionKeys, setNewlyInsertedSessionKeys] = useState<Set<string>>(() => new Set())
   const [exitingSessionKeys, setExitingSessionKeys] = useState<Set<string>>(() => new Set())
   const [renderedSessionGroups, setRenderedSessionGroups] = useState<AnimatedSessionGroup[] | null>(null)
-  const sidebarMotionTimeoutRef = useRef<number | null>(null)
   const wslNavRevealTimeoutRef = useRef<number | null>(null)
   const wslNavRevealPhaseRef = useRef<WslNavRevealPhase>('hidden')
   const wslSupportInitializedRef = useRef(false)
@@ -568,8 +551,6 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const prefetchResumeTimeoutRef = useRef<number | null>(null)
   const lastSessionScrollRef = useRef({ top: 0, time: 0 })
   const sessionCacheReleaseTimeoutRef = useRef<number | null>(null)
-  const firstSidebarPaintRef = useRef(true)
-  const preparedSidebarMotionRef = useRef(false)
 
   useEffect(() => {
     if (sessionListTransitionPhaseRef.current !== 'idle') return
@@ -808,28 +789,6 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     return onForgeEvent('wslSupportChanged', refreshWslSupport)
   }, [refresh, reloadForBackendSwitch])
 
-  const clearSidebarMotionTimers = (): void => {
-    if (sidebarMotionTimeoutRef.current !== null) {
-      window.clearTimeout(sidebarMotionTimeoutRef.current)
-      sidebarMotionTimeoutRef.current = null
-    }
-  }
-
-  const prepareSidebarMotion = (): void => {
-    clearSidebarMotionTimers()
-    document.documentElement.classList.add('sidebar-motion')
-    sidebarMotionTimeoutRef.current = window.setTimeout(() => {
-      sidebarMotionTimeoutRef.current = null
-      document.documentElement.classList.remove('sidebar-motion')
-    }, SIDEBAR_MOTION_MS)
-  }
-
-  const handleToggleSidebar = (): void => {
-    preparedSidebarMotionRef.current = true
-    prepareSidebarMotion()
-    toggleSidebar()
-  }
-
   const clearSessionCacheReleaseTimer = (): void => {
     if (sessionCacheReleaseTimeoutRef.current !== null) {
       window.clearTimeout(sessionCacheReleaseTimeoutRef.current)
@@ -922,20 +881,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   }
 
   useEffect(() => {
-    if (firstSidebarPaintRef.current) {
-      firstSidebarPaintRef.current = false
-      return
-    }
-    if (preparedSidebarMotionRef.current) {
-      preparedSidebarMotionRef.current = false
-      return
-    }
-    prepareSidebarMotion()
-  }, [collapsed])
-
-  useEffect(() => {
     return () => {
-      clearSidebarMotionTimers()
       clearWslNavRevealTimer()
       clearSessionListFadeTimers()
       clearSessionInsertTimer()
@@ -1232,7 +1178,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     clearSessionCacheReleaseTimer()
     clearPrefetchResumeTimer()
 
-    if (collapsed || !meta) return
+    if (!meta) return
 
     const root = sessionListRef.current
     if (!root) return
@@ -1276,7 +1222,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       clearSessionCacheReleaseTimer()
       clearPrefetchResumeTimer()
     }
-  }, [collapsed, meta?.cwd, sessionGroups, prefetchSessionHistory])
+  }, [meta?.cwd, sessionGroups, prefetchSessionHistory])
 
   // TODO(providers): 运营商面板绑定旧 Claude 后端，kimi-only 阶段固定隐藏。
   const showProviderNav = false
@@ -1299,97 +1245,6 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const wslNavInteractive =
     wslSupportEnabled && (wslNavRevealPhase === 'opening' || wslNavRevealPhase === 'visible')
 
-  /* ---------- collapsed: icon rail ---------- */
-  if (collapsed) {
-    const iconBtn = (on: boolean): string =>
-      `flex h-9 w-9 items-center justify-center rounded-xl transition ${
-        on ? 'glass-active text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200'
-      }`
-    return (
-      <div key="sidebar-collapsed" className="sidebar-collapse glass-sidebar flex h-full min-h-0 w-14 shrink-0 flex-col items-center rounded-[18px] border py-2.5">
-        <button
-          onClick={handleToggleSidebar}
-          className={iconBtn(false)}
-          title="展开侧边栏"
-        >
-          <ChevronIcon collapsed />
-        </button>
-        <AppLogo size={30} className="mt-2" />
-        <div className="mt-2">
-          <ProjectSwitcher collapsed />
-        </div>
-        <button
-          onClick={() => {
-            void newChat()
-            setView('chat')
-          }}
-          className="mt-2 flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200"
-          title="新建对话"
-        >
-          <PlusIcon />
-        </button>
-        <div className="min-h-0 flex-1" />
-        <button
-          onClick={() => setView('skills')}
-          className={iconBtn(view === 'skills')}
-          title="技能"
-        >
-          <SkillsIcon />
-        </button>
-        <div className={`provider-stack-reveal provider-collapsed-reveal ${showProviderNav ? 'is-enabled' : ''}`}>
-          <button
-            onClick={() => {
-              if (showProviderNav) setView('providers')
-            }}
-            className={iconBtn(view === 'providers')}
-            title="运营商"
-            disabled={!showProviderNav}
-            tabIndex={showProviderNav ? 0 : -1}
-            aria-hidden={!showProviderNav}
-          >
-            <ShieldIcon />
-          </button>
-        </div>
-        <button
-          onClick={() => setView('translate')}
-          className={`mt-1 ${iconBtn(view === 'translate')}`}
-          title="翻译"
-        >
-          <LanguageIcon />
-        </button>
-        <button
-          onClick={() => setView('settings')}
-          className={`mt-1 ${iconBtn(view === 'settings')}`}
-          title="设置"
-        >
-          <GearIcon />
-        </button>
-        <div className={`wsl-stack-reveal wsl-collapsed-reveal ${wslNavRevealClass}`}>
-          <button
-            onClick={() => {
-              if (wslNavInteractive) setView('wslHealth')
-            }}
-            className={iconBtn(view === 'wslHealth')}
-            title="WSL"
-            disabled={!wslNavInteractive}
-            tabIndex={wslNavInteractive ? 0 : -1}
-            aria-hidden={!wslNavInteractive}
-          >
-            <TerminalIcon />
-          </button>
-        </div>
-        <button
-          onClick={() => setView('help')}
-          className={`mt-1 ${iconBtn(view === 'help')}`}
-          title="说明"
-        >
-          <HelpIcon />
-        </button>
-      </div>
-    )
-  }
-
-  /* ---------- expanded ---------- */
   const groups = renderedSessionGroups ?? toAnimatedSessionGroups(sessionGroups, exitingSessionKeys)
   const hasAnimatedSessionRows = renderedSessionGroups !== null
   const showSnapshotList =
@@ -1452,29 +1307,24 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
 
   return (
     <div key="sidebar-expanded" className="sidebar-expand glass-sidebar flex h-full min-h-0 w-64 shrink-0 flex-col rounded-[18px] border">
-      {/* brand + collapse（全窗口唯一品牌位，标题栏不再重复；文字挂常静流光，
-          2026-08 用户点名要的动效）。头部两颗按钮：缩小（收成图标条）与
-          完全隐藏（连图标条都不留，Alt+Q 可回）。 */}
+      {/* brand + 隐藏切换（全窗口唯一品牌位，标题栏不再重复；文字挂常静流光，
+          2026-08 用户点名要的动效）。头部只留一颗「隐藏侧边栏」（Alt+Q 唤回，
+          左缘悬停也能浮出）——图标条模式 2026-08-18 用户拍板整体砍掉。 */}
       <div className="flex items-center gap-2 px-4 pt-3">
         <AppLogo size={30} className="shrink-0" />
         <div className="flex-1 text-sm font-semibold">
           <span className="flow-text flow-text-violet">Tran</span>
         </div>
         <button
-          onClick={handleToggleSidebar}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
-          title="缩小为图标条（Ctrl+B）"
-        >
-          <ChevronIcon collapsed={false} />
-        </button>
-        <button
           onClick={() => useUiStore.getState().toggleSidebarHidden()}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
           title="隐藏侧边栏（Alt+Q 唤回）"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-            <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M20 5v14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          {/* 侧栏面板图标（VS Code 式：框 + 左侧栏位）——替代原来的 ⟨| 箭头
+              （2026-08-18 用户：「两个箭头太丑了」）。 */}
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="4.5" width="18" height="15" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
+            <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.7" />
           </svg>
         </button>
       </div>

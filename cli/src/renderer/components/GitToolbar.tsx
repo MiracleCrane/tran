@@ -6,7 +6,7 @@ import DiffView from './DiffView'
 import Collapse from './Collapse'
 import ConfirmDialog from './ConfirmDialog'
 import ChangesPanel from './ChangesPanel'
-import { onForgeEvent } from '../events'
+import { onOpenChangesPanel } from '../events'
 
 /* --- icons --- */
 const BranchIcon = (): JSX.Element => (
@@ -285,6 +285,8 @@ export default function GitToolbar({ cornerAction, docked = false }: GitToolbarP
   const [error, setError] = useState<string | null>(null)
 
   const [drawer, setDrawer] = useState<Drawer>(null)
+  const changesRequestSeqRef = useRef(0)
+  const [changesTarget, setChangesTarget] = useState<{ path: string; requestKey: number } | null>(null)
   const [renderedDrawer, setRenderedDrawer] = useState<OpenDrawer | null>(null)
   const renderedDrawerRef = useRef<OpenDrawer | null>(null)
   const drawerOpenRef = useRef(false)
@@ -600,6 +602,7 @@ export default function GitToolbar({ cornerAction, docked = false }: GitToolbarP
       setDrawer(null)
       return
     }
+    if (next === 'changes') setChangesTarget(null)
     setDrawer(next)
     loadDrawerData(next)
   }
@@ -607,7 +610,8 @@ export default function GitToolbar({ cornerAction, docked = false }: GitToolbarP
   // 轮次改动卡的「审核」按钮：打开工作区改动面板（对话流里点、面板在这儿开，
   // 两个组件不直接耦合，走既有的渲染层事件总线）。
   useEffect(() => {
-    return onForgeEvent('openChangesPanel', () => {
+    return onOpenChangesPanel(({ path }) => {
+      setChangesTarget(path ? { path, requestKey: ++changesRequestSeqRef.current } : null)
       setDrawer('changes')
       loadDrawerData('changes')
     })
@@ -983,6 +987,8 @@ export default function GitToolbar({ cornerAction, docked = false }: GitToolbarP
             <ChangesPanel
               cwd={cwd}
               refreshKey={`${status.staged.length}:${status.unstaged.length}:${status.untracked.length}:${status.conflicts.length}`}
+              initialPath={changesTarget?.path}
+              initialRequestKey={changesTarget?.requestKey}
               onClose={() => setDrawer(null)}
             />
           )}

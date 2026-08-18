@@ -17,7 +17,7 @@ import Collapse from './Collapse'
 import EmptyState from './EmptyState'
 import QueryResultCard from './QueryResultCard'
 import TurnChangesCard from './TurnChangesCard'
-import { emitForgeEvent } from '../events'
+import { openChangesPanel } from '../events'
 import UserMessageNav, { type UserNavEntry } from './UserMessageNav'
 import { useCheapNote } from '../hooks/useCheapNote'
 
@@ -289,19 +289,40 @@ function buildDisplayRows(
    * 落在本轮第一个活动块的位置；解说/回答文本保持原位可见（混合消息只留文本）。
    * 此前按「连续相邻 ≥2 块」成组，解说文本一断就再也合不上（实测：每步一句解说的
    * 轮次结束只剩一梯子单独的小 bar）。
-   * isLiveSegment（本轮还在跑）消息不参与攒组：正在跑的活动必须实时可见。
-   * 2026-08-18 修正：live 闸门只盖**最后一段**（当前轮）——此前按「非历史」一刀切，
-   * 上一轮的消息还没落 isHistory，新轮一开始就被判成 live，刚折好的集合行
-   * 重新摊开（用户：「我新发了对话，上一轮的 bar 又自己展开了」）。
+   *
+   * 段完即折（2026-08-18 用户：「每段思考命令执行完有输出之后，上面的这些就
+   * 收起来，这点很重要很关键」）：live 闸门只盖**当前轮的尾巴**——最后一条
+   * 含正文的消息之后的活动（还在生长，必须实时可见）。尾巴之前的活动随
+   * 输出文本落地即刻进组折起，不再等整轮结束。live 闸门只盖最后一段
+   * （当前轮）——此前按「非历史」一刀切，上一轮的消息还没落 isHistory，
+   * 新轮一开始就被判成 live，刚折好的集合行重新摊开。
    */
   const flushTurn = (isLiveSegment: boolean): void => {
     if (turnNodes.length === 0) return
-    const live = (node: ItemNode): boolean => isLiveSegment && !node.item.isHistory
+    // live 尾巴起点：最后一条含正文块（且非历史）的消息之后。没有正文就是
+    // 轮刚起步，整段都是尾巴（保持展开）。
+    let liveTailStart = turnNodes.length
+    if (isLiveSegment) {
+      for (let i = turnNodes.length - 1; i >= 0; i--) {
+        const item = turnNodes[i].item
+        if (
+          item.kind === 'assistant' &&
+          !item.isHistory &&
+          item.blocks.some((b): b is AssistantBlock => !!b && b.kind === 'text')
+        ) {
+          liveTailStart = i + 1
+          break
+        }
+      }
+    }
+    const live = (index: number, node: ItemNode): boolean =>
+      isLiveSegment && !node.item.isHistory && index >= liveTailStart
     // 第一遍：攒活动块。
     const groupBlocks: AssistantBlock[] = []
     let firstActivityId: string | null = null
-    for (const node of turnNodes) {
-      if (live(node)) continue
+    for (let i = 0; i < turnNodes.length; i++) {
+      const node = turnNodes[i]
+      if (live(i, node)) continue
       const pure = activityBlocksOf(node)
       const blocks = pure ?? mixedActivityOf(node)
       if (blocks) {
@@ -313,8 +334,9 @@ function buildDisplayRows(
       groupBlocks.length >= 2 && firstActivityId !== null && shouldFold(`turn-group-${firstActivityId}`)
     // 第二遍：产行。折叠时组行落在第一个活动块的位置。
     let groupInserted = false
-    for (const node of turnNodes) {
-      if (live(node)) {
+    for (let i = 0; i < turnNodes.length; i++) {
+      const node = turnNodes[i]
+      if (live(i, node)) {
         rows.push({ kind: 'item', node })
         continue
       }
@@ -1264,9 +1286,15 @@ export default function Transcript({
     prevTurnRunningRef.current = turnRunning
     const foldDecisionFor = (groupKey: string): boolean => {
       const map = foldDecisionsRef.current
+      // 轮刚结束一律折（覆盖轮中"上翻不折"的决定）——「轮末收齐」优先于滚动
+      // 稳定；且段完即折后组键在轮中就可能已登记，不覆盖会永远摊开。
+      if (turnJustEnded) {
+        map.set(groupKey, true)
+        return true
+      }
       const existing = map.get(groupKey)
       if (existing !== undefined) return existing
-      const decision = turnJustEnded ? true : atBottomRef.current
+      const decision = atBottomRef.current
       map.set(groupKey, decision)
       return decision
     }
@@ -1875,7 +1903,7 @@ export default function Transcript({
       return (
         <TurnChangesCard
           item={row.node.item}
-          onReview={() => emitForgeEvent('openChangesPanel')}
+          onReview={(path) => openChangesPanel(path)}
         />
       )
     }
@@ -1962,8 +1990,8 @@ export default function Transcript({
           // 行距统一（2026-08-17 用户：「间距不固定不稳定」）：不再给裸活动行
           // 单独开小灶（py-0.5 与 py-1.5 混排就是时松时紧的根源），节奏全由
           // 这里一处说了算；卡片自身的外边距已清零。
-          // 2026-08-17 用户：「稍微松一点，但不要像之前那个版本那么松」——
-          // py-1(行距 8px) → py-1.5(12px)，与 Codex 活动行节奏一致。
+          // 取值史：8px 嫌紧 → py-1.5(12px)；2026-08-18 用户觉得 12px 仍偏大，
+          // 但拍板"先不要改"——维持 12px 不动。
           // #50 顶层用户消息行打标：导航高亮按 DOM 几何定位（见 updateActiveUserNav）。
           const userMsgId =
             row.kind === 'item' && row.node.item.kind === 'user' && envelopeTextOf(row.node) === null

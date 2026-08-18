@@ -5,10 +5,8 @@ import { useUiStore, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_DEFAULT } from '../store/u
 /**
  * 侧栏外壳：给侧栏加一条可拖的宽度调节边。
  *
- * 做成独立外壳而不是改 Sidebar 内部：Sidebar 有收起/展开两条 return 分支，
- * 在里面塞拖拽逻辑要两条路径都改一遍，改动面大、也容易和别人的编辑撞车。
- *
- * 收起态（w-14 图标条）不参与调节——它是固定尺寸的图标列，能调宽反而奇怪。
+ * 做成独立外壳而不是改 Sidebar 内部：Sidebar 的渲染分支里有自己的布局
+ * 逻辑，在里面塞拖拽容易和别人的编辑撞车。
  */
 
 /**
@@ -21,7 +19,7 @@ const COLLAPSE_SNAP_PX = 48
 
 function ResizeHandle(): JSX.Element {
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth)
-  const toggleSidebar = useUiStore((s) => s.toggleSidebar)
+  const toggleSidebarHidden = useUiStore((s) => s.toggleSidebarHidden)
   const [dragging, setDragging] = useState(false)
   const startXRef = useRef(0)
   const startWidthRef = useRef(0)
@@ -33,10 +31,11 @@ function ResizeHandle(): JSX.Element {
       if (collapsedRef.current) return
       const raw = startWidthRef.current + (e.clientX - startXRef.current)
       if (raw < SIDEBAR_WIDTH_MIN - COLLAPSE_SNAP_PX) {
-        // 越过吸附线：收起并立即结束本次拖拽，别继续跟手。
+        // 越过吸附线：隐藏侧栏并立即结束本次拖拽，别继续跟手（Alt+Q 唤回，
+        // 左缘悬停也能浮出）。
         collapsedRef.current = true
         setDragging(false)
-        toggleSidebar()
+        toggleSidebarHidden()
         return
       }
       setSidebarWidth(raw)
@@ -54,7 +53,7 @@ function ResizeHandle(): JSX.Element {
       window.removeEventListener('pointercancel', onUp)
       document.body.style.userSelect = prevSelect
     }
-  }, [dragging, setSidebarWidth, toggleSidebar])
+  }, [dragging, setSidebarWidth, toggleSidebarHidden])
 
   return (
     <div
@@ -90,10 +89,8 @@ const PEEK_CLOSE_DELAY_MS = 260
 const PEEK_LEAVE_ANIM_MS = 170
 
 export default function SidebarShell(): JSX.Element {
-  const collapsed = useUiStore((s) => s.sidebarCollapsed)
   const hidden = useUiStore((s) => s.sidebarHidden)
   const width = useUiStore((s) => s.sidebarWidth)
-  const hoverExpand = useUiStore((s) => s.sidebarHoverExpand)
   const [peeking, setPeeking] = useState(false)
   /** 退场中：面板还挂着但正在播淡出动画，播完才卸载（2026-08：消失太突兀）。 */
   const [leaving, setLeaving] = useState(false)
@@ -138,16 +135,13 @@ export default function SidebarShell(): JSX.Element {
   }
 
   // 展开之后残留的 peek 会盖在正文上，必须清掉（连同在途的定时器）。
-  // 隐藏态（hidden）的 peek 由隐藏分支自己管理，这里不插手。
   useEffect(() => {
     if (hidden) return
-    if (!collapsed || !hoverExpand) {
-      clearPeekTimer()
-      clearLeaveTimer()
-      setPeeking(false)
-      setLeaving(false)
-    }
-  }, [collapsed, hoverExpand, hidden])
+    clearPeekTimer()
+    clearLeaveTimer()
+    setPeeking(false)
+    setLeaving(false)
+  }, [hidden])
 
   useEffect(
     () => () => {
@@ -157,7 +151,7 @@ export default function SidebarShell(): JSX.Element {
     []
   )
 
-  // 完全隐藏（Codex 风）：连图标条都不渲染，dock 收成零宽——主区顺势铺满，
+  // 完全隐藏（Codex 风）：dock 收成零宽——主区顺势铺满，
   //  网格列动画（workspace-shell 的 grid-template-columns 过渡）给出滑走感。
   //  但左缘留一条 10px 的隐形触发带：悬停浮出完整侧栏（peek），移开自动收回
   //  （2026-08 用户：隐藏了鼠标悬停也要能出来）。
@@ -184,35 +178,15 @@ export default function SidebarShell(): JSX.Element {
     )
   }
 
-  const peekOn = collapsed && hoverExpand
-
   return (
     <div
       className="sidebar-dock relative flex shrink-0"
       // 宽度经 CSS 变量下发：Sidebar 内部那个 w-64 是 Tailwind 工具类，
       // 在 styles.css 里用不带 @layer 的规则覆盖它（无层声明胜过任何 @layer）。
       style={{ ['--sidebar-w' as string]: `${width}px` }}
-      {...(peekOn
-        ? {
-            onPointerEnter: () => schedulePeek(true),
-            onPointerLeave: () => schedulePeek(false)
-          }
-        : {})}
     >
-      {/* 悬停触发区：dock 本体（图标条全高）就是触发区。2026-08 曾加过一条
-          伸进主区的扩展条，但合体布局里主区紧贴 dock（没有沟），扩展条会盖住
-          主区左缘 16px 的点击——已撤。 */}
-      {/* 图标条始终挂着：它决定在流的那一列有多宽，卸载会让 Sidebar 每次悬停
-          都重建、内部状态全丢。2026-08 起浮层改实底（.sidebar-peek > * 实色
-          背景），从左缘完整盖住图标条，不再需要 invisible 切换——衔接不再跳。 */}
       <Sidebar />
-      {peekOn && peeking && (
-        <div className={`sidebar-peek ${leaving ? 'is-leaving' : ''}`} style={{ width: `${width}px` }}>
-          <Sidebar forceExpanded />
-        </div>
-      )}
-      {/* 收起态是固定宽度的图标条，不给调节边。 */}
-      {!collapsed && <ResizeHandle />}
+      <ResizeHandle />
     </div>
   )
 }

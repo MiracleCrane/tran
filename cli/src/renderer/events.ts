@@ -15,6 +15,10 @@ export const FORGE_RENDERER_EVENTS = {
 
 export type ForgeRendererEventKey = keyof typeof FORGE_RENDERER_EVENTS
 
+export interface OpenChangesPanelDetail {
+  path?: string
+}
+
 export function emitForgeEvent(key: ForgeRendererEventKey): void {
   window.dispatchEvent(new Event(FORGE_RENDERER_EVENTS[key]))
 }
@@ -23,4 +27,19 @@ export function onForgeEvent(key: ForgeRendererEventKey, listener: () => void): 
   const eventName = FORGE_RENDERER_EVENTS[key]
   window.addEventListener(eventName, listener)
   return () => window.removeEventListener(eventName, listener)
+}
+
+export function openChangesPanel(path?: string): void {
+  window.dispatchEvent(new CustomEvent<OpenChangesPanelDetail>(FORGE_RENDERER_EVENTS.openChangesPanel, {
+    detail: path ? { path } : {}
+  }))
+}
+
+export function onOpenChangesPanel(listener: (detail: OpenChangesPanelDetail) => void): () => void {
+  const eventName = FORGE_RENDERER_EVENTS.openChangesPanel
+  const handler = (event: Event): void => {
+    listener((event as CustomEvent<OpenChangesPanelDetail>).detail ?? {})
+  }
+  window.addEventListener(eventName, handler)
+  return () => window.removeEventListener(eventName, handler)
 }

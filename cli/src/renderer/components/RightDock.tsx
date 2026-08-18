@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
-import { onForgeEvent } from '../events'
+import { onOpenChangesPanel } from '../events'
 import GitToolbar from './GitToolbar'
 import PlanCard from './PlanCard'
 import GoalCard from './GoalCard'
@@ -21,7 +21,7 @@ export default function RightDock(): JSX.Element | null {
   const goal = useSessionStore((s) => s.goal)
 
   // 「审核改动」入口（改动胶囊 / 轮次改动卡）→ 打开 dock 的 Git 页。
-  useEffect(() => onForgeEvent('openChangesPanel', () => setRightDock('git')), [setRightDock])
+  useEffect(() => onOpenChangesPanel(() => setRightDock('git')), [setRightDock])
 
   const open = dock !== null
   const title = dock === 'git' ? 'Git 工具' : dock === 'plan' ? '待办' : '目标'

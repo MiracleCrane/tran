@@ -23,26 +23,16 @@ export interface BlockingOverlayState {
 interface UiStore {
   view: View
   setView: (view: View) => void
-  sidebarCollapsed: boolean
-  toggleSidebar: () => void
-  /** 完全隐藏（连图标条都不留，Codex 风）。Alt+Q 绑这档；collapsed 是收成
-   *  图标条那一档。 */
+  /** 隐藏侧栏（Codex 风开/关两态）。Alt+Q / Ctrl+B 都绑这档；图标条模式
+   *  2026-08-18 用户拍板整体砍掉。 */
   sidebarHidden: boolean
   toggleSidebarHidden: () => void
   /**
    * 展开态侧栏的宽度（px）。拖右边缘可调，持久化到 localStorage——用户手动
-   * 调过的尺寸，重启后弹回默认值会显得像 bug。收起态是固定的图标条宽度，
-   * 不受这个值影响。
+   * 调过的尺寸，重启后弹回默认值会显得像 bug。
    */
   sidebarWidth: number
   setSidebarWidth: (width: number) => void
-  /**
-   * 收起态下，鼠标悬停在图标条上是否自动展开成完整面板（浮层，不推开正文）。
-   * 默认开——收起之后不用为了看一眼会话列表专门去点箭头/按快捷键。
-   * 暂存在 localStorage；等设置体系整合完再挪进正式设置项。
-   */
-  sidebarHoverExpand: boolean
-  setSidebarHoverExpand: (on: boolean) => void
   /** Footer tool nav (skills/mcp/providers/translate/settings) collapsed. */
   navCollapsed: boolean
   toggleNav: () => void
@@ -75,17 +65,6 @@ export function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Math.round(width)))
 }
 
-const HOVER_EXPAND_KEY = 'tran.sidebarHoverExpand'
-
-function readHoverExpand(): boolean {
-  try {
-    // 只有显式存过 '0' 才算关；没存过 = 默认开。
-    return localStorage.getItem(HOVER_EXPAND_KEY) !== '0'
-  } catch {
-    return true
-  }
-}
-
 function readSidebarWidth(): number {
   try {
     const raw = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY))
@@ -99,13 +78,9 @@ function readSidebarWidth(): number {
 export const useUiStore = create<UiStore>((set) => ({
   view: 'chat',
   setView: (view) => set({ view }),
-  // 启动一律展开、可见（2026-08-12 用户改口：打开默认不要收起侧边栏——
-  // Codex 同款）。收起/隐藏改为会话内动作，不再跨启动持久化：持久化的
-  // 收起态会让"上次随手收起"的人每次启动都对着图标条找会话列表。
-  sidebarCollapsed: false,
-  toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
-  /** 完全隐藏（Codex 风）：连图标条都不留。与 collapsed（收成图标条）是两档，
-   *  Alt+Q 绑定这档。 */
+  // 启动一律可见（2026-08-12 用户改口：打开默认不要收起侧边栏——Codex 同款）。
+  // 隐藏改为会话内动作，不再跨启动持久化：持久化的隐藏态会让"上次随手隐藏"
+  // 的人每次启动都找不到会话列表。
   sidebarHidden: false,
   toggleSidebarHidden: () => set((s) => ({ sidebarHidden: !s.sidebarHidden })),
   sidebarWidth: readSidebarWidth(),
@@ -117,15 +92,6 @@ export const useUiStore = create<UiStore>((set) => ({
       /* 隐私模式/存储满：不持久化也要让本次生效 */
     }
     set({ sidebarWidth: next })
-  },
-  sidebarHoverExpand: readHoverExpand(),
-  setSidebarHoverExpand: (on) => {
-    try {
-      localStorage.setItem(HOVER_EXPAND_KEY, on ? '1' : '0')
-    } catch {
-      /* 隐私模式/存储满：不持久化也要让本次生效 */
-    }
-    set({ sidebarHoverExpand: on })
   },
   // 默认收起：工具区是低频入口，常驻展开只是把五行图标怼在侧栏底部。
   // 鼠标移到底部就浮出来，够用（2026-08 用户要求）。

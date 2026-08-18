@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GitFileChange } from '../../shared/ipc'
 import { useSessionStore } from '../store/sessionStore'
-import { emitForgeEvent } from '../events'
+import { openChangesPanel } from '../events'
 
 /**
  * 输入框正上方的「N 个文件已更改 +X -Y」悬浮胶囊（Codex 同款）。
@@ -97,9 +97,9 @@ export default function SessionChangesPill(): JSX.Element | null {
 
   const shown = sessionFiles.slice(0, FILES_SHOWN)
   const rest = sessionFiles.length - shown.length
-  const review = (): void => {
+  const review = (path?: string): void => {
     setOpen(false)
-    emitForgeEvent('openChangesPanel')
+    openChangesPanel(path)
   }
 
   return (
@@ -115,7 +115,7 @@ export default function SessionChangesPill(): JSX.Element | null {
               <button
                 key={f.path}
                 type="button"
-                onClick={review}
+                onClick={() => review(f.path)}
                 title={f.path}
                 className="flex w-full items-center gap-3 px-3 py-1.5 text-left transition hover:bg-white/[0.05]"
               >
@@ -139,7 +139,7 @@ export default function SessionChangesPill(): JSX.Element | null {
         )}
         <button
           type="button"
-          onClick={review}
+          onClick={() => review()}
           title="查看本次会话的工作区改动"
           className="mb-1.5 flex items-center gap-2 rounded-full border border-border-subtle bg-bg-elev px-3.5 py-1.5 text-[12px] text-zinc-300 shadow-lg shadow-black/30 transition hover:bg-bg-hover"
         >

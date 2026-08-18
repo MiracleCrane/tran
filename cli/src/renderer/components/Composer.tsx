@@ -454,10 +454,11 @@ export default function Composer(): JSX.Element {
           return canonical
         }
         if (aliases[canonical]?.trim().toLowerCase() === query) return canonical
+        if (displayName(canonical, agentBackend, aliases).trim().toLowerCase() === query) return canonical
       }
       return null
     },
-    [slashSkills, aliases]
+    [slashSkills, agentBackend, aliases]
   )
 
   const resolveCommandForChip = useCallback(

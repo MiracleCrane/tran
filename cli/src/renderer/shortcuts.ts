@@ -191,16 +191,17 @@ export function buildShortcuts(): ShortcutAction[] {
   const list: ShortcutAction[] = [
     {
       id: 'toggleSidebar',
-      label: '缩小 / 展开侧栏（图标条）',
-      // Alt+W 缩小（用户指定 2026-08）；Ctrl+B 是 VS Code / Codex 的肌肉记忆。
+      label: '隐藏 / 显示侧栏',
+      // Alt+W（用户指定 2026-08）与 Ctrl+B（VS Code / Codex 的肌肉记忆）都绑到
+      // 隐藏切换；Alt+Q 同义。图标条模式 2026-08-18 已砍，这里不再分两档。
       keys: ['Alt+W', 'Ctrl+B'],
       // 侧栏开合在输入时也该能用：不影响文本，纯视图动作。
       allowInInput: true,
-      run: () => ui().toggleSidebar()
+      run: () => ui().toggleSidebarHidden()
     },
     {
       id: 'hideSidebar',
-      label: '隐藏 / 显示侧栏（完全隐藏）',
+      label: '隐藏 / 显示侧栏',
       // Alt+Q 是用户指定的完全隐藏键位（2026-08）：连图标条都不留，Codex 风。
       // Windows 上没冲突：Chromium 未占用，Tran 是自绘标题栏、没有菜单栏。
       keys: ['Alt+Q'],

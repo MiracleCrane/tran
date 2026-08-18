@@ -29,7 +29,7 @@ export default function TurnChangesCard({
   onReview
 }: {
   item: TurnChangesItem
-  onReview: () => void
+  onReview: (path?: string) => void
 }): JSX.Element | null {
   // cwd 直接从 store 取：调用点在 Transcript 的行渲染函数里，那儿拿不到组件
   // 作用域的 cwd，与其把它一路透传下来，不如卡片自己订阅。
@@ -94,7 +94,7 @@ export default function TurnChangesCard({
               </button>
               <button
                 type="button"
-                onClick={onReview}
+                onClick={() => onReview()}
                 className="shrink-0 rounded-lg border border-border-subtle px-2.5 py-1 text-[11px] text-zinc-300 transition hover:bg-white/[0.06]"
               >
                 审核
@@ -109,7 +109,7 @@ export default function TurnChangesCard({
               <button
                 key={f.path}
                 type="button"
-                onClick={onReview}
+                onClick={() => onReview(f.path)}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition hover:bg-white/[0.03]"
                 title={f.path}
               >

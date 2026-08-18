@@ -17,6 +17,9 @@ interface ChangesPanelProps {
   cwd: string
   /** 外部状态变化信号：值变了就刷新（不比较内容，只比较引用/值）。 */
   refreshKey: string
+  /** 从轮次/会话文件行进入时，加载后自动定位并展开该文件。 */
+  initialPath?: string | null
+  initialRequestKey?: number
   onClose: () => void
 }
 
@@ -36,7 +39,7 @@ function splitPath(path: string): { dir: string; base: string } {
   return { dir: path.slice(0, idx + 1), base: path.slice(idx + 1) }
 }
 
-export default function ChangesPanel({ cwd, refreshKey, onClose }: ChangesPanelProps): JSX.Element {
+export default function ChangesPanel({ cwd, refreshKey, initialPath, initialRequestKey, onClose }: ChangesPanelProps): JSX.Element {
   const [changes, setChanges] = useState<GitWorkingChanges | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -46,6 +49,8 @@ export default function ChangesPanel({ cwd, refreshKey, onClose }: ChangesPanelP
   const [reverting, setReverting] = useState(false)
   // 切目录/刷新竞态：迟到的响应不覆盖新目录的数据
   const loadSeqRef = useRef(0)
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const appliedRequestRef = useRef<number | null>(null)
 
   const load = useCallback(
     (opts?: { keepDiffs?: boolean }): void => {
@@ -80,10 +85,8 @@ export default function ChangesPanel({ cwd, refreshKey, onClose }: ChangesPanelP
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshKey 是唯一触发源
   }, [refreshKey])
 
-  const toggleFile = (file: GitFileChange): void => {
-    const next = expanded === file.path ? null : file.path
-    setExpanded(next)
-    if (next && diffs[file.path] === undefined) {
+  const ensureFileDiff = (file: GitFileChange): void => {
+    if (diffs[file.path] === undefined) {
       setDiffs((d) => ({ ...d, [file.path]: null }))
       void window.api
         .gitFileDiff(cwd, file.path, {
@@ -98,6 +101,29 @@ export default function ChangesPanel({ cwd, refreshKey, onClose }: ChangesPanelP
         })
     }
   }
+
+  const toggleFile = (file: GitFileChange): void => {
+    const next = expanded === file.path ? null : file.path
+    setExpanded(next)
+    if (next) ensureFileDiff(file)
+  }
+
+  useEffect(() => {
+    if (!initialPath || initialRequestKey === undefined || !changes) return
+    if (appliedRequestRef.current === initialRequestKey) return
+    const file = changes.files.find((entry) => entry.path === initialPath)
+    if (!file) return
+    appliedRequestRef.current = initialRequestKey
+    setExpanded(file.path)
+    ensureFileDiff(file)
+    window.requestAnimationFrame(() => {
+      const rows = listRef.current?.querySelectorAll<HTMLElement>('[data-change-path]') ?? []
+      const row = [...rows].find((entry) => entry.dataset.changePath === file.path)
+      row?.scrollIntoView({ block: 'nearest' })
+    })
+    // `diffs` / `expanded` are intentionally excluded: this effect reacts to a new request or file list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPath, initialRequestKey, changes, cwd])
 
   const doRevert = async (): Promise<void> => {
     const file = confirmRevert
@@ -161,14 +187,14 @@ export default function ChangesPanel({ cwd, refreshKey, onClose }: ChangesPanelP
         <div className="py-6 text-center text-[11px] text-zinc-500">工作区干净，没有未提交的改动</div>
       )}
       {files.length > 0 && (
-        <div className="git-stable-scroll min-h-0 flex-1 overflow-y-auto pr-1">
+        <div ref={listRef} className="git-stable-scroll min-h-0 flex-1 overflow-y-auto pr-1">
           {files.map((file) => {
             const meta = STATUS_META[file.status]
             const { dir, base } = splitPath(file.path)
             const isOpen = expanded === file.path
             const diff = diffs[file.path]
             return (
-              <div key={file.path} className="mb-0.5">
+              <div key={file.path} data-change-path={file.path} className="mb-0.5">
                 <div
                   className={`group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-[11px] transition hover:bg-white/[0.05] ${
                     isOpen ? 'bg-white/[0.04]' : ''
