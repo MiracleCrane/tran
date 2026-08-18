@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.23 - 2026-08-18
+
+### 中文
+
+- 优化:**流式期间集合行贴着正在输出的尾巴**——边输出边折叠时,折进去的 bar 汇成「思考 N 段 命令 ×N…」集合行,落在「当前 + 上一条」展开 bar 的正上方,始终在视野内;每折进一个计数实时涨。原先集合行落在段首,段一长就滚出视口,看起来像 bar 凭空消失。轮末收齐与历史布局不变。
+
+### English
+
+- Live output folding: the collection row ("N thinking, ×N commands…") now sits right above the two expanded tail bars (current + previous), staying in view while streaming, and its counters increment live as bars fold in. Previously the row anchored at the segment start and scrolled out of view on long segments, making bars look like they vanished. Turn-end folding and history layout are unchanged.
+
 ## v1.1.22 - 2026-08-18
 
 ### 中文

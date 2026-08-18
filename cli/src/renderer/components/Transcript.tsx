@@ -349,10 +349,29 @@ function buildDisplayRows(
     }
     const fold =
       groupBlocks.length >= 2 && firstActivityId !== null && shouldFold(`turn-group-${firstActivityId}`)
-    // 第二遍：产行。折叠时组行落在第一个活动块的位置。
+    const insertGroupRow = (): void => {
+      const id = `turn-group-${firstActivityId}`
+      const pureTools = groupBlocks.every((b): b is ToolBlock => b.kind === 'tool')
+      rows.push(
+        pureTools
+          ? { kind: 'toolGroup', id, blocks: groupBlocks as ToolBlock[] }
+          : { kind: 'activityGroup', id, blocks: groupBlocks }
+      )
+      groupInserted = true
+    }
+    // 第二遍：产行。组行落点分两种——
+    // live 段：贴着尾巴（第一个 live 节点之前）。流式期间折进去的 bar 在用户
+    //   眼前汇成集合行、计数实时涨；落在段首会随段变长滚出视口，用户看到的
+    //   就是"bar 凭空消失"（2026-08-18 用户：「不是让你看不见的收起来啊」）。
+    // 非 live 段（历史/轮末收齐）：落在第一个活动块的位置，与 wire 重建的
+    //   历史布局一致。
+    const firstLiveIndex = prevAct >= 0 ? prevAct : lastAct
     let groupInserted = false
     for (let i = 0; i < turnNodes.length; i++) {
       const node = turnNodes[i]
+      if (fold && !groupInserted && isLiveSegment && firstLiveIndex >= 0 && i === firstLiveIndex) {
+        insertGroupRow()
+      }
       if (live(i, node)) {
         rows.push({ kind: 'item', node })
         continue
@@ -360,17 +379,10 @@ function buildDisplayRows(
       const pure = activityBlocksOf(node)
       const mixed = pure ? null : mixedActivityOf(node)
       if (fold && (pure || mixed)) {
-        if (!groupInserted) {
-          const id = `turn-group-${firstActivityId}`
-          const pureTools = groupBlocks.every((b): b is ToolBlock => b.kind === 'tool')
-          rows.push(
-            pureTools
-              ? { kind: 'toolGroup', id, blocks: groupBlocks as ToolBlock[] }
-              : { kind: 'activityGroup', id, blocks: groupBlocks }
-          )
-          groupInserted = true
-        }
-        // 混合消息的文本保持原位可见；纯活动消息整条进组。
+        if (!groupInserted && !isLiveSegment) insertGroupRow()
+        // live 段里 firstLiveIndex < 0（轮刚起步全是活动、没有 live 节点）时
+        // 退回段首落点，否则组行永远不会插入、块整段消失。
+        if (!groupInserted && isLiveSegment && firstLiveIndex < 0) insertGroupRow()
         if (mixed) rows.push({ kind: 'itemText', node })
         continue
       }
