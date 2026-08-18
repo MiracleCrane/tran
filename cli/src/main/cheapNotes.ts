@@ -10,8 +10,9 @@ import { loadSettings } from './settings'
  * 总结类杂活的第二、第三项：**命令一句话说明**与**思考块摘要**。
  * （第一项是会话命名，在 aiTitles.ts。）
  *
- * 请求形态全部走 cheapModel.ts 的 cheapSummarize——多轮角色少样本 + stop +
- * terseText 三道防线，理由见那边的注释。这里只管"什么时候问、问完存哪"。
+ * 请求形态全部走 cheapModel.ts 的 cheapSummarize——多轮角色少样本 +
+ * terseText 两道防线（原第三道 stop:['\n'] 已删：会把换行开头的模型
+ * 在第 0 字截断，见 cheapModel.ts），理由见那边的注释。这里只管"什么时候问、问完存哪"。
  *
  * --- 2026-07-30 实测：这两项都成立 ---
  * 交接文档把它们卡在"等用户点提示词自检"，怕的是压不住格式。实测：

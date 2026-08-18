@@ -17,7 +17,8 @@ import { log } from './logger'
  * 已知取舍（与 kimi 回放对齐或更好）：
  * - 子代理内部轮次在主 wire 里只有 Task 调用与结论（内部细节在 tasks/<id>/
  *   各自的 wire 里，暂不合入）；思考正文在旧版 kimi 不落盘（空串）的块丢弃。
- * - 压缩点不产分隔卡（history 通道没有压缩消息的位置，内容完整优先）。
+ * - 压缩点产 type:'compaction' 的分界线消息（带摘要正文），位置 = 压缩发生的
+ *   历史点；live 通道推的分界线只有统计数字，两者在渲染层按需要去重。
  */
 
 interface WirePartEvent {
@@ -62,6 +63,9 @@ export function parseWireHistory(wirePath: string): Array<Record<string, unknown
   /** 已到达、还没排进消息的 tool_result（紧跟下一步/边界时flush成一条 user 消息）。 */
   let pendingResults: Array<Record<string, unknown>> = []
   let lineNo = 0
+  /** 最近一次 full_compaction.begin 的时间戳：apply_compaction 自身不带
+   *  time，分界线的 at 借 begin 的（complete 在它后面，赶不上）。 */
+  let compactionBeginAt = 0
 
   const flushResults = (): void => {
     if (!pendingResults.length) return
@@ -172,8 +176,27 @@ export function parseWireHistory(wirePath: string): Array<Record<string, unknown
       continue
     }
 
-    // context.apply_compaction / turn.prompt / turn.steer / config / usage 等：
-    // 与展示历史无关（压缩点内容本就在 wire 里，不需要标记）。
+    // 压缩点：产分界线消息（2026-08-18 用户：重启后历史里压缩分界线要么
+    // 没有、要么位置错乱——live 推送只追加在末尾）。wire 里有完整摘要正文，
+    // 一并带上（live 通道 kimi 只给统计数字，「查看摘要」一直名不副实）。
+    if (type === 'full_compaction.begin') {
+      compactionBeginAt = typeof entry.time === 'number' ? entry.time : 0
+      continue
+    }
+    if (type === 'context.apply_compaction') {
+      flushStep()
+      flushResults()
+      messages.push({
+        type: 'compaction',
+        uuid: `w${lineNo}-compaction`,
+        message: { content: '' },
+        summary: typeof entry.summary === 'string' ? entry.summary : '',
+        at: compactionBeginAt || Date.now()
+      })
+      continue
+    }
+
+    // turn.prompt / turn.steer / config / usage 等：与展示历史无关。
   }
   flushStep()
   flushResults()

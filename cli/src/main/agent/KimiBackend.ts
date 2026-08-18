@@ -91,6 +91,11 @@ interface ActiveKimiSession {
    *  turn 结束解析后经 system/compaction 合成消息推渲染层。 */
   compactTurn: boolean
   compactText: string
+  /** 一次压缩的完整生命周期（首次检出 → 统计文本齐推出分界线）跨多个 ACP
+   *  轮：/compact 秒回后宿主才把压缩甩到后台跑，完成文本经游离 chunk/steered
+   *  轮到达。为 true 期间渲染层显示「正在压缩上下文…」（2026-08-18：原先
+   *  kimi 后端从不发 compacting 状态，压缩的 2-3 分钟里界面零反馈）。 */
+  compactionInFlight: boolean
   /** 隐藏 /usage 轮进行中又收到刷新请求：轮末补跑一次。 */
   usageRefreshPending: boolean
   /** 空壳治理：本次运行由 Tran 新建（session/new，非 resume）的会话。 */
@@ -377,6 +382,7 @@ export class KimiBackend {
       lastTurnFailed: false,
       compactTurn: false,
       compactText: '',
+      compactionInFlight: false,
       usageRefreshPending: false,
       createdViaNew: !opts.resume,
       gotRealPrompt: false,
@@ -631,6 +637,45 @@ export class KimiBackend {
    * ——下一个事件会重新点亮，自愈；真实 prompt 开始时静默清旗（真实轮的
    * 生命周期接管一切）。
    */
+  /** 「正在压缩」状态上报（只在翻转时发，渲染层 status.compacting 驱动
+   *  TranscriptFooter 的「正在压缩上下文…」）。 */
+  private setCompacting(session: ActiveKimiSession, on: boolean): void {
+    if (session.compactionInFlight === on) return
+    session.compactionInFlight = on
+    if (session.closed) return
+    this.h.onMessage(session.id, {
+      type: 'system',
+      subtype: 'status',
+      status: on ? 'compacting' : null
+    } as unknown as SDKMessage)
+  }
+
+  /** 压缩完成判定：统计文本齐（或出现完成标记）才推分界线并解除「正在压缩」。
+   *  只流了 "Compacting conversation context…" 开场白的秒回轮不算完成——那是
+   *  宿主把压缩甩到后台的信号，此时推分界线就是谎报成功（2026-08-18 用户：
+   *  「提前告诉我成功了，没有过程」）。真正的完成文本（Compaction completed:
+   *  Messages compacted…）走游离 chunk/steered 轮到达，由 endSteeredTurn 或
+   *  下一个 runTurn 末尾再调本函数收尾。 */
+  private flushCompactionIfDone(session: ActiveKimiSession): void {
+    const stats = parseCompaction(session.compactText)
+    const done =
+      session.compactText.includes('Compaction completed') ||
+      stats.messagesCompacted !== undefined ||
+      stats.tokensBefore !== undefined ||
+      stats.tokensAfter !== undefined
+    session.compactTurn = false
+    if (!done) return // 压缩仍在跑：compactText 留着等完成文本追加，状态不清
+    if (!session.closed) {
+      this.h.onMessage(session.id, {
+        type: 'system',
+        subtype: 'compaction',
+        compaction: { ...stats, at: Date.now() }
+      } as unknown as SDKMessage)
+    }
+    session.compactText = ''
+    this.setCompacting(session, false)
+  }
+
   private touchSteeredTurn(session: ActiveKimiSession): void {
     if (!session.steeredActive) {
       session.steeredActive = true
@@ -659,6 +704,11 @@ export class KimiBackend {
     if (!emit || session.closed) return
     // 封口流式消息 + 通知渲染层收尾（清 running/streaming 态）。
     this.sealStreamMessage(session)
+    // steered 轮是压缩完成文本的常规到达路径（宿主后台压完后经游离 chunk
+    // 流出 "Compaction completed: …"，wire 活动触发 self-wake）：轮末结算
+    // 分界线。原先这里不处理 compactTurn，统计文本一路挂到下一个客户端轮
+    // 末尾才推——分界线因此落到最新消息下面（2026-08-18 实测）。
+    if (session.compactTurn || session.compactText) this.flushCompactionIfDone(session)
     session.turnStartedAt = 0
     this.emitRunning(session, false)
     this.h.onMessage(session.id, {
@@ -1304,6 +1354,7 @@ export class KimiBackend {
       // 压缩轮标志随轮重置（runTurn 正常结束已清；这里是出错兜底）。
       session.compactTurn = false
       session.compactText = ''
+      this.setCompacting(session, false)
       // 查询轮标志同理（出错兜底：吞掉的文本直接丢弃，不补状态卡）。
       session.queryTurn = false
       session.queryText = ''
@@ -1599,8 +1650,11 @@ export class KimiBackend {
       session.titleTexts.push(firstUserText(message.content))
     }
     // 压缩轮标记：/compact（含参数形式）——该轮压缩文本不渲染，结束统一解析。
+    // 同时点亮「正在压缩」：宿主对 /compact 秒回、压缩甩后台跑 2-3 分钟，
+    // 没有状态指示就是用户眼里的"秒成功/死机"（2026-08-18 用户反馈）。
     if (userText.startsWith('/compact')) {
       session.compactTurn = true
+      this.setCompacting(session, true)
     }
     const client = await this.ensureClient()
     const payload = contentToPrompt(message.content)
@@ -1649,15 +1703,15 @@ export class KimiBackend {
         }
       }
     }
-    // 压缩轮：解析统计数据，经 system/compaction 推渲染层（原始文本不渲染）。
+    // 压缩轮：完成（统计文本齐）才经 system/compaction 推分界线；只有
+    // "Compacting…" 开场白的秒回轮不推（谎报成功），状态留待完成文本收尾。
     if (session.compactTurn) {
-      this.h.onMessage(session.id, {
-        type: 'system',
-        subtype: 'compaction',
-        compaction: { ...parseCompaction(session.compactText), at: Date.now() }
-      } as unknown as SDKMessage)
-      session.compactTurn = false
+      this.flushCompactionIfDone(session)
+    } else if (session.compactionInFlight && session.streamedText) {
+      // 安全网：完成文本丢失（宿主异常/版本差异）但对话已产出正常内容——
+      // 撤掉「正在压缩」防状态卡死，积存的压缩残文一并丢弃。
       session.compactText = ''
+      this.setCompacting(session, false)
     }
     this.sealStreamMessage(session)
     const usage = asRecord(response.usage)
@@ -2029,6 +2083,7 @@ export class KimiBackend {
       // 检测串带上已流式正文的尾部拼接——置位前放行的半截前缀随 seal 定稿，
       // 属可接受残留（渲染层压缩卡逻辑同款正则会滤掉残句所在的流式条目）。
       if (session.compactTurn || isCompactionText(session.streamedText.slice(-64) + session.compactText + text)) {
+        if (!session.compactTurn) this.setCompacting(session, true) // 自动压缩检出：点亮「正在压缩」
         session.compactTurn = true
         session.compactText += text
         return

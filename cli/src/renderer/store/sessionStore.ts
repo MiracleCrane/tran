@@ -993,6 +993,19 @@ export function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
   // #7 tool_use → 块索引：tool_result 配对从全量双重扫描 O(n²) 降为 Map 查找。
   const toolBlocksById = new Map<string, ToolBlock>()
   for (const m of messages) {
+    // wire 重建的压缩分界线消息（parseWireHistory）：位置 = 历史压缩点，
+    // 带摘要正文（live 通道只有统计数字）。
+    if ((m as { type?: string }).type === 'compaction') {
+      const mc = m as unknown as { uuid?: string; summary?: string; at?: number }
+      items.push({
+        id: mc.uuid ?? uid(),
+        kind: 'compaction',
+        parentToolUseId: null,
+        ...(mc.summary ? { summary: mc.summary } : {}),
+        at: typeof mc.at === 'number' ? mc.at : Date.now()
+      })
+      continue
+    }
     if (m.type === 'assistant') {
       const beta = m.message as { content?: Array<Record<string, unknown>> }
       const blocks: AssistantBlock[] = []
@@ -3299,7 +3312,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             modePanel: defaultModePanel(),
             goal: null,
             elicitationQueue: [],
-            status: { ...s.status }
+            // compacting 不随会话切换残留：压缩状态由 live 事件重新点亮
+            //（2026-08-18 前 resume 会带着上一会话的「正在压缩」卡死）。
+            status: { ...s.status, compacting: false }
           }))
           // 会话刚 load 完，立刻补拉待办真值（零 token，失败静默）。
           void get().refreshTodos()

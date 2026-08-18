@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.1.22 - 2026-08-18
+
+### 中文
+
+- 修复:**思考摘要/翻译/AI 命名/命令说明全部不生效**——摘要请求带 `stop: ['\n']`,而硅基 GLM-4-9B 的回复以 `\n` 开头,服务端在第 0 字截断,HTTP 200 但内容为空(日志里"连续几千次失败"即此);单行约束由 terseText 客户端兜底,删除 stop。失败的空结果已按"判废"缓存,本次同时清空毒缓存(500 条)。
+- 修复:**上下文压缩全程无反馈、看起来像"秒成功/假成功"**——`/compact` 发送即点亮「正在压缩上下文…」(此前 kimi 后端从不发 compacting 状态,压缩的 2-3 分钟界面零反馈);只流开场白的秒回轮不再推"已压缩"分界线,统计文本齐了才推;压缩期间发消息不再让人误以为死机。
+- 修复:**压缩分界线位置错乱**——统计分界线原先挂到下一轮末尾才推(落在最新消息下面);现改在 steered 轮收尾即时结算;重启后由 wire 全量重建在**历史正确位置**重建分界线,且「查看摘要」展示真实摘要正文(此前只有统计数字)。
+- 优化:**侧栏段标(置顶/项目/最近)11px → 13px**,刷新过渡快照同步。
+- 修复:**点侧栏刷新时项目组头闪完整路径**——过渡快照直接渲了原始路径,改为与实时列表一致只显示末段名。
+- 修复:**会话删光后项目组消失**——空项目保留组头(可直接点「+」开新会话),主目录仍不算项目。
+
+### English
+
+- Fix: thinking summaries/translations, AI titles and command notes all broken — the summary request used `stop: ['\n']`, and SiliconFlow GLM-4-9B starts replies with `\n`, so the server truncated at position 0 (HTTP 200 with empty content). The stop is removed; terseText enforces single-line client-side. Poisoned empty-result caches (500 entries) were purged.
+- Fix: context compaction gave zero feedback and looked like an instant "fake success" — a "compacting context…" indicator now lights up as soon as `/compact` is sent (the kimi backend previously never reported the compacting state, leaving the UI blank for the real 2-3 minute compaction); the early ack turn no longer pushes a premature divider; dividers are only pushed once completion stats arrive.
+- Fix: compaction dividers landed in the wrong place (the stats divider used to be flushed at the end of the *next* turn, below the latest message). They are now settled when the steered turn ends; after a restart, the wire full-rebuild recreates dividers at their true historical positions, and "view summary" shows the actual summary text instead of only stats.
+- Sidebar section labels (Pinned/Projects/Recent) enlarged 11px → 13px, including the refresh-transition snapshot.
+- Fix: clicking sidebar refresh flashed full project paths in group headers — the transition snapshot rendered the raw path; it now shows the basename like the live list.
+- Fix: a project disappeared from the sidebar once all its sessions were deleted — empty projects keep their group header (with a working "+" new-chat button); the home directory still doesn't count as a project.
+
 ## v1.1.21 - 2026-08-18
 
 ### 中文

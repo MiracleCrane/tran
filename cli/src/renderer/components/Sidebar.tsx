@@ -420,11 +420,17 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const [aiNamingBusy, setAiNamingBusy] = useState(false)
   /** 已添加项目的归一化路径集合：决定会话归「项目」段还是「最近」段。 */
   const [addedProjectPaths, setAddedProjectPaths] = useState<Set<string>>(() => new Set())
+  /** 已添加项目的原始路径（listProjects 顺序）：会话被删光的项目也要保留
+   *  空组头（2026-08-18 用户：「项目不能就没了吧？留着，下面不挂会话就行了」）。 */
+  const [addedProjectRawPaths, setAddedProjectRawPaths] = useState<string[]>([])
   useEffect(() => {
     const load = (): void => {
       void window.api
         .listProjects()
-        .then((list) => setAddedProjectPaths(new Set(list.map((p) => normalizeCwdForCompare(p.path)))))
+        .then((list) => {
+          setAddedProjectPaths(new Set(list.map((p) => normalizeCwdForCompare(p.path))))
+          setAddedProjectRawPaths(list.map((p) => p.path))
+        })
         .catch(() => {})
     }
     load()
@@ -1101,12 +1107,25 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       sessionScope === 'all'
         ? groupSessionsByCwd(inProject, meta?.cwd ?? '')
         : groupSessionsByProject(inProject, meta?.cwd ?? '')
+    // 空项目保留组头：会话被删光/还没开过会话的项目不消失（2026-08-18 用户
+    // 拍板）。追加在有会话的组后面，保持 listProjects 顺序；主目录不算项目。
+    const nonEmptyLabels = new Set(cwdGroups.map((g) => normalizeCwdForCompare(g.label)))
+    const emptyProjectGroups =
+      sessionScope === 'all'
+        ? addedProjectRawPaths
+            .filter((p) => {
+              const n = normalizeCwdForCompare(p)
+              return !nonEmptyLabels.has(n) && (!homePath || n !== homePath)
+            })
+            .map((p) => ({ label: p, items: [] as SessionListItem[], section: false }))
+        : []
     return [
       ...(pinned.length ? [{ label: '置顶', items: pinned, section: true }] : []),
       ...cwdGroups,
+      ...emptyProjectGroups,
       ...(recent.length ? [{ label: '最近', items: recent, section: true }] : [])
     ]
-  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjectPaths, homePath])
+  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjectPaths, addedProjectRawPaths, homePath])
   sessionGroupsRef.current = sessionGroups
 
   const visibleSessionKeys = useMemo(
@@ -1272,9 +1291,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const renderSessionSnapshot = (snapshot: SessionListSnapshot): JSX.Element[] =>
     snapshot.groups.map((g) => (
       <div key={g.label} className="mb-2">
-        {/* 组头/缩进与实时列表保持一致，否则过渡快照一换就整体位移。 */}
-        <div className="px-2 py-1 text-[11px] font-medium text-zinc-500">
-          {g.label}
+        {/* 组头/缩进与实时列表保持一致，否则过渡快照一换就整体位移。
+            项目组的 label 是完整路径——快照原先直接渲原文，刷新过渡期间
+            组头会闪出整条路径（2026-08-18 用户抓包）；与实时列表一样只
+            显示末段名。 */}
+        <div className="px-2 py-1 text-[13px] font-medium text-zinc-500">
+          {g.section ? g.label : (g.label.split(/[\\/]/).pop() ?? g.label)}
         </div>
         <div className={g.section ? '' : 'ml-[31px]'}>
         {g.items.map((s) => {
@@ -1465,7 +1487,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             style={{ '--session-grow-delay': `${Math.min(groupIndex * 28, 120)}ms` } as CSSProperties}
           >
             {showProjectDivider && (
-              <div className="mb-0.5 mt-1 px-2 text-[11px] font-medium text-zinc-500">
+              <div className="mb-0.5 mt-1 px-2 text-[13px] font-medium text-zinc-500">
                 项目
               </div>
             )}
@@ -1510,7 +1532,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium text-zinc-500">
+              <div className="flex items-center gap-1.5 px-2 py-1 text-[13px] font-medium text-zinc-500">
                 <span className="truncate">{g.label}</span>
               </div>
             )}

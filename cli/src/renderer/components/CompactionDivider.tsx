@@ -4,7 +4,8 @@ import type { CompactionItem } from '../types'
 import { fmtK } from '../utils/format'
 
 /** 上下文压缩分界线（kimi web 式）：左右渐变细线 + 中间统计 + 右侧"查看摘要"
- *  链接，点击弹非模态详情卡（portal；kimi 不给摘要正文，只有统计数据）。 */
+ *  链接，点击弹非模态详情卡（portal）。统计数字来自 live 通道；摘要正文只有
+ *  wire 重建的历史分界线才有（live 通道 kimi 不给），有就置顶展示。 */
 
 const CompactionDivider = memo(function CompactionDivider({
   item
@@ -65,13 +66,18 @@ const CompactionDivider = memo(function CompactionDivider({
       {cardOpen && anchor && createPortal(
         <div
           ref={cardRef}
-          className="glass-panel tran-enter fixed z-[90] w-64 rounded-2xl p-4 shadow-2xl"
+          className={`glass-panel tran-enter fixed z-[90] rounded-2xl p-4 shadow-2xl ${item.summary ? 'w-96' : 'w-64'}`}
           style={{ left: anchor.left, bottom: anchor.bottom }}
         >
           <div className="mb-2 flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-accent" />
             <span className="text-xs font-semibold text-zinc-100">压缩详情</span>
           </div>
+          {item.summary && (
+            <div className="mb-2 max-h-56 overflow-y-auto whitespace-pre-wrap rounded-lg bg-white/[0.04] p-2 text-[11px] leading-relaxed text-zinc-300">
+              {item.summary}
+            </div>
+          )}
           <div className="space-y-1.5 text-[11px] text-zinc-400">
             {item.messagesCompacted !== undefined && (
               <div className="flex justify-between"><span>压缩消息数</span><span className="text-zinc-200">{item.messagesCompacted}</span></div>

@@ -128,6 +128,8 @@ export interface CompactionItem {
   messagesCompacted?: number
   tokensBefore?: number
   tokensAfter?: number
+  /** 压缩摘要正文：wire 重建通道才有（live 通道 kimi 只给统计数字）。 */
+  summary?: string
   at: number
   /** 见 UserItem.isHistory（历史重放里不会出现，占位兼容）。 */
   isHistory?: boolean

@@ -489,7 +489,10 @@ export async function cheapSummarize(opts: {
 
   const result = await cheapComplete({
     messages,
-    stop: ['\n'],
+    // 不传 stop：硅基 GLM-4-9B 这类模型回复以 "\n" 开头，stop:['\n'] 会在
+    // 第 0 个字符处截断，content 直接为空——整条摘要/命名/命令说明链路全灭
+    //（2026-08-18 实测复现：同一 payload 带 stop content=''，去掉就正常）。
+    // 单行约束由 terseText 兜底（取首个非空行 + 宽度/开场白判定），够用。
     // 给到 maxChars 的几倍空间：太小的话即使格式对了也会被截断。
     maxTokens: Math.max(32, opts.maxChars * 3)
   })
