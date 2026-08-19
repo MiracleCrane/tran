@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.27 - 2026-08-19
+
+### 中文
+
+- 优化:**侧栏头部行重排**——「会话」标签删除(纯标签无功能);搜索/AI 命名/多选/刷新右对齐一排;多选模式下操作条(已选 N 项/全选/清空/删除所选/退出)并进这一行,不再另起一行挤压列表。
+- 新增:**段标彩色淡流光**——置顶=金、项目=紫、最近=青,慢速呼吸扫过(seg-shimmer)。
+- 修复:**空项目从侧栏消失**——v1.1.22 加的空项目逻辑被动画层的 `filter(items.length > 0)` 静默滤掉;现在只滤合成段,项目组没有会话也保留组头(可直接点「+」开会话)。
+
+### English
+
+- Sidebar header reworked: the bare "Sessions" label is gone; search / AI-naming / multi-select / refresh sit right-aligned in one row, and in multi-select mode the action bar (selected count / select all / clear / delete / exit) merges into that same row instead of squeezing an extra line.
+- Section labels get subtle colored shimmer: Pinned=gold, Projects=violet, Recent=cyan.
+- Fix: empty projects disappeared from the sidebar — the v1.1.22 empty-group logic was silently dropped by the animation layer's `filter(items.length > 0)`; project groups now keep their header even with zero sessions (with a working "+" to start a chat).
+
 ## v1.1.26 - 2026-08-19
 
 ### 中文

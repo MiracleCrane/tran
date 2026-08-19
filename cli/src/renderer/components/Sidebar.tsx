@@ -211,7 +211,11 @@ function toAnimatedSessionGroups(
         exiting: exitingKeys.has(sessionKey(session))
       }))
     }))
-    .filter((group) => group.items.length > 0)
+    // 空组过滤只针对合成段（置顶/最近，本就不会有空的）——**项目组不过滤**：
+    // 空项目（会话删光/还没开过会话）要保留组头（2026-08-19 用户：「项目下面
+    // 的对话删除完了项目就没了」——这条 filter 把 v1.1.22 加进来的空项目组
+    // 又悄悄滤掉了）。
+    .filter((group) => group.items.length > 0 || !group.section)
 }
 
 /* --- icons --- */
@@ -226,6 +230,14 @@ const SearchIcon = (): JSX.Element => (
     <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
   </svg>
 )
+/** 段标配色（2026-08-19 用户：置顶/项目/最近各自一种颜色 + 淡淡流光）：
+ *  置顶=金（图钉感）、项目=紫、最近=青。走 seg-shimmer（慢速呼吸扫过）。 */
+const SECTION_LABEL_SHIMMER: Record<string, string> = {
+  置顶: 'seg-shimmer seg-shimmer-bash',
+  项目: 'seg-shimmer seg-shimmer-edit',
+  最近: 'seg-shimmer seg-shimmer-read'
+}
+
 const FolderIcon = (): JSX.Element => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
     <path
@@ -1299,7 +1311,11 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             组头会闪出整条路径（2026-08-18 用户抓包）；与实时列表一样只
             显示末段名。 */}
         <div className="px-2 py-1 text-[13px] font-semibold text-zinc-400">
-          {g.section ? g.label : (g.label.split(/[\\/]/).pop() ?? g.label)}
+          {g.section ? (
+            <span className={SECTION_LABEL_SHIMMER[g.label] ?? ''}>{g.label}</span>
+          ) : (
+            (g.label.split(/[\\/]/).pop() ?? g.label)
+          )}
         </div>
         <div className={g.section ? '' : 'ml-[31px]'}>
         {g.items.map((s) => {
@@ -1372,68 +1388,66 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         </button>
       </div>
 
-      {/* session list label */}
-      <div className="flex items-center justify-between px-4 py-0.5">
-        <span className="text-xs font-semibold text-zinc-400">
-          会话
-        </span>
-        <span className="flex items-center gap-1">
-          <button
-            onClick={() => emitForgeEvent('openSessionSearch')}
-            className="flex h-5 w-5 items-center justify-center rounded-md text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
-            title="搜索会话（Ctrl+K）"
-          >
-            <SearchIcon />
-          </button>
-          <button
-            onClick={() => void handleAiNaming()}
-            disabled={aiNamingBusy}
-            className="rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200 disabled:opacity-50"
-            title="为列表里还没有 AI 标题的会话逐个生成短标题（串行、有缓存跳过）"
-          >
-            {aiNamingBusy ? '命名中…' : 'AI 命名'}
-          </button>
-          <button
-            onClick={() => (multiMode ? exitMultiMode() : setMultiMode(true))}
-            className={`rounded-md px-1.5 py-0.5 text-[11px] transition ${
-              multiMode ? 'bg-accent/20 text-accent' : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-200'
-            }`}
-            title="多选管理（批量删除）"
-          >
-            多选
-          </button>
-          <button
-            onClick={startSessionRefreshTransition}
-            className="rounded-md px-1 text-xs text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300"
-            title="刷新"
-          >
-            ↻
-          </button>
-        </span>
+      {/* 头部行（2026-08-19 用户：「会话两个字删了」——纯标签无功能）。
+          非多选：搜索 / AI 命名 / 多选 / 刷新右对齐一排；
+          多选：操作条并进这一行（见下方 multiMode 分支），不再另起一行挤压列表。 */}
+      <div className="flex items-center px-4 py-0.5">
+        {multiMode ? (
+          <div className="flex w-full items-center gap-2 text-[11px] text-zinc-400">
+            <span className="tabular-nums text-zinc-300">已选 {selectedKeys.size} 项</span>
+            <button onClick={selectAllFiltered} className="rounded px-1.5 py-0.5 transition hover:bg-white/[0.05] hover:text-zinc-200">
+              全选
+            </button>
+            <button onClick={() => setSelectedKeys(new Set())} className="rounded px-1.5 py-0.5 transition hover:bg-white/[0.05] hover:text-zinc-200">
+              清空
+            </button>
+            <button
+              onClick={() => setConfirmBatch(true)}
+              disabled={selectedKeys.size === 0 || batchDeleting}
+              className="rounded px-1.5 py-0.5 text-red-400 transition hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {batchDeleting ? '删除中…' : '删除所选'}
+            </button>
+            <button onClick={exitMultiMode} className="ml-auto rounded px-1.5 py-0.5 transition hover:bg-white/[0.05] hover:text-zinc-200" title="退出多选（Esc）">
+              退出
+            </button>
+          </div>
+        ) : (
+          <span className="ml-auto flex items-center gap-1">
+            <button
+              onClick={() => emitForgeEvent('openSessionSearch')}
+              className="flex h-5 w-5 items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
+              title="搜索会话（Ctrl+K）"
+            >
+              <SearchIcon />
+            </button>
+            <button
+              onClick={() => void handleAiNaming()}
+              disabled={aiNamingBusy}
+              className="rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200 disabled:opacity-50"
+              title="为列表里还没有 AI 标题的会话逐个生成短标题（串行、有缓存跳过）"
+            >
+              {aiNamingBusy ? '命名中…' : 'AI 命名'}
+            </button>
+            <button
+              onClick={() => (multiMode ? exitMultiMode() : setMultiMode(true))}
+              className="rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
+              title="多选管理（批量删除）"
+            >
+              多选
+            </button>
+            <button
+              onClick={startSessionRefreshTransition}
+              className="rounded-md px-1 text-xs text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
+              title="刷新"
+            >
+              ↻
+            </button>
+          </span>
+        )}
       </div>
 
-      {/* 多选操作条：已选 N / 全选（当前过滤结果）/ 清空 / 删除所选 / 退出（Esc 同效） */}
-      {multiMode && (
-        <div className="flex items-center gap-2 px-4 py-1 text-[11px] text-zinc-500">
-          <span className="tabular-nums">已选 {selectedKeys.size} 项</span>
-          <button onClick={selectAllFiltered} className="rounded px-1 transition hover:text-zinc-300">
-            全选
-          </button>
-          <button onClick={() => setSelectedKeys(new Set())} className="rounded px-1 transition hover:text-zinc-300">
-            清空
-          </button>
-          <button
-            onClick={() => setConfirmBatch(true)}
-            disabled={selectedKeys.size === 0 || batchDeleting}
-            className="rounded px-1 text-red-400 transition hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {batchDeleting ? '删除中…' : '删除所选'}
-          </button>
-          <button onClick={exitMultiMode} className="ml-auto rounded px-1 transition hover:text-zinc-300" title="退出多选（Esc）">
-            退出
-          </button>
-        </div>
-      )}
+      {/* 多选操作条已并进上方头部行（2026-08-19：原先独立一行，换行挤压） */}
 
       <div className="min-h-0 flex flex-1 flex-col">
         {/* grouped sessions */}
@@ -1491,7 +1505,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
           >
             {showProjectDivider && (
               <div className="mb-0.5 mt-1 px-2 text-[13px] font-semibold text-zinc-400">
-                项目
+                <span className={SECTION_LABEL_SHIMMER['项目']}>项目</span>
               </div>
             )}
             {/* 组头（项目 / 时间段）。Codex 式（2026-08-18 像素对比）：项目名与会话
@@ -1536,7 +1550,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               </div>
             ) : (
               <div className="flex items-center gap-1.5 px-2 py-1 text-[13px] font-semibold text-zinc-400">
-                <span className="truncate">{g.label}</span>
+                <span className={`truncate ${SECTION_LABEL_SHIMMER[g.label] ?? ''}`}>{g.label}</span>
               </div>
             )}
             {!groupCollapsed && (
