@@ -1204,7 +1204,12 @@ export function registerIpc(
   ipcMain.handle(
     'forge:generateAiTitles',
     async (_e, sessionIds: string[]): Promise<AiTitlesBatchResult> => {
-      const result = await generateAiTitlesBatch(Array.isArray(sessionIds) ? sessionIds : [])
+      // 进度逐条推渲染层：批量命名几十上百个会话要跑几分钟，按钮上没进度
+      // 就是"卡住"（2026-08-19 用户：「AI会话命名一直卡住」）。
+      const result = await generateAiTitlesBatch(
+        Array.isArray(sessionIds) ? sessionIds : [],
+        (done, total) => send('forge:aiNamingProgress', { done, total })
+      )
       // 有新标题产生就通知渲染层刷新侧栏（复用 sessions-changed 通道）。
       if (result.generated > 0) send('forge:sessions-changed', {})
       return result

@@ -225,6 +225,12 @@ const api: ForgeApi = {
     ipcRenderer.on('forge:sessions-changed', listener)
     return () => ipcRenderer.removeListener('forge:sessions-changed', listener)
   },
+  onAiNamingProgress: (cb) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { done: number; total: number }): void =>
+      cb(payload)
+    ipcRenderer.on('forge:aiNamingProgress', listener)
+    return () => ipcRenderer.removeListener('forge:aiNamingProgress', listener)
+  },
   onSessionRunningChanged: (cb) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: SessionRunningChangedPayload): void =>
       cb(payload)

@@ -430,6 +430,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const [collapsedGroupLabels, setCollapsedGroupLabels] = useState<Set<string>>(() => new Set())
   const [appVersion, setAppVersion] = useState('')
   const [aiNamingBusy, setAiNamingBusy] = useState(false)
+  /** 批量命名进度（主进程逐条推送）：没进度显示就是用户眼里的"卡住"。 */
+  const [aiNamingProgress, setAiNamingProgress] = useState<{ done: number; total: number } | null>(null)
+  useEffect(() => window.api.onAiNamingProgress((p) => setAiNamingProgress(p)), [])
   /** 已添加项目的归一化路径集合：决定会话归「项目」段还是「最近」段。 */
   const [addedProjectPaths, setAddedProjectPaths] = useState<Set<string>>(() => new Set())
   /** 已添加项目的原始路径（listProjects 顺序）：会话被删光的项目也要保留
@@ -467,10 +470,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   }, [])
 
   /** 一键补全 AI 标题：当前列表里还没有 AI 标题的会话，串行生成（主进程
-   *  内部间隔 ~300ms、有缓存/手动命名自动跳过；开关关闭时不发请求）。 */
+   *  内部间隔 ~300ms、有缓存/手动命名自动跳过；开关关闭时不发请求）。
+   *  进度经 forge:aiNamingProgress 逐条推送显示在按钮上。 */
   const handleAiNaming = async (): Promise<void> => {
     if (aiNamingBusy) return
     setAiNamingBusy(true)
+    setAiNamingProgress(null)
     try {
       const [aiTitles, prefs] = await Promise.all([
         window.api.getAiTitles().catch(() => ({} as Record<string, string>)),
@@ -488,6 +493,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       // "有则更好"，失败静默即可，busy 复位在 finally。
     } finally {
       setAiNamingBusy(false)
+      setAiNamingProgress(null)
     }
   }
 
@@ -1427,7 +1433,11 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               className="rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200 disabled:opacity-50"
               title="为列表里还没有 AI 标题的会话逐个生成短标题（串行、有缓存跳过）"
             >
-              {aiNamingBusy ? '命名中…' : 'AI 命名'}
+              {aiNamingBusy
+                ? aiNamingProgress
+                  ? `命名中 ${aiNamingProgress.done}/${aiNamingProgress.total}`
+                  : '命名中…'
+                : 'AI 命名'}
             </button>
             <button
               onClick={() => (multiMode ? exitMultiMode() : setMultiMode(true))}

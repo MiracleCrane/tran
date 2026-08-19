@@ -1044,6 +1044,8 @@ export interface ForgeApi {
   getAiTitles(): Promise<Record<string, string>>
   /** 为给定会话批量生成 AI 标题（串行 ~300ms 间隔，有缓存/手动命名跳过）。 */
   generateAiTitles(sessionIds: string[]): Promise<AiTitlesBatchResult>
+  /** 批量命名的进度推送（每个会话处理完一次：done 含 skipped/failed）。 */
+  onAiNamingProgress(cb: (payload: { done: number; total: number }) => void): () => void
   /** 侧栏条目悬停预览（零 token，读磁盘 state.json）。 */
   getSessionPreview(sessionId: string): Promise<SessionPreview>
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.28 - 2026-08-19
+
+### 中文
+
+- 修复:**切换会话后排队消息"丢失"**——排队消息早已送达宿主（内部排队），切走后会话进后台缓冲；后台每消费一条，镜像队列弹队首但**从不补登用户气泡**——后台被处理的消息在转录里永远消失（回复悬空）。现在后台消费时同步补登气泡（与前台落账同款）。
+- 优化:**AI 命名进度可见**——批量命名几十上百个会话要跑几分钟，原先按钮只干转「命名中…」看着像卡死;现在主进程逐个推送进度，按钮显示「命名中 12/87」。
+
+### English
+
+- Fix: queued messages "lost" after switching sessions — they were already delivered to the host (queued internally), but the background path popped the mirror without ever inserting the user bubble, so messages consumed in the background never appeared in the transcript. The bubble is now recorded as they're consumed (same as the foreground path).
+- AI naming progress is now visible: batch naming hundreds of sessions used to spin "命名中…" for minutes with no sign of life; the button now shows live progress ("命名中 12/87").
+
 ## v1.1.27 - 2026-08-19
 
 ### 中文

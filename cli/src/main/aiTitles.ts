@@ -147,24 +147,33 @@ export interface AiTitlesBatchResult {
 }
 
 /** 老会话一键补全：串行逐个生成，每次间隔 ~300ms，避免并发打爆云端。
- *  有缓存/手动命名/读不到 lastPrompt 的跳过。 */
-export async function generateAiTitlesBatch(sessionIds: string[]): Promise<AiTitlesBatchResult> {
+ *  有缓存/手动命名/读不到 lastPrompt 的跳过。
+ *  onProgress 每个会话处理完报一次（done 含 skipped/failed）——批量可能跑
+ *  几分钟，按钮上没进度就是用户眼里的"卡住"（2026-08-19 用户反馈）。 */
+export async function generateAiTitlesBatch(
+  sessionIds: string[],
+  onProgress?: (done: number, total: number) => void
+): Promise<AiTitlesBatchResult> {
   const result: AiTitlesBatchResult = { generated: 0, skipped: 0, failed: 0 }
   if (!aiNamingEnabled()) return result
+  const total = sessionIds.length
+  let done = 0
   for (const sessionId of sessionIds) {
     if (load()[sessionId] || manualSessionTitle(sessionId)) {
       result.skipped++
-      continue
+    } else {
+      const prompt = readSessionPromptFromDisk(sessionId)
+      if (!prompt) {
+        result.skipped++
+      } else {
+        const title = await generateAiTitle(sessionId, prompt)
+        if (title) result.generated++
+        else result.failed++
+        await new Promise((resolve) => setTimeout(resolve, BATCH_INTERVAL_MS))
+      }
     }
-    const prompt = readSessionPromptFromDisk(sessionId)
-    if (!prompt) {
-      result.skipped++
-      continue
-    }
-    const title = await generateAiTitle(sessionId, prompt)
-    if (title) result.generated++
-    else result.failed++
-    await new Promise((resolve) => setTimeout(resolve, BATCH_INTERVAL_MS))
+    done++
+    onProgress?.(done, total)
   }
   return result
 }

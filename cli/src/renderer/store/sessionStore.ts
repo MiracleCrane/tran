@@ -1669,7 +1669,26 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
       // 的 slice(1)）：后端收下一条排队消息继续跑，running 保持 true；队列
       // 已空才是真的闲下来。
       const queuedBefore = bg.queuedMirror?.length ?? 0
-      if (queuedBefore > 0) bg.queuedMirror = bg.queuedMirror!.slice(1)
+      if (queuedBefore > 0) {
+        // 队首被后端消费成新的一轮：镜像弹出 + **补登用户气泡**（原先后台路径只弹
+        // 不登——排队消息在后台被处理完，转录里永远没有它的气泡：回复悬空、队列
+        // 也没了，用户看到的就是「排队消息丢了」。2026-08-19 用户：「切换会话，
+        // 之前会话排队的消息会丢失」。与前台 result 分支的 pendingQueue[0] 同款）。
+        const popped = bg.queuedMirror![0]!
+        bg.queuedMirror = bg.queuedMirror!.slice(1)
+        bg.items = [
+          ...bg.items,
+          {
+            id: popped.id,
+            kind: 'user' as const,
+            text: popped.text,
+            parentToolUseId: null,
+            ...(popped.attachments ? { attachments: popped.attachments } : {}),
+            ...(popped.swarm ? { swarm: true } : {}),
+            ...(popped.cutIn ? { cutIn: true } : {})
+          }
+        ]
+      }
       bg.running = queuedBefore > 0
       if (queuedBefore === 0) markSdkSessionRunning(bg.sdkSessionId, false)
       delete bg.startedAt
