@@ -2563,6 +2563,12 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
 .thinking-block .prose-forge {
   color: #8b8b93;
   font-size: 12px;
+  /* 关键：思考体容器是 whitespace-pre-wrap（流式纯文本阶段要保留换行），
+   *  ReactMarkdown 的块级元素之间带 \n 文本节点，在 pre-wrap 下每个都渲染成
+   *  一条幽灵空行（实测：段落间隙 30px、列表项间隙 23px）。markdown 内部回到
+   *  normal，间隙回落到纯 margin（5px/2px）——2026-08-19 用户：「渲染后总是
+   *  出现很多空行」。流式阶段的纯文本不走 .prose-forge，不受影响。 */
+  white-space: normal;
 }
 .thinking-block .prose-forge pre {
   padding: 8px 10px;

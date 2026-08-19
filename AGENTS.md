@@ -16,9 +16,7 @@ Single-context layout — one `CONTEXT.md` and `docs/adr/` at the repo root. See
 
 ## 发版流程（惯例）
 
-改代码 → `npm run typecheck` → `npm run build` → commit/push → tag `vX.Y.Z` → `npm run build:win` → GitHub Release（API 创建 + 上传 `Tran-X.Y.Z-setup.exe`）→ 用户卸载重装验证 → 关闭对应 issue。版本号在 `cli/package.json`，changelog 在 `cli/CHANGELOG.md`（中英双语）。
-
-**长任务一律前台阻塞跑（2026-08-18 用户拍板）**：build:win 这类几分钟的任务不开后台任务，在同一轮里阻塞等到完、直接把流程走完再回复。后台任务回合结束会让对话看起来像中断（用户：「你就一直阻塞我们的对话不行么」）。单条命令超 300s 上限就拆成多条前台命令接力，不得转后台。
+改代码 → `npm run typecheck` → `npm run build` → commit/push → tag `vX.Y.Z` → `npm run build:win` → GitHub Release（API 创建 + 上传 `Tran-X.Y.Z-setup.exe`）→ 下载最新release安装包到默认下载路径 →  用户卸载重装验证 → 关闭对应 issue。版本号在 `cli/package.json`，changelog 在 `cli/CHANGELOG.md`（中英双语）。
 
 ### 已知环境坑
 

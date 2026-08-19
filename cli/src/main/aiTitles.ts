@@ -95,11 +95,14 @@ export async function generateAiTitle(
 
   const prompt = firstUserText.replace(/\s+/g, ' ').trim().slice(0, MAX_PROMPT_CHARS)
   // 少样本是压住"开始写长文"反射的关键（单靠 system 里的约束实测无效）。
+  // 2026-08-19 提质：补一条"压缩措辞而非复述原话"的示范——小模型（GLM-4-9B）
+  // 偷懒时会把首条消息原样截短当标题（"创建四个文件并写入内容"这种流水账）。
   const title = await cheapSummarize({
-    instruction: '用一个短标题概括这段对话要做的事',
+    instruction: '用一个短标题概括这段对话要做的事，提炼主题，不要复述原话',
     examples: [
       ['帮我看看这个登录接口为什么 401，token 明明是新的', '排查登录接口 401'],
-      ['把侧边栏的会话列表改成虚拟滚动，现在几百条很卡', '侧边栏虚拟滚动']
+      ['把侧边栏的会话列表改成虚拟滚动，现在几百条很卡', '侧边栏虚拟滚动'],
+      ['在 .scratch 目录下依次创建 fold-a.txt、fold-b.txt、fold-c.txt 四个文件，每个写一行 hello', '批量创建测试文件']
     ],
     input: prompt,
     maxChars: MAX_TITLE_CHARS

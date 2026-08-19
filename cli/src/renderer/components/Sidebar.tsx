@@ -468,6 +468,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       const ids = sessions.map((s) => s.sessionId).filter((id) => !aiTitles[id])
       if (!ids.length) return
       await window.api.generateAiTitles(ids)
+      // 命名落盘不会自己刷新列表——不补这一下，用户点完看到的还是旧标题，
+      // 形同"点了没用"（2026-08-19 用户：「AI命名感觉还是有问题」）。
+      await refresh()
     } catch {
       // IPC 失败不能变成未捕获 rejection（本函数被 void 调用）；批量命名是
       // "有则更好"，失败静默即可，busy 复位在 finally。
@@ -1295,7 +1298,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             项目组的 label 是完整路径——快照原先直接渲原文，刷新过渡期间
             组头会闪出整条路径（2026-08-18 用户抓包）；与实时列表一样只
             显示末段名。 */}
-        <div className="px-2 py-1 text-[13px] font-medium text-zinc-500">
+        <div className="px-2 py-1 text-[13px] font-semibold text-zinc-400">
           {g.section ? g.label : (g.label.split(/[\\/]/).pop() ?? g.label)}
         </div>
         <div className={g.section ? '' : 'ml-[31px]'}>
@@ -1371,7 +1374,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
 
       {/* session list label */}
       <div className="flex items-center justify-between px-4 py-0.5">
-        <span className="text-[11px] font-medium text-zinc-500">
+        <span className="text-xs font-semibold text-zinc-400">
           会话
         </span>
         <span className="flex items-center gap-1">
@@ -1385,15 +1388,15 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
           <button
             onClick={() => void handleAiNaming()}
             disabled={aiNamingBusy}
-            className="rounded-md px-1.5 py-0.5 text-[10px] text-zinc-500 transition hover:bg-white/[0.05] hover:text-zinc-300 disabled:opacity-50"
+            className="rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200 disabled:opacity-50"
             title="为列表里还没有 AI 标题的会话逐个生成短标题（串行、有缓存跳过）"
           >
             {aiNamingBusy ? '命名中…' : 'AI 命名'}
           </button>
           <button
             onClick={() => (multiMode ? exitMultiMode() : setMultiMode(true))}
-            className={`rounded-md px-1.5 py-0.5 text-[10px] transition ${
-              multiMode ? 'bg-accent/20 text-accent' : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-300'
+            className={`rounded-md px-1.5 py-0.5 text-[11px] transition ${
+              multiMode ? 'bg-accent/20 text-accent' : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-200'
             }`}
             title="多选管理（批量删除）"
           >
@@ -1487,7 +1490,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             style={{ '--session-grow-delay': `${Math.min(groupIndex * 28, 120)}ms` } as CSSProperties}
           >
             {showProjectDivider && (
-              <div className="mb-0.5 mt-1 px-2 text-[13px] font-medium text-zinc-500">
+              <div className="mb-0.5 mt-1 px-2 text-[13px] font-semibold text-zinc-400">
                 项目
               </div>
             )}
@@ -1532,7 +1535,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 px-2 py-1 text-[13px] font-medium text-zinc-500">
+              <div className="flex items-center gap-1.5 px-2 py-1 text-[13px] font-semibold text-zinc-400">
                 <span className="truncate">{g.label}</span>
               </div>
             )}

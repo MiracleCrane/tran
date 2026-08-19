@@ -497,7 +497,13 @@ export async function cheapSummarize(opts: {
     maxTokens: Math.max(32, opts.maxChars * 3)
   })
   if (!result.ok) return null
-  return terseText(result.text, opts.maxChars)
+  const cleaned = terseText(result.text, opts.maxChars)
+  // 判废要留痕：原文打出来，下次"命名没生效"才查得到原因（2026-08-19：
+  //  只记"未得到可用结果"看不到模型到底回了什么）。
+  if (cleaned === null) {
+    log('cheap-model', `terseText 判废: ${result.text.replace(/\s+/g, ' ').slice(0, 80)}`)
+  }
+  return cleaned
 }
 
 /**

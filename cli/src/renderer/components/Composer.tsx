@@ -1163,10 +1163,10 @@ export default function Composer(): JSX.Element {
           >
             <span>🕐</span>
             <span className={runningBash > 0 ? 'chip-flow-text' : undefined}>
-              {/* 有在跑的：显示运行中数量 + 最早一个的走时（原先恒显示累计总账
-                  (100)，+1 混在历史里毫无存在感——2026-08-18 用户：「发版的时候
-                  我没有看到任何后台命令」）。没在跑的维持累计数（点开面板的入口）。 */}
-              {runningBash > 0 ? `后台命令 ${runningBash} 运行中` : `后台命令 (${bashTotal})`}
+              {/* 空闲时不显示累计总数——「后台命令 (101)」这种总账是噪声
+                  （2026-08-19 用户），看不出任何活；数字只在有任务运行时出现。
+                  点它仍开面板看历史。 */}
+              {runningBash > 0 ? `后台命令 ${runningBash} 运行中` : '后台命令'}
             </span>
             {runningBash > 0 && runningBashStartedAt !== null && (
               <BashRunningElapsed startedAt={runningBashStartedAt} />

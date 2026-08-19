@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.1.25 - 2026-08-19
+
+### 中文
+
+- 修复:**思考块 markdown 渲染多出很多空行**——思考体容器是 whitespace-pre-wrap(流式纯文本需要),而 ReactMarkdown 的块级元素之间带换行文本节点,pre-wrap 下每个都渲染成幽灵空行(实测段落间隙 30px、列表项 23px);markdown 内部改回正常空白折叠,间隙回落到纯 margin(5px/2px)。
+- 修复:**点「AI 命名」后列表不刷新**——标题已落盘但界面还是旧的,看起来像没生效;批量命名完成后现在自动刷新列表。
+- 优化:**AI 命名提示词提质**——"提炼主题,不要复述原话" + 压缩措辞示范样本,治"创建四个文件并写入内容"这种流水账标题;判废时把模型原文打进日志,可查因。
+- 优化:**侧栏灰字提亮**——「会话」区头 12px 半粗、「AI 命名/多选」11px、「置顶/项目/最近」段标半粗 + 提亮一档。
+- 优化:**后台命令 chip 空闲态去掉累计总数**——「后台命令 (101)」这种总账是噪声;数字只在有任务运行时以「N 运行中 · mm:ss」出现,点 chip 照样开面板看历史。
+
+### English
+
+- Fix: thinking blocks rendered with phantom blank lines — the thinking container is whitespace-pre-wrap (needed for streaming plain text), and ReactMarkdown emits newline text nodes between block elements, each rendering as a real blank line (30px between paragraphs, 23px between list items). Markdown now uses normal whitespace collapsing inside thinking blocks (back to pure margins: 5px/2px).
+- Fix: the session list didn't refresh after clicking "AI naming" — titles were saved but the UI kept showing the old ones, looking like it did nothing. The list now refreshes when the batch finishes.
+- AI naming prompt improved ("distill the topic, don't restate the message" + a compression-style few-shot) to avoid flat restatement titles; rejected outputs now log the model's raw text for diagnosability.
+- Sidebar grays brightened: the "Sessions" header (12px semibold), AI-naming/multi-select buttons (11px), and section labels (Pinned/Projects/Recent) are semibold and one shade brighter.
+- Background-commands chip no longer shows the cumulative lifetime count when idle — numbers only appear while tasks are actually running ("N running · mm:ss"); clicking still opens the full history panel.
+
 ## v1.1.24 - 2026-08-19
 
 ### 中文
