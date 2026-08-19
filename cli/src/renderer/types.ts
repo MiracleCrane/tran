@@ -92,9 +92,9 @@ export type TranscriptItem =
 
 /** 一轮对话结束后的文件改动汇总（Codex 同款卡片）。
  *
- *  统计来源是 git 工作区快照的**前后差**，而不是"AI 调了几次编辑工具"——
- *  后者漏掉一切经 shell 改的文件（sed/mv/格式化脚本/构建产物），而那些同样
- *  是这一轮造成的改动。轮开始时记一次 numstat，轮结束再记一次，差集即本轮。 */
+ *  v1.1.21 起统计来源是**本轮 Write/Edit 工具输入**（轮一结束立刻出卡）；
+ *  更早是 git 快照前后差——在 200+ 改动文件的脏仓库里快照 IPC 会被轮内流量
+ *  饿死约 1 分钟，卡片落地太晚位置全错，已废弃。 */
 export interface TurnChangesItem {
   id: string
   kind: 'turnChanges'

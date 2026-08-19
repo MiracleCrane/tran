@@ -512,6 +512,21 @@ export async function getFileDiff(
   const args = [...READ_ONLY_GIT_FLAGS, 'diff', '-M', await diffBase(cwd), '--', p]
   if (opts.oldPath) args.push(assertPath(opts.oldPath))
   const { stdout } = await runGit(cwd, args, 20_000)
+  // 兜底（2026-08-19）：diff 为空不一定意味着"没差异"——gitignored/未跟踪文件
+  // （如 .scratch 产物）git diff 根本不认识，返回空串。轮次卡/pill 点这种文件
+  // 进面板曾因此什么都看不到。文件在磁盘且不在索引里 → 按未跟踪合成全量 diff。
+  if (!stdout.trim()) {
+    try {
+      await runGit(cwd, [...READ_ONLY_GIT_FLAGS, 'ls-files', '--error-unmatch', '--', p])
+    } catch {
+      // 不在索引 = 未跟踪/被忽略：磁盘上有就合成，没有就真没有差异
+      try {
+        return await getFileDiff(cwd, relPath, { ...opts, untracked: true })
+      } catch {
+        return stdout
+      }
+    }
+  }
   return stdout
 }
 

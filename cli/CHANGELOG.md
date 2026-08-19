@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.26 - 2026-08-19
+
+### 中文
+
+- 修复:**前台命令超时自动转后台的任务完全隐形**——转后台后 input 里没有 run_in_background 标记,面板查无此条、转录里还显示"已完成"(实测:94MB 的下载任务就这么丢了)。现在按启动回执文本形态识别(task_id 顶格开头 + "runs in the background"),识别后 chip 走时/面板状态/停止按钮全部生效。
+- 修复:**「本会话 diff」比单轮 diff 还少的口径倒挂**——会话胶囊原先只统计"卡片 ∩ 当前 git 工作区"(commit 后文件消失、gitignore 文件不列);改为全部轮次卡的并集汇总,构造上恒 ≥ 任一轮,顺带去掉了 4 秒一次的 git 轮询。
+- 修复:**从轮次卡/会话胶囊点文件进改动面板没反应**——目标文件不在 git 工作区改动里(gitignored/已提交)时面板静默放弃;现在合成一条"未跟踪"条目置顶展开,diff 为空时自动从磁盘合成全量 diff,点了一定有东西看。
+
+### English
+
+- Fix: foreground commands promoted to background on timeout were invisible — the input lacks the run_in_background flag, so the panel missed them and the transcript showed "done" (a 94MB download vanished this way). They're now recognized by the launch-receipt shape (leading task_id + "runs in the background"), gaining the live chip counter, panel status and stop button.
+- Fix: the session diff pill could show less than a single turn's card — it counted "cards ∩ current git working tree" (files vanish after commit; gitignored files never listed). It now sums all turn cards, so the session total always covers every turn; the 4s git polling was dropped.
+- Fix: clicking a file from a turn card / the session pill did nothing when the file wasn't in the git working changes (gitignored or committed). Such files now get a synthetic untracked row pinned at the top and expanded; empty diffs fall back to a synthesized full-content diff from disk.
+
 ## v1.1.25 - 2026-08-19
 
 ### 中文

@@ -97,10 +97,17 @@ export function backgroundTaskInfo(block: ToolBlock): BackgroundTaskInfo {
     }
   }
   const input = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>
-  if (input.run_in_background !== true) return { isBackground: false, running: false }
   const resultText = typeof block.result === 'string' ? block.result : ''
   const taskId = resultText.match(/task_id:\s*(\S+)/)?.[1]
   const running = /status:\s*running/.test(resultText)
+  // 第二种后台形态（2026-08-19 用户抓包）：前台命令超时被宿主提升为后台——
+  // input 里没有 run_in_background 标记，但结果文本是启动回执的标准形态
+  //（"task_id:" 顶格开头 + "runs in the background"）。不识别它：任务明明在跑，
+  // 面板里查无此条、转录里显示"已完成"。防误判：两个条件同时命中才认——普通
+  // 命令输出里引用这些字样（比如打印 TaskOutput）不会顶格，不误伤。
+  const promoted =
+    resultText.trimStart().startsWith('task_id:') && /runs in the background/i.test(resultText)
+  if (input.run_in_background !== true && !promoted) return { isBackground: false, running: false }
   return { isBackground: true, ...(taskId ? { taskId } : {}), running }
 }
 

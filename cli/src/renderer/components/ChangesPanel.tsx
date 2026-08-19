@@ -47,6 +47,9 @@ export default function ChangesPanel({ cwd, refreshKey, initialPath, initialRequ
   const [diffs, setDiffs] = useState<Record<string, string | null>>({})
   const [confirmRevert, setConfirmRevert] = useState<GitFileChange | null>(null)
   const [reverting, setReverting] = useState(false)
+  /** 从轮次卡/pill 点进来、但不在 git 工作区改动里的文件（gitignored/已提交）：
+   *  合成条目挂在列表最前，保证"点了一定有东西展开"。 */
+  const [extraFiles, setExtraFiles] = useState<GitFileChange[]>([])
   // 切目录/刷新竞态：迟到的响应不覆盖新目录的数据
   const loadSeqRef = useRef(0)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -76,6 +79,7 @@ export default function ChangesPanel({ cwd, refreshKey, initialPath, initialRequ
     setChanges(null)
     setExpanded(null)
     setDiffs({})
+    setExtraFiles([])
     load()
   }, [cwd, load])
 
@@ -112,8 +116,23 @@ export default function ChangesPanel({ cwd, refreshKey, initialPath, initialRequ
     if (!initialPath || initialRequestKey === undefined || !changes) return
     if (appliedRequestRef.current === initialRequestKey) return
     const file = changes.files.find((entry) => entry.path === initialPath)
-    if (!file) return
     appliedRequestRef.current = initialRequestKey
+    // 不在工作区改动里（gitignored / 已提交）：不能静默放弃——那是轮次卡/pill
+    // 点进来"什么都不跳"的根源（2026-08-19 用户抓包）。合成一条未跟踪条目进
+    // 列表展开它；diff 由 getFileDiff 兜底合成（tracked 空 → 未跟踪合成）。
+    if (!file) {
+      const synthetic: GitFileChange = {
+        path: initialPath,
+        status: 'untracked',
+        additions: null,
+        deletions: null,
+        binary: false
+      }
+      setExtraFiles((prev) => (prev.some((f) => f.path === initialPath) ? prev : [synthetic, ...prev]))
+      setExpanded(initialPath)
+      ensureFileDiff(synthetic)
+      return
+    }
     setExpanded(file.path)
     ensureFileDiff(file)
     window.requestAnimationFrame(() => {
@@ -145,7 +164,8 @@ export default function ChangesPanel({ cwd, refreshKey, initialPath, initialRequ
     }
   }
 
-  const files = changes?.files ?? []
+  // extraFiles（轮次卡/pill 点进来的 gitignored/已提交文件）排在 git 列表前面。
+  const files = [...extraFiles, ...(changes?.files ?? [])]
 
   return (
     <div className="flex min-h-0 flex-col gap-2">

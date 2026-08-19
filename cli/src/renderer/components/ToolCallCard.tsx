@@ -321,12 +321,13 @@ const ToolCallCard = memo(function ToolCallCard({
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const collapsed = userToggled ?? (forceExpanded ? false : !active)
   const meta = STATUS_META[block.status]
-  // 后台子代理（rawInput.run_in_background，实证见 toolStats）：完成=已挂后台。
-  const bg = isSubagent ? backgroundTaskInfo(block) : null
-  const statusLabel = bg?.isBackground && bg.running && block.status === 'done' ? '已挂后台' : meta.label
   const summary = summaryForTool(block.name, block.input)
   const resultText = collapsed ? '' : normalizeResult(block.result)
   const bashInfo = bashCommandFor(block)
+  // 后台子代理（rawInput.run_in_background，实证见 toolStats）：完成=已挂后台。
+  // 后台命令同口径（含前台超时被提升为后台的——识别见 toolStats.backgroundTaskInfo）。
+  const bg = isSubagent || bashInfo.isBash ? backgroundTaskInfo(block) : null
+  const statusLabel = bg?.isBackground && bg.running && block.status === 'done' ? '已挂后台' : meta.label
   // 命令盒覆盖 Bash 与 kimi 的 terminal（2026-08-14：原先只认 Bash，terminal
   // 落进「输入」JSON 明细——裸 JSON 盒就是用户截图里那个丑东西）。
   const inputText = !collapsed && bashInfo.isBash ? bashInfo.command : ''
