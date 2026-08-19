@@ -18,7 +18,7 @@ import { useUiStore } from '../store/uiStore'
 import type { AgentBackendId, ComposerModel, PickedFile, EffortLevel, PermissionMode, SkillInfo } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
 import ModePanel from './ModePanel'
-import { AGENT_TOOL_NAMES, collectBackgroundTaskBlocks, countRunningBackgroundTasks, countRunningTools, countTotalTools } from '../utils/toolStats'
+import { AGENT_TOOL_NAMES, backgroundTaskInfo, collectBackgroundTaskBlocks, countRunningBackgroundTasks, countRunningTools, countTotalTools, withServerTaskStatus } from '../utils/toolStats'
 import { pickedFileToUserAttachment, splitPickedFiles, userAttachmentToPickedFile } from '../utils/attachments'
 import ChipPopover, { type ChipAnchor, type ChipKind } from './ChipPopover'
 import UsageRings from './UsageRings'
@@ -159,6 +159,8 @@ type SessionSnapshot = ReturnType<typeof useSessionStore.getState>
 interface ToolChipStats {
   bashTotal: number
   runningBash: number
+  /** 运行中后台命令里最早的开始时间（chip 走时；server startedAt 优先）。 */
+  runningBashStartedAt: number | null
   agentTotal: number
   runningAgents: number
   /** ACP 侧是否有 running/pending 的 AgentSwarm 工具调用（Swarm 徽章兜底）。 */
@@ -180,6 +182,16 @@ function getToolChipStats(s: SessionSnapshot): ToolChipStats {
     // 「后台命令」chip 只数真后台任务（run_in_background），见 toolStats 注释。
     bashTotal: collectBackgroundTaskBlocks(s.items).length,
     runningBash: countRunningBackgroundTasks(s.items, s.swarmTasks),
+    runningBashStartedAt: (() => {
+      let earliest: number | null = null
+      for (const b of collectBackgroundTaskBlocks(s.items)) {
+        const bg = withServerTaskStatus(backgroundTaskInfo(b), s.swarmTasks)
+        if (!bg.running) continue
+        const at = bg.startedAt ?? b.startedAt ?? null
+        if (at && (earliest === null || at < earliest)) earliest = at
+      }
+      return earliest
+    })(),
     agentTotal: countTotalTools(s.items, AGENT_TOOL_NAMES),
     runningAgents: countRunningTools(s.items, AGENT_TOOL_NAMES, s.swarmTasks, running),
     swarmToolActive: s.items.some(
@@ -257,6 +269,15 @@ function TurnElapsed({ startedAt }: { startedAt: number }): JSX.Element {
   return <span className="font-mono">（{mm}:{ss}）</span>
 }
 
+/** 后台命令 chip 的运行中走时（mm:ss 秒跳；最早一个在跑任务的开始时间）。 */
+function BashRunningElapsed({ startedAt }: { startedAt: number }): JSX.Element {
+  useSecondTick()
+  const total = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+  const mm = String(Math.floor(total / 60)).padStart(2, '0')
+  const ss = String(total % 60).padStart(2, '0')
+  return <span className="font-mono">· {mm}:{ss}</span>
+}
+
 /** #41 疑似无响应提示：静默超阈值后由主进程推送（system/turn_stall），显示
  *  已静默分钟数（随心跳递增）+ 继续等待/打断两个操作（打断走现有 cancel 路径）。 */
 function TurnStallNotice({
@@ -314,6 +335,7 @@ export default function Composer(): JSX.Element {
   // 计算走 getToolChipStats 的引用缓存，5 个选择器共享同一次 items 扫描。
   const bashTotal = useSessionStore((s) => getToolChipStats(s).bashTotal)
   const runningBash = useSessionStore((s) => getToolChipStats(s).runningBash)
+  const runningBashStartedAt = useSessionStore((s) => getToolChipStats(s).runningBashStartedAt)
   const agentTotal = useSessionStore((s) => getToolChipStats(s).agentTotal)
   const runningAgents = useSessionStore((s) => getToolChipStats(s).runningAgents)
   // #5c 忙碌原因（输入区提示文案用）：权限确认 / 提问等待 / 后台子任务。
@@ -1141,8 +1163,14 @@ export default function Composer(): JSX.Element {
           >
             <span>🕐</span>
             <span className={runningBash > 0 ? 'chip-flow-text' : undefined}>
-              后台命令 ({bashTotal})
+              {/* 有在跑的：显示运行中数量 + 最早一个的走时（原先恒显示累计总账
+                  (100)，+1 混在历史里毫无存在感——2026-08-18 用户：「发版的时候
+                  我没有看到任何后台命令」）。没在跑的维持累计数（点开面板的入口）。 */}
+              {runningBash > 0 ? `后台命令 ${runningBash} 运行中` : `后台命令 (${bashTotal})`}
             </span>
+            {runningBash > 0 && runningBashStartedAt !== null && (
+              <BashRunningElapsed startedAt={runningBashStartedAt} />
+            )}
           </button>
           <button
             type="button"

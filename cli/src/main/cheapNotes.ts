@@ -45,7 +45,7 @@ const MAX_COMMAND_CHARS = 400
 /** 缓存条数上限。超了按插入顺序丢最旧的——命令的重复是近期聚集的。 */
 const MAX_ENTRIES = 500
 
-type NoteKind = 'cmd' | 'think' | 'zh'
+type NoteKind = 'cmd' | 'think' | 'zh' | 'edit' | 'group'
 
 /**
  * 思考翻译的输入上限。
@@ -118,7 +118,15 @@ function notesEnabled(): boolean {
 async function note(
   kind: NoteKind,
   rawInput: string,
-  opts: { instruction: string; examples: Array<[string, string]>; maxChars: number; maxInput: number }
+  opts: {
+    instruction: string
+    examples: Array<[string, string]>
+    maxChars: number
+    maxInput: number
+    /** false = 失败/判废不缓存（下次渲染重试）。默认 true：判废也存空串防重复
+     *  打请求。整组总结（group）传 false——小模型偶发判废不该让这行永远空着。 */
+    cacheNull?: boolean
+  }
 ): Promise<string | null> {
   if (!notesEnabled()) return null
   const input = rawInput.replace(/\s+/g, ' ').trim().slice(0, opts.maxInput)
@@ -140,6 +148,8 @@ async function note(
     .then((result) => {
       // 判废（null）也存进去，存空串。否则同一条命令每次进视口都要重打一发——
       // 模型对同一个输入判废一次就会判废第二次，重试纯属浪费额度。
+      // 例外：cacheNull=false 的类别（整组总结）失败不落缓存，下次渲染重试。
+      if (result === null && opts.cacheNull === false) return result
       load()[key] = result ?? ''
       save()
       return result
@@ -154,6 +164,64 @@ async function note(
 
   inflight.set(key, run)
   return run
+}
+
+/** 文件编辑说明上限：比命令说明宽一点，"改了哪个文件的什么"要多两三个字。 */
+const EDIT_NOTE_CHARS = 14
+/** 集合行整组总结上限：跟在计数后面，一句话。 */
+const GROUP_NOTE_CHARS = 24
+/** 编辑说明的输入上限：路径 + 新内容头足够表达意图。 */
+const MAX_EDIT_SAMPLE_CHARS = 500
+/** 整组总结的输入上限：各块首句拼起来，太长截断。 */
+const MAX_GROUP_SAMPLE_CHARS = 800
+
+/**
+ * 一次文件编辑（Edit/Write）在做什么。
+ *
+ * 2026-08-18 用户：「每个编辑文件有总结（Bash 自带 description 不需要）」。
+ * Bash 有 description 自报意图，编辑类工具没有——光看路径看不出改了什么。
+ * 输入样本由渲染层拼好：路径 + 新内容头部（≤500 字），按内容哈希缓存。
+ */
+export async function explainEdit(sample: string): Promise<string | null> {
+  return note('edit', sample, {
+    instruction: '用一句话说明这次文件编辑改了什么',
+    examples: [
+      [
+        'cli/src/renderer/components/Sidebar.tsx\nconst emptyProjectGroups = addedProjectRawPaths.filter((p) => !nonEmptyLabels.has(p))',
+        '侧栏保留空项目组头'
+      ],
+      ['cli/package.json\n"version": "1.1.23"', '版本号升到 1.1.23'],
+      ['cli/src/main/cheapModel.ts\n-  stop: [\'\\n\'],', '删掉摘要请求的 stop 参数']
+    ],
+    maxChars: EDIT_NOTE_CHARS,
+    maxInput: MAX_EDIT_SAMPLE_CHARS
+  })
+}
+
+/**
+ * 一条折叠集合行（思考 N 段 + 工具 ×M）整组在做什么。
+ *
+ * 2026-08-18 用户：「这整个块有总结」。输入样本由渲染层从组内各块拼好
+ * （每块取首句/工具摘要，≤800 字），按内容哈希缓存——同一组在历史重建后
+ * 再渲染零成本。
+ */
+export async function summarizeActivityGroup(sample: string): Promise<string | null> {
+  return note('group', sample, {
+    instruction: '用一句话总结这一段 AI 工作做了什么',
+    examples: [
+      [
+        '思考: 用户说压缩像假成功，需要查 wire 日志…\n读取文件: KimiBackend.ts\n编辑文件: cheapModel.ts\n运行命令: npm run typecheck',
+        '排查并修复压缩假成功'
+      ],
+      [
+        '思考: 侧栏段标字号太小…\n编辑文件: Sidebar.tsx\n编辑文件: Sidebar.tsx\n运行命令: npm run build',
+        '调大侧栏段标字号'
+      ]
+    ],
+    maxChars: GROUP_NOTE_CHARS,
+    maxInput: MAX_GROUP_SAMPLE_CHARS,
+    cacheNull: false
+  })
 }
 
 /**

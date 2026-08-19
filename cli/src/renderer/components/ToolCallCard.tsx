@@ -113,6 +113,36 @@ function bashCommandSummary(command: string): string {
 /** 模块级常量，保证 useCheapNote 的依赖稳定（每次渲染新建函数会反复触发 effect）。 */
 const fetchCommandNote = (command: string): Promise<string | null> =>
   window.api.explainCommand(command)
+const fetchEditNote = (sample: string): Promise<string | null> => window.api.explainEdit(sample)
+
+/** 文件编辑类工具（渲染层规范名 + wire 原始名）：它们没有 description 自报
+ *  意图——光看路径看不出改了什么（2026-08-18 用户：「每个编辑文件有总结」）。 */
+const EDIT_TOOL_NAMES = new Set(['Edit', 'Write', 'MultiEdit', 'patch', 'edit_file', 'write_file'])
+
+/** 拼编辑说明的输入样本：路径 + 新内容头部（≤300 字）。防御式解析同 bashCommandFor。 */
+function editSampleOf(block: ToolBlock): string | null {
+  if (!EDIT_TOOL_NAMES.has(block.name)) return null
+  let value: unknown = block.input
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      value = null
+    }
+  }
+  if (!value || typeof value !== 'object') return null
+  const rec = value as Record<string, unknown>
+  const path =
+    typeof rec.file_path === 'string' ? rec.file_path : typeof rec.path === 'string' ? rec.path : ''
+  const content =
+    typeof rec.new_string === 'string'
+      ? rec.new_string
+      : typeof rec.content === 'string'
+        ? rec.content
+        : ''
+  const sample = `${path}\n${content.slice(0, 300)}`.trim()
+  return sample || null
+}
 
 /**
  * 取 Bash 卡片的命令原文，并判断 Kimi 有没有自带 description。
@@ -308,6 +338,11 @@ const ToolCallCard = memo(function ToolCallCard({
   const wantsNote = bashInfo.isBash && !bashInfo.hasDescription && block.status !== 'pending'
   const commandNote = useCheapNote(fetchCommandNote, bashInfo.command, wantsNote).value
 
+  // 编辑类工具的一句话说明（便宜模型，2026-08-18 用户：「除了 Bash 之外的都有
+  //  总结」）。同样在 pending 期间不问（输入可能还在流式拼接）。
+  const editSample = editSampleOf(block)
+  const editNote = useCheapNote(fetchEditNote, editSample ?? '', !!editSample && block.status !== 'pending').value
+
   // AgentSwarm（kimi 并行子代理）：专门的可视化卡片（进度条 + 子代理行）。
   // 分支在 hooks 之后，同实例块名变化不违反 hooks 规则。
   if (block.name === 'AgentSwarm') return <SwarmCard block={block} />
@@ -396,6 +431,11 @@ const ToolCallCard = memo(function ToolCallCard({
         {commandNote && (
           <span className="shrink-0 truncate text-xs text-zinc-600" title={commandNote}>
             · {commandNote}
+          </span>
+        )}
+        {editNote && (
+          <span className="shrink-0 truncate text-xs text-zinc-600" title={editNote}>
+            · {editNote}
           </span>
         )}
       </button>

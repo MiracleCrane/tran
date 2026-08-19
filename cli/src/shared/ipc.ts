@@ -930,6 +930,10 @@ export interface ForgeApi {
   nudgeTodos(sessionId: string): Promise<boolean>
   /** 一条 bash 命令在做什么（便宜模型 + 落盘缓存）。拿不到返回 null。 */
   explainCommand(command: string): Promise<string | null>
+  /** 一次文件编辑（Edit/Write）改了什么（便宜模型 + 落盘缓存）。拿不到返回 null。 */
+  explainEdit(sample: string): Promise<string | null>
+  /** 一条折叠集合行整组在做什么（便宜模型 + 落盘缓存）。拿不到返回 null。 */
+  summarizeActivityGroup(sample: string): Promise<string | null>
   /** 一段思考在做什么（便宜模型 + 落盘缓存）。拿不到返回 null。 */
   summarizeThinking(text: string): Promise<string | null>
   /** 把整段思考过程译成中文（优先免费的网页通道 + 落盘缓存）。拿不到返回 null。 */

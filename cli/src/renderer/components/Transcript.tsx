@@ -10,7 +10,7 @@ import { showImageContextMenu } from './ImageContextMenu'
 import { formatTimeFull, formatTimeShort, messageTime } from '../utils/messageTimes'
 import { initSentImageRecording, loadSentImages, matchHistoryImages } from '../utils/sentImages'
 import SkillCard, { matchSkillInvocation } from './SkillCard'
-import ToolCallCard from './ToolCallCard'
+import ToolCallCard, { summaryForTool } from './ToolCallCard'
 import ToolGroupCard from './ToolGroupCard'
 import CompactionDivider from './CompactionDivider'
 import Collapse from './Collapse'
@@ -180,8 +180,9 @@ type DisplayRow =
   /** 轮级折叠下的混合消息：只渲染文本块（思考/工具已收进轮级集合组）。 */
   | { kind: 'itemText'; node: ItemNode }
   | { kind: 'toolGroup'; id: string; blocks: ToolBlock[] }
-  /** B 方案：跨消息的「思考 + 工具」活动组（含思考时才用，纯工具仍走 toolGroup）。 */
-  | { kind: 'activityGroup'; id: string; blocks: AssistantBlock[] }
+  /** B 方案：跨消息的「思考 + 工具」活动组（含思考时才用，纯工具仍走 toolGroup）。
+   *  live=true 表示组还在流式生长（整组总结等收尾后再问，见 ActivityGroupCard）。 */
+  | { kind: 'activityGroup'; id: string; blocks: AssistantBlock[]; live?: boolean }
   | { kind: 'envelopeGroup'; id: string; entries: Array<{ id: string; text: string }> }
 
 /** 该节点是否"整条消息只有工具调用块"（可聚合）。 */
@@ -355,7 +356,7 @@ function buildDisplayRows(
       rows.push(
         pureTools
           ? { kind: 'toolGroup', id, blocks: groupBlocks as ToolBlock[] }
-          : { kind: 'activityGroup', id, blocks: groupBlocks }
+          : { kind: 'activityGroup', id, blocks: groupBlocks, live: isLiveSegment }
       )
       groupInserted = true
     }
@@ -1029,14 +1030,38 @@ const ActivityGroupRow = memo(function ActivityGroupRow({
  * 与消息内的 ActivityGroupRow 是两套：那个只能看到单条消息的 blocks，这个跨消息。
  * 组内含"最新块"时默认展开，用户手动点过之后以其选择为准。
  */
+/** 模块级常量，保证 useCheapNote 依赖稳定（每次渲染新建会反复触发 effect）。 */
+const fetchGroupNote = (sample: string): Promise<string | null> =>
+  window.api.summarizeActivityGroup(sample)
+
+/** 集合行整组总结的输入样本：思考取首句、工具取中文动作 + 规则摘要，截 800 字。 */
+function activityGroupSampleOf(blocks: AssistantBlock[]): string {
+  const lines: string[] = []
+  for (const b of blocks) {
+    if (!b) continue
+    if (b.kind === 'thinking') {
+      const head = b.text.replace(/\s+/g, ' ').trim().slice(0, 80)
+      if (head) lines.push(`思考: ${head}`)
+    } else if (b.kind === 'tool') {
+      const label = TOOL_ACTIVITY_META[b.name]?.label ?? b.name
+      lines.push(`${label}: ${summaryForTool(b.name, b.input).slice(0, 80)}`)
+    }
+    if (lines.join('\n').length > 800) break
+  }
+  return lines.join('\n').slice(0, 800)
+}
+
 const ActivityGroupCard = memo(function ActivityGroupCard({
   blocks,
   forceOpen = false,
-  expandedBlockKey = null
+  expandedBlockKey = null,
+  live = false
 }: {
   blocks: AssistantBlock[]
   forceOpen?: boolean
   expandedBlockKey?: string | null
+  /** 组还在流式生长：整组总结等收尾（live=false）后再问，省得每长一块重打一发。 */
+  live?: boolean
 }): JSX.Element {
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const open = userToggled ?? forceOpen
@@ -1046,6 +1071,9 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
   useEffect(() => {
     if (open) setEverOpened(true)
   }, [open])
+  // 整组 AI 总结（2026-08-18 用户：「这整个块有总结」）：跟在计数后面。
+  const groupSample = activityGroupSampleOf(blocks)
+  const groupNote = useCheapNote(fetchGroupNote, groupSample, !live && groupSample.length > 0).value
   return (
     <div className="my-0">
       <button
@@ -1055,6 +1083,7 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
         className="flex w-fit cursor-pointer select-none items-center gap-1.5 rounded-lg bg-white/[0.03] px-2 py-1 text-left text-xs text-zinc-500 transition hover:bg-white/[0.055] hover:text-zinc-400"
       >
         <ActivitySummary segments={summarizeActivity(blocks)} />
+        {groupNote && <span className="truncate text-zinc-600">· {groupNote}</span>}
       </button>
       {everOpened && (
         <Collapse open={open}>
@@ -1910,6 +1939,7 @@ export default function Transcript({
         <div className="tran-ai-col">
           <ActivityGroupCard
             blocks={row.blocks}
+            live={row.live}
             forceOpen={row.blocks.some(
               (b) => b.kind === 'tool' && b.toolUseId === lastExpandableKey
             )}

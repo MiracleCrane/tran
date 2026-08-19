@@ -68,7 +68,7 @@ import { applyPortableSettingsBackup, createPortableSettingsBackup } from './por
 import { checkForUpdates, downloadAndInstallUpdate } from './updater'
 import { checkKimiVersion, upgradeKimi } from './kimiVersion'
 import { probeCheapModels, diagnoseSummaryPrompt, onSummaryIssue } from './cheapModel'
-import { explainCommand, summarizeThinking, translateThinking } from './cheapNotes'
+import { explainCommand, explainEdit, summarizeActivityGroup, summarizeThinking, translateThinking } from './cheapNotes'
 import { fetchSessionTodos } from './kimiTodos'
 import { getPlanUsageCached } from './usageService'
 import { getDeepseekBalanceCached, invalidateDeepseekBalanceCache } from './deepseekService'
@@ -969,6 +969,16 @@ export function registerIpc(
     'forge:explainCommand',
     async (_e, command: unknown): Promise<string | null> =>
       explainCommand(requireString(command, 'command'))
+  )
+  ipcMain.handle(
+    'forge:explainEdit',
+    async (_e, sample: unknown): Promise<string | null> =>
+      explainEdit(requireString(sample, 'sample'))
+  )
+  ipcMain.handle(
+    'forge:summarizeActivityGroup',
+    async (_e, sample: unknown): Promise<string | null> =>
+      summarizeActivityGroup(requireString(sample, 'sample'))
   )
   ipcMain.handle(
     'forge:summarizeThinking',

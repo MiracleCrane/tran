@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { PlanEntry, ToolBlock, ToolStatus } from '../types'
 import type { KimiTaskInfo } from '../../shared/ipc'
-import { AGENT_TOOL_NAMES, backgroundTaskInfo, withServerTaskStatus } from '../utils/toolStats'
+import { AGENT_TOOL_NAMES, BASH_TOOL_NAMES, backgroundTaskInfo, withServerTaskStatus } from '../utils/toolStats'
 import ToolCallCard, { parseSubagentInput, summaryForTool } from './ToolCallCard'
 
 /** 任务行组件（chips 独立浮层共用；原 TaskPanel 合并面板拆出）。 */
@@ -25,11 +25,14 @@ const STATUS_ICON: Record<ToolStatus, { glyph: string; cls: string }> = {
   stopped: { glyph: '⏸', cls: 'text-zinc-500' }
 }
 
-/** 行是否活跃（运行中/排队；后台 agent 以 server 校正后的 running 为准，
- *  server 不可用退回 launch 结果文本猜测）：
+/** 行是否活跃（运行中/排队；后台任务——子 Agent 与后台命令——以 server 校正后的
+ *  running 为准，server 不可用退回 launch 结果文本猜测）：
  *  ChipPopover 的置顶排序与行高亮共用同一判定。 */
 export function isToolRowActive(block: ToolBlock, swarmTasks?: KimiTaskInfo[] | null): boolean {
-  const bg = AGENT_TOOL_NAMES.has(block.name) ? backgroundTaskInfo(block) : null
+  const bg =
+    AGENT_TOOL_NAMES.has(block.name) || BASH_TOOL_NAMES.has(block.name)
+      ? backgroundTaskInfo(block)
+      : null
   if (bg?.isBackground) return withServerTaskStatus(bg, swarmTasks).running
   return block.status === 'running' || block.status === 'pending'
 }
@@ -41,8 +44,10 @@ export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
   const [open, setOpen] = useState(false)
   const isAgent = AGENT_TOOL_NAMES.has(block.name)
   // 后台任务（实证形态见 toolStats.backgroundTaskInfo）：完成=已挂后台。
+  // 后台命令（Bash）与后台子 Agent 同口径（2026-08-18：原先只认 Agent，
+  // 后台命令行在面板里永远显示"已完成"、无运行态无走时）。
   // #32 有 server tasks 时以其状态为准（完成/被杀后不再误报运行中）。
-  const bgInfo = isAgent ? backgroundTaskInfo(block) : null
+  const bgInfo = isAgent || BASH_TOOL_NAMES.has(block.name) ? backgroundTaskInfo(block) : null
   const bg = bgInfo?.isBackground ? withServerTaskStatus(bgInfo, swarmTasks) : bgInfo
   const bgRunning = !!bg?.isBackground && bg.running
   // 前台阻塞语义只给非后台任务。
@@ -87,7 +92,17 @@ export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
             )}
           </>
         ) : (
-          <span className="shrink-0 font-mono text-[11px] text-zinc-300">{block.name}</span>
+          <>
+            <span className="shrink-0 font-mono text-[11px] text-zinc-300">{block.name}</span>
+            {bg?.isBackground && (
+              <span
+                className="shrink-0 rounded bg-blue-950/50 px-1 py-0.5 text-[9px] font-medium text-blue-300"
+                title="后台任务：发起后不阻塞对话"
+              >
+                后台
+              </span>
+            )}
+          </>
         )}
         {/* #12 子 agent 显示可读意图（description→prompt），不再是裸参数；
          *  完整输入/命令收进下方展开区（ToolCallCard）。

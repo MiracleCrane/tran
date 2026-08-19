@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.24 - 2026-08-19
+
+### 中文
+
+- 优化:**后台命令 chip 实况化**——有任务在跑时显示「后台命令 N 运行中 · mm:ss」(秒级走时),空闲时才显示累计数;面板里后台命令与后台子 Agent 同口径:「后台」徽章、运行中高亮置顶、按 kimi server 校正的用时、运行中可一键停止(原先只认子 Agent,后台命令永远显示"已完成")。
+- 新增:**编辑条 AI 一句话说明**——Edit/Write 这类没有 description 的工具,条上跟一句「· 改了什么」(实测:「patch cli/README.md · 添加 Tran 标记」);走摘要通道 + 内容哈希落盘缓存,同一编辑零重复花费。Bash 不动(自带 description)。
+- 新增:**集合行整组 AI 总结**——折叠行变成「思考 N 段 · 编辑文件 ×M · 创建并编辑文件」这种,计数后面跟一句整组总结;只在轮收尾后问一次(流式生长期间不问),小模型偶发判废不落缓存、下次自动重试。
+
+### English
+
+- Live background-command chip: while tasks run it shows "N running · mm:ss" (ticking every second); the panel now treats background commands the same as background sub-agents — a "background" badge, running rows pinned and highlighted, durations corrected against the kimi server, and a one-click stop (previously only sub-agents got this; background commands always showed as done).
+- New: one-line AI notes on Edit/Write bars ("· what changed"), which unlike Bash have no description of intent; served by the summary channel with content-hash disk cache, so the same edit never costs twice.
+- New: whole-group AI summary on folded collection rows ("N thinking · ×M edits · created and edited files"), requested once when the turn settles; transient rejections are not cached so a later view retries automatically.
+
 ## v1.1.23 - 2026-08-18
 
 ### 中文
