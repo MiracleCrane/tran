@@ -4,8 +4,9 @@ import type { CompactionItem } from '../types'
 import { fmtK } from '../utils/format'
 
 /** 上下文压缩分界线（kimi web 式）：左右渐变细线 + 中间统计 + 右侧"查看摘要"
- *  链接，点击弹非模态详情卡（portal）。统计数字来自 live 通道；摘要正文只有
- *  wire 重建的历史分界线才有（live 通道 kimi 不给），有就置顶展示。 */
+ *  链接，点击弹非模态详情卡（portal）。摘要正文 live 与历史通道都有（都源自
+ *  wire 的 apply_compaction），有就置顶展示；统计数字宿主已不提供，仅旧数据
+ *  残留时才显示。 */
 
 const CompactionDivider = memo(function CompactionDivider({
   item

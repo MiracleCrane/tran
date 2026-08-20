@@ -177,7 +177,7 @@ function buildForest(items: TranscriptItem[]): ItemNode[] {
  *  单个工具调用/单个信封仍按普通消息渲染）。 */
 type DisplayRow =
   | { kind: 'item'; node: ItemNode }
-  /** 轮级折叠下的混合消息：只渲染文本块（思考/工具已收进轮级集合组）。 */
+  /** 段级折叠下的混合消息：只渲染文本块（思考/工具已收进该段的集合组）。 */
   | { kind: 'itemText'; node: ItemNode }
   | { kind: 'toolGroup'; id: string; blocks: ToolBlock[] }
   /** B 方案：跨消息的「思考 + 工具」活动组（含思考时才用，纯工具仍走 toolGroup）。
@@ -285,18 +285,19 @@ function buildDisplayRows(
   }
 
   /**
-   * 轮级收尾（2026-08-18 用户拍板：「一整个思考块命令块执行完了就整个收起来」）：
-   * 同一轮里的**全部**思考/工具块——哪怕中间夹了解说文本——收成一条集合摘要行，
-   * 落在本轮第一个活动块的位置；解说/回答文本保持原位可见（混合消息只留文本）。
-   * 此前按「连续相邻 ≥2 块」成组，解说文本一断就再也合不上（实测：每步一句解说的
-   * 轮次结束只剩一梯子单独的小 bar）。
+   * 段级折叠（2026-08-20 用户拍板：「以 AI 输出的实在文字为界，一轮可能有多个
+   * 折叠 bar，按顺序排好」）：同一轮里被**正文文本**隔开的活动（思考/工具）各自
+   * 成组——每段收成一条集合摘要行。已闭合的段：组行落在段内第一个被折节点的
+   * 位置（与 wire 重建的历史布局一致）；正在跑的开口段：组行贴着 live 尾巴
+   * （折点在用户眼前、计数实时涨，不会"bar 凭空消失"，2026-08-18）。解说/回答
+   * 文本保持原位可见（混合消息只留文本块）。
    *
-   * 段完即折 + 只留两条（2026-08-18 用户拍板：「每段思考命令执行完有输出之后，
-   * 上面的这些就收起来」「除了正在输出的这个，和上一个，其它的都收进去」）：
-   * ① 最后一条含正文的消息之前的活动随文本落地即刻进组折起；
-   * ② 正在生长的尾巴也只留**最后 2 条** bar 展开（正在输出的 + 上一个），更早的
-   * 即刻折进集合行——不再是整段尾巴都摊着。live 闸门只盖当前轮的最后一段，
-   * 上一轮已折好的组不受影响。
+   * 前身是轮级一整条（2026-08-18「一整个思考块命令块执行完了就整个收起来」）：
+   * 整轮所有活动收进一条组行落在轮首，几段解说之间的 bar 全被抽走合并，工作
+   * 过程与解说错位（2026-08-20 用户：「你现在都收到一起去了是不对的」）。
+   *
+   * live 尾巴规则不变：开口段只留最后 KEEP_TAIL_OPEN 条活动节点展开（正在输出
+   * 的 + 上一个），更早的即刻折进该段集合行。live 闸门只盖当前轮的开口段。
    */
   const flushTurn = (isLiveSegment: boolean): void => {
     if (turnNodes.length === 0) return
@@ -316,8 +317,7 @@ function buildDisplayRows(
         }
       }
     }
-    // 尾巴里的活动节点：只留最后 KEEP_TAIL_OPEN 个展开（正在输出的 + 上一个）。
-    const KEEP_TAIL_OPEN = 2
+    // 尾巴里的活动节点：只留最后 2 条展开（正在输出的 + 上一个）。
     let lastAct = -1
     let prevAct = -1
     if (isLiveSegment) {
@@ -335,60 +335,77 @@ function buildDisplayRows(
       !node.item.isHistory &&
       index >= liveTailStart &&
       (index === lastAct || index === prevAct)
-    // 第一遍：攒活动块。
-    const groupBlocks: AssistantBlock[] = []
-    let firstActivityId: string | null = null
-    for (let i = 0; i < turnNodes.length; i++) {
-      const node = turnNodes[i]
-      if (live(i, node)) continue
-      const pure = activityBlocksOf(node)
-      const blocks = pure ?? mixedActivityOf(node)
-      if (blocks) {
-        if (!firstActivityId) firstActivityId = node.item.id
-        groupBlocks.push(...blocks)
+    const textBearing = (node: ItemNode): boolean =>
+      node.item.kind === 'assistant' &&
+      node.item.blocks.some((b) => !!b && b.kind === 'text')
+
+    /** 当前段（正文边界之间）的节点 + 轮内下标。 */
+    let seg: Array<{ node: ItemNode; index: number }> = []
+
+    /** 收一段。closing 是闭段的含正文消息（混合消息的活动块并入本段组行）；
+     *  开口段传 null。返回 closing 的渲染方式：'text' = 只留文本块（活动已进
+     *  组行），'full' = 整条原样。 */
+    const flushSegment = (closing: ItemNode | null, isOpenTail: boolean): 'text' | 'full' => {
+      const groupBlocks: AssistantBlock[] = []
+      let firstId: string | null = null
+      const foldedIndexes = new Set<number>()
+      for (const { node, index } of seg) {
+        if (live(index, node)) continue
+        const blocks = activityBlocksOf(node)
+        if (blocks) {
+          if (!firstId) firstId = node.item.id
+          groupBlocks.push(...blocks)
+          foldedIndexes.add(index)
+        }
       }
-    }
-    const fold =
-      groupBlocks.length >= 2 && firstActivityId !== null && shouldFold(`turn-group-${firstActivityId}`)
-    const insertGroupRow = (): void => {
-      const id = `turn-group-${firstActivityId}`
-      const pureTools = groupBlocks.every((b): b is ToolBlock => b.kind === 'tool')
-      rows.push(
-        pureTools
+      const closingActs = closing ? (mixedActivityOf(closing) ?? []) : []
+      if (closingActs.length) {
+        if (!firstId && closing) firstId = closing.item.id
+        groupBlocks.push(...closingActs)
+      }
+      const fold =
+        groupBlocks.length >= 2 && firstId !== null && shouldFold(`turn-group-${firstId}`)
+      if (!fold) {
+        for (const { node } of seg) rows.push({ kind: 'item', node })
+        seg = []
+        return 'full'
+      }
+      const groupRow = (): DisplayRow => {
+        const id = `turn-group-${firstId}`
+        const pureTools = groupBlocks.every((b): b is ToolBlock => b.kind === 'tool')
+        return pureTools
           ? { kind: 'toolGroup', id, blocks: groupBlocks as ToolBlock[] }
-          : { kind: 'activityGroup', id, blocks: groupBlocks, live: isLiveSegment }
-      )
-      groupInserted = true
+          : { kind: 'activityGroup', id, blocks: groupBlocks, live: isOpenTail }
+      }
+      const segHasLive = seg.some(({ node, index }) => live(index, node))
+      let groupEmitted = false
+      for (const { node, index } of seg) {
+        // 开口段：组行贴在第一个 live 节点之前；闭段：落在段内第一个被折节点处。
+        if (!groupEmitted && (segHasLive ? live(index, node) : foldedIndexes.has(index))) {
+          rows.push(groupRow())
+          groupEmitted = true
+        }
+        if (foldedIndexes.has(index)) continue
+        rows.push({ kind: 'item', node })
+      }
+      // 段内没有可落点的节点（段为空、组块全部来自 closing 混合消息；或开口段
+      // 尚无 live 节点）：组行补在段尾——仍在 closing 文本之前，顺序不乱。
+      if (!groupEmitted) rows.push(groupRow())
+      seg = []
+      return closingActs.length > 0 ? 'text' : 'full'
     }
-    // 第二遍：产行。组行落点分两种——
-    // live 段：贴着尾巴（第一个 live 节点之前）。流式期间折进去的 bar 在用户
-    //   眼前汇成集合行、计数实时涨；落在段首会随段变长滚出视口，用户看到的
-    //   就是"bar 凭空消失"（2026-08-18 用户：「不是让你看不见的收起来啊」）。
-    // 非 live 段（历史/轮末收齐）：落在第一个活动块的位置，与 wire 重建的
-    //   历史布局一致。
-    const firstLiveIndex = prevAct >= 0 ? prevAct : lastAct
-    let groupInserted = false
+
     for (let i = 0; i < turnNodes.length; i++) {
       const node = turnNodes[i]
-      if (fold && !groupInserted && isLiveSegment && firstLiveIndex >= 0 && i === firstLiveIndex) {
-        insertGroupRow()
+      if (textBearing(node)) {
+        const mode = flushSegment(node, false)
+        rows.push({ kind: mode === 'text' ? 'itemText' : 'item', node })
+      } else {
+        seg.push({ node, index: i })
       }
-      if (live(i, node)) {
-        rows.push({ kind: 'item', node })
-        continue
-      }
-      const pure = activityBlocksOf(node)
-      const mixed = pure ? null : mixedActivityOf(node)
-      if (fold && (pure || mixed)) {
-        if (!groupInserted && !isLiveSegment) insertGroupRow()
-        // live 段里 firstLiveIndex < 0（轮刚起步全是活动、没有 live 节点）时
-        // 退回段首落点，否则组行永远不会插入、块整段消失。
-        if (!groupInserted && isLiveSegment && firstLiveIndex < 0) insertGroupRow()
-        if (mixed) rows.push({ kind: 'itemText', node })
-        continue
-      }
-      rows.push({ kind: 'item', node })
     }
+    // 尾巴段：正在跑的这轮的开口部分（轮已结束/历史时就是最后一段）。
+    flushSegment(null, isLiveSegment)
     turnNodes = []
   }
 

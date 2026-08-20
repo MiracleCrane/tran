@@ -751,7 +751,16 @@ function startProgressiveSessionHistory(
               const fp = transcriptFingerprint(item)
               if (fp) sourceFingerprints.set(fp, (sourceFingerprints.get(fp) ?? 0) + 1)
             }
+            // 压缩分界线的对账键是摘要正文（live 条 id=uid()、at=complete；
+            // 磁盘条 id=w*-compaction、at=begin）——指纹对 compaction 返回 null
+            // 不参与，得单独按摘要去重，否则同一次压缩两条分界线。
+            const sourceCompactionSummaries = new Set(
+              sourceItems.flatMap((i) => (i.kind === 'compaction' && i.summary ? [i.summary] : []))
+            )
             const liveItems = s.items.filter((item) => {
+              if (item.kind === 'compaction' && item.summary && sourceCompactionSummaries.has(item.summary)) {
+                return false
+              }
               const fp = transcriptFingerprint(item)
               const remaining = fp ? (sourceFingerprints.get(fp) ?? 0) : 0
               // id 命中说明这条**就是**磁盘里的那条，因此必须一并消耗掉它自己的
@@ -994,7 +1003,7 @@ export function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
   const toolBlocksById = new Map<string, ToolBlock>()
   for (const m of messages) {
     // wire 重建的压缩分界线消息（parseWireHistory）：位置 = 历史压缩点，
-    // 带摘要正文（live 通道只有统计数字）。
+    // 带摘要正文（live 通道分界线同样带摘要——都源自 apply_compaction）。
     if ((m as { type?: string }).type === 'compaction') {
       const mc = m as unknown as { uuid?: string; summary?: string; at?: number }
       items.push({
@@ -1352,7 +1361,19 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
         if (Array.isArray(msgs) && msgs.length) {
           const historyItems = historyToItems(msgs).map((it) => ({ ...it, isHistory: true }))
           const existing = new Set(bg.items.map((i) => i.id))
-          bg.items = [...historyItems.filter((i) => !existing.has(i.id)), ...bg.items]
+          const fresh = historyItems.filter((i) => !existing.has(i.id))
+          // 压缩分界线去重：live 条（id=uid()、at=complete 时刻）与 wire 历史条
+          // （id=w*-compaction、at=begin 时刻）对不上 id/时间，对账键是摘要正文。
+          // 留历史那条（在历史中的位置正确），丢 live 那条。
+          const historySummaries = new Set(
+            fresh.flatMap((i) => (i.kind === 'compaction' && i.summary ? [i.summary] : []))
+          )
+          bg.items = [
+            ...fresh,
+            ...bg.items.filter(
+              (i) => !(i.kind === 'compaction' && i.summary && historySummaries.has(i.summary))
+            )
+          ]
         }
       } else if (subtype === 'plan') {
         const entries = (msg as unknown as { entries?: PlanEntry[] }).entries
@@ -1396,31 +1417,19 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
         const c = (msg as unknown as { commands?: SkillInfo[] }).commands
         bg.slashCommands = Array.isArray(c) ? c : []
       } else if (subtype === 'compaction') {
-        const c = (msg as unknown as {
-          compaction?: { messagesCompacted?: number; tokensBefore?: number; tokensAfter?: number; at?: number }
-        }).compaction
+        // 压缩完成分界线：main 从 wire.jsonl 的 full_compaction.complete 推送
+        // （宿主压缩全程零 ACP 文本输出，2026-08-20 wire 实证），摘要正文来自
+        // apply_compaction。不再按文本标记过滤流式条目——那会把引用了标记
+        // 文本的正常回复整条误删（同日实证）。
+        const c = (msg as unknown as { compaction?: { summary?: string; at?: number } }).compaction
         if (c) {
           bg.items = [
-            ...bg.items.filter(
-              (it) =>
-                !(
-                  it.kind === 'assistant' &&
-                  it.streaming &&
-                  it.blocks.some(
-                    (b) =>
-                      b &&
-                      b.kind === 'text' &&
-                      /Compacting conversation context|Compaction completed/.test(b.text)
-                  )
-                )
-            ),
+            ...bg.items,
             {
               id: uid(),
               kind: 'compaction' as const,
               parentToolUseId: null,
-              ...(c.messagesCompacted !== undefined ? { messagesCompacted: c.messagesCompacted } : {}),
-              ...(c.tokensBefore !== undefined ? { tokensBefore: c.tokensBefore } : {}),
-              ...(c.tokensAfter !== undefined ? { tokensAfter: c.tokensAfter } : {}),
+              ...(c.summary ? { summary: c.summary } : {}),
               at: c.at ?? Date.now()
             }
           ]
@@ -3432,34 +3441,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             }))
           }
         } else if (subtype === 'compaction') {
-          // 压缩轮（/compact 或自动压缩）：插入分界线 item；剔除可能已流式进
-          // transcript 的压缩原文（未标记的自动压缩兜底路径会短暂流出）。
-          const c = (msg as unknown as {
-            compaction?: { messagesCompacted?: number; tokensBefore?: number; tokensAfter?: number; at?: number }
-          }).compaction
+          // 压缩完成分界线：main 从 wire.jsonl 的 full_compaction.complete 推送
+          // （宿主压缩全程零 ACP 文本输出，2026-08-20 wire 实证），摘要正文来自
+          // apply_compaction。不再按文本标记过滤流式条目——那会把引用了标记
+          // 文本的正常回复整条误删（同日实证）。
+          const c = (msg as unknown as { compaction?: { summary?: string; at?: number } }).compaction
           if (c) {
             set((s) => ({
               items: [
-                ...s.items.filter(
-                  (it) =>
-                    !(
-                      it.kind === 'assistant' &&
-                      it.streaming &&
-                      it.blocks.some(
-                        (b) =>
-                          b &&
-                          b.kind === 'text' &&
-                          /Compacting conversation context|Compaction completed/.test(b.text)
-                      )
-                    )
-                ),
+                ...s.items,
                 {
                   id: uid(),
                   kind: 'compaction' as const,
                   parentToolUseId: null,
-                  ...(c.messagesCompacted !== undefined ? { messagesCompacted: c.messagesCompacted } : {}),
-                  ...(c.tokensBefore !== undefined ? { tokensBefore: c.tokensBefore } : {}),
-                  ...(c.tokensAfter !== undefined ? { tokensAfter: c.tokensAfter } : {}),
+                  ...(c.summary ? { summary: c.summary } : {}),
                   at: c.at ?? Date.now()
                 }
               ],
@@ -3475,7 +3470,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             set((s) => {
               const existing = new Set(s.items.map((i) => i.id))
               const fresh = historyItems.filter((i) => !existing.has(i.id))
-              return { items: [...fresh, ...s.items] }
+              // 压缩分界线去重：live 条与 wire 历史条的对账键是摘要正文（id/时间
+              // 都对不上：live id=uid()、at=complete；历史 id=w*-compaction、
+              // at=begin）。留历史那条（位置正确），丢 live 那条。
+              const historySummaries = new Set(
+                fresh.flatMap((i) => (i.kind === 'compaction' && i.summary ? [i.summary] : []))
+              )
+              return {
+                items: [
+                  ...fresh,
+                  ...s.items.filter(
+                    (i) => !(i.kind === 'compaction' && i.summary && historySummaries.has(i.summary))
+                  )
+                ]
+              }
             })
           }
         } else if (subtype === 'permission_denied') {

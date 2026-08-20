@@ -18,7 +18,8 @@ import { log } from './logger'
  * - 子代理内部轮次在主 wire 里只有 Task 调用与结论（内部细节在 tasks/<id>/
  *   各自的 wire 里，暂不合入）；思考正文在旧版 kimi 不落盘（空串）的块丢弃。
  * - 压缩点产 type:'compaction' 的分界线消息（带摘要正文），位置 = 压缩发生的
- *   历史点；live 通道推的分界线只有统计数字，两者在渲染层按需要去重。
+ *   历史点；live 通道（KimiBackend 的 wire 监听）推的分界线带同一摘要正文，
+ *   两者在 store 历史合并时按摘要去重（留历史这条，位置正确）。
  */
 
 interface WirePartEvent {

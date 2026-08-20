@@ -87,15 +87,14 @@ interface ActiveKimiSession {
   noProgressTurns: number
   /** 本轮是否出错（goal 循环遇错暂停）。 */
   lastTurnFailed: boolean
-  /** 压缩轮标记（/compact prompt 或自动压缩检出）：该轮压缩文本累积不转发，
-   *  turn 结束解析后经 system/compaction 合成消息推渲染层。 */
-  compactTurn: boolean
-  compactText: string
-  /** 一次压缩的完整生命周期（首次检出 → 统计文本齐推出分界线）跨多个 ACP
-   *  轮：/compact 秒回后宿主才把压缩甩到后台跑，完成文本经游离 chunk/steered
-   *  轮到达。为 true 期间渲染层显示「正在压缩上下文…」（2026-08-18：原先
-   *  kimi 后端从不发 compacting 状态，压缩的 2-3 分钟里界面零反馈）。 */
+  /** 压缩检测只认 wire.jsonl 事件（2026-08-20 wire 实证：宿主压缩全程零
+   *  ACP 推送，旧的流式文本标记检测既等不到真压缩——「正在压缩」灯和分界线
+   *  都不出现，又会把引用了标记文本的正常回复吞掉并推假分界线，已整条
+   *  删除）。full_compaction.begin 点亮、complete 推分界线后熄灭；为 true
+   *  期间渲染层显示「正在压缩上下文…」。 */
   compactionInFlight: boolean
+  /** context.apply_compaction 带来的摘要正文：complete 时随分界线一起推。 */
+  compactionSummary: string
   /** 隐藏 /usage 轮进行中又收到刷新请求：轮末补跑一次。 */
   usageRefreshPending: boolean
   /** 空壳治理：本次运行由 Tran 新建（session/new，非 resume）的会话。 */
@@ -138,9 +137,9 @@ interface ActiveKimiSession {
   /** Steered 轮的静默收尾定时器（无 prompt 响应可等，只能按事件静默判结束；
    *  判早了也无害——下一个事件会重新点亮，自愈）。 */
   steeredTimer?: NodeJS.Timeout
-  /** Wire 回放（见 maybeStartWireWatch）：kimi 对 post-turn steered 轮零 ACP
-   *  推送（2026-08 直连 kimi acp 实证：turn 结束后后台任务完成、wire 里唤醒轮
-   *  跑完，45s 内 stdio 一个字节都没有）——唯一数据源是磁盘 wire.jsonl。 */
+  /** Wire 监听（见 maybeStartWireWatch）：steered 轮与压缩事件 kimi 都零 ACP
+   *  推送（2026-08 直连 kimi acp 探针 + wire 地面真相双重实证）——唯一
+   *  数据源是磁盘 wire.jsonl。 */
   wireWatchTimer?: NodeJS.Timeout
   /** wire.jsonl 绝对路径缓存（null=已确认找不到，别再扫）。 */
   wirePath?: string | null
@@ -149,12 +148,10 @@ interface ActiveKimiSession {
   /** wire 状态机：当前处于 steered 轮内容段（turn.steer 之后、下个
    *  turn.prompt 之前）。客户端轮（含隐藏轮）的行一律不回放。 */
   wireInSteer?: boolean
-  /** 最近一次 wire 新行时间（静默收尾/停表判定）。 */
+  /** 最近一次 wire 新行时间（steered 静默收尾判定）。 */
   wireLastActivityAt?: number
   /** 最近处理的 wire 行是否 step.end（静默 + step.end = steered 轮真结束）。 */
   wireLastWasStepEnd?: boolean
-  /** 最近一次 hasRunningDiskTasks 磁盘扫描时刻（停表判定的节流，见 pollWire）。 */
-  wireTasksCheckedAt?: number
   /** #3 恢复闸门：ACP 断连自动恢复窗口（退避重连 + session/load）内挂闸。
    *  期间该会话不发起任何新 turn——新进程还没 session/load 过这个
    *  acpSessionId，直接 session/prompt 会以 "session not found" 报错；也不会
@@ -253,20 +250,14 @@ const STEERED_TURN_IDLE_MS = 45_000
  *  会被误判成自发唤醒（interrupt 之后 running 指示凭空复燃 45s）。 */
 const STEERED_DETECT_GRACE_MS = 3_000
 
-/** Wire 回放轮询间隔：steered 轮的思考/正文/工具卡从 wire.jsonl 增量读出，
- *  1s 粒度对"后台任务完成 → 界面出现唤醒内容"的感知延迟足够。 */
+/** Wire 监听轮询间隔：steered 轮的思考/正文/工具卡与压缩事件从 wire.jsonl
+ *  增量读出，1s 粒度对"后台任务完成 → 界面出现唤醒内容"和压缩状态指示的
+ *  感知延迟都足够。 */
 const WIRE_POLL_MS = 1_000
-/** 停表判定里 hasRunningDiskTasks 的节流间隔：那是一次同步磁盘扫描（sessions
- *  根 readdir + 逐任务文件读），长静默期（子代理跑几十分钟没新行）每秒扫一次
- *  纯属浪费——5s 一次足够，其余 tick 视作"任务还在跑"。 */
-const WIRE_TASKS_CHECK_THROTTLE_MS = 5_000
 /** steered 轮收尾判定：最后一行是 step.end 且这么久没有新行。kimi 的 loop
  *  在 step.end 后开下一步是同毫秒级（wire 实证），4s 静默 + step.end 稳判
  *  结束；判早了下一行会重新点亮（自愈）。 */
 const WIRE_STEER_SEAL_QUIET_MS = 4_000
-/** 任务清零后 watch 再挂这么久才停：completion → turn.steer 写盘有毫秒级
- *  间隙，立即停表会漏掉最后一个唤醒。 */
-const WIRE_WATCH_LINGER_MS = 10_000
 
 /** M2 pendingNotifications 淘汰参数：正常注册竞争窗口只有一两个微任务的长度，
  *  缓冲到达上限只可能是"会话已死、通知永远等不到注册"的泄漏形态。 */
@@ -380,9 +371,8 @@ export class KimiBackend {
       turnHadToolCall: false,
       noProgressTurns: 0,
       lastTurnFailed: false,
-      compactTurn: false,
-      compactText: '',
       compactionInFlight: false,
+      compactionSummary: '',
       usageRefreshPending: false,
       createdViaNew: !opts.resume,
       gotRealPrompt: false,
@@ -399,6 +389,11 @@ export class KimiBackend {
     }
     session.ready = this.prepareSession(session, opts)
     this.sessions.set(sessionId, session)
+    // wire 监听挂会话即 arm（压缩可以发生在任何空闲时刻——wire 实证 manual
+    // 压缩连客户端轮都没有，等不到轮末的 arm）。acpSessionId 要 ready 后才有。
+    void session.ready.then(() => {
+      if (this.sessions.get(sessionId) === session) this.maybeStartWireWatch(session)
+    })
     session.ready.catch((error) => {
       if (!this.sessions.has(sessionId)) return
       const message = userFacingError(error)
@@ -638,7 +633,8 @@ export class KimiBackend {
    * 生命周期接管一切）。
    */
   /** 「正在压缩」状态上报（只在翻转时发，渲染层 status.compacting 驱动
-   *  TranscriptFooter 的「正在压缩上下文…」）。 */
+   *  TranscriptFooter 的「正在压缩上下文…」）。调用方只有 wire 事件处理
+   *  （replayWireLine 的 full_compaction.begin/complete）。 */
   private setCompacting(session: ActiveKimiSession, on: boolean): void {
     if (session.compactionInFlight === on) return
     session.compactionInFlight = on
@@ -648,32 +644,6 @@ export class KimiBackend {
       subtype: 'status',
       status: on ? 'compacting' : null
     } as unknown as SDKMessage)
-  }
-
-  /** 压缩完成判定：统计文本齐（或出现完成标记）才推分界线并解除「正在压缩」。
-   *  只流了 "Compacting conversation context…" 开场白的秒回轮不算完成——那是
-   *  宿主把压缩甩到后台的信号，此时推分界线就是谎报成功（2026-08-18 用户：
-   *  「提前告诉我成功了，没有过程」）。真正的完成文本（Compaction completed:
-   *  Messages compacted…）走游离 chunk/steered 轮到达，由 endSteeredTurn 或
-   *  下一个 runTurn 末尾再调本函数收尾。 */
-  private flushCompactionIfDone(session: ActiveKimiSession): void {
-    const stats = parseCompaction(session.compactText)
-    const done =
-      session.compactText.includes('Compaction completed') ||
-      stats.messagesCompacted !== undefined ||
-      stats.tokensBefore !== undefined ||
-      stats.tokensAfter !== undefined
-    session.compactTurn = false
-    if (!done) return // 压缩仍在跑：compactText 留着等完成文本追加，状态不清
-    if (!session.closed) {
-      this.h.onMessage(session.id, {
-        type: 'system',
-        subtype: 'compaction',
-        compaction: { ...stats, at: Date.now() }
-      } as unknown as SDKMessage)
-    }
-    session.compactText = ''
-    this.setCompacting(session, false)
   }
 
   private touchSteeredTurn(session: ActiveKimiSession): void {
@@ -704,11 +674,6 @@ export class KimiBackend {
     if (!emit || session.closed) return
     // 封口流式消息 + 通知渲染层收尾（清 running/streaming 态）。
     this.sealStreamMessage(session)
-    // steered 轮是压缩完成文本的常规到达路径（宿主后台压完后经游离 chunk
-    // 流出 "Compaction completed: …"，wire 活动触发 self-wake）：轮末结算
-    // 分界线。原先这里不处理 compactTurn，统计文本一路挂到下一个客户端轮
-    // 末尾才推——分界线因此落到最新消息下面（2026-08-18 实测）。
-    if (session.compactTurn || session.compactText) this.flushCompactionIfDone(session)
     session.turnStartedAt = 0
     this.emitRunning(session, false)
     this.h.onMessage(session.id, {
@@ -719,23 +684,27 @@ export class KimiBackend {
   }
 
   /**
-   * Wire 回放：steered 轮内容的唯一数据源。
+   * Wire 监听：steered 轮内容与压缩事件的唯一数据源。
    *
-   * 实证链（2026-08，直连 `kimi acp` 的对照探针）：
+   * 实证链（2026-08，直连 `kimi acp` 的对照探针 + wire.jsonl 地面真相）：
    * 1. 后台任务/子代理完成时 kimi 内部 100% turn.steer 自动唤醒（历史 91 例 +
    *    实测 2 例，零例外），唤醒轮的思考/工具/正文全部写进 wire.jsonl；
    * 2. 但 ACP stdio 对这轮**零推送**——turn 结束后监听 45s，session/update
    *    一条都没有。所以"从 ACP 事件检测 steered 轮"（v1.0.72 的做法）对
    *    post-turn 唤醒永远不会触发，内容只能从磁盘拉。
+   * 3. 上下文压缩同样零 ACP 推送（2026-08-20 wire 实证：full_compaction.begin
+   *    → llm.request(kind=compaction) → full_compaction.complete，全程 109s
+   *    无任何流式文本；manual 压缩甚至连客户端轮都没有）。压缩检测因此也
+   *    挂在这里，见 replayWireLine 的 full_compaction.* 分支。
    *
-   * 生命周期：真实轮收尾且还有后台任务在跑 → 启动 1s 轮询；真实轮开始 →
-   * 停表（该轮期间的 wire 行属于客户端轮，ACP 正常推送，回放会双写）；
-   * 任务清零且静默 → 停表。回放经 emitThinking/emitAssistantDelta/emitToolUse
-   * 走正常流式管道，渲染层零改动。
+   * 生命周期：会话 ready / 真实轮收尾 → 启动 1s 轮询；真实轮开始 → 停表
+   * （该轮期间的 wire 行属于客户端轮，ACP 正常推送，回放会双写）；会话
+   * 关闭 → 停表。压缩可以发生在任何空闲时刻，所以不再按"有后台任务才
+   * 挂表"收窄（早先的任务门禁会让空闲期压缩完全失明）。steered 回放经
+   * emitThinking/emitAssistantDelta/emitToolUse 走正常流式管道，渲染层零改动。
    */
   private maybeStartWireWatch(session: ActiveKimiSession): void {
     if (session.closed || session.running || session.hiddenTurn || session.wireWatchTimer) return
-    if (!session.acpSessionId || !hasRunningDiskTasks(session.acpSessionId)) return
     const path = this.resolveWirePath(session)
     if (!path) return
     try {
@@ -841,17 +810,8 @@ export class KimiBackend {
       session.wireInSteer = false
       this.endSteeredTurn(session)
     }
-    // 停表：没有 steered 轮在跑、任务清零、且静默过 linger 窗口。
-    // 磁盘扫描节流：条件不满足或未到检查间隔时不碰磁盘（视作"还在跑"）。
-    if (!session.steeredActive && !session.wireInSteer && quietMs >= WIRE_WATCH_LINGER_MS) {
-      const now = Date.now()
-      if (now - (session.wireTasksCheckedAt ?? 0) >= WIRE_TASKS_CHECK_THROTTLE_MS) {
-        session.wireTasksCheckedAt = now
-        if (!session.acpSessionId || !hasRunningDiskTasks(session.acpSessionId)) {
-          this.stopWireWatch(session)
-        }
-      }
-    }
+    // 不停表：压缩可以在任意空闲时刻发生（manual 压缩连客户端轮都没有），
+    // 挂表期间每秒一次 statSync 的代价可忽略；真实轮开始/会话关闭才停。
   }
 
   /** 单条 wire 行 → 渲染层消息。只回放 steered 段（turn.steer 之后、下个
@@ -860,9 +820,41 @@ export class KimiBackend {
    *  name/args，tool.result 带 result.output。 */
   private replayWireLine(session: ActiveKimiSession, entry: Record<string, unknown>): void {
     const type = asString(entry.type)
+    // 压缩生命周期（宿主零 ACP 推送，wire 是唯一信号源）：begin 亮「正在
+    // 压缩」、apply 存摘要、complete 推分界线+灭灯。这些行在轮间空闲期
+    // 到达（manual /compact 甚至没有客户端轮），只有常驻监听才能看到。
+    if (type === 'full_compaction.begin') {
+      session.wireLastWasStepEnd = false
+      this.setCompacting(session, true)
+      return
+    }
+    if (type === 'context.apply_compaction') {
+      session.compactionSummary = asString(entry.summary) ?? ''
+      return
+    }
+    if (type === 'full_compaction.complete') {
+      session.wireLastWasStepEnd = false
+      const summary = session.compactionSummary
+      session.compactionSummary = ''
+      if (!session.closed) {
+        this.h.onMessage(session.id, {
+          type: 'system',
+          subtype: 'compaction',
+          compaction: { ...(summary ? { summary } : {}), at: Date.now() }
+        } as unknown as SDKMessage)
+      }
+      this.setCompacting(session, false)
+      return
+    }
     if (type === 'turn.prompt') {
       session.wireInSteer = false
       session.wireLastWasStepEnd = false
+      // 安全网：begin 后 complete 丢失（宿主异常/崩溃）——下一轮已开始，
+      // 压缩无论如何都结束了，灭灯防「正在压缩」卡死。
+      if (session.compactionInFlight) {
+        session.compactionSummary = ''
+        this.setCompacting(session, false)
+      }
       return
     }
     if (type === 'turn.steer') {
@@ -1351,11 +1343,7 @@ export class KimiBackend {
       session.thinkingBlockIndex = null
       session.nextBlockIndex = 0
       session.toolResults.clear()
-      // 压缩轮标志随轮重置（runTurn 正常结束已清；这里是出错兜底）。
-      session.compactTurn = false
-      session.compactText = ''
-      this.setCompacting(session, false)
-      // 查询轮标志同理（出错兜底：吞掉的文本直接丢弃，不补状态卡）。
+      // 查询轮标志随轮重置（runTurn 正常结束已清；这里是出错兜底）。
       session.queryTurn = false
       session.queryText = ''
       session.queryCommand = undefined
@@ -1649,13 +1637,6 @@ export class KimiBackend {
     if (session.createdViaNew && userText && !userText.startsWith('/') && session.titleTexts.length < 3) {
       session.titleTexts.push(firstUserText(message.content))
     }
-    // 压缩轮标记：/compact（含参数形式）——该轮压缩文本不渲染，结束统一解析。
-    // 同时点亮「正在压缩」：宿主对 /compact 秒回、压缩甩后台跑 2-3 分钟，
-    // 没有状态指示就是用户眼里的"秒成功/死机"（2026-08-18 用户反馈）。
-    if (userText.startsWith('/compact')) {
-      session.compactTurn = true
-      this.setCompacting(session, true)
-    }
     const client = await this.ensureClient()
     const payload = contentToPrompt(message.content)
     // #41 用户轮无硬超时（timeoutMs=0）：长任务（一次多任务、阻塞型子代理可
@@ -1702,16 +1683,6 @@ export class KimiBackend {
           } as unknown as SDKMessage)
         }
       }
-    }
-    // 压缩轮：完成（统计文本齐）才经 system/compaction 推分界线；只有
-    // "Compacting…" 开场白的秒回轮不推（谎报成功），状态留待完成文本收尾。
-    if (session.compactTurn) {
-      this.flushCompactionIfDone(session)
-    } else if (session.compactionInFlight && session.streamedText) {
-      // 安全网：完成文本丢失（宿主异常/版本差异）但对话已产出正常内容——
-      // 撤掉「正在压缩」防状态卡死，积存的压缩残文一并丢弃。
-      session.compactText = ''
-      this.setCompacting(session, false)
     }
     this.sealStreamMessage(session)
     const usage = asRecord(response.usage)
@@ -2075,17 +2046,6 @@ export class KimiBackend {
       // system/query_result 状态卡推送。
       if (session.queryTurn) {
         session.queryText += text
-        return
-      }
-      // 压缩轮（/compact 标记；或自动压缩：chunk 文本出现压缩标记即检出并置位，
-      // 后续 chunk 一并吞掉）：累积不转发，turn 结束经 system/compaction 推送。
-      // L3：标记可能被 chunk 边界拦腰截断（"Compacting conver|sation context"），
-      // 检测串带上已流式正文的尾部拼接——置位前放行的半截前缀随 seal 定稿，
-      // 属可接受残留（渲染层压缩卡逻辑同款正则会滤掉残句所在的流式条目）。
-      if (session.compactTurn || isCompactionText(session.streamedText.slice(-64) + session.compactText + text)) {
-        if (!session.compactTurn) this.setCompacting(session, true) // 自动压缩检出：点亮「正在压缩」
-        session.compactTurn = true
-        session.compactText += text
         return
       }
       this.emitAssistantDelta(session, asString(update.messageId), text)
@@ -2781,13 +2741,8 @@ function mergeReplayToolInput(
   }
 }
 
-/** 压缩文本检出：kimi 宿主直返的压缩提示（/compact 或自动压缩）。 */
-function isCompactionText(text: string): boolean {
-  return text.includes('Compacting conversation context') || text.includes('Compaction completed')
-}
-
 /** "查询类"斜杠命令（输出是状态信息、不该以普通对话形式出现）：命中返回
- *  规范化命令名，否则 null。/compact 走压缩轮通道，不在此列。 */
+ *  规范化命令名，否则 null。/compact 走 wire 事件通道，不在此列。 */
 function queryCommandOf(text: string): string | null {
   const match = text.match(/^\/(usage|status|mcp)\b/)
   return match ? `/${match[1]}` : null
@@ -2824,31 +2779,6 @@ function parseMcpServers(text: string): McpServerEntry[] | null {
     })
   }
   return servers
-}
-
-/** 解析压缩统计：`Messages compacted: 16` / `Tokens before: 1,906` / `Tokens after: 782`。 */
-function parseCompaction(text: string): {
-  messagesCompacted?: number
-  tokensBefore?: number
-  tokensAfter?: number
-} {
-  const num = (pattern: RegExp): number | undefined => {
-    const match = text.match(pattern)
-    if (!match) return undefined
-    const value = Number(match[1].replace(/,/g, ''))
-    return Number.isFinite(value) ? value : undefined
-  }
-  return {
-    ...(num(/Messages compacted:\s*(\d+)/) !== undefined
-      ? { messagesCompacted: num(/Messages compacted:\s*(\d+)/) }
-      : {}),
-    ...(num(/Tokens before:\s*([\d,]+)/) !== undefined
-      ? { tokensBefore: num(/Tokens before:\s*([\d,]+)/) }
-      : {}),
-    ...(num(/Tokens after:\s*([\d,]+)/) !== undefined
-      ? { tokensAfter: num(/Tokens after:\s*([\d,]+)/) }
-      : {})
-  }
 }
 
 /** AskUserQuestion 的问题文本：toolCall.content[].content.text 防御式下钻。 */

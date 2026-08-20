@@ -128,7 +128,8 @@ export interface CompactionItem {
   messagesCompacted?: number
   tokensBefore?: number
   tokensAfter?: number
-  /** 压缩摘要正文：wire 重建通道才有（live 通道 kimi 只给统计数字）。 */
+  /** 压缩摘要正文：wire 重建通道与 live 通道都有（都源自 apply_compaction；
+   *  宿主压缩零 ACP 文本输出，2026-08-20 起统计数字不再可得）。 */
   summary?: string
   at: number
   /** 见 UserItem.isHistory（历史重放里不会出现，占位兼容）。 */

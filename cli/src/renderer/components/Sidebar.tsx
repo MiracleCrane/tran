@@ -55,6 +55,10 @@ interface SessionPreviewData {
   cwd?: string
   lastModified: number
   firstPrompt?: string
+  /** 归档入口移到预览卡（行内悬停操作组太容易误触，2026-08-19 用户）。 */
+  sessionId: string
+  /** 输出中的会话不支持归档（按钮禁用并说明）。 */
+  running: boolean
 }
 
 let previewSetter: ((p: SessionPreviewData | null) => void) | null = null
@@ -65,10 +69,12 @@ function showSessionPreview(p: SessionPreviewData | null): void {
 
 function SessionPreviewCard({
   onHoldOpen,
-  onClose
+  onClose,
+  onArchive
 }: {
   onHoldOpen: () => void
   onClose: () => void
+  onArchive: (sessionId: string) => void
 }): JSX.Element | null {
   const [preview, setPreview] = useState<SessionPreviewData | null>(null)
   useEffect(() => {
@@ -105,6 +111,23 @@ function SessionPreviewCard({
           {preview.firstPrompt}
         </div>
       )}
+      {/* 归档入口挪到这里（2026-08-19 用户：行内悬停操作组太容易误触，但不要
+          二次确认）——预览卡要悬停停留才出现，点它是有意动作。输出中的会话
+          不支持归档：禁用并说明。 */}
+      <div className="mt-2 flex justify-end border-t border-white/[0.06] pt-2">
+        <button
+          type="button"
+          disabled={preview.running}
+          onClick={() => {
+            onClose()
+            onArchive(preview.sessionId)
+          }}
+          className="rounded-lg px-2 py-1 text-[11px] text-zinc-400 transition enabled:hover:bg-white/[0.06] enabled:hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+          title={preview.running ? '正在输出中的会话不支持归档' : '归档（从列表收起，归档页可找回）'}
+        >
+          归档
+        </button>
+      </div>
     </div>,
     document.body
   )
@@ -462,6 +485,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       .catch(() => {})
   }, [])
   const previewTimerRef = useRef<number | null>(null)
+  /** 行移出后的延迟收卡定时器：给指针留出跨空隙上到预览卡的时间窗
+   *  （2026-08-20 用户：归档按钮在卡里，卡随行移出即消失，根本点不到）。 */
+  const previewHideTimerRef = useRef<number | null>(null)
   /** 预览请求代际号（见 schedulePreview 的竞态守卫）。 */
   const previewSeqRef = useRef(0)
 
@@ -504,8 +530,17 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     }
   }
 
+  const cancelPreviewHide = (): void => {
+    if (previewHideTimerRef.current !== null) {
+      window.clearTimeout(previewHideTimerRef.current)
+      previewHideTimerRef.current = null
+    }
+  }
+
   const schedulePreview = (key: string, s: SessionListItem, el: HTMLElement): void => {
     cancelPreviewTimer()
+    // 指针从预览卡移回行：收回中的卡重新定住。
+    cancelPreviewHide()
     previewTimerRef.current = window.setTimeout(() => {
       previewTimerRef.current = null
       const rect = el.getBoundingClientRect()
@@ -538,7 +573,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             summary: s.summary || '(未命名)',
             ...(s.cwd ? { cwd: s.cwd } : {}),
             lastModified: s.lastModified,
-            ...(data.firstPrompt ? { firstPrompt: data.firstPrompt } : {})
+            ...(data.firstPrompt ? { firstPrompt: data.firstPrompt } : {}),
+            sessionId: s.sessionId,
+            running: s.running || runningSdkSessionIds.includes(s.sessionId)
           })
         })
     }, 350)
@@ -546,9 +583,28 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
 
   const hidePreview = (): void => {
     cancelPreviewTimer()
+    cancelPreviewHide()
     // 作废在途请求：不然移开后才返回的 IPC 会把预览卡又弹回来。
     previewSeqRef.current++
     showSessionPreview(null)
+  }
+
+  /** 行移出不立刻收卡：留 300ms 给指针跨过行与卡之间的空隙上到卡上
+   *  （滚动/点击/切换等显式关闭仍走 hidePreview 立即收）。 */
+  const scheduleHidePreview = (): void => {
+    cancelPreviewHide()
+    previewHideTimerRef.current = window.setTimeout(() => {
+      previewHideTimerRef.current = null
+      // 另一行的预览正在排期（A→B 快速移动）：让位给新卡，别收。
+      if (previewTimerRef.current !== null) return
+      hidePreview()
+    }, 300)
+  }
+
+  /** 指针上到预览卡：show/hide 两个定时器都取消，卡保持常开（点归档就靠它）。 */
+  const holdPreviewOpen = (): void => {
+    cancelPreviewTimer()
+    cancelPreviewHide()
   }
   const [pinnedSessionKeys, setPinnedSessionKeys] = useState<Set<string>>(() => readPinnedSessions())
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
@@ -1538,7 +1594,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                     const isCurrent =
                       meta && normalizeCwdForCompare(g.label) === normalizeCwdForCompare(meta.cwd)
                     return (
-                      <span className={`truncate ${isCurrent ? 'flow-text flow-text-violet' : ''}`}>
+                      <span className={`truncate ${isCurrent ? 'seg-shimmer seg-shimmer-project' : ''}`}>
                         {g.label.split(/[\\/]/).pop()}
                       </span>
                     )
@@ -1620,7 +1676,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                         if (!multiMode) schedulePreview(key, s, e.currentTarget)
                       }}
                       onPointerMove={handleSidebarPointerGlow}
-                      onPointerLeave={hidePreview}
+                      onPointerLeave={scheduleHidePreview}
                       className={`sidebar-session-row relative w-full rounded-md border px-2 py-[5px] text-left ${
                         // 标题给足宽度：不再为悬停操作组预留 pr-28（那是标题
                         // 七八个字就省略号的元凶，2026-08-17 用户反馈）。操作组
@@ -1651,16 +1707,18 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                         )}
                         <span className="min-w-0 flex-1">
                           {/* 单行标题：时间收进 hover 提示，不再占第二行（2026-08
-                              用户定稿）；运行中圆点跟在标题后面。 */}
+                              用户定稿）。运行中=标题多色流光（2026-08-19 用户：
+                              「不要紫色的点了，运行中会话的流光花哨点」）。 */}
                           <div className="flex items-center gap-1.5 text-sm" title={relTime(s.lastModified)}>
-                            <span className="min-w-0 flex-1 truncate">{s.summary || '(未命名)'}</span>
-                            {/* #5b：列表条目自带的 running 之外，还叠加 store 实时上报的
-                                runningSdkSessionIds（当前正在跑 turn 的会话）。
-                                悬停时操作组从右缘淡入，圆点/徽标淡出避让（2026-08-14
-                                用户：运行标识和归档按钮叠在一起）。 */}
-                            {(s.running || runningSdkSessionIds.includes(s.sessionId)) && (
-                              <span className="session-running-dot transition-opacity group-hover:opacity-0" title="运行中" />
-                            )}
+                            <span
+                              className={`min-w-0 flex-1 truncate ${
+                                s.running || runningSdkSessionIds.includes(s.sessionId)
+                                  ? 'seg-shimmer seg-shimmer-running'
+                                  : ''
+                              }`}
+                            >
+                              {s.summary || '(未命名)'}
+                            </span>
                             <span className={`session-runtime-badge transition-opacity group-hover:opacity-0 ${wslSupportEnabled ? 'is-visible' : ''}`}>
                               {backendLabel(s.runtimeBackend)}
                             </span>
@@ -1672,17 +1730,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
 
                   {!editing && !exiting && !multiMode && (
                     <div className="absolute bottom-1 right-1 z-10 flex items-center gap-0.5 rounded-lg bg-[#16171c]/95 px-0.5 opacity-0 shadow-lg shadow-black/30 transition-opacity duration-150 group-hover:opacity-100">
-                      {/* 会话操作组：置顶 / 重命名 / 归档（进归档页）/ 删除 */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          void archiveSession(s.sessionId)
-                        }}
-                        className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
-                        title="归档（从列表收起，归档页可找回）"
-                      >
-                        <ArchiveIcon />
-                      </button>
+                      {/* 会话操作组：置顶 / 重命名 / 删除。归档已挪到悬停预览卡
+                          （2026-08-19 用户：这一组贴着行右缘淡入，光标就在按钮上，
+                          归档最容易被误点）。 */}
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
@@ -1875,7 +1925,11 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       {/* 会话条目悬停预览（零 token：标题 / 首条消息 / 更新时间 / 目录）。
           状态在 SessionPreviewCard 自己手里：悬停 setState 不再重渲染整个
           侧栏列表（几百行会话行全量重来是悬停卡顿的来源）。 */}
-      <SessionPreviewCard onHoldOpen={cancelPreviewTimer} onClose={hidePreview} />
+      <SessionPreviewCard
+        onHoldOpen={holdPreviewOpen}
+        onClose={hidePreview}
+        onArchive={(sessionId) => void archiveSession(sessionId)}
+      />
     </div>
   )
 }

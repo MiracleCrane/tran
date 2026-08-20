@@ -1,6 +1,26 @@
 # Changelog
 
+## v1.1.32 - 2026-08-20
+
+### 中文
+
+- 修复:**上下文压缩在界面完全隐形**——宿主已改为静默压缩（全程零 ACP 文本输出，wire 实证），旧的流式文本标记检测永远等不到信号：压缩的两三分钟里无「正在压缩」指示、完成后无分界线。检测改认 wire.jsonl 的压缩事件（begin 亮灯 / complete 推分界线），分界线还顺带带上完整摘要正文（「查看摘要」不再只有统计数字）；历史重放与 live 分界线按摘要正文去重。
+- 修复:**回复提到压缩标记文本就被"腰斩"**——检测是在流式正文里找标记串，任何引用这两串文本的正常回复都被当成压缩残文吞掉、还推一条假分界线（连续两次实锤）。文本检测路径已整条删除。
+- 优化:**折叠 bar 按正文分段**——一轮里被 AI 解说文字隔开的思考/命令各自成组、按顺序落在解说之间（原先整轮收成一条抽走合并，工作过程和解说错位）；正在输出的尾巴仍只留最后两条展开。
+- 修复:**预览卡里的归档按钮点不到**——行移出立即收卡，指针跨不过行与卡之间的空隙。改为 300ms 延迟收卡 + 指针上卡常开（hover 桥）；A 行快速移到 B 行时旧卡让位，不误杀新卡预览。
+
+### English
+
+- Fix: context compaction was completely invisible — the host now compacts silently (zero ACP text output, proven from wire.jsonl), so the old streamed-marker detection never fired: no "compacting" indicator during the minutes-long compaction, no divider afterwards. Detection now reads compaction events from wire.jsonl (begin lights the indicator, complete pushes the divider); the divider now carries the full summary text ("view summary" is no longer stats-only), and live vs. history dividers dedupe by summary.
+- Fix: replies quoting the compaction marker text got truncated — detection pattern-matched those strings in streamed text, so any normal reply mentioning them was swallowed as compaction residue and a fake divider was pushed (demonstrated twice live). The text-detection path is deleted entirely.
+- Improvement: fold bars now segment by assistant text — thinking/command runs between narration paragraphs each fold into their own bar, in order (previously the whole turn collapsed into a single bar, scrambling work vs. narration); the live tail still keeps only the last two expanded.
+- Fix: the archive button inside the hover preview card was unreachable — leaving the row closed the card instantly, so the pointer could never cross the gap. Now a 300ms delayed close plus hold-open while hovering the card (hover bridge); fast row-to-row moves yield without killing the next row's preview.
+
 ## v1.1.31 - 2026-08-20
+
+### 补充修复
+
+- 修复：重做摇摆角色动画链路。使用 `libvpx-vp9` 保留原始 WebM 的真实 alpha；此前普通 VP9 解码先丢失 alpha、再抠黑底，造成黑影、硬边和断腿。新素材移除首尾坏帧，经三帧时域修补后生成正放/倒放无缝循环；播放器改为暂停或继续同一个视频帧，悬浮窗背景改为完全透明，并在渲染层清除 VP9 的近零 alpha。
 
 ### 中文
 
@@ -13,6 +33,10 @@
 - Fix: float window truly undraggable — v1.1.30's `-webkit-app-region: drag` simply doesn't work on transparent windows (Chromium limitation). Back to event-driven drag, minus the jank: pointermove accumulates movementX/Y, flushed per animation frame to the main process (verified precise to the pixel), and the animation swaps to a still frame while dragging to cut compositing cost.
 - Fix: legs still vanished on a few frames — the keyer kept only the largest connected component, so a thinning leg/skirt bridge lost the whole leg. Now keeps every component ≥40px.
 - Fix: black flash at the loop point — on the material's baked fade frames the character flashed as a black silhouette. Alpha now scales with each frame's brightness, so fades go to transparent instead of black (frame 0 fully transparent).
+
+### English follow-up
+
+- Fix: rebuilt the swaying-character animation pipeline with `libvpx-vp9` so the source WebM's real alpha is retained. The previous path decoded VP9 without alpha and then keyed black back out, causing dark ghosts, hard edges, and disappearing legs. The repaired asset removes the bad endpoint fades, applies three-frame temporal repair, and uses a forward/reverse seamless loop. Playback now pauses and resumes the same video frame; the floating stage is fully transparent, with near-zero VP9 alpha removed at render time.
 
 ## v1.1.30 - 2026-08-20
 
