@@ -55,8 +55,11 @@ interface SessionPreviewData {
   cwd?: string
   lastModified: number
   firstPrompt?: string
-  /** 归档入口移到预览卡（行内悬停操作组太容易误触，2026-08-19 用户）。 */
-  sessionId: string
+  /** 会话动作集中营（2026-08-20 用户：「这几个功能都加上图标，和归档放到一个
+   *  地方去」）：置顶/重命名/删除/归档全部收进预览卡底部图标排。 */
+  session: SessionListItem
+  /** 置顶态（图钉高亮用，悬停时刻快照即可）。 */
+  pinned: boolean
   /** 输出中的会话不支持归档（按钮禁用并说明）。 */
   running: boolean
 }
@@ -70,10 +73,16 @@ function showSessionPreview(p: SessionPreviewData | null): void {
 function SessionPreviewCard({
   onHoldOpen,
   onClose,
+  onPin,
+  onRename,
+  onDelete,
   onArchive
 }: {
   onHoldOpen: () => void
   onClose: () => void
+  onPin: (session: SessionListItem) => void
+  onRename: (key: string, currentSummary: string) => void
+  onDelete: (key: string) => void
   onArchive: (sessionId: string) => void
 }): JSX.Element | null {
   const [preview, setPreview] = useState<SessionPreviewData | null>(null)
@@ -111,20 +120,58 @@ function SessionPreviewCard({
           {preview.firstPrompt}
         </div>
       )}
-      {/* 归档入口挪到这里（2026-08-19 用户：行内悬停操作组太容易误触，但不要
-          二次确认）——预览卡要悬停停留才出现，点它是有意动作。输出中的会话
+      {/* 会话动作集中营（2026-08-20 用户：「这几个功能都加上图标，和归档放到
+          一个地方去」）：置顶/重命名/删除/归档收进预览卡底部一排图标；行内悬停
+          操作组随之删除（它贴着行右缘淡入、光标就在按钮上，是误触之源）。预览卡
+          要悬停停留才出现，点这里面的都是有意动作，无需二次确认。输出中的会话
           不支持归档：禁用并说明。 */}
-      <div className="mt-2 flex justify-end border-t border-white/[0.06] pt-2">
+      <div className="mt-2 flex items-center justify-end gap-0.5 border-t border-white/[0.06] pt-2">
+        <button
+          type="button"
+          onClick={() => {
+            onClose()
+            onPin(preview.session)
+          }}
+          className={`flex h-6 w-6 items-center justify-center rounded-lg transition ${
+            preview.pinned ? 'text-accent hover:bg-white/[0.06]' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200'
+          }`}
+          title={preview.pinned ? '取消置顶' : '置顶'}
+        >
+          <PinIcon active={preview.pinned} />
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            onClose()
+            onRename(preview.key, preview.summary)
+          }}
+          className="flex h-6 w-6 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
+          title="重命名"
+        >
+          <EditIcon />
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            onClose()
+            onDelete(preview.key)
+          }}
+          className="flex h-6 w-6 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
+          title="删除"
+        >
+          <TrashIcon />
+        </button>
         <button
           type="button"
           disabled={preview.running}
           onClick={() => {
             onClose()
-            onArchive(preview.sessionId)
+            onArchive(preview.session.sessionId)
           }}
-          className="rounded-lg px-2 py-1 text-[11px] text-zinc-400 transition enabled:hover:bg-white/[0.06] enabled:hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-6 items-center gap-1 rounded-lg px-1.5 text-[11px] text-zinc-400 transition enabled:hover:bg-white/[0.06] enabled:hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
           title={preview.running ? '正在输出中的会话不支持归档' : '归档（从列表收起，归档页可找回）'}
         >
+          <ArchiveIcon />
           归档
         </button>
       </div>
@@ -306,6 +353,39 @@ const PinIcon = ({ active = false }: { active?: boolean }): JSX.Element => (
       strokeWidth="1.5"
       strokeLinejoin="round"
     />
+  </svg>
+)
+/** 头部/多选工具条图标（2026-08-20 侧栏图标化整理）：与 SearchIcon 同款 12px
+ *  描边风格。 */
+const SparkleIcon = (): JSX.Element => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+    <path
+      d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4L12 3zM19 15l.9 2.6 2.6.9-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9L19 15z"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+const ChecklistIcon = (): JSX.Element => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+    <path d="m3.5 6 1.5 1.5L8 4.5M3.5 12.5 5 14l3-3M3.5 19 5 20.5l3-3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M11 6h9M11 12.5h9M11 19h9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+  </svg>
+)
+const RefreshIcon = (): JSX.Element => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+    <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+const CheckAllIcon = (): JSX.Element => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+    <path d="m4 12.5 4 4L18 6.5M10 16.5l1 1 10-10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+const XIcon = (): JSX.Element => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+    <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
   </svg>
 )
 const ShieldIcon = (): JSX.Element => (
@@ -574,7 +654,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             ...(s.cwd ? { cwd: s.cwd } : {}),
             lastModified: s.lastModified,
             ...(data.firstPrompt ? { firstPrompt: data.firstPrompt } : {}),
-            sessionId: s.sessionId,
+            session: s,
+            pinned: pinnedSessionKeys.has(key),
             running: s.running || runningSdkSessionIds.includes(s.sessionId)
           })
         })
@@ -1450,28 +1531,42 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         </button>
       </div>
 
-      {/* 头部行（2026-08-19 用户：「会话两个字删了」——纯标签无功能）。
-          非多选：搜索 / AI 命名 / 多选 / 刷新右对齐一排；
-          多选：操作条并进这一行（见下方 multiMode 分支），不再另起一行挤压列表。 */}
+      {/* 头部行：非多选 = 搜索 / AI 命名 / 多选 / 刷新一排图标（2026-08-20 侧栏
+          图标化整理：全部 h-5 图标按钮 + tooltip，不再文字/图标混排）；多选 =
+          操作条并进这一行（所有项 shrink-0 + nowrap，窄侧栏也不许竖排断字）。 */}
       <div className="flex items-center px-4 py-0.5">
         {multiMode ? (
-          <div className="flex w-full items-center gap-2 text-[11px] text-zinc-400">
-            <span className="tabular-nums text-zinc-300">已选 {selectedKeys.size} 项</span>
-            <button onClick={selectAllFiltered} className="rounded px-1.5 py-0.5 transition hover:bg-white/[0.05] hover:text-zinc-200">
-              全选
+          <div className="flex w-full items-center gap-1 text-[11px] text-zinc-400">
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-zinc-300">已选 {selectedKeys.size} 项</span>
+            <button
+              onClick={selectAllFiltered}
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition hover:bg-white/[0.05] hover:text-zinc-200"
+              title="全选（当前过滤结果）"
+            >
+              <CheckAllIcon />
             </button>
-            <button onClick={() => setSelectedKeys(new Set())} className="rounded px-1.5 py-0.5 transition hover:bg-white/[0.05] hover:text-zinc-200">
-              清空
+            <button
+              onClick={() => setSelectedKeys(new Set())}
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition hover:bg-white/[0.05] hover:text-zinc-200"
+              title="清空选择"
+            >
+              <XIcon />
             </button>
             <button
               onClick={() => setConfirmBatch(true)}
               disabled={selectedKeys.size === 0 || batchDeleting}
-              className="rounded px-1.5 py-0.5 text-red-400 transition hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 text-red-400 transition hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-50"
+              title="删除所选会话"
             >
-              {batchDeleting ? '删除中…' : '删除所选'}
+              <TrashIcon />
+              {batchDeleting ? '删除中…' : '删除'}
             </button>
-            <button onClick={exitMultiMode} className="ml-auto rounded px-1.5 py-0.5 transition hover:bg-white/[0.05] hover:text-zinc-200" title="退出多选（Esc）">
-              退出
+            <button
+              onClick={exitMultiMode}
+              className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition hover:bg-white/[0.05] hover:text-zinc-200"
+              title="退出多选（Esc）"
+            >
+              <XIcon />
             </button>
           </div>
         ) : (
@@ -1486,28 +1581,35 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             <button
               onClick={() => void handleAiNaming()}
               disabled={aiNamingBusy}
-              className="rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200 disabled:opacity-50"
-              title="为列表里还没有 AI 标题的会话逐个生成短标题（串行、有缓存跳过）"
+              className="flex h-5 items-center justify-center rounded-md px-1 text-[11px] text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200 disabled:opacity-50"
+              title="AI 命名：为列表里还没有 AI 标题的会话逐个生成短标题（串行、有缓存跳过）"
             >
               {aiNamingBusy
                 ? aiNamingProgress
                   ? `命名中 ${aiNamingProgress.done}/${aiNamingProgress.total}`
                   : '命名中…'
-                : 'AI 命名'}
+                : <SparkleIcon />}
             </button>
             <button
-              onClick={() => (multiMode ? exitMultiMode() : setMultiMode(true))}
-              className="rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
+              onClick={() => {
+                // 进多选强制收预览卡：多选态悬停不出新卡（schedulePreview 有
+                // multiMode 守卫），已开的也别留着（指针物理停在卡上时
+                // onHoldOpen 会让它一直活着，2026-08-20 实证）。
+                if (!multiMode) hidePreview()
+                if (multiMode) exitMultiMode()
+                else setMultiMode(true)
+              }}
+              className="flex h-5 w-5 items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
               title="多选管理（批量删除）"
             >
-              多选
+              <ChecklistIcon />
             </button>
             <button
               onClick={startSessionRefreshTransition}
-              className="rounded-md px-1 text-xs text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
+              className="flex h-5 w-5 items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
               title="刷新"
             >
-              ↻
+              <RefreshIcon />
             </button>
           </span>
         )}
@@ -1629,7 +1731,6 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               const key = sessionKey(s)
               const active = s.sessionId === meta.sdkSessionId && view === 'chat'
               const editing = editingId === key
-              const pinned = pinnedSessionKeys.has(key)
               const inserting = newlyInsertedSessionKeys.has(key)
               const exiting = item.exiting
               return (
@@ -1678,9 +1779,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                       onPointerMove={handleSidebarPointerGlow}
                       onPointerLeave={scheduleHidePreview}
                       className={`sidebar-session-row relative w-full rounded-md border px-2 py-[5px] text-left ${
-                        // 标题给足宽度：不再为悬停操作组预留 pr-28（那是标题
-                        // 七八个字就省略号的元凶，2026-08-17 用户反馈）。操作组
-                        // 悬停浮在上方，自带深色小底板遮住下面的文字。
+                        // 标题全程占满行宽：行内悬停操作组已随预览卡动作集中营
+                        // 删除（2026-08-20），无任何右缘遮挡。
                         multiMode ? '' : 'pr-2'
                       } ${
                         active
@@ -1719,7 +1819,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                             >
                               {s.summary || '(未命名)'}
                             </span>
-                            <span className={`session-runtime-badge transition-opacity group-hover:opacity-0 ${wslSupportEnabled ? 'is-visible' : ''}`}>
+                            <span className={`session-runtime-badge transition-opacity ${wslSupportEnabled ? 'is-visible' : ''}`}>
                               {backendLabel(s.runtimeBackend)}
                             </span>
                           </div>
@@ -1728,48 +1828,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                     </button>
                   )}
 
-                  {!editing && !exiting && !multiMode && (
-                    <div className="absolute bottom-1 right-1 z-10 flex items-center gap-0.5 rounded-lg bg-[#16171c]/95 px-0.5 opacity-0 shadow-lg shadow-black/30 transition-opacity duration-150 group-hover:opacity-100">
-                      {/* 会话操作组：置顶 / 重命名 / 删除。归档已挪到悬停预览卡
-                          （2026-08-19 用户：这一组贴着行右缘淡入，光标就在按钮上，
-                          归档最容易被误点）。 */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          togglePinnedSession(s)
-                        }}
-                        className={`flex h-6 w-6 items-center justify-center overflow-hidden rounded-lg p-1 text-[11px] transition ${
-                          pinned
-                            ? 'text-accent hover:bg-white/[0.06]'
-                            : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200'
-                        }`}
-                        title={pinned ? '取消置顶' : '置顶'}
-                      >
-                        <PinIcon active={pinned} />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setEditingId(key)
-                          setEditText(s.summary || '')
-                        }}
-                        className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
-                        title="重命名"
-                      >
-                        <EditIcon />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setConfirmDeleteId(key)
-                        }}
-                        className="rounded-lg p-1 text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
-                        title="删除"
-                      >
-                        <TrashIcon />
-                      </button>
-                    </div>
-                  )}
+                  {/* 行内悬停操作组已删（2026-08-20 用户拍板：置顶/重命名/删除
+                      和归档一起收进悬停预览卡底部图标排——行右缘淡入的按钮组是
+                      归档误触之源）。标题因此全程占满行宽。 */}
                 </div>
               )
             })}
@@ -1928,6 +1989,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       <SessionPreviewCard
         onHoldOpen={holdPreviewOpen}
         onClose={hidePreview}
+        onPin={togglePinnedSession}
+        onRename={(key, currentSummary) => {
+          setEditingId(key)
+          setEditText(currentSummary === '(未命名)' ? '' : currentSummary)
+        }}
+        onDelete={setConfirmDeleteId}
         onArchive={(sessionId) => void archiveSession(sessionId)}
       />
     </div>
