@@ -51,6 +51,7 @@ import ClosePromptDialog from './components/ClosePromptDialog'
 import UpdateAvailableDialog from './components/UpdateAvailableDialog'
 import { useApplyAppearanceSettings } from './store/appearanceStore'
 import { useTaskbarBadge } from './hooks/useTaskbarBadge'
+import { usePetReporter } from './hooks/usePetReporter'
 import { AppLogo } from './components/AppLogo'
 import { pushAgentEvent, flushAgentEvents } from './store/streamBatcher'
 import type { Provider, UpdateCheckResult } from '../shared/ipc'
@@ -334,6 +335,7 @@ function MainViewContent({
 export default function App(): JSX.Element {
   useApplyAppearanceSettings()
   useTaskbarBadge()
+  usePetReporter()
 
   const meta = useSessionStore((s) => s.meta)
   const bootstrapped = useSessionStore((s) => s.bootstrapped)

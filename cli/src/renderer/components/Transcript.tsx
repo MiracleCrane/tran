@@ -940,20 +940,29 @@ const MCP_ACTIVITY_META = { label: '使用 MCP 工具', icon: 'mcp', tone: 'web'
 
 function summarizeActivity(blocks: AssistantBlock[]): ActivitySegment[] {
   let thinking = 0
-  const tools = new Map<string, number>()
+  // 按「展示 label」分桶而不是按工具全名：mcp__desktop__x / mcp__browser__y /
+  // mcp__yuque__z 全名各不相同，曾各自成段——一行里出现三个「使用 MCP 工具」
+  // （2026-08-20 用户截图）。patch/edit_file、Read/read_file 这类同义工具同理。
+  const tools = new Map<string, { meta: { label: string; icon: string; tone: string }; count: number }>()
   for (const block of blocks) {
-    if (block.kind === 'thinking') thinking += 1
-    else if (block.kind === 'tool') tools.set(block.name, (tools.get(block.name) ?? 0) + 1)
+    if (block.kind === 'thinking') {
+      thinking += 1
+      continue
+    }
+    if (block.kind !== 'tool') continue
+    // 未收录的工具也给兜底图标 + 中性灰微光（与单卡头部的 other 同一套）。
+    const meta =
+      TOOL_ACTIVITY_META[block.name] ??
+      (block.name.startsWith('mcp__') ? MCP_ACTIVITY_META : { label: `使用了 ${block.name}`, icon: 'other', tone: 'think' })
+    const bucket = tools.get(meta.label)
+    if (bucket) bucket.count += 1
+    else tools.set(meta.label, { meta, count: 1 })
   }
   const segments: ActivitySegment[] = []
   // 思考排最前：时间上它也确实发生在动作之前。2026-08：思考段也要图标 +
   // 微光（用户点名），只是色调比动作段更收敛（灰紫）。
   if (thinking > 0) segments.push({ kind: 'thinking', label: '思考', count: thinking, icon: 'think', tone: 'think' })
-  for (const [name, count] of tools) {
-    // 未收录的工具也给兜底图标 + 中性灰微光（与单卡头部的 other 同一套）。
-    const meta =
-      TOOL_ACTIVITY_META[name] ??
-      (name.startsWith('mcp__') ? MCP_ACTIVITY_META : { label: `使用了 ${name}`, icon: 'other', tone: 'think' })
+  for (const { meta, count } of tools.values()) {
     segments.push({
       kind: 'tool',
       label: meta.label,
@@ -966,12 +975,22 @@ function summarizeActivity(blocks: AssistantBlock[]): ActivitySegment[] {
 }
 
 /** 折叠摘要的一行渲染：每段「图标 + 淡色微光动作名 + 次数」，段间靠间距
- *  自然分开（2026-08：不要「·」——那玩意儿小到根本看不见还显脏）。 */
+ *  自然分开（2026-08：不要「·」——那玩意儿小到根本看不见还显脏）。
+ *
+ *  一排是硬约束（2026-08-20 用户：「以后这种一定放到一排」），三层保险：
+ *  1. 段数上限 MAX_VISIBLE_SEGMENTS，超出的尾部收成一段「等 N 类」；
+ *  2. flex-nowrap + 每段 shrink-0，物理上不允许换行；
+ *  3. overflow-hidden 兜底——窗口太窄时宁可裁掉尾部，也不换行。 */
+const MAX_VISIBLE_SEGMENTS = 8
+
 function ActivitySummary({ segments }: { segments: ActivitySegment[] }): JSX.Element {
+  const visible =
+    segments.length > MAX_VISIBLE_SEGMENTS ? segments.slice(0, MAX_VISIBLE_SEGMENTS - 1) : segments
+  const hidden = segments.length - visible.length
   return (
-    <span className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
-      {segments.map((seg) => (
-        <span key={`${seg.kind}-${seg.label}`} className="inline-flex items-center gap-1">
+    <span className="flex min-w-0 shrink-0 flex-nowrap items-center gap-x-2.5 overflow-hidden whitespace-nowrap">
+      {visible.map((seg) => (
+        <span key={`${seg.kind}-${seg.label}`} className="inline-flex shrink-0 items-center gap-1">
           {seg.icon && (
             <span className="text-zinc-500">
               <ToolGlyph kind={seg.icon} size={11} />
@@ -993,6 +1012,9 @@ function ActivitySummary({ segments }: { segments: ActivitySegment[] }): JSX.Ele
           )}
         </span>
       ))}
+      {hidden > 0 && (
+        <span className="shrink-0 text-[10px] text-zinc-600">等 {hidden} 类</span>
+      )}
     </span>
   )
 }
@@ -1014,7 +1036,7 @@ const ActivityGroupRow = memo(function ActivityGroupRow({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-fit cursor-pointer select-none items-center gap-1.5 rounded-lg bg-white/[0.03] px-2 py-1 text-left text-xs text-zinc-500 transition hover:bg-white/[0.055] hover:text-zinc-400"
+        className="flex w-fit max-w-full cursor-pointer select-none items-center gap-1.5 overflow-hidden rounded-lg bg-white/[0.03] px-2 py-1 text-left text-xs text-zinc-500 transition hover:bg-white/[0.055] hover:text-zinc-400"
       >
         <ActivitySummary segments={summarizeActivity(entries.map((e) => e.block))} />
       </button>
@@ -1080,10 +1102,12 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
         type="button"
         aria-expanded={open}
         onClick={() => setUserToggled(!open)}
-        className="flex w-fit cursor-pointer select-none items-center gap-1.5 rounded-lg bg-white/[0.03] px-2 py-1 text-left text-xs text-zinc-500 transition hover:bg-white/[0.055] hover:text-zinc-400"
+        className="flex w-fit max-w-full cursor-pointer select-none items-center gap-1.5 overflow-hidden rounded-lg bg-white/[0.03] px-2 py-1 text-left text-xs text-zinc-500 transition hover:bg-white/[0.055] hover:text-zinc-400"
       >
         <ActivitySummary segments={summarizeActivity(blocks)} />
-        {groupNote && <span className="truncate text-zinc-600">· {groupNote}</span>}
+        {/* AI 整组总结跟在计数后面，但优先级最低：pill 段 shrink-0 保住完整，
+            空间不够时这句先截断（min-w-0 + truncate），绝不能把 pill 挤换行。 */}
+        {groupNote && <span className="min-w-0 truncate text-zinc-600">· {groupNote}</span>}
       </button>
       {everOpened && (
         <Collapse open={open}>

@@ -13,6 +13,7 @@ import { log, scheduleLogMaintenance } from './logger'
 import { seedDefaultIfNeeded } from './providers'
 import { sweepOrphanSessionDirs } from './sessionDelete'
 import { loadSettings, saveSettings } from './settings'
+import { initPetWindow, shutdownPetWindow } from './petWindow'
 import { createTray, type ForgeTray } from './tray'
 import { checkForUpdates } from './updater'
 import type { UpdateCheckResult } from '../shared/ipc'
@@ -203,6 +204,10 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     mainWindow = null
+    // 主窗口真正销毁（关到托盘走的是 hide，不会到这）时宠物必须一起死——
+    // 否则只剩宠物窗口，window-all-closed 永远凑不齐，进程退不掉。
+    // macOS activate 重建主窗口时 createWindow 会再把宠物开回来。
+    shutdownPetWindow()
   })
 
   // 同步最大化状态给渲染层：自定义标题栏按钮要切换 最大化/还原 图标
@@ -347,6 +352,10 @@ function createWindow(): void {
       query: vulkanBackend ? { gpuBackend: 'vulkan' } : {}
     })
   }
+
+  // 桌面宠物跟着主窗口的生命周期走：启动和 macOS activate 重建都会走到这
+  // （内部有防重入：IPC 只注册一次、窗口已存在则不重建；设置关了则不开）。
+  initPetWindow(showAndFocusMainWindow)
 }
 
 /** 本机代理地址（Clash 混合端口）。用户机器固定配置，见 AGENTS.md。 */
@@ -444,6 +453,8 @@ if (!hasSingleInstanceLock) {
 
 app.on('before-quit', () => {
   isQuitting = true
+  // 宠物是独立窗口，退出时一并销毁，别让它在退出流程里多活一拍。
+  shutdownPetWindow()
   // 空壳治理：退出前清理本次运行中 Tran 新建但没发过消息的空会话（同步
   // 文件删除立即生效；ACP 通知尽力而为，进程随即退出）。
   // shutdown 是异步且 Electron 不 await before-quit：其末尾 kill ACP 子进程的

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.29 - 2026-08-20
+
+### 中文
+
+- 新增:**桌面宠物**——透明、无边框、置顶的魔性摇摆猫悬浮窗（独立窗口，主窗口最小化/关到托盘它也在）。跟随 Agent 状态：干活时摇摆、等你回话/确认权限时定格出气泡、任务完成庆祝 4 秒、出错变灰。可拖拽换位（位置记忆），右键菜单（显示 Tran / 隐藏宠物 / 退出）。设置 → 系统可开关，默认开。
+- 优化:**折叠活动摘要永远一排**——MCP 工具按大类合并成一段（原先 mcp__desktop / mcp__browser / mcp__yuque 各算一段，一行能出现三个「使用 MCP 工具」）；超过 8 段尾部收成「等 N 类」；整行 nowrap + 溢出裁切硬约束，任何窗口宽度下不换行；右侧 AI 整组总结空间不够时优先截断，不再把 pill 挤到第二行。
+
+### English
+
+- New: desktop pet — a transparent, frameless, always-on-top swaying-cat window (independent of the main window; survives minimize-to-tray). It mirrors agent state: sways while working, freezes with a bubble when waiting for your input/permission, celebrates for 4s on completion, turns grayscale on error. Draggable (position persisted), with a context menu (show Tran / hide pet / quit). Toggle in Settings → System, on by default.
+- Activity group summary now always stays on one row: MCP tools merge into a single bucket (previously one pill per MCP server, so "使用 MCP 工具" could appear three times); beyond 8 segments the tail collapses into an "N more" pill; the row is hard-clamped with nowrap + overflow clipping, and the AI group note truncates first instead of pushing pills onto a second line.
+
 ## v1.1.28 - 2026-08-19
 
 ### 中文

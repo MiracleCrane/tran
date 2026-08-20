@@ -20,7 +20,11 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
-        input: { index: resolve(__dirname, 'src/preload/index.ts') }
+        input: {
+          index: resolve(__dirname, 'src/preload/index.ts'),
+          // 桌面宠物窗口的独立 preload（只暴露 petApi，不带完整 ForgeApi）。
+          pet: resolve(__dirname, 'src/preload/pet.ts')
+        }
       }
     }
   },
@@ -33,7 +37,11 @@ export default defineConfig({
     },
     build: {
       rollupOptions: {
-        input: { index: resolve(__dirname, 'src/renderer/index.html') }
+        input: {
+          index: resolve(__dirname, 'src/renderer/index.html'),
+          // 桌面宠物窗口页面（独立 BrowserWindow 加载，见 main/petWindow.ts）。
+          pet: resolve(__dirname, 'src/renderer/pet.html')
+        }
       }
     },
     plugins: [react()]

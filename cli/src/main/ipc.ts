@@ -56,6 +56,7 @@ import {
 import { translateTexts } from './translate'
 import { getTranslateConfig, saveTranslateConfig, testTranslate } from './translateConfig'
 import { getPreferences, savePreferences } from './preferences'
+import { setPetEnabled } from './petWindow'
 import { DEFAULT_AGENT_BACKEND_ID, normalizeAgentBackend } from '../shared/agentBackends'
 import {
   getDiagnosticLog,
@@ -855,9 +856,12 @@ export function registerIpc(
     bridge.listModels()
   )
   ipcMain.handle('forge:getPreferences', async (): Promise<Preferences> => getPreferences())
-  ipcMain.handle('forge:savePreferences', async (_e, prefs: Preferences): Promise<Preferences> =>
-    savePreferences(prefs)
-  )
+  ipcMain.handle('forge:savePreferences', async (_e, prefs: Preferences): Promise<Preferences> => {
+    const next = savePreferences(prefs)
+    // 桌面宠物开关立即生效（其余偏好项都是渲染层自己消费，主进程不用管）。
+    if (prefs.desktopPetEnabled !== undefined) setPetEnabled(prefs.desktopPetEnabled)
+    return next
+  })
   ipcMain.handle(
     'forge:getRuntimeStatus',
     async (_e, cwd?: string, model?: string, options?: { refreshProbe?: boolean }): Promise<RuntimeStatus> =>

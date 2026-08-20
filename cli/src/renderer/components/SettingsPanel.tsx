@@ -163,6 +163,7 @@ export default function SettingsPanel(): JSX.Element {
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   const [minimizeToTray, setMinimizeToTray] = useState(false)
   const [startMaximized, setStartMaximized] = useState(false)
+  const [desktopPet, setDesktopPet] = useState(true)
   const [richComposer, setRichComposer] = useState(false)
   const [nativeNotifications, setNativeNotifications] = useState(true)
   const [aiNaming, setAiNaming] = useState(true)
@@ -237,6 +238,7 @@ export default function SettingsPanel(): JSX.Element {
         setWslSupportEnabled(!!p.wslSupportEnabled)
         setMinimizeToTray(!!p.minimizeToTray)
         setStartMaximized(!!p.startMaximized)
+        setDesktopPet(p.desktopPetEnabled !== false)
     setRichComposer(p.richComposer === true)
         setRichComposer(p.richComposer === true)
         setNativeNotifications(p.nativeNotifications !== false)
@@ -308,9 +310,19 @@ export default function SettingsPanel(): JSX.Element {
     }
   }
 
+  /** 桌面宠物开关：主进程立即创建/销毁宠物窗口。 */
+  const toggleDesktopPet = async (next: boolean): Promise<void> => {
+    setDesktopPet(next)
+    try {
+      await window.api.savePreferences({ desktopPetEnabled: next })
+      flashSaved()
+    } catch {
+      setDesktopPet(!next)
+    }
+  }
+
   /** 富文本输入框（实验）。改完要重开窗口才换那一层 DOM。 */
-  const toggleRichComposer = async (next: boolean): Promise<void> => {
-    setRichComposer(next)
+  const toggleRichComposer = async (next: boolean): Promise<void> => {    setRichComposer(next)
     try {
       await window.api.savePreferences({ richComposer: next })
       flashSaved()
@@ -1224,6 +1236,12 @@ export default function SettingsPanel(): JSX.Element {
               description="启动 Tran 时自动将主窗口最大化。"
               checked={startMaximized}
               onChange={(checked) => void toggleStartMaximized(checked)}
+            />
+            <ToggleControl
+              label="桌面宠物"
+              description="在桌面右下角显示一只摇摆猫，跟随 Agent 状态变化（干活 / 等你回话 / 搞定 / 出错）。可拖拽换位，右键可隐藏。"
+              checked={desktopPet}
+              onChange={(checked) => void toggleDesktopPet(checked)}
             />
             <ToggleControl
               label="富文本输入框（实验）"

@@ -290,6 +290,29 @@ export interface Preferences {
   summaryModel?: string
   /** 总结类请求使用的 OpenAI 兼容 API 根地址。 */
   summaryApiBaseUrl?: string
+  /** 桌面宠物（透明置顶小窗，动画形象 + agent 状态气泡）。默认开。 */
+  desktopPetEnabled?: boolean
+}
+
+/** 桌面宠物的情绪状态（渲染层 sessionStore 推导 → 主进程转发 → 宠物窗口）。 */
+export type PetMood = 'idle' | 'working' | 'waiting' | 'done' | 'error'
+
+export interface PetState {
+  mood: PetMood
+  /** 气泡文案；idle 时省略（不显示气泡）。 */
+  label?: string
+}
+
+/** 宠物窗口独占的 preload API（window.petApi；主窗口不注入）。 */
+export interface PetApi {
+  onState(cb: (state: PetState) => void): () => void
+  /** 拖拽中：相对上一帧的位移增量（CSS px，与 setPosition 的 DIP 同单位。
+   *  不要发 screenX/clientX 绝对坐标——高缩放下两者单位不一致会滚雪球。 */
+  dragDelta(delta: { dx: number; dy: number }): void
+  /** 拖拽结束：主进程立即把当前位置落盘。 */
+  dragEnd(): void
+  /** 请求弹出宠物右键菜单（显示主窗口 / 隐藏宠物）。 */
+  openContextMenu(): void
 }
 
 /** 提示词策略自检的一项结果（设置页「提示词自检」）。四种请求形态各打一发，
@@ -907,6 +930,8 @@ export interface ForgeApi {
   listAgentModels(): Promise<ComposerModel[]>
   getPreferences(): Promise<Preferences>
   savePreferences(prefs: Preferences): Promise<Preferences>
+  /** 主渲染层 → 主进程：上报桌面宠物状态（主进程转发给宠物窗口）。 */
+  petSetState(state: PetState): void
   getRuntimeStatus(cwd?: string, model?: string, options?: RuntimeStatusOptions): Promise<RuntimeStatus>
   runWslHealthCheck(cwd: string): Promise<WslHealthReport>
   repairWslEnvironment(cwd: string): Promise<WslHealthReport>
@@ -1115,5 +1140,7 @@ export interface BrowserBridgeStatus {
 declare global {
   interface Window {
     api: ForgeApi
+    /** 仅宠物窗口注入（preload/pet.ts）；主窗口为 undefined。 */
+    petApi?: PetApi
   }
 }

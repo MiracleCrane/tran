@@ -83,6 +83,10 @@ interface PersistedSettings {
   minimizeToTray?: boolean
   /** 启动时最大化主窗口（默认关）。 */
   startMaximized?: boolean
+  /** 桌面宠物（透明置顶小窗 + agent 状态气泡，默认开）。 */
+  desktopPetEnabled?: boolean
+  /** 桌面宠物窗口的持久化位置（屏幕坐标）。 */
+  petPosition?: { x: number; y: number }
   /** 实验：富文本输入框（内联命令胶囊）。默认关。 */
   richComposer?: boolean
   /** User has already answered the first-close prompt (don't ask again). */
@@ -347,6 +351,13 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.vulkanBackend = optionalBoolean(source.vulkanBackend)
   settings.minimizeToTray = optionalBoolean(source.minimizeToTray)
   settings.startMaximized = optionalBoolean(source.startMaximized)
+  settings.desktopPetEnabled = optionalBoolean(source.desktopPetEnabled)
+  const petPos = asRecord(source.petPosition)
+  settings.petPosition =
+    typeof petPos?.x === 'number' && Number.isFinite(petPos.x) &&
+    typeof petPos?.y === 'number' && Number.isFinite(petPos.y)
+      ? { x: petPos.x, y: petPos.y }
+      : undefined
   settings.richComposer = optionalBoolean(source.richComposer)
   settings.closePromptDismissed = optionalBoolean(source.closePromptDismissed)
   settings.aiNamingEnabled = optionalBoolean(source.aiNamingEnabled)

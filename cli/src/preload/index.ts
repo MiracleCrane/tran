@@ -80,6 +80,7 @@ const api: ForgeApi = {
 
   getPreferences: () => ipcRenderer.invoke('forge:getPreferences'),
   savePreferences: (prefs) => ipcRenderer.invoke('forge:savePreferences', prefs),
+  petSetState: (state) => ipcRenderer.send('pet:set-state', state),
   getRuntimeStatus: (cwd, model, options) =>
     ipcRenderer.invoke('forge:getRuntimeStatus', cwd, model, options),
   runWslHealthCheck: (cwd) => ipcRenderer.invoke('forge:runWslHealthCheck', cwd),
