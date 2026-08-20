@@ -309,8 +309,11 @@ export interface PetState {
 /** 宠物窗口独占的 preload API（window.petApi；主窗口不注入）。 */
 export interface PetApi {
   onState(cb: (state: PetState) => void): () => void
-  /** 请求弹出宠物右键菜单（显示主窗口 / 隐藏宠物）。
-   *  拖拽不需要 API：stage 是 -webkit-app-region:drag，OS 原生处理。 */
+  /** 拖拽中：指针位移增量（movementX/Y，CSS px = DIP；渲染层按 rAF 合帧上报）。 */
+  dragDelta(delta: { dx: number; dy: number }): void
+  /** 拖拽结束：主进程立即把当前位置落盘。 */
+  dragEnd(): void
+  /** 请求弹出宠物右键菜单（显示主窗口 / 隐藏宠物）。 */
   openContextMenu(): void
 }
 

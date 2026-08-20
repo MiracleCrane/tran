@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.31 - 2026-08-20
+
+### 中文
+
+- 修复:**悬浮窗真的拖不动了**——v1.1.30 用的 `-webkit-app-region: drag` 在透明窗口上根本不生效（Chromium 限制）。改回事件驱动拖拽但治好"卡"：pointermove 累计 movementX/Y 按 rAF 合帧上报主进程 setPosition（实测两次 +40/+30 精准落位 +80/+60），拖动期间自动切定格帧消掉动画合成开销。
+- 修复:**腿部仍有零星帧消失**——抠图只保留最大连通体，腿/裙摆连接变细的帧整条腿被当噪声丢掉。改为保留所有 ≥40px 连通体，逐帧验证腿区覆盖正常。
+- 修复:**循环点仍闪黑**——素材首尾淡入淡出帧里人物以黑色剪影闪现（alpha 不透明 + RGB 近黑）。alpha 改按帧亮度整体缩放：淡出 = 淡出到透明，帧 0 已全透明、过渡帧半透明，不再有黑色。
+
+### English
+
+- Fix: float window truly undraggable — v1.1.30's `-webkit-app-region: drag` simply doesn't work on transparent windows (Chromium limitation). Back to event-driven drag, minus the jank: pointermove accumulates movementX/Y, flushed per animation frame to the main process (verified precise to the pixel), and the animation swaps to a still frame while dragging to cut compositing cost.
+- Fix: legs still vanished on a few frames — the keyer kept only the largest connected component, so a thinning leg/skirt bridge lost the whole leg. Now keeps every component ≥40px.
+- Fix: black flash at the loop point — on the material's baked fade frames the character flashed as a black silhouette. Alpha now scales with each frame's brightness, so fades go to transparent instead of black (frame 0 fully transparent).
+
 ## v1.1.30 - 2026-08-20
 
 ### 中文

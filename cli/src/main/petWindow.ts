@@ -13,11 +13,13 @@ import type { PetMood, PetState, Preferences } from '../shared/ipc'
  *
  * 实现要点：
  * - 窗口配置照抄 controlOverlay 那套（transparent + skipTaskbar +
- *   backgroundThrottling:false），但**不能** setIgnoreMouseEvents——宠物要
- *   支持拖拽换位和右键菜单。同理也不能 focusable:false：Windows 上那种
- *   窗口完全收不到 OS 鼠标输入（2026-08-20 实证）。
- * - 拖拽交给 OS 原生：stage 用 -webkit-app-region:drag，右键不受影响；
- *   位置落盘靠窗口 'move' 事件防抖（'moved' 是 macOS 限定，Windows 不发）。
+ *   backgroundThrottling:false），但不能 setIgnoreMouseEvents——宠物要
+ *   支持拖拽换位和右键菜单。focusable:false 不抢焦点。
+ * - 拖拽：pointermove → 渲染层 rAF 合帧 → movementX/Y 增量 IPC → 主进程
+ *   setPosition。-webkit-app-region:drag 在透明窗口上不生效（Chromium
+ *   限制），主进程 60Hz 轮询 setPosition 会冻死应用（2026-08-20 实测），
+ *   事件驱动 + 合帧是实测可行的唯一组合。位置落盘靠 'move' 事件防抖 +
+ *   drag-end 立即落盘（'moved' 是 macOS 限定事件，Windows 不发）。
  * - 页面加载完之前 webContents.send 会丢，lastState 缓存 + did-finish-load
  *   补发（同 controlOverlay 的 pendingState 思路）。
  * - 位置持久化在 settings.petPosition；启动时校验落在某块屏内，防拔副屏后
@@ -136,10 +138,7 @@ function createPetWindow(): void {
     maximizable: false,
     fullscreenable: false,
     skipTaskbar: true,
-    // focusable:true：false 在 Windows 上会让窗口完全收不到 OS 鼠标输入
-    // （拖拽/右键全废，2026-08-20 逐层排查实证）。宠物没有输入控件，
-    // 可聚焦唯一的代价是点击时焦点短暂落在它身上，可接受。
-    focusable: true,
+    focusable: false,
     show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/pet.js'),
@@ -215,6 +214,20 @@ export function initPetWindow(
   if (!ipcRegistered) {
     ipcRegistered = true
     ipcMain.on('pet:set-state', (_e, state: unknown) => updatePetState(state))
+    // 拖拽：渲染层按 rAF 合帧上报 movementX/Y 增量，主进程逐条 setPosition。
+    // 注意 -webkit-app-region:drag 在透明窗口上不生效（Chromium 限制），
+    // 主进程 60Hz 轮询 setPosition 会把应用冻死——事件驱动是唯一出路。
+    ipcMain.on('pet:drag-delta', (_e, delta: unknown) => {
+      const win = petWindow
+      if (!win || win.isDestroyed()) return
+      const d = delta && typeof delta === 'object' ? (delta as Record<string, unknown>) : null
+      if (typeof d?.dx !== 'number' || typeof d?.dy !== 'number') return
+      const [x, y] = win.getPosition()
+      win.setPosition(Math.round(x + d.dx), Math.round(y + d.dy))
+    })
+    ipcMain.on('pet:drag-end', () => {
+      if (petWindow && !petWindow.isDestroyed()) scheduleSavePosition(petWindow, 0)
+    })
     ipcMain.on('pet:context-menu', () => {
       const win = petWindow
       if (!win || win.isDestroyed()) return
