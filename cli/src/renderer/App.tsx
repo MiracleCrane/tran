@@ -52,6 +52,8 @@ import UpdateAvailableDialog from './components/UpdateAvailableDialog'
 import { useApplyAppearanceSettings } from './store/appearanceStore'
 import { useTaskbarBadge } from './hooks/useTaskbarBadge'
 import { usePetReporter } from './hooks/usePetReporter'
+import PetMascot from './pet/PetMascot'
+import { usePetStore } from './store/petStore'
 import { AppLogo } from './components/AppLogo'
 import { pushAgentEvent, flushAgentEvents } from './store/streamBatcher'
 import type { Provider, UpdateCheckResult } from '../shared/ipc'
@@ -336,6 +338,18 @@ export default function App(): JSX.Element {
   useApplyAppearanceSettings()
   useTaskbarBadge()
   usePetReporter()
+
+  // 宠物总开关灌入渲染层镜像；之后靠 preferences-changed 推送保持同步
+  // （设置面板拨开关、宠物右键菜单「隐藏宠物」都会推）。
+  useEffect(() => {
+    void window.api
+      .getPreferences()
+      .then((p) => usePetStore.getState().setMasterEnabled(p.desktopPetEnabled !== false))
+      .catch(() => {})
+    return window.api.onPreferencesChanged((p) => {
+      usePetStore.getState().setMasterEnabled(p.desktopPetEnabled !== false)
+    })
+  }, [])
 
   const meta = useSessionStore((s) => s.meta)
   const bootstrapped = useSessionStore((s) => s.bootstrapped)
@@ -773,6 +787,7 @@ export default function App(): JSX.Element {
           <PermissionModal />
           <ImageContextMenuHost />
           <TooltipHost />
+          <PetMascot />
           <SessionSearchPalette />
           <ClosePromptDialog open={closePromptOpen} onClose={() => setClosePromptOpen(false)} />
           <UpdateAvailableDialog

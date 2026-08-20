@@ -1,30 +1,32 @@
 import { BrowserWindow, Menu, app, ipcMain, screen } from 'electron'
 import { join } from 'node:path'
 import { loadSettings, saveSettings } from './settings'
-import { log } from './logger'
-import type { PetMood, PetState } from '../shared/ipc'
+import { getPreferences } from './preferences'
+import type { PetMood, PetState, Preferences } from '../shared/ipc'
 
 /**
  * 桌面宠物（Codex Pets 的 Tran 版）：透明、无边框、置顶的悬浮小窗，
  * 里面是魔性摇摆猫的动画，气泡跟着 agent 状态走（干活/等你回话/搞定/出错）。
  *
+ * 这是「Tran 以外」的展示位（设置里可单独关）；Tran 界面内的舞动形象是
+ * 渲染层的 PetMascot 组件，与本窗口互不影响，两边共用同一份状态推送。
+ *
  * 实现要点：
  * - 窗口配置照抄 controlOverlay 那套（transparent + skipTaskbar +
  *   backgroundThrottling:false），但**不能** setIgnoreMouseEvents——宠物要
- *   支持拖拽换位和右键菜单。
- * - focusable:false：不抢焦点、不打断输入法；鼠标事件照常收到。
- * - 拖拽走 IPC 增量（pet:drag-delta）：frameless + transparent 的窗口在
- *   Windows 上 -webkit-app-region:drag 不可靠，手动 setPosition 最稳。
- *   只发 CSS px 位移增量、不发 screenX 绝对坐标——200% 缩放下 screenX
- *   与 clientX 单位不一致，绝对坐标换算会让窗口位移滚雪球（实测 3.5x）。
+ *   支持拖拽换位和右键菜单。同理也不能 focusable:false：Windows 上那种
+ *   窗口完全收不到 OS 鼠标输入（2026-08-20 实证）。
+ * - 拖拽交给 OS 原生：stage 用 -webkit-app-region:drag，右键不受影响；
+ *   位置落盘靠窗口 'move' 事件防抖（'moved' 是 macOS 限定，Windows 不发）。
  * - 页面加载完之前 webContents.send 会丢，lastState 缓存 + did-finish-load
  *   补发（同 controlOverlay 的 pendingState 思路）。
  * - 位置持久化在 settings.petPosition；启动时校验落在某块屏内，防拔副屏后
  *   宠物挂在虚拟桌面外回不来。
  */
 
-const PET_WIDTH = 240
-const PET_HEIGHT = 360
+/** 2026-08-20 用户：「再搞小一号」——从 150x230 缩到 115x176。 */
+const PET_WIDTH = 115
+const PET_HEIGHT = 176
 /** 与屏幕右/下边缘的默认间距（无历史位置时落右下角）。 */
 const EDGE_MARGIN = 48
 const MOVE_SAVE_DEBOUNCE_MS = 500
@@ -38,6 +40,8 @@ let moveSaveTimer: NodeJS.Timeout | null = null
 let ipcRegistered = false
 /** index.ts 注入的主窗口显示回调（右键菜单「显示 Tran」用）。 */
 let showMainWindow: (() => void) | null = null
+/** index.ts 注入的偏好变更通知（右键菜单「隐藏宠物」后同步渲染层镜像）。 */
+let notifyPrefsChanged: ((prefs: Preferences) => void) | null = null
 
 function sanitizeState(state: unknown): PetState {
   const raw = state && typeof state === 'object' ? (state as Record<string, unknown>) : {}
@@ -47,6 +51,12 @@ function sanitizeState(state: unknown): PetState {
       ? raw.label.trim().slice(0, LABEL_MAX_LEN)
       : undefined
   return label ? { mood, label } : { mood }
+}
+
+/** 悬浮窗是否应该存在：总开关 && 「Tran 以外展示」开关。 */
+function shouldFloat(): boolean {
+  const s = loadSettings()
+  return s.desktopPetEnabled !== false && s.petOutsideEnabled !== false
 }
 
 function defaultPosition(): { x: number; y: number } {
@@ -126,7 +136,10 @@ function createPetWindow(): void {
     maximizable: false,
     fullscreenable: false,
     skipTaskbar: true,
-    focusable: false,
+    // focusable:true：false 在 Windows 上会让窗口完全收不到 OS 鼠标输入
+    // （拖拽/右键全废，2026-08-20 逐层排查实证）。宠物没有输入控件，
+    // 可聚焦唯一的代价是点击时焦点短暂落在它身上，可接受。
+    focusable: true,
     show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/pet.js'),
@@ -172,13 +185,20 @@ export function updatePetState(state: unknown): void {
   if (petWindow) sendState(petWindow, lastState)
 }
 
-/** 开关宠物并持久化（设置页开关与右键菜单「隐藏宠物」共用）。 */
+/** 按当前两个开关的组合创建/销毁悬浮窗（总开关、外部展示开关变更后统一走这）。 */
+export function applyPetWindowPrefs(): void {
+  if (shouldFloat()) createPetWindow()
+  else destroyPetWindow()
+}
+
+/** 总开关：持久化 + 应用（右键菜单「隐藏宠物」也走这）。 */
 export function setPetEnabled(enabled: boolean): void {
   const s = loadSettings()
   s.desktopPetEnabled = enabled
   saveSettings(s)
-  if (enabled) createPetWindow()
-  else destroyPetWindow()
+  applyPetWindowPrefs()
+  // 主进程侧的变更也要告诉渲染层（petStore 镜像、界面内形象显隐）。
+  notifyPrefsChanged?.(getPreferences())
 }
 
 /**
@@ -186,31 +206,22 @@ export function setPetEnabled(enabled: boolean): void {
  * @param onShowMainWindow 右键菜单「显示 Tran」的回调（index.ts 注入，
  *   避免 petWindow → index 的反向依赖）。
  */
-export function initPetWindow(onShowMainWindow: () => void): void {
+export function initPetWindow(
+  onShowMainWindow: () => void,
+  onPrefsChanged?: (prefs: Preferences) => void
+): void {
   showMainWindow = onShowMainWindow
+  notifyPrefsChanged = onPrefsChanged ?? null
   if (!ipcRegistered) {
     ipcRegistered = true
     ipcMain.on('pet:set-state', (_e, state: unknown) => updatePetState(state))
-    ipcMain.on('pet:drag-delta', (_e, delta: unknown) => {
-      const win = petWindow
-      if (!win || win.isDestroyed()) return
-      const d = delta && typeof delta === 'object' ? (delta as Record<string, unknown>) : null
-      if (typeof d?.dx !== 'number' || typeof d?.dy !== 'number') return
-      const [x, y] = win.getPosition()
-      win.setPosition(Math.round(x + d.dx), Math.round(y + d.dy))
-    })
-    ipcMain.on('pet:drag-end', () => {
-      if (petWindow && !petWindow.isDestroyed()) scheduleSavePosition(petWindow, 0)
-    })
     ipcMain.on('pet:context-menu', () => {
       const win = petWindow
       if (!win || win.isDestroyed()) return
       buildContextMenu(win).popup({ window: win })
     })
   }
-  if (loadSettings().desktopPetEnabled !== false) {
-    createPetWindow()
-  }
+  applyPetWindowPrefs()
 }
 
 /** 应用退出前调用（before-quit），确保宠物窗口不拦住退出。 */

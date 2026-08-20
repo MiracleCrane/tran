@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.30 - 2026-08-20
+
+### 中文
+
+- 新增:**宠物进驻 Tran 界面**——摇摆猫主战场搬到聊天视图右下角（90px，无缝循环一直摇），状态气泡照旧（干活/等你回话/搞定了/出错了灰度）。原桌面悬浮窗降级为可选项：设置 → 系统新增「宠物在 Tran 以外展示」开关，关掉就只在界面内跳。悬浮窗尺寸也缩小到 115x176。
+- 新增:**计时器小猫**——左下角本轮计时（⏱ mm:ss）后面跟了一只同比例摇摆小猫，跑动时才出现。
+- 修复:**悬浮窗拖拽彻底重做**——真实鼠标拖不动/不跟手的根因一串：`focusable:false` 的窗口在 Windows 收不到 OS 鼠标输入；主进程 60Hz 轮询 setPosition 会冻住整个应用。最终方案：`focusable:true` + OS 原生拖拽（-webkit-app-region:drag），stage 加 1% 白底保证全窗可点，位置随动随存。
+- 修复:**宠物换真透明素材**——新 webm 素材实际没有 alpha 通道（VP9 编码丢失），用自研三段式抠图（亮体孔洞填充保鞋、常驻黑部保墨镜刘海、高频围区挡幽灵黑团）重建 863 帧逐帧透明动画 webp：边缘干净无黑框、墨镜完好、腿不闪。循环点不再黑闪（素材自带的黑场帧抠完即透明帧，人物自然隐现）。
+
+### English
+
+- New: the pet moves into Tran's chat view — a 90px seamlessly-looping swaying cat in the bottom-right corner with the same state bubbles (working / waiting / done / error grayscale). The desktop floating window becomes opt-in via a new Settings → System toggle "show pet outside Tran", and shrinks to 115x176.
+- New: a tiny swaying cat now follows the turn timer (⏱ mm:ss) at the bottom-left, visible only while the agent is running.
+- Fix: float-window drag rebuilt from scratch — `focusable:false` windows receive no OS mouse input on Windows, and polling `setPosition` at 60Hz froze the whole app. Final: `focusable:true` + native OS drag (`-webkit-app-region:drag`) with a 1%-white stage so the whole window is clickable; position persists as you drag.
+- Fix: true transparency — the new webm actually had no alpha channel (VP9 dropped it), so we rebuilt all 863 frames with a custom three-part keyer (bright-body hole-fill keeps shoes, resident dark parts keep the sunglasses/bangs, high-frequency enclosure rejects ghost blobs): clean edges, intact sunglasses, no leg flicker, and no more black flash at the loop point.
+
 ## v1.1.29 - 2026-08-20
 
 ### 中文

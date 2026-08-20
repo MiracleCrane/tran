@@ -80,6 +80,12 @@ const api: ForgeApi = {
 
   getPreferences: () => ipcRenderer.invoke('forge:getPreferences'),
   savePreferences: (prefs) => ipcRenderer.invoke('forge:savePreferences', prefs),
+  onPreferencesChanged: (cb) => {
+    const listener = (_event: Electron.IpcRendererEvent, prefs: Parameters<typeof cb>[0]): void =>
+      cb(prefs)
+    ipcRenderer.on('forge:preferences-changed', listener)
+    return () => ipcRenderer.removeListener('forge:preferences-changed', listener)
+  },
   petSetState: (state) => ipcRenderer.send('pet:set-state', state),
   getRuntimeStatus: (cwd, model, options) =>
     ipcRenderer.invoke('forge:getRuntimeStatus', cwd, model, options),

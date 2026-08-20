@@ -2924,6 +2924,18 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
 .tran-turn-timer svg {
   color: rgb(82, 82, 91); /* zinc-600 */
 }
+/* 计时后跟着的同比例摇摆小猫（2026-08-20 用户）：与计时同生命周期，
+   只在跑动时出现。高度对齐计时数字（11px 字 + 余量），pointer-events
+   继承 .tran-turn-timer 的穿透。 */
+.tran-turn-timer-cat {
+  height: 18px;
+  width: auto;
+  margin-left: 2px;
+  /* 猫是全身像（480x700 含上下留白），18px 高时视觉人物比数字略小，
+     用负边距收紧上下留白让猫看起来与数字同高。 */
+  margin-top: -3px;
+  margin-bottom: -3px;
+}
 
 /* 侧栏选中指示条：静态紫色渐变 + 呼吸微光（opacity）。 */
 .session-active-bar {
@@ -3486,6 +3498,12 @@ div:has(textarea:focus) .composer-shortcut-hint {
 .seg-shimmer-agent { background-image: linear-gradient(90deg, #b08ac0 0%, #d5b3e2 50%, #b08ac0 100%); }
 .seg-shimmer-todo { background-image: linear-gradient(90deg, #6fae7f 0%, #9cd4ac 50%, #6fae7f 100%); }
 .seg-shimmer-think { background-image: linear-gradient(90deg, #8a8a9c 0%, #b3b3c8 50%, #8a8a9c 100%); }
+/* 侧栏运行中会话标题（2026-08-19 用户：「运行中会话的流光可以花哨点，颜色和
+   鲜艳程度上」）：青→绿→金三色扫过，比 seg-shimmer 系列鲜艳一档。 */
+.seg-shimmer-running { background-image: linear-gradient(90deg, #5eead4 0%, #a3e635 35%, #fbbf24 65%, #5eead4 100%); }
+/* 当前项目名（2026-08-19 用户：「焦点项目的流光太显眼了，不要用紫色」）：
+   暖灰淡扫，放慢一拍，安静地区分而不是喊。 */
+.seg-shimmer-project { background-image: linear-gradient(90deg, #8f8a80 0%, #c9c2b4 50%, #8f8a80 100%); animation-duration: 4.5s; }
 
 /* peek 浮层实底（2026-08）：半透明时正文（顶栏文字等）会透上来，看着像
    "图层没压上"。注意：生产构建里 @layer 会被 esbuild 展平，层级保护不存在，

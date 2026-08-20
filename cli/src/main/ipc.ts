@@ -56,7 +56,7 @@ import {
 import { translateTexts } from './translate'
 import { getTranslateConfig, saveTranslateConfig, testTranslate } from './translateConfig'
 import { getPreferences, savePreferences } from './preferences'
-import { setPetEnabled } from './petWindow'
+import { applyPetWindowPrefs } from './petWindow'
 import { DEFAULT_AGENT_BACKEND_ID, normalizeAgentBackend } from '../shared/agentBackends'
 import {
   getDiagnosticLog,
@@ -858,8 +858,14 @@ export function registerIpc(
   ipcMain.handle('forge:getPreferences', async (): Promise<Preferences> => getPreferences())
   ipcMain.handle('forge:savePreferences', async (_e, prefs: Preferences): Promise<Preferences> => {
     const next = savePreferences(prefs)
-    // 桌面宠物开关立即生效（其余偏好项都是渲染层自己消费，主进程不用管）。
-    if (prefs.desktopPetEnabled !== undefined) setPetEnabled(prefs.desktopPetEnabled)
+    // 宠物开关立即生效（其余偏好项都是渲染层自己消费，主进程不用管）。
+    // 悬浮窗的存在与否 = 总开关 && 外部展示开关，任一变动都重新评估。
+    if (prefs.desktopPetEnabled !== undefined || prefs.petOutsideEnabled !== undefined) {
+      applyPetWindowPrefs()
+    }
+    // 渲染层镜像状态（petStore.masterEnabled 等）靠推送同步——直接拨
+    // savePreferences 或宠物右键菜单改开关时，界面内的形象也要跟着显隐。
+    withWindow((win) => win.webContents.send('forge:preferences-changed', next))
     return next
   })
   ipcMain.handle(

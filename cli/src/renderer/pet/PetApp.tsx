@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PetMood, PetState } from '../../shared/ipc'
-import swayingCatUrl from '../assets/pet/swaying-cat.webp'
+import swayingCatUrl from '../assets/pet/swaying-cat-alpha.webp'
 import swayingCatStillUrl from '../assets/pet/swaying-cat-still.png'
 
 /**
- * 桌面宠物窗口的页面：一只魔性摇摆猫 + 状态气泡。
+ * 桌面宠物窗口（「Tran 以外」的展示位）的页面：一只魔性摇摆猫 + 状态气泡。
+ * 与界面内 PetMascot 同素材同情绪，状态经主进程 pet:state 推过来。
  *
- * 素材只有一段摇摆动画（webp 不能调速/暂停），状态差异靠三招表达：
- * - 动静切换：working/done 放动画，idle/waiting 换成第一帧定格 PNG（两张图
- *   叠放、透明度切换，避免换 src 的解码闪烁）；
- * - CSS 滤镜：error 灰度；
- * - 气泡文案：mood 对应的主体动作（idle 不出气泡）。
+ * 素材：边缘洪水填充抠过背景的真透明动画 webp（墨镜的封闭黑区完好），
+ * 无限循环；首尾淡出是素材自带的循环衔接设计（黑场帧抠完即透明帧，
+ * 循环点表现为人物自然隐现，没有黑闪）。waiting 时换成同帧定格 PNG
+ * （两张图叠放透明度切换，避免换 src 的解码闪烁）。
  *
- * 交互：整窗可拖拽（pointer 事件 → IPC 换算屏幕坐标），右键出菜单。
+ * 交互：拖拽走 OS 原生（stage 的 -webkit-app-region:drag，见 petWindow.ts），
+ * 右键出菜单。
  */
 
 const BUBBLE_FALLBACK: Record<Exclude<PetMood, 'idle'>, string> = {
@@ -29,27 +30,33 @@ const CSS = `
     display: flex; align-items: flex-end; justify-content: center;
     cursor: grab; user-select: none; -webkit-user-select: none;
     touch-action: none;
+    /* 拖拽交给 OS 原生（WM_NCHITTEST + app-region:drag）。
+       Windows 分层窗口按像素 alpha 命中：真透明区域点不到（会穿透），
+       1% 白等于肉眼不可见的"全窗可点"——拖哪都跟手，右键哪都出菜单。 */
+    background: rgba(255, 255, 255, 0.012);
+    -webkit-app-region: drag;
   }
-  .pet-stage.dragging { cursor: grabbing; }
+  .pet-stage:active { cursor: grabbing; }
   .pet-img {
-    width: 200px; height: auto; display: block; pointer-events: none;
+    width: 90px; height: auto; display: block; pointer-events: none;
     transition: opacity 180ms ease, filter 180ms ease;
   }
   .pet-img.top { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); }
   .pet-stage.mood-error .pet-img { filter: grayscale(.85) brightness(.92); }
-  .pet-stage.mood-idle .pet-img, .pet-stage.mood-waiting .pet-img { filter: saturate(.82); }
   .pet-bubble {
-    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-    max-width: 210px; padding: 6px 12px; border-radius: 12px;
+    position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+    max-width: 108px; padding: 4px 8px; border-radius: 10px;
     background: rgba(22, 20, 31, .88); border: 1px solid rgba(255, 255, 255, .14);
-    color: #f3f1fa; font: 12px/1.5 -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    color: #f3f1fa; font: 11px/1.5 -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     box-shadow: 0 4px 16px rgba(0, 0, 0, .35);
     pointer-events: none;
+    /* 气泡不抢拖拽：整块 stage 都是拖拽区。 */
+    -webkit-app-region: drag;
   }
   .pet-bubble::after {
-    content: ''; position: absolute; bottom: -5px; left: 50%; margin-left: -5px;
-    width: 10px; height: 10px; transform: rotate(45deg);
+    content: ''; position: absolute; bottom: -4px; left: 50%; margin-left: -4px;
+    width: 8px; height: 8px; transform: rotate(45deg);
     background: rgba(22, 20, 31, .88); border-right: 1px solid rgba(255, 255, 255, .14);
     border-bottom: 1px solid rgba(255, 255, 255, .14);
   }
@@ -59,52 +66,18 @@ const CSS = `
 
 export default function PetApp(): JSX.Element {
   const [state, setState] = useState<PetState>({ mood: 'idle' })
-  const [dragging, setDragging] = useState(false)
-  const stageRef = useRef<HTMLDivElement | null>(null)
-  /** 上一帧指针位置（拖拽增量用）。 */
-  const lastPoint = useRef<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
     if (!window.petApi) return
     return window.petApi.onState(setState)
   }, [])
 
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
-    if (e.button !== 0 || !window.petApi) return
-    stageRef.current?.setPointerCapture(e.pointerId)
-    lastPoint.current = { x: e.clientX, y: e.clientY }
-    setDragging(true)
-  }
-  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
-    if (!dragging || !window.petApi || !lastPoint.current) return
-    // 只发增量：clientX 是 CSS px（与主进程 setPosition 的 DIP 同单位），
-    // 混用 screenX 会在高缩放下滚雪球（见 petWindow.ts 头注）。
-    const dx = e.clientX - lastPoint.current.x
-    const dy = e.clientY - lastPoint.current.y
-    if (dx === 0 && dy === 0) return
-    lastPoint.current = { x: e.clientX, y: e.clientY }
-    window.petApi.dragDelta({ dx, dy })
-  }
-  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>): void => {
-    if (!dragging) return
-    stageRef.current?.releasePointerCapture(e.pointerId)
-    lastPoint.current = null
-    setDragging(false)
-    window.petApi?.dragEnd()
-  }
-
-  // 动画层：working/done/error 显示；定格层：idle/waiting 显示。
-  const animated = state.mood === 'working' || state.mood === 'done' || state.mood === 'error'
+  const animated = state.mood !== 'waiting'
   const bubble = state.mood === 'idle' ? null : (state.label ?? BUBBLE_FALLBACK[state.mood])
 
   return (
     <div
-      ref={stageRef}
-      className={`pet-stage mood-${state.mood}${dragging ? ' dragging' : ''}`}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      className={`pet-stage mood-${state.mood}`}
       onContextMenu={(e) => {
         e.preventDefault()
         window.petApi?.openContextMenu()

@@ -290,8 +290,11 @@ export interface Preferences {
   summaryModel?: string
   /** 总结类请求使用的 OpenAI 兼容 API 根地址。 */
   summaryApiBaseUrl?: string
-  /** 桌面宠物（透明置顶小窗，动画形象 + agent 状态气泡）。默认开。 */
+  /** 桌面宠物（动画形象 + agent 状态气泡）。总开关，默认开。 */
   desktopPetEnabled?: boolean
+  /** 宠物是否在 Tran 窗口以外展示（独立桌面悬浮窗）。默认开；
+   *  关掉则只在 Tran 界面内舞动。 */
+  petOutsideEnabled?: boolean
 }
 
 /** 桌面宠物的情绪状态（渲染层 sessionStore 推导 → 主进程转发 → 宠物窗口）。 */
@@ -306,12 +309,8 @@ export interface PetState {
 /** 宠物窗口独占的 preload API（window.petApi；主窗口不注入）。 */
 export interface PetApi {
   onState(cb: (state: PetState) => void): () => void
-  /** 拖拽中：相对上一帧的位移增量（CSS px，与 setPosition 的 DIP 同单位。
-   *  不要发 screenX/clientX 绝对坐标——高缩放下两者单位不一致会滚雪球。 */
-  dragDelta(delta: { dx: number; dy: number }): void
-  /** 拖拽结束：主进程立即把当前位置落盘。 */
-  dragEnd(): void
-  /** 请求弹出宠物右键菜单（显示主窗口 / 隐藏宠物）。 */
+  /** 请求弹出宠物右键菜单（显示主窗口 / 隐藏宠物）。
+   *  拖拽不需要 API：stage 是 -webkit-app-region:drag，OS 原生处理。 */
   openContextMenu(): void
 }
 
@@ -930,6 +929,9 @@ export interface ForgeApi {
   listAgentModels(): Promise<ComposerModel[]>
   getPreferences(): Promise<Preferences>
   savePreferences(prefs: Preferences): Promise<Preferences>
+  /** 偏好变更推送（含主进程侧变更，如宠物右键菜单「隐藏宠物」）——
+   *  渲染层镜像状态（petStore 等）靠它保持同步。 */
+  onPreferencesChanged(cb: (prefs: Preferences) => void): () => void
   /** 主渲染层 → 主进程：上报桌面宠物状态（主进程转发给宠物窗口）。 */
   petSetState(state: PetState): void
   getRuntimeStatus(cwd?: string, model?: string, options?: RuntimeStatusOptions): Promise<RuntimeStatus>

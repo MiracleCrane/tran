@@ -355,7 +355,11 @@ function createWindow(): void {
 
   // 桌面宠物跟着主窗口的生命周期走：启动和 macOS activate 重建都会走到这
   // （内部有防重入：IPC 只注册一次、窗口已存在则不重建；设置关了则不开）。
-  initPetWindow(showAndFocusMainWindow)
+  initPetWindow(showAndFocusMainWindow, (prefs) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('forge:preferences-changed', prefs)
+    }
+  })
 }
 
 /** 本机代理地址（Clash 混合端口）。用户机器固定配置，见 AGENTS.md。 */

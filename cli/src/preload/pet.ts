@@ -11,8 +11,6 @@ const petApi: PetApi = {
     ipcRenderer.on('pet:state', listener)
     return () => ipcRenderer.removeListener('pet:state', listener)
   },
-  dragDelta: (delta) => ipcRenderer.send('pet:drag-delta', delta),
-  dragEnd: () => ipcRenderer.send('pet:drag-end'),
   openContextMenu: () => ipcRenderer.send('pet:context-menu')
 }
 

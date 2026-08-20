@@ -83,8 +83,11 @@ interface PersistedSettings {
   minimizeToTray?: boolean
   /** 启动时最大化主窗口（默认关）。 */
   startMaximized?: boolean
-  /** 桌面宠物（透明置顶小窗 + agent 状态气泡，默认开）。 */
+  /** 桌面宠物（动画形象 + agent 状态气泡，默认开）。总开关：关掉后界面内/外都不显示。 */
   desktopPetEnabled?: boolean
+  /** 宠物是否在 Tran 窗口**以外**展示（独立桌面悬浮窗，默认开）。
+   *  关掉 = 只在 Tran 界面内舞动，不出现在桌面。 */
+  petOutsideEnabled?: boolean
   /** 桌面宠物窗口的持久化位置（屏幕坐标）。 */
   petPosition?: { x: number; y: number }
   /** 实验：富文本输入框（内联命令胶囊）。默认关。 */
@@ -352,6 +355,7 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.minimizeToTray = optionalBoolean(source.minimizeToTray)
   settings.startMaximized = optionalBoolean(source.startMaximized)
   settings.desktopPetEnabled = optionalBoolean(source.desktopPetEnabled)
+  settings.petOutsideEnabled = optionalBoolean(source.petOutsideEnabled)
   const petPos = asRecord(source.petPosition)
   settings.petPosition =
     typeof petPos?.x === 'number' && Number.isFinite(petPos.x) &&

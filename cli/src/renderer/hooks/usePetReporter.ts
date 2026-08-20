@@ -1,64 +1,50 @@
 import { useEffect } from 'react'
 import { useSessionStore } from '../store/sessionStore'
+import { usePetStore } from '../store/petStore'
+import { computePetState } from '../pet/mood'
 import type { PetMood, PetState } from '../../shared/ipc'
 
 /**
- * 把 sessionStore 的原始状态推导成桌面宠物的情绪，上报给主进程（→ 宠物窗口）。
+ * 宠物状态的唯一计算点：订阅 sessionStore，推导情绪（含 done 的 4s 庆祝时序），
+ * 同时分发给两个消费者——
+ * - 渲染层 petStore（界面内 PetMascot 订阅，零 IPC）；
+ * - 主进程 pet:set-state（转发给桌面悬浮窗，关着时只缓存不渲染，零成本）。
  *
- * 映射（优先级从高到低）：
- * - waiting：有权限确认（pendingPermissions）或提问（elicitationQueue）在等用户；
- * - working：turn 在跑（含压缩上下文）；
- * - error：上一轮出错；
- * - done：working 刚结束且没出错——庆祝 4s 再回 idle；
- * - idle：其余时间。
- *
- * store 每次流式更新都会触发订阅，但 compute 是纯字段读取、send 按 key 去重，
- * 实际 IPC 只在情绪真正变化时发生。宠物关着时主进程只缓存不转发，零成本。
+ * store 每次流式更新都会触发订阅，但 compute 是纯字段读取、分发按 key 去重，
+ * 实际写入只在情绪真正变化时发生。
  */
 
 const DONE_BUBBLE_MS = 4000
 
 type StoreSnapshot = ReturnType<typeof useSessionStore.getState>
 
-function computeState(s: StoreSnapshot): PetState {
-  if (s.pendingPermissions.length > 0 || s.elicitationQueue.length > 0) {
-    return {
-      mood: 'waiting',
-      label: s.pendingPermissions.length > 0 ? '等你确认权限' : '等你回话'
-    }
-  }
-  if (s.status.running) {
-    return { mood: 'working', label: s.status.compacting ? '正在压缩上下文…' : '正在干活…' }
-  }
-  if (s.status.error) return { mood: 'error', label: '出错了' }
-  return { mood: 'idle' }
-}
-
 export function usePetReporter(): void {
   useEffect(() => {
-    if (typeof window.api?.petSetState !== 'function') return
+    const setMood = usePetStore.getState().setMood
+    const canReport = typeof window.api?.petSetState === 'function'
     let lastKey = ''
     let prevMood: PetMood = 'idle'
     let doneTimer: number | null = null
 
-    const send = (state: PetState): void => {
+    const publish = (state: PetState): void => {
       const key = `${state.mood}|${state.label ?? ''}`
       if (key === lastKey) return
       lastKey = key
-      window.api.petSetState(state)
+      setMood(state.mood, state.label ?? null)
+      if (canReport) window.api.petSetState(state)
     }
 
     const evaluate = (s: StoreSnapshot): void => {
-      const next = computeState(s)
+      const next = computePetState(s)
       if (next.mood === 'idle' && prevMood === 'working') {
         // 收工庆祝：先 done 4 秒再回 idle；期间若又开跑/出错则打断庆祝。
         prevMood = 'done'
-        send({ mood: 'done', label: '搞定了' })
+        publish({ mood: 'done', label: '搞定了' })
         doneTimer = window.setTimeout(() => {
           doneTimer = null
-          const cur = computeState(useSessionStore.getState())
+          const cur = computePetState(useSessionStore.getState())
           prevMood = cur.mood
-          send(cur)
+          publish(cur)
         }, DONE_BUBBLE_MS)
         return
       }
@@ -68,7 +54,7 @@ export function usePetReporter(): void {
         doneTimer = null
       }
       prevMood = next.mood
-      send(next)
+      publish(next)
     }
 
     evaluate(useSessionStore.getState())
