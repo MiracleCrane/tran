@@ -1,9 +1,9 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from 'react'
 import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import { probeCommit } from '../utils/streamProbe'
-import type { AssistantBlock, AssistantItem, UserAttachment, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
+import type { AssistantBlock, AssistantItem, TextBlock, UserAttachment, UserItem, TranscriptItem, ItemNode, ToolBlock } from '../types'
 import MessageText from './MessageText'
 import { ToolGlyph, FRIENDLY_TOOL_NAMES } from './toolIcons'
 import { showImageContextMenu } from './ImageContextMenu'
@@ -20,6 +20,7 @@ import TurnChangesCard from './TurnChangesCard'
 import { openChangesPanel } from '../events'
 import UserMessageNav, { type UserNavEntry } from './UserMessageNav'
 import { useCheapNote } from '../hooks/useCheapNote'
+import { useTransientFlag } from '../hooks/useTransientFlag'
 
 const INITIAL_HIGHLIGHT_DELAY_MS = 420
 const SCROLL_HIGHLIGHT_RESUME_MS = 180
@@ -562,6 +563,80 @@ function EnvelopeGroupRow({ entries }: { entries: Array<{ id: string; text: stri
   )
 }
 
+/** 悬停复制控件：与时间戳（#43）共用 group/msg 悬停淡入机制，落在同一条侧边
+ *  留白里、时间戳下方，两者组成一个悬停 meta 簇（样式见 styles.css 的
+ *  .tran-msg-copy）。
+ *  用户消息是纯文本，只有一个「复制」；AI 消息多给一种格式——Markdown 源文
+ *  （blocks 里的原始文本）之外还能复制渲染后的富文本（从 .prose-forge DOM 读
+ *  innerHTML 写 text/html，纯文本回退用同批节点的 textContent）。 */
+const MessageCopyControls = memo(function MessageCopyControls({
+  gutter,
+  text,
+  richRootRef
+}: {
+  /** 落在哪侧留白：与该消息的时间戳同侧。 */
+  gutter: 'left' | 'right'
+  /** 纯文本（用户消息）或 Markdown 源文（AI 消息）。 */
+  text: string
+  /** 传了就是 AI 消息：多一个「复制富文本」，从这里捞渲染后的 .prose-forge。 */
+  richRootRef?: RefObject<HTMLDivElement | null>
+}): JSX.Element {
+  // useTransientFlag 管定时器的取消与卸载清理（同 PreRenderer 的复制钮）。
+  const [copiedText, flashText] = useTransientFlag(1200)
+  const [copiedRich, flashRich] = useTransientFlag(1200)
+
+  const copyText = async (): Promise<void> => {
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      flashText()
+    } catch {
+      /* 剪贴板不可用时静默 */
+    }
+  }
+
+  const copyRich = async (): Promise<void> => {
+    const nodes = richRootRef?.current?.querySelectorAll('.prose-forge')
+    if (!nodes || nodes.length === 0) return
+    const html = Array.from(nodes).map((n) => n.innerHTML).join('\n')
+    const plain = Array.from(nodes).map((n) => n.textContent ?? '').join('\n\n')
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([plain], { type: 'text/plain' })
+        })
+      ])
+      flashRich()
+    } catch {
+      /* 剪贴板不可用时静默 */
+    }
+  }
+
+  return (
+    <div className={`tran-msg-copy tran-msg-copy-gutter-${gutter}`}>
+      <button
+        type="button"
+        className="tran-msg-copy-btn"
+        onClick={() => void copyText()}
+        title={richRootRef ? '复制 Markdown（源文）' : '复制'}
+      >
+        {copiedText ? '✓' : richRootRef ? 'MD' : '复制'}
+      </button>
+      {richRootRef && (
+        <button
+          type="button"
+          className="tran-msg-copy-btn"
+          onClick={() => void copyRich()}
+          title="复制富文本（渲染后的排版）"
+        >
+          {copiedRich ? '✓' : 'Aa'}
+        </button>
+      )}
+    </div>
+  )
+})
+
 const UserMessage = memo(function UserMessage({
   item,
   hydratedAttachments
@@ -680,6 +755,9 @@ const UserMessage = memo(function UserMessage({
           {formatTimeShort(at)}
         </div>
       )}
+      {/* 悬停复制：与时间戳同一个 meta 簇。纯文本消息只有一种格式；
+          无文本（纯附件）时没有可复制内容，不显示。 */}
+      {item.text && <MessageCopyControls gutter="left" text={item.text} />}
     </div>
   )
 })
@@ -1165,9 +1243,16 @@ const AssistantMessage = memo(function AssistantMessage({
 }): JSX.Element {
   const isStreaming = !!item.streaming
   const at = messageTime(item.id)
+  // 消息根节点 ref：「复制富文本」从这里捞渲染后的 .prose-forge DOM。
+  const rootRef = useRef<HTMLDivElement>(null)
+  // Markdown 源文：blocks 在流式期间会有空洞（子代理事件交错），先过滤再拼。
+  const markdownSource = item.blocks
+    .filter((b): b is TextBlock => !!b && b.kind === 'text')
+    .map((b) => b.text)
+    .join('\n\n')
 
   return (
-    <div className={`group/msg relative ${depth === 0 ? 'tran-ai-col' : ''}`}>
+    <div ref={rootRef} className={`group/msg relative ${depth === 0 ? 'tran-ai-col' : ''}`}>
       {item.error && (
         <div className="mb-2 rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-1.5 text-xs text-red-300">
           {item.error}
@@ -1263,6 +1348,11 @@ const AssistantMessage = memo(function AssistantMessage({
         <div className="tran-msg-time tran-msg-time-gutter-right" title={formatTimeFull(at)}>
           {formatTimeShort(at)}
         </div>
+      )}
+      {/* 悬停复制：与时间戳同一个 meta 簇，同样的显示口径（非流式、depth 0）。
+          没有任何正文块（纯工具/思考）时没有可复制内容，不显示。 */}
+      {!isStreaming && depth === 0 && markdownSource && (
+        <MessageCopyControls gutter="right" text={markdownSource} richRootRef={rootRef} />
       )}
     </div>
   )

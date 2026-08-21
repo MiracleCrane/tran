@@ -54,6 +54,7 @@ import {
   getStartupProject
 } from './projects'
 import { translateTexts } from './translate'
+import { scanSkillsForCwd } from './skillsScan'
 import { getTranslateConfig, saveTranslateConfig, testTranslate } from './translateConfig'
 import { getPreferences, savePreferences } from './preferences'
 import { applyPetWindowPrefs } from './petWindow'
@@ -816,6 +817,11 @@ export function registerIpc(
       throw err
     }
   })
+
+  ipcMain.handle('forge:listSkillsForCwd', async (_e, cwd: string): Promise<SkillInfo[]> =>
+    // 扫描自身已对所有 fs 错误静默降级（见 skillsScan.ts），这里只做入参校验。
+    scanSkillsForCwd(requireString(cwd, 'cwd'))
+  )
 
   ipcMain.handle('forge:getSessionUsage', async (_e, sessionId: string): Promise<SessionUsageInfo> => {
     try {

@@ -919,6 +919,9 @@ export interface ForgeApi {
   /** --- Skills --- */
   /** Skills available to the active session (via supportedCommands). */
   listSkills(sessionId: string): Promise<SkillInfo[]>
+  /** 会话未启动时的兜底：主进程直接扫 <cwd>/.agents/skills 与 ~/.agents/skills
+   *  下的 SKILL.md（不依赖后端会话；会话起来后以 ACP 推送为准）。 */
+  listSkillsForCwd(cwd: string): Promise<SkillInfo[]>
   /** Browse plugin marketplace catalogs for the selected agent backend (read-only). */
   listMarketplacePlugins(agentBackend?: AgentBackendId, cwd?: string): Promise<MarketplacePlugin[]>
 

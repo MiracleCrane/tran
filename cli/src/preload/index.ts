@@ -69,6 +69,7 @@ const api: ForgeApi = {
   saveImageAs: (src, suggestedName) => ipcRenderer.invoke('forge:saveImageAs', src, suggestedName),
 
   listSkills: (sessionId) => ipcRenderer.invoke('forge:listSkills', sessionId),
+  listSkillsForCwd: (cwd) => ipcRenderer.invoke('forge:listSkillsForCwd', cwd),
   listMarketplacePlugins: (agentBackend, cwd) =>
     ipcRenderer.invoke('forge:listMarketplacePlugins', agentBackend, cwd),
   translateTexts: (texts) => ipcRenderer.invoke('forge:translateTexts', texts),

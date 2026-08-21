@@ -524,12 +524,20 @@ export default function Composer(): JSX.Element {
   useEffect(() => {
     if (!meta?.sessionId || starting) return
     if (useSessionStore.getState().slashCommands.length > 0) return
-    void window.api.listSkills(meta.sessionId).then((skills) => {
-      if (skills.length && useSessionStore.getState().slashCommands.length === 0) {
-        useSessionStore.setState({ slashCommands: skills })
+    void window.api.listSkills(meta.sessionId).then(async (skills) => {
+      // 懒创建期间会话侧 listSkills 必为空（后端要第一条消息才起）：退回主进程
+      // 磁盘扫描（listSkillsForCwd），让「新对话第一句之前」按 / 也有技能。
+      // 写进同一个 sessionStore.slashCommands：真会话起来后 ACP 推送照常覆盖，
+      // SkillsPanel 的 store 读数也能顺带受益。
+      let list = skills
+      if (list.length === 0 && meta.cwd) {
+        list = await window.api.listSkillsForCwd(meta.cwd).catch(() => [] as SkillInfo[])
+      }
+      if (list.length && useSessionStore.getState().slashCommands.length === 0) {
+        useSessionStore.setState({ slashCommands: list })
       }
     }).catch(() => {})
-  }, [meta?.sessionId, meta?.sdkSessionId, starting])
+  }, [meta?.sessionId, meta?.sdkSessionId, meta?.cwd, starting])
   const [slashContext, setSlashContext] = useState<SlashContext | null>(null)
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight)

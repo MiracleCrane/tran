@@ -233,7 +233,13 @@ function SkillsTab({
     setLoading(true)
     setError(null)
     try {
-      setSkills(await window.api.listSkills(meta.sessionId))
+      let list = await window.api.listSkills(meta.sessionId)
+      // 懒创建期间会话侧拿不到技能：退回主进程磁盘扫描，让技能页在发第一条
+      // 消息前也有内容；两条来源都为空时维持原来的「发一条消息后就出现」提示。
+      if (list.length === 0 && meta.cwd) {
+        list = await window.api.listSkillsForCwd(meta.cwd)
+      }
+      setSkills(list)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

@@ -3077,6 +3077,54 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   }
 }
 
+/* 悬停复制控件（MessageCopyControls）：与时间戳同一套显隐机制、同一条侧边
+   留白，落在时间戳下方，两者组成一个悬停 meta 簇。
+   默认 pointer-events:none——opacity 0 时按钮虽看不见却还在原地，不关掉
+   会在留白里埋隐形点击陷阱；悬停淡入的同时恢复点击。 */
+.tran-msg-copy {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+/* AI：右侧留白，时间戳（top 0.2rem）下方。 */
+.tran-msg-copy-gutter-right {
+  left: 100%;
+  margin-left: 0.5rem;
+  top: 1.2rem;
+}
+/* 用户：左侧留白，时间戳（top 0.8rem）下方。 */
+.tran-msg-copy-gutter-left {
+  left: 0;
+  top: 2rem;
+}
+.group\/msg:hover .tran-msg-copy {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* 小按钮与时间戳同色同字号，悬停提亮（交互对齐 .md-code-copy）。 */
+.tran-msg-copy-btn {
+  padding: 1px 5px;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: rgb(113 113 122 / 0.9);
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.tran-msg-copy-btn:hover {
+  color: #d4d4d8;
+  background: rgba(255, 255, 255, 0.06);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tran-msg-copy {
+    transition: none;
+  }
+}
+
 /* ============================================================================
    正文排版：AI 回复的字重
    ----------------------------------------------------------------------------
@@ -3385,6 +3433,13 @@ div:has(textarea:focus) .composer-shortcut-hint {
     right: -0.5rem;
     transform: translateX(100%);
     top: 0.2rem;
+  }
+  /* 复制控件跟着时间戳搬到同侧，落在它下方。 */
+  :root[data-ui='flat'] .tran-msg-copy-gutter-left {
+    left: auto;
+    right: -0.5rem;
+    transform: translateX(100%);
+    top: 1.2rem;
   }
 }
 
@@ -3695,10 +3750,22 @@ div:has(textarea:focus) .composer-shortcut-hint {
   position: relative;
   width: 100%;
   min-height: 1.5rem;
+  /* 高度封顶（2026-08-21）：对齐 textarea 路径 composerHeightBoundsForViewport
+     （Composer.tsx:89）——上限 min(224px, 24vh)，超出出滚动条。没有这两行时
+     contenteditable 会无限长高，把工具栏挤出可视区。 */
+  max-height: min(224px, 24vh);
+  overflow-y: auto;
   outline: none;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+/* 紧凑窗口（高度 <680px）收紧上限，与 textarea 路径的 min(128px, 20vh) 一致。 */
+@media (max-height: 680px) {
+  .rich-input {
+    max-height: min(128px, 20vh);
+  }
 }
 
 /* 占位符必须**脱离文档流**。
@@ -3733,6 +3800,11 @@ div:has(textarea:focus) .composer-shortcut-hint {
   align-items: center;
   gap: 0.2em;
   margin-right: 0.25em;
+  /* inline-flex 的基线取自第一个 flex 子项；首个子项是 SVG（replaced 元素，
+     基线=下外边距边缘），导致整枚胶囊基线下移、看起来比后面的文字高
+     1.5~2px（2026-08-21 实测）。负的 vertical-align 把整枚压回文字基线。
+     -0.1em 是目测调出来的值，视觉回归后可能需要微调。 */
+  vertical-align: -0.1em;
   color: rgb(134, 172, 248);
   /* 胶囊整体不可编辑：光标不会停进内部，选中/退格都以整枚为单位。 */
   user-select: none;

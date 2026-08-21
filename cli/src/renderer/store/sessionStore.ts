@@ -1050,6 +1050,30 @@ function applyStreamEvent(
   return { items: applyAllTaskTerminalEnvelopes(items), currentStreamingMsgId: msgId }
 }
 
+/** user-slash 技能信封还原成用户原始输入（2026-08-21 修复：重开会话后 SkillCard 消失）。
+ *  kimi CLI 展开斜杠命令后才记录，历史里的 user 消息是注入信封：
+ *    `User activated the skill "X". Follow the loaded skill instructions.`
+ *    `<kimi-skill-loaded name="X" trigger="user-slash" source="user" dir="…" args="…">`
+ *    + 整篇 skill markdown
+ *  原样渲染会被 Transcript 的 HIDDEN_ENVELOPE_RE 整条隐藏（用户那一轮变空白）。
+ *  这里把 trigger="user-slash" 的信封改回 `/name args`（args 空则只有 `/name`），
+ *  让 SkillCard 的 matchSkillInvocation 分支照常命中；其余 trigger（如模型自己调
+ *  Skill 工具的 model-tool 信封）原样返回、照旧隐藏。解析保守：格式不符就原样返回。 */
+export function rewriteSkillEnvelope(text: string): string {
+  const m =
+    /^(?:User activated the skill "[^"]*"\. Follow the loaded skill instructions\.\s*)?<kimi-skill-loaded\s+([^>]*)>/.exec(
+      text.trimStart()
+    )
+  if (!m) return text
+  const attrs = m[1]
+  const attr = (key: string): string | null =>
+    new RegExp(`\\b${key}="([^"]*)"`).exec(attrs)?.[1] ?? null
+  const name = attr('name')
+  if (!name || attr('trigger') !== 'user-slash') return text
+  const args = attr('args') ?? ''
+  return args ? `/${name} ${args}` : `/${name}`
+}
+
 /** Convert a past session's transcript messages into renderable items, pairing
  *  each tool_use with its tool_result by id. */
 export function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
@@ -1096,7 +1120,7 @@ export function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
       const mp = m.message as { content?: unknown }
       const content = mp.content
       if (typeof content === 'string') {
-        items.push({ id: m.uuid, kind: 'user', text: content, parentToolUseId: m.parent_tool_use_id })
+        items.push({ id: m.uuid, kind: 'user', text: rewriteSkillEnvelope(content), parentToolUseId: m.parent_tool_use_id })
       } else if (Array.isArray(content)) {
         const toolResults = content.filter(
           (c) => !!c && typeof c === 'object' && (c as { type?: string }).type === 'tool_result'
@@ -1118,7 +1142,7 @@ export function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
             )
             .join('')
           if (text)
-            items.push({ id: m.uuid, kind: 'user', text, parentToolUseId: m.parent_tool_use_id })
+            items.push({ id: m.uuid, kind: 'user', text: rewriteSkillEnvelope(text), parentToolUseId: m.parent_tool_use_id })
         }
       }
     }

@@ -16,7 +16,7 @@ Single-context layout — one `CONTEXT.md` and `docs/adr/` at the repo root. See
 
 ## 发版流程（惯例）
 
-改代码 → `npm run typecheck` → `npm run build` → commit/push → tag `vX.Y.Z` → `npm run build:win` → GitHub Release（API 创建 + 上传 `Tran-X.Y.Z-setup.exe`）→ 下载最新release安装包到默认下载路径 →  用户卸载重装验证 → 关闭对应 issue。版本号在 `cli/package.json`，changelog 在 `cli/CHANGELOG.md`（中英双语）。
+改代码 → `npm run typecheck` → `npm run build` → commit/push → tag `vX.Y.Z` → `npm run build:win` → GitHub Release（API 创建 + 上传 `Tran-X.Y.Z-setup.exe`）→ 通过 API 核对 Release 资产名称、大小和可用摘要 → 用户使用 `cli/release/Tran-X.Y.Z-setup.exe` 卸载重装验证 → 关闭对应 issue。默认不再把已上传的同一安装包重复下载到用户的“下载”目录；只有用户明确要求下载，或必须验证实际下载链路时才下载。版本号在 `cli/package.json`，changelog 在 `cli/CHANGELOG.md`（中英双语）。
 
 ### 已知环境坑
 
