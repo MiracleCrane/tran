@@ -9,6 +9,7 @@
 - 可靠性：终端输出按 UTF-8 字符边界限长；会话中断、关闭、ACP 断线和 Tran 退出时统一回收进程树。新会话及跨 ACP 连接恢复的旧会话均已通过真实 Kimi 0.38.0 Bash 验证。
 - 宠物：Tran 界面内的摇摆猫现在可直接拖动，位置会持久化，并在窗口缩放后自动收回可视范围；拖动期间暂停动画，松手后继续。
 - 宠物：主界面和桌面悬浮窗共用更温和的 alpha 清理滤镜，去除 VP9 透明底噪，同时保留腿、鞋、头发和裙边的抗锯齿细节。
+- 设置：新增独立“宠物”分类，集中管理宠物总开关、窗口外悬浮显示和 Tran 内位置复位。
 
 ### English
 
@@ -17,6 +18,7 @@
 - Reliability: terminal output is bounded at UTF-8 character boundaries, and process trees are reclaimed when sessions are interrupted or closed, ACP disconnects, or Tran exits. Both fresh sessions and sessions restored across a new ACP connection were verified with real Bash calls on Kimi 0.38.0.
 - Pet: the in-app swaying cat can now be dragged directly; its position persists, clamps back into view after window resizing, pauses while dragging, and resumes on release.
 - Pet: the in-app mascot and desktop overlay now share a gentler alpha-cleanup filter that removes VP9 transparency noise while preserving antialiased detail around legs, shoes, hair, and dress edges.
+- Settings: add a dedicated Pet category for the master switch, outside-window overlay, and resetting the in-app position.
 
 ## v1.1.36 - 2026-08-21
 

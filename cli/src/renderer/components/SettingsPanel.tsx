@@ -29,7 +29,7 @@ import {
 import DisclosureSelect from './DisclosureSelect'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
-import { usePetStore } from '../store/petStore'
+import PetSettings from '../pet/PetSettings'
 import {
   createDownloadRequestId,
   formatProgressText,
@@ -136,6 +136,7 @@ const SETTINGS_CATEGORIES = [
   { id: 'tools', label: '工具' },
   { id: 'shortcuts', label: '快捷键' },
   { id: 'appearance', label: '外观' },
+  { id: 'pet', label: '宠物' },
   { id: 'system', label: '系统' },
   { id: 'backup', label: '备份' }
 ] as const
@@ -164,8 +165,6 @@ export default function SettingsPanel(): JSX.Element {
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   const [minimizeToTray, setMinimizeToTray] = useState(false)
   const [startMaximized, setStartMaximized] = useState(false)
-  const [desktopPet, setDesktopPet] = useState(true)
-  const [petOutside, setPetOutside] = useState(true)
   const [richComposer, setRichComposer] = useState(false)
   const [nativeNotifications, setNativeNotifications] = useState(true)
   const [aiNaming, setAiNaming] = useState(true)
@@ -240,9 +239,6 @@ export default function SettingsPanel(): JSX.Element {
         setWslSupportEnabled(!!p.wslSupportEnabled)
         setMinimizeToTray(!!p.minimizeToTray)
         setStartMaximized(!!p.startMaximized)
-        setDesktopPet(p.desktopPetEnabled !== false)
-        setPetOutside(p.petOutsideEnabled !== false)
-    setRichComposer(p.richComposer === true)
         setRichComposer(p.richComposer === true)
         setNativeNotifications(p.nativeNotifications !== false)
         setAiNaming(p.aiNamingEnabled !== false)
@@ -310,30 +306,6 @@ export default function SettingsPanel(): JSX.Element {
       flashSaved()
     } catch {
       setStartMaximized(!next)
-    }
-  }
-
-  /** 桌面宠物开关：主进程立即创建/销毁宠物窗口。 */
-  const toggleDesktopPet = async (next: boolean): Promise<void> => {
-    setDesktopPet(next)
-    try {
-      await window.api.savePreferences({ desktopPetEnabled: next })
-      // 渲染层镜像同步：界面内的 PetMascot 读 petStore 显隐。
-      usePetStore.getState().setMasterEnabled(next)
-      flashSaved()
-    } catch {
-      setDesktopPet(!next)
-    }
-  }
-
-  /** 「Tran 以外展示」开关：只影响独立桌面悬浮窗，不影响界面内的舞动形象。 */
-  const togglePetOutside = async (next: boolean): Promise<void> => {
-    setPetOutside(next)
-    try {
-      await window.api.savePreferences({ petOutsideEnabled: next })
-      flashSaved()
-    } catch {
-      setPetOutside(!next)
     }
   }
 
@@ -1235,6 +1207,8 @@ export default function SettingsPanel(): JSX.Element {
         </section>
         )}
 
+        {category === 'pet' && <PetSettings />}
+
         {category === 'system' && (
         <section className="glass-panel-soft rounded-2xl p-4">
           <div className="mb-4">
@@ -1252,19 +1226,6 @@ export default function SettingsPanel(): JSX.Element {
               description="启动 Tran 时自动将主窗口最大化。"
               checked={startMaximized}
               onChange={(checked) => void toggleStartMaximized(checked)}
-            />
-            <ToggleControl
-              label="桌面宠物"
-              description="显示一只无缝循环的摇摆猫，跟随 Agent 状态变化（干活 / 等你回话 / 搞定 / 出错）。默认在 Tran 聊天界面内舞动。"
-              checked={desktopPet}
-              onChange={(checked) => void toggleDesktopPet(checked)}
-            />
-            <ToggleControl
-              label="宠物在 Tran 以外展示"
-              description="在 Tran 窗口之外再开一个透明置顶的桌面悬浮窗（主窗口最小化也在），可拖拽换位、右键隐藏。关闭后宠物只出现在 Tran 界面内。"
-              checked={petOutside}
-              disabled={!desktopPet}
-              onChange={(checked) => void togglePetOutside(checked)}
             />
             <ToggleControl
               label="富文本输入框（实验）"
