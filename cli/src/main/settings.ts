@@ -88,6 +88,8 @@ interface PersistedSettings {
   /** 宠物是否在 Tran 窗口**以外**展示（独立桌面悬浮窗，默认开）。
    *  关掉 = 只在 Tran 界面内舞动，不出现在桌面。 */
   petOutsideEnabled?: boolean
+  /** Tran 界面内宠物相对窗口右下角的位置（CSS 像素）。 */
+  petInAppPosition?: { right: number; bottom: number }
   /** 桌面宠物窗口的持久化位置（屏幕坐标）。 */
   petPosition?: { x: number; y: number }
   /** 实验：富文本输入框（内联命令胶囊）。默认关。 */
@@ -356,6 +358,12 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.startMaximized = optionalBoolean(source.startMaximized)
   settings.desktopPetEnabled = optionalBoolean(source.desktopPetEnabled)
   settings.petOutsideEnabled = optionalBoolean(source.petOutsideEnabled)
+  const inAppPetPos = asRecord(source.petInAppPosition)
+  settings.petInAppPosition =
+    typeof inAppPetPos?.right === 'number' && Number.isFinite(inAppPetPos.right) &&
+    typeof inAppPetPos?.bottom === 'number' && Number.isFinite(inAppPetPos.bottom)
+      ? { right: inAppPetPos.right, bottom: inAppPetPos.bottom }
+      : undefined
   const petPos = asRecord(source.petPosition)
   settings.petPosition =
     typeof petPos?.x === 'number' && Number.isFinite(petPos.x) &&

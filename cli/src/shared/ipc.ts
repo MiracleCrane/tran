@@ -295,6 +295,13 @@ export interface Preferences {
   /** 宠物是否在 Tran 窗口以外展示（独立桌面悬浮窗）。默认开；
    *  关掉则只在 Tran 界面内舞动。 */
   petOutsideEnabled?: boolean
+  /** Tran 界面内宠物相对窗口右下角的位置（CSS 像素）。 */
+  petInAppPosition?: InAppPetPosition
+}
+
+export interface InAppPetPosition {
+  right: number
+  bottom: number
 }
 
 /** 桌面宠物的情绪状态（渲染层 sessionStore 推导 → 主进程转发 → 宠物窗口）。 */

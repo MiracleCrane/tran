@@ -63,6 +63,7 @@ export function getPreferences(): Preferences {
     startMaximized: s.startMaximized,
     desktopPetEnabled: s.desktopPetEnabled,
     petOutsideEnabled: s.petOutsideEnabled,
+    petInAppPosition: s.petInAppPosition,
     richComposer: s.richComposer,
     nativeNotifications: s.nativeNotifications,
     closePromptDismissed: s.closePromptDismissed,
@@ -108,6 +109,7 @@ export function savePreferences(prefs: Preferences): Preferences {
   if (prefs.startMaximized !== undefined) s.startMaximized = prefs.startMaximized
   if (prefs.desktopPetEnabled !== undefined) s.desktopPetEnabled = prefs.desktopPetEnabled
   if (prefs.petOutsideEnabled !== undefined) s.petOutsideEnabled = prefs.petOutsideEnabled
+  if (prefs.petInAppPosition !== undefined) s.petInAppPosition = prefs.petInAppPosition
   if (prefs.richComposer !== undefined) s.richComposer = prefs.richComposer
   if (prefs.nativeNotifications !== undefined) s.nativeNotifications = prefs.nativeNotifications
   if (prefs.closePromptDismissed !== undefined) s.closePromptDismissed = prefs.closePromptDismissed

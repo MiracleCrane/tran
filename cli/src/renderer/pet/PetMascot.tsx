@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react'
 import { usePetStore } from '../store/petStore'
 import { useUiStore } from '../store/uiStore'
 import swayingCatUrl from '../assets/pet/swaying-cat-repaired.webm'
+import PetAlphaFilter, { PET_ALPHA_FILTER_URL } from './PetAlphaFilter'
+import { useDraggablePetPosition } from './useDraggablePetPosition'
 
 /**
  * Tran 界面内的宠物形象（主战场，2026-08-20 用户：「主要是在 tran 界面里面
@@ -12,8 +14,8 @@ import swayingCatUrl from '../assets/pet/swaying-cat-repaired.webm'
  * 短时闪帧经九帧多数判定修补，首尾只重叠 10 帧做预乘 alpha 交叉淡化；
  * waiting 直接暂停当前视频帧，不再切换静态图层。error 灰度。
  *
- * 纯展示、pointer-events-none：永远不挡聊天区/输入框的点击；想关掉走
- * 设置 → 系统 → 桌面宠物。
+ * 仅宠物自身的 90px 区域接收拖动，不占用其余聊天区；位置持久化并在窗口缩放
+ * 时自动收回可视范围。
  */
 export default function PetMascot(): JSX.Element | null {
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -22,9 +24,17 @@ export default function PetMascot(): JSX.Element | null {
   const label = usePetStore((s) => s.label)
   const masterEnabled = usePetStore((s) => s.masterEnabled)
   const view = useUiStore((s) => s.view)
+  const {
+    elementRef,
+    position,
+    dragging,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp
+  } = useDraggablePetPosition()
 
   const visible = masterEnabled && view === 'chat'
-  const animated = mood !== 'waiting'
+  const animated = mood !== 'waiting' && !dragging
 
   useEffect(() => {
     const previousMood = previousMoodRef.current
@@ -40,26 +50,31 @@ export default function PetMascot(): JSX.Element | null {
   if (!visible) return null
 
   return (
-    <div className="pointer-events-none fixed bottom-24 right-4 z-30 flex w-[90px] select-none flex-col items-center">
+    <div
+      ref={elementRef}
+      className={`pointer-events-auto fixed z-30 flex w-[90px] touch-none select-none flex-col items-center ${
+        dragging ? 'cursor-grabbing' : 'cursor-grab'
+      }`}
+      style={{ right: position.right, bottom: position.bottom }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      title="拖动宠物"
+    >
       {mood !== 'idle' && label && (
         <div className="mb-1.5 max-w-[120px] truncate rounded-xl border border-white/10 bg-[#16141f]/90 px-2.5 py-1 text-[11px] text-zinc-200 shadow-lg">
           {label}
         </div>
       )}
       <div className={mood === 'error' ? 'grayscale-[.85] brightness-[.92]' : ''}>
-        <svg className="pointer-events-none absolute h-0 w-0" aria-hidden>
-          <filter id="tran-pet-alpha-clean" colorInterpolationFilters="sRGB">
-            <feComponentTransfer>
-              <feFuncA type="linear" slope="1.02" intercept="-0.02" />
-            </feComponentTransfer>
-          </filter>
-        </svg>
+        <PetAlphaFilter />
         <video
           ref={videoRef}
           src={swayingCatUrl}
           draggable={false}
           className="block w-[90px] bg-transparent"
-          style={{ filter: 'url(#tran-pet-alpha-clean)' }}
+          style={{ filter: PET_ALPHA_FILTER_URL }}
           autoPlay
           muted
           loop

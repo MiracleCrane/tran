@@ -7,12 +7,16 @@
 - 修复：Kimi Code CLI 0.37.2+ 自动升级后，Tran 内 Bash、Glob、Grep 全部报 `ACP terminal capability is unavailable`，仅 Read/Write/Edit 可用。Tran 现在完整实现 ACP `terminal/create`、`output`、`wait_for_exit`、`kill`、`release` 生命周期并声明终端能力。
 - 修复：ACP 反向请求现在绑定到产生请求的具体连接，避免自动重连时旧连接的迟到请求被错误地回到新连接。
 - 可靠性：终端输出按 UTF-8 字符边界限长；会话中断、关闭、ACP 断线和 Tran 退出时统一回收进程树。新会话及跨 ACP 连接恢复的旧会话均已通过真实 Kimi 0.38.0 Bash 验证。
+- 宠物：Tran 界面内的摇摆猫现在可直接拖动，位置会持久化，并在窗口缩放后自动收回可视范围；拖动期间暂停动画，松手后继续。
+- 宠物：主界面和桌面悬浮窗共用更温和的 alpha 清理滤镜，去除 VP9 透明底噪，同时保留腿、鞋、头发和裙边的抗锯齿细节。
 
 ### English
 
 - Fix: after Kimi Code CLI 0.37.2+ auto-updated, Bash, Glob, and Grep in Tran all failed with `ACP terminal capability is unavailable` while Read/Write/Edit still worked. Tran now implements the full ACP `terminal/create`, `output`, `wait_for_exit`, `kill`, and `release` lifecycle and advertises terminal support.
 - Fix: ACP reverse requests are now bound to the connection that produced them, preventing late requests from an old connection from being answered through a replacement connection after automatic recovery.
 - Reliability: terminal output is bounded at UTF-8 character boundaries, and process trees are reclaimed when sessions are interrupted or closed, ACP disconnects, or Tran exits. Both fresh sessions and sessions restored across a new ACP connection were verified with real Bash calls on Kimi 0.38.0.
+- Pet: the in-app swaying cat can now be dragged directly; its position persists, clamps back into view after window resizing, pauses while dragging, and resumes on release.
+- Pet: the in-app mascot and desktop overlay now share a gentler alpha-cleanup filter that removes VP9 transparency noise while preserving antialiased detail around legs, shoes, hair, and dress edges.
 
 ## v1.1.36 - 2026-08-21
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PetMood, PetState } from '../../shared/ipc'
 import swayingCatUrl from '../assets/pet/swaying-cat-repaired.webm'
+import PetAlphaFilter, { PET_ALPHA_FILTER_URL } from './PetAlphaFilter'
 
 /**
  * 桌面宠物窗口（「Tran 以外」的展示位）的页面：一只魔性摇摆猫 + 状态气泡。
@@ -37,11 +38,11 @@ const CSS = `
   .pet-stage.dragging { cursor: grabbing; }
   .pet-img {
     width: 90px; height: auto; display: block; pointer-events: none;
-    background: transparent; filter: url(#tran-pet-alpha-clean);
+    background: transparent; filter: ${PET_ALPHA_FILTER_URL};
     transition: filter 180ms ease;
   }
   .pet-stage.mood-error .pet-img {
-    filter: url(#tran-pet-alpha-clean) grayscale(.85) brightness(.92);
+    filter: ${PET_ALPHA_FILTER_URL} grayscale(.85) brightness(.92);
   }
   .pet-bubble {
     position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
@@ -154,13 +155,7 @@ export default function PetApp(): JSX.Element {
     >
       <style>{CSS}</style>
       {bubble && <div className={`pet-bubble mood-${state.mood}`}>{bubble}</div>}
-      <svg width="0" height="0" aria-hidden style={{ position: 'absolute', pointerEvents: 'none' }}>
-        <filter id="tran-pet-alpha-clean" colorInterpolationFilters="sRGB">
-          <feComponentTransfer>
-            <feFuncA type="linear" slope="1.02" intercept="-0.02" />
-          </feComponentTransfer>
-        </filter>
-      </svg>
+      <PetAlphaFilter />
       <video
         ref={videoRef}
         className="pet-img"
