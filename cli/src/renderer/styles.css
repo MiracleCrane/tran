@@ -2527,9 +2527,8 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   margin: 0.7em 0 0.3em;
   line-height: 1.3;
 }
-/* 链接（2026-08 Codex 风）：链接蓝 + 无下划线 + 站点 favicon（favicon 由
- *  LinkRenderer 里联渲染——Codex 用的 google s2/favicons 国内不通，直连站点
- *  /favicon.ico，失败回退通用小箭头）。
+/* 链接（2026-08 Codex 风）：链接蓝 + 无下划线 + 主题安全的站点图标；
+ *  GitHub 使用本地矢量图标，其他站点走 S2 favicon，失败回退本地外链图标。
  *  色值来自 Codex 桌面版 asar 实测（--blue-400 #0285ff），按暗色底提亮到 #3d9bff。 */
 .prose-forge a {
   color: #3d9bff;

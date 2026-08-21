@@ -402,14 +402,14 @@ if (!hasSingleInstanceLock) {
     showAndFocusMainWindow()
   })
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     seedDefaultIfNeeded()
     // 2026-08 favicon/外网资源走本机代理（用户指定 127.0.0.1:7897，Clash）：
     // 系统代理常年关着，Chromium 默认直连，GitHub 这类站点的 favicon 必然
     // 取不到。先探测端口，通才挂；localhost/127.0.0.1 直连（kimi server 等
     // 本地服务不能被代理拦）。影响面：渲染层 img/fetch + 主进程 net.fetch
     // （更新检查顺带也能走代理了）。
-    void applyLocalProxyIfReachable()
+    await applyLocalProxyIfReachable()
     // Tray is created after the window; pass a getter so registerIpc's closures
     // pick up the live tray (used for tooltip updates on session end).
     agentBridge = registerIpc(

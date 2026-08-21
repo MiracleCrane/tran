@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.38 - 2026-08-21
+
+### 中文
+
+- 修复：GitHub 外链直接加载深色 `/favicon.ico`，在 Tran 深色背景上几乎不可见。GitHub 链接现在使用随主题保持清晰的本地矢量图标。
+- 优化：其他 HTTP(S) 外链改用标准化的 S2 favicon，并在请求失败时回退为本地外链图标；邮件等非网页链接也始终保留可见图标。
+- 可靠性：应用启动时先等待本地代理配置完成，再创建主窗口，避免首批 favicon 请求抢在代理生效前发出。
+
+### English
+
+- Fix: GitHub links no longer render the dark `/favicon.ico`, which was nearly invisible on Tran's dark transcript background. They now use a bundled, theme-safe vector icon.
+- Improvement: other HTTP(S) links use normalized S2 favicons and fall back to a bundled external-link glyph on failure; non-web links such as email also retain a visible icon.
+- Reliability: Tran now waits for local proxy configuration before creating the main window, preventing initial favicon requests from racing ahead of proxy activation.
+
 ## v1.1.37 - 2026-08-21
 
 ### 中文

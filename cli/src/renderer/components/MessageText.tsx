@@ -8,6 +8,7 @@ import { useUiStore } from '../store/uiStore'
 import type { UserAttachment } from '../types'
 import { pathToUserAttachment, pickedFileToUserAttachment } from '../utils/attachments'
 import { showImageContextMenu } from './ImageContextMenu'
+import { LinkIcon } from './LinkIcon'
 
 function isPathLike(s: string): boolean {
   if (!s || s.length > 260) return false
@@ -179,8 +180,7 @@ function LinkRenderer({
     openPathPreview(cwd, path, useUiStore.getState().openAttachmentPreview)
   }
 
-  /** 网站图标：直连站点 /favicon.ico（Codex 用的是 google s2/favicons，但那域名
-   *  在国内不通）。加载失败回退为通用外跳小图标——图标只是点缀，绝不能裂图。 */
+  /** 外链使用主题安全的站点图标；请求失败时仍保留清晰的本地图标。 */
   return (
     <>
       <a
@@ -190,7 +190,7 @@ function LinkRenderer({
         title={title}
         className="text-[#3d9bff] no-underline transition hover:brightness-125"
       >
-        {external && <LinkFavicon href={href} />}
+        {external && <LinkIcon href={href} />}
         {bare ? shortenUrlForDisplay(linkTarget) : children}
       </a>
       {trailing}
@@ -212,43 +212,6 @@ function shortenUrlForDisplay(text: string): string {
   const budget = 56 - host.length - 1
   if (budget < 10) return `${host}…`
   return `${host}${rest.slice(0, Math.ceil(budget / 2))}…${rest.slice(-Math.floor(budget / 2))}`
-}
-
-/** 站点图标：img 加载失败回退成通用外跳小箭头（裂图比没图标难看）。 */
-function LinkFavicon({ href }: { href: string }): JSX.Element | null {
-  const [failed, setFailed] = useState(false)
-  if (failed) {
-    return (
-      <svg
-        width="11"
-        height="11"
-        viewBox="0 0 24 24"
-        fill="none"
-        className="mr-0.5 inline-block align-[-0.1em]"
-        aria-hidden
-      >
-        <path
-          d="M9 4h11v11h-2.2V7.6L6 19.4 4.6 18 16.4 6.2H9V4Z"
-          fill="currentColor"
-        />
-      </svg>
-    )
-  }
-  let origin = ''
-  try {
-    origin = new URL(normalizeExternalHref(href)).origin
-  } catch {
-    return null
-  }
-  return (
-    <img
-      src={`${origin}/favicon.ico`}
-      alt=""
-      loading="lazy"
-      onError={() => setFailed(true)}
-      className="mr-0.5 inline-block h-[0.95em] w-[0.95em] rounded-[2px] align-[-0.1em]"
-    />
-  )
 }
 
 type ImgRendererProps = ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }
