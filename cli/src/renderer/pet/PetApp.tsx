@@ -6,9 +6,9 @@ import swayingCatUrl from '../assets/pet/swaying-cat-repaired.webm'
  * 桌面宠物窗口（「Tran 以外」的展示位）的页面：一只魔性摇摆猫 + 状态气泡。
  * 与界面内 PetMascot 同素材同情绪，状态经主进程 pet:state 推过来。
  *
- * 素材：使用 libvpx-vp9 保留原始 alpha 的透明 WebM。短时闪帧经五帧离群修补，
- * 从两个相似姿势间截取纯正向循环并用 6 帧预乘 alpha 过渡衔接。waiting 与拖动
- * 时直接暂停当前视频帧，恢复时继续播放，不再切换静态图层。
+ * 素材：使用 libvpx-vp9 保留原始 alpha 的透明 WebM。完整可见动作全部保留，
+ * 短时闪帧经九帧多数判定修补，首尾只重叠 10 帧做预乘 alpha 交叉淡化。
+ * waiting 与拖动时直接暂停当前视频帧，恢复时继续播放，不再切换静态图层。
  *
  * 拖拽（2026-08-20 第三版）：pointermove 累计 movementX/Y，rAF 合帧上报主
  * 进程 setPosition；拖动期间暂停当前视频帧（动画合成开销是"卡"的主因）。

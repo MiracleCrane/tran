@@ -8,9 +8,9 @@ import swayingCatUrl from '../assets/pet/swaying-cat-repaired.webm'
  * 去舞动」）：聊天视图右下角一只无缝循环的摇摆猫，情绪与桌面悬浮窗同源
  * （usePetReporter → petStore）。
  *
- * 素材：使用 libvpx-vp9 保留原始 alpha 的透明 WebM。短时闪帧经五帧离群修补，
- * 从两个相似姿势间截取纯正向循环并用 6 帧预乘 alpha 过渡衔接；waiting 直接
- * 暂停当前视频帧，不再切换静态图层。error 灰度。
+ * 素材：使用 libvpx-vp9 保留原始 alpha 的透明 WebM。完整可见动作全部保留，
+ * 短时闪帧经九帧多数判定修补，首尾只重叠 10 帧做预乘 alpha 交叉淡化；
+ * waiting 直接暂停当前视频帧，不再切换静态图层。error 灰度。
  *
  * 纯展示、pointer-events-none：永远不挡聊天区/输入框的点击；想关掉走
  * 设置 → 系统 → 桌面宠物。

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.36 - 2026-08-21
+
+### 中文
+
+- 修复：v1.1.35 为追求闭环误将 14.27 秒完整动作裁成 7.13 秒——恢复全部 856 个可见动作帧，最终动画 846 帧、14.1 秒，仅将首尾各 10 帧重叠为约 0.17 秒的普通预乘 alpha 交叉淡化，始终正向播放。
+- 修复：残留短帧闪烁——以九帧多数判定替换腿部、轮廓、颜色和透明度的短时离群像素；循环过渡不再集中产生 v1.1.35 的 `421–426` 帧突变。
+
+### English
+
+- Fix: v1.1.35 mistakenly reduced the full 14.27-second motion to 7.13 seconds while trying to close the loop — restored all 856 visible action frames. The final animation is 846 frames / 14.1 seconds, always forward, with only the first and last 10 frames overlapped into a normal ~0.17-second premultiplied-alpha crossfade.
+- Fix: residual isolated flashes — nine-frame majority repair now replaces short-lived leg, silhouette, color, and transparency outliers; the loop no longer concentrates the v1.1.35 transition discontinuity in frames 421–426.
+
 ## v1.1.35 - 2026-08-21
 
 ### 中文
