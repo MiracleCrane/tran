@@ -25,9 +25,9 @@ interface PendingRequest {
 }
 
 interface ClientHandlers {
-  onNotification: (msg: AcpRpcMessage) => void
-  onServerRequest: (msg: AcpRpcMessage) => void
-  onClose: (error?: string) => void
+  onNotification: (client: AcpClient, msg: AcpRpcMessage) => void
+  onServerRequest: (client: AcpClient, msg: AcpRpcMessage) => void
+  onClose: (client: AcpClient, error?: string) => void
 }
 
 export interface AcpClientOptions {
@@ -221,13 +221,13 @@ export class AcpClient {
     child.on('error', (error) => {
       this.closed = true
       this.rejectAll(error)
-      this.handlers.onClose(error.message)
+      this.handlers.onClose(this, error.message)
     })
     child.on('close', (code) => {
       this.closed = true
       const detail = this.stderr.trim() || (code == null ? 'ACP server stopped.' : `ACP server exited with code ${code}.`)
       this.rejectAll(new Error(detail))
-      if (!this.closing) this.handlers.onClose(detail)
+      if (!this.closing) this.handlers.onClose(this, detail)
     })
 
     try {
@@ -301,9 +301,9 @@ export class AcpClient {
     }
 
     if (msg.method && msg.id !== undefined) {
-      this.handlers.onServerRequest(msg)
+      this.handlers.onServerRequest(this, msg)
     } else if (msg.method) {
-      this.handlers.onNotification(msg)
+      this.handlers.onNotification(this, msg)
     }
   }
 

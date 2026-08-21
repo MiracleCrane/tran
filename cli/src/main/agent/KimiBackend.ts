@@ -40,6 +40,7 @@ import {
 } from '../goalStore'
 import { log } from '../logger'
 import { parseWireHistory } from '../wireHistory'
+import { ACP_TERMINAL_METHODS, AcpTerminalHost } from './AcpTerminalHost'
 
 interface QueuedMessage {
   content: string | unknown[]
@@ -336,6 +337,7 @@ export class KimiBackend {
   private droppedNotifications = 0
   private clientPromise: Promise<AcpClient> | null = null
   private client: AcpClient | null = null
+  private terminalHost = new AcpTerminalHost((acpSessionId) => this.sessionForAcp(acpSessionId)?.cwd)
   /** L4：dispose 后置位——在途 ensureClient 返回的 client 直接关掉，防泄漏。 */
   private disposed = false
   /** Model choices discovered from session/new configOptions (ACP-side source
@@ -436,6 +438,7 @@ export class KimiBackend {
     const client = this.client
     if (!client) return
     client.notify('session/cancel', { sessionId: session.acpSessionId })
+    this.terminalHost.releaseSession(session.acpSessionId)
   }
 
   async setModel(sessionId: string, model: string): Promise<void> {
@@ -493,6 +496,7 @@ export class KimiBackend {
         this.markAcpSessionDead(session.acpSessionId)
         // Kimi ACP 未实现 session/close —— 只取消当前 turn 并丢弃本地映射。
         this.client?.notify('session/cancel', { sessionId: session.acpSessionId })
+        this.terminalHost.releaseSession(session.acpSessionId)
         // M5：本轮已随 session/cancel 作废，挂在它上面的权限/elicitation 等待
         // 一并清掉（详见 dropPendingPermissions）。
         this.dropPendingPermissions(session)
@@ -1732,12 +1736,12 @@ export class KimiBackend {
           clientInfo: { name: 'tran', title: 'Tran', version: '1.0.0' },
           clientCapabilities: {
             fs: { readTextFile: true, writeTextFile: true },
-            terminal: false
+            terminal: true
           }
         }, {
-          onNotification: (msg) => this.handleNotification(msg),
-          onServerRequest: (msg) => this.handleServerRequest(msg),
-          onClose: (error) => this.handleClientClose(error)
+          onNotification: (_client, msg) => this.handleNotification(msg),
+          onServerRequest: (requestClient, msg) => this.handleServerRequest(requestClient, msg),
+          onClose: (closedClient, error) => this.handleClientClose(closedClient, error)
         })
       })().then((client) => {
         // L4：dispose（或被取代）后才建成的在途 client：直接关掉，不接管。
@@ -2123,12 +2127,10 @@ export class KimiBackend {
     // TODO: 'config_option_update' 暂不映射到 UI。
   }
 
-  private handleServerRequest(msg: AcpRpcMessage): void {
+  private handleServerRequest(client: AcpClient, msg: AcpRpcMessage): void {
     const method = msg.method ?? ''
     const params = asRecord(msg.params) ?? {}
     if (msg.id === undefined) return
-    const client = this.client
-    if (!client) return
     // #41 权限/fs 请求也是该会话的活动（权限等待不算无响应）：重置静默计时。
     const session = this.sessionForAcp(asString(params.sessionId))
     if (session) this.touchTurnActivity(session)
@@ -2161,6 +2163,13 @@ export class KimiBackend {
       } catch (error) {
         client.respondError(msg.id, error instanceof Error ? error.message : String(error))
       }
+      return
+    }
+    if (ACP_TERMINAL_METHODS.has(method)) {
+      void this.terminalHost.handle(method, params).then(
+        (result) => client.respond(msg.id!, result),
+        (error) => client.respondError(msg.id!, error instanceof Error ? error.message : String(error))
+      )
       return
     }
     client.respondError(msg.id, `Tran does not handle Kimi ACP request: ${method}`, -32601)
@@ -2275,6 +2284,7 @@ export class KimiBackend {
     } catch {
       /* 退出路径尽力而为 */
     }
+    this.terminalHost.dispose()
     this.sessions.clear()
     this.acpToSession.clear()
     this.pendingPermissions.clear()
@@ -2293,9 +2303,11 @@ export class KimiBackend {
    * ⚠️ 保守约束：不自动重发用户 prompt（避免重复执行副作用），恢复后由用户
    * 继续；死进程的权限等待不可应答，直接清掉（不误导用户去点一个回不去的框）。
    */
-  private handleClientClose(error?: string): void {
+  private handleClientClose(closedClient: AcpClient, error?: string): void {
+    if (this.client && this.client !== closedClient) return
     this.client = null
     this.clientPromise = null
+    this.terminalHost.dispose()
     // 死进程的权限/elicitation 等待已不可应答：复位对应会话的"等用户"标记后清掉。
     for (const pending of this.pendingPermissions.values()) {
       const s = pending.sessionId ? this.sessions.get(pending.sessionId) : undefined

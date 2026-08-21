@@ -99,13 +99,14 @@ function ensureClient(): Promise<AcpClient> {
       }
     }, {
       onNotification: () => {},
-      onServerRequest: (msg) => {
+      onServerRequest: (requestClient, msg) => {
         // 历史连接不处理任何反向请求（权限/文件读写都属于活跃会话）。
-        if (msg.id !== undefined) own?.respondError(msg.id, 'Tran history client does not handle requests.', -32601)
+        if (msg.id !== undefined) requestClient.respondError(msg.id, 'Tran history client does not handle requests.', -32601)
       },
-      onClose: () => {
+      onClose: (closedClient) => {
         // 只清理“当前这一代”连接的关闭：过期被换下的旧连接 close 事件晚到时，
         // 不能误清已重建的新连接。
+        if (own && closedClient !== own) return
         if (clientPromise === promise) {
           client = null
           clientPromise = null
