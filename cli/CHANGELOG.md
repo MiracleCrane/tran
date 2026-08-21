@@ -1,12 +1,9 @@
 # Changelog
 
-## v1.1.38 - 2026-08-21
+## v1.1.39 - 2026-08-21
 
 ### 中文
 
-- 修复：GitHub 外链直接加载深色 `/favicon.ico`，在 Tran 深色背景上几乎不可见。GitHub 链接现在使用随主题保持清晰的本地矢量图标。
-- 优化：其他 HTTP(S) 外链改用标准化的 S2 favicon，并在请求失败时回退为本地外链图标；邮件等非网页链接也始终保留可见图标。
-- 可靠性：应用启动时先等待本地代理配置完成，再创建主窗口，避免首批 favicon 请求抢在代理生效前发出。
 - 修复：富文本输入框中 skill 胶囊与后续文字垂直方向不对齐（胶囊基线取自图标底边所致），现在与正文基线对齐。
 - 修复：富文本输入框不再无限长高——超过上限（常规窗口约 9 行）后转为内部滚动，与旧版 textarea 输入框行为一致。
 - 修复：重新打开历史会话时，通过斜杠命令触发 skill 的那条用户消息不再整段消失，恢复显示为技能卡片（skill 已卸载则显示原始 `/命令` 文本）。
@@ -15,14 +12,25 @@
 
 ### English
 
-- Fix: GitHub links no longer render the dark `/favicon.ico`, which was nearly invisible on Tran's dark transcript background. They now use a bundled, theme-safe vector icon.
-- Improvement: other HTTP(S) links use normalized S2 favicons and fall back to a bundled external-link glyph on failure; non-web links such as email also retain a visible icon.
-- Reliability: Tran now waits for local proxy configuration before creating the main window, preventing initial favicon requests from racing ahead of proxy activation.
 - Fix: in the rich text composer, skill chips were vertically misaligned with the text after them (the chip baseline came from the icon's bottom edge); chips now sit on the text baseline.
 - Fix: the rich text composer no longer grows without limit — past the cap (about 9 lines in a normal window) it scrolls internally, matching the legacy textarea behavior.
 - Fix: when reopening a past session, the user message that triggered a skill via slash command no longer vanishes entirely; it renders as the skill card again (or as the raw `/command` text if the skill was uninstalled).
 - New: hovering a message reveals copy buttons. Assistant replies offer two formats — copy Markdown source or copy rendered rich text; user messages offer one-click text copy.
 - New: the skill list is now scanned from disk by the main process (SKILL.md under `~/.agents/skills` and the project's `.agents/skills`), so the `/` menu and Skills panel are populated before a session starts; once a session is live, the ACP-provided list stays authoritative.
+
+## v1.1.38 - 2026-08-21
+
+### 中文
+
+- 修复：GitHub 外链直接加载深色 `/favicon.ico`，在 Tran 深色背景上几乎不可见。GitHub 链接现在使用随主题保持清晰的本地矢量图标。
+- 优化：其他 HTTP(S) 外链改用标准化的 S2 favicon，并在请求失败时回退为本地外链图标；邮件等非网页链接也始终保留可见图标。
+- 可靠性：应用启动时先等待本地代理配置完成，再创建主窗口，避免首批 favicon 请求抢在代理生效前发出。
+
+### English
+
+- Fix: GitHub links no longer render the dark `/favicon.ico`, which was nearly invisible on Tran's dark transcript background. They now use a bundled, theme-safe vector icon.
+- Improvement: other HTTP(S) links use normalized S2 favicons and fall back to a bundled external-link glyph on failure; non-web links such as email also retain a visible icon.
+- Reliability: Tran now waits for local proxy configuration before creating the main window, preventing initial favicon requests from racing ahead of proxy activation.
 
 ## v1.1.37 - 2026-08-21
 
