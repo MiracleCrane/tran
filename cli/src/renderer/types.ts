@@ -25,6 +25,10 @@ export interface ToolBlock {
   /** 创建/终态时间戳（任务面板耗时用；历史重放 items 无 ts，诚实缺省）。 */
   startedAt?: number
   endedAt?: number
+  /** 后台任务的终态标记：完成通知信封（<notification id="task:…">）到达/历史
+   *  重建时由 store 补登。磁盘任务记录只保留最近两条（2026-08-20 实证），
+   *  server 校正覆盖不到老任务——没有它，老后台命令在面板里永远"运行中"。 */
+  bgTerminal?: 'completed' | 'failed' | 'stopped'
 }
 export type AssistantBlock = TextBlock | ThinkingBlock | ToolBlock
 

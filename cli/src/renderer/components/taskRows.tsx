@@ -52,8 +52,18 @@ export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
   const bgRunning = !!bg?.isBackground && bg.running
   // 前台阻塞语义只给非后台任务。
   const running = (block.status === 'running' || block.status === 'pending') && !bg?.isBackground
-  // #32 后台仍在跑时块 status 已是 done（launch ack），图标按运行中显示。
-  const icon = STATUS_ICON[bgRunning ? 'running' : block.status]
+  // #32 后台仍在跑时块 status 已是 done（launch ack），图标按运行中显示；
+  // 信封补登的终态（无 server 记录的老任务）按 完成/失败/停止 显示。
+  const icon =
+    STATUS_ICON[
+      bgRunning
+        ? 'running'
+        : bg?.terminal === 'failed'
+          ? 'error'
+          : bg?.terminal === 'stopped'
+            ? 'stopped'
+            : block.status
+    ]
   const sub = isAgent ? parseSubagentInput(block.input) : null
   const summary = summaryForTool(block.name, block.input)
   // #32 后台任务时长以 server task 的 started_at/completed_at 为准（block 的

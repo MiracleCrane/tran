@@ -363,6 +363,8 @@ function buildDisplayRows(
         if (!firstId && closing) firstId = closing.item.id
         groupBlocks.push(...closingActs)
       }
+      // ≥2 块才折：单块段（纯文本解说 + 每步单命令的轮次）保持普通卡片 inline
+      // 显示——那不属于"该折没折"，是用户定稿的直排（2026-08-21 拍板）。
       const fold =
         groupBlocks.length >= 2 && firstId !== null && shouldFold(`turn-group-${firstId}`)
       if (!fold) {

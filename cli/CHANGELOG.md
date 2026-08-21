@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.34 - 2026-08-21
+
+### 中文
+
+- 修复:**后台命令面板"全员假运行"**——后台命令的「运行中」取自启动回执的静态快照，完成后的纠正依赖 server/磁盘任务记录，但宿主只保留最近两条任务记录（本会话 132 个后台命令磁盘只剩 2 条），老命令永远等不到纠正，面板里全部挂着「运行中 + 停止」。现在宿主的完成通知信封到达时即把对应命令补登终态（live 前台、后台缓冲、历史重建三条链路），图标区分 完成✓/失败✗/停止⏸，重开老会话同样批量纠偏。
+
+### English
+
+- Fix: every background command showed "running" forever — the running flag came from the static launch receipt, and completion correction relied on server/disk task records, of which the host keeps only the latest two (132 background commands in one session, 2 records on disk), so older commands never got corrected. Completion notification envelopes now stamp the terminal state onto the matching command as they arrive (live, background buffer, and history rebuild paths), with distinct done/failed/stopped icons; reopening old sessions retro-corrects as well.
+
 ## v1.1.33 - 2026-08-20
 
 ### 中文

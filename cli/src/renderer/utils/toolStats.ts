@@ -78,9 +78,12 @@ export function countRunningBackgroundTasks(items: TranscriptItem[], swarmTasks:
 export interface BackgroundTaskInfo {
   isBackground: boolean
   taskId?: string
-  /** 后台任务仍在跑（launch 结果 status: running；完成通知另行到达，
-   *  有 server tasks 时以 withServerTaskStatus 校正为准）。 */
+  /** 后台任务仍在跑（launch 结果 status: running；完成通知信封另行到达，
+   *  有 server tasks 时以 withServerTaskStatus 校正为准，信封补登见
+   *  block.bgTerminal）。 */
   running: boolean
+  /** 完成通知信封补登的终态（server/磁盘校正覆盖不到的老任务的唯一信号）。 */
+  terminal?: 'completed' | 'failed' | 'stopped'
   /** server task 的 started_at/completed_at（ms；面板运行时长用，
    *  缺省退回 block 时间戳）。仅 withServerTaskStatus 命中时填充。 */
   startedAt?: number
@@ -108,7 +111,27 @@ export function backgroundTaskInfo(block: ToolBlock): BackgroundTaskInfo {
   const promoted =
     resultText.trimStart().startsWith('task_id:') && /runs in the background/i.test(resultText)
   if (input.run_in_background !== true && !promoted) return { isBackground: false, running: false }
-  return { isBackground: true, ...(taskId ? { taskId } : {}), running }
+  return {
+    isBackground: true,
+    ...(taskId ? { taskId } : {}),
+    // 信封补登的终态优先于 launch 回执的静态 running（宿主磁盘任务记录只留
+    // 最近两条，老任务等不到 server 校正，2026-08-20 实证「全员假运行」）。
+    running: block.bgTerminal ? false : running,
+    ...(block.bgTerminal ? { terminal: block.bgTerminal } : {})
+  }
+}
+
+/** 后台任务完成通知信封（kimi 宿主注入对话的 `<notification id="task:<id>:<状态>"`）
+ *  → 终态。killed/lost 归并到 stopped/failed（与磁盘词表对齐）。 */
+const TASK_NOTIFICATION_RE = /^<notification\s[^>]*\bid="task:([\w-]+):(\w+)"/
+export function taskTerminalFromEnvelope(
+  text: string
+): { taskId: string; terminal: 'completed' | 'failed' | 'stopped' } | null {
+  const match = text.trimStart().match(TASK_NOTIFICATION_RE)
+  if (!match) return null
+  const raw = match[2]
+  const terminal = raw === 'completed' ? 'completed' : raw === 'failed' || raw === 'lost' ? 'failed' : 'stopped'
+  return { taskId: match[1], terminal }
 }
 
 /** #32 用 kimi server 轮询到的 tasks 校正后台任务状态：launch 结果文本里的

@@ -36,6 +36,7 @@ import { pickedFileToUserAttachment, userAttachmentToPickedFile } from '../utils
 import { DEFAULT_KIMI_MODEL_ID } from '../../shared/models'
 import { normalizeCwdForCompare } from '../../shared/paths'
 import { emitForgeEvent } from '../events'
+import { backgroundTaskInfo, taskTerminalFromEnvelope } from '../utils/toolStats'
 
 /** 每个会话（按 sdkSessionId）最近使用的权限模式。kimi CLI 的 session/load
  *  不会恢复会话模式（init 恒报 default），Tran 侧持久化并在 resume 时重放，
@@ -700,6 +701,59 @@ function scheduleHistoryHydrationStep(
  *  user 用文本；assistant 用各块文本/toolUseId（tool id 在流式与磁盘间稳定）。
  *  user/assistant 之外的本地条目（query/compaction 等）不参与（返回 null，
  *  一律保留）。 */
+/** 后台任务完成通知信封（kimi 宿主注入对话的 <notification id="task:…">）到达：
+ *  把对应后台工具块补登终态。server/磁盘校正只覆盖宿主最近保留的两条任务记录
+ *  （2026-08-20 实证：本会话 132 个后台任务磁盘只剩 2 条 json），老任务的
+ *  「运行中」假象全靠这个信封纠正。 */
+function applyTaskTerminalEnvelope(items: TranscriptItem[], text: string): TranscriptItem[] {
+  const hit = taskTerminalFromEnvelope(text)
+  if (!hit) return items
+  let changed = false
+  const next = items.map((item) => {
+    if (item.kind !== 'assistant') return item
+    let touched = false
+    const blocks = item.blocks.map((b) => {
+      if (!b || b.kind !== 'tool' || b.bgTerminal) return b
+      const bg = backgroundTaskInfo(b)
+      if (!bg.isBackground || bg.taskId !== hit.taskId) return b
+      touched = true
+      return { ...b, bgTerminal: hit.terminal }
+    })
+    if (!touched) return item
+    changed = true
+    return { ...item, blocks }
+  })
+  return changed ? next : items
+}
+
+/** 历史重建的批量补登：先攒终态表再一次改完（逐封扫是 O(通知数×块数)）。 */
+function applyAllTaskTerminalEnvelopes(items: TranscriptItem[]): TranscriptItem[] {
+  const terminalByTask = new Map<string, 'completed' | 'failed' | 'stopped'>()
+  for (const item of items) {
+    if (item.kind !== 'user' || !item.text) continue
+    const hit = taskTerminalFromEnvelope(item.text)
+    if (hit) terminalByTask.set(hit.taskId, hit.terminal)
+  }
+  if (terminalByTask.size === 0) return items
+  let changed = false
+  const next = items.map((item) => {
+    if (item.kind !== 'assistant') return item
+    let touched = false
+    const blocks = item.blocks.map((b) => {
+      if (!b || b.kind !== 'tool' || b.bgTerminal) return b
+      const bg = backgroundTaskInfo(b)
+      const terminal = bg.taskId ? terminalByTask.get(bg.taskId) : undefined
+      if (!bg.isBackground || !terminal) return b
+      touched = true
+      return { ...b, bgTerminal: terminal }
+    })
+    if (!touched) return item
+    changed = true
+    return { ...item, blocks }
+  })
+  return changed ? next : items
+}
+
 function transcriptFingerprint(item: TranscriptItem): string | null {
   if (item.kind === 'user') return `user\n${item.text.slice(0, 200)}`
   if (item.kind === 'assistant') {
@@ -992,7 +1046,8 @@ function applyStreamEvent(
     })
   }
 
-  return { items, currentStreamingMsgId: msgId }
+  // 历史里的完成通知信封批量补登：重开老会话时后台命令状态同样纠偏。
+  return { items: applyAllTaskTerminalEnvelopes(items), currentStreamingMsgId: msgId }
 }
 
 /** Convert a past session's transcript messages into renderable items, pairing
@@ -1561,6 +1616,8 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
         } else {
           bg.items = [...bg.items, { id: uid(), kind: 'user', text: content, parentToolUseId: parent }]
         }
+        // 后台任务完成通知信封：补登对应工具块终态（后台命令面板纠错）。
+        bg.items = applyTaskTerminalEnvelope(bg.items, content)
         bg.running = true
         markSdkSessionRunning(bg.sdkSessionId, true)
       } else if (Array.isArray(content)) {
@@ -3620,6 +3677,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               status: { ...s.status, running: true }
             }
           })
+          // 后台任务完成通知信封：补登对应工具块终态（后台命令面板纠错）。
+          if (content.trimStart().startsWith('<notification')) {
+            set((s) => ({ items: applyTaskTerminalEnvelope(s.items, content) }))
+          }
           // #5 turn 进行中（无论回显还是他端注入的用户消息）。
           markSdkSessionRunning(get().meta?.sdkSessionId, true)
         } else if (Array.isArray(content)) {
