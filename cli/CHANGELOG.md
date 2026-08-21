@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.35 - 2026-08-21
+
+### 中文
+
+- 修复：摇摆角色仍有短帧闪烁——从保留真实 alpha 的 120fps 原始 WebM 重建素材，以五帧时域离群检测只替换持续 1–2 帧的腿部、轮廓和透明度异常，不再用整段平均模糊动作。
+- 修复：两遍动画之间衔接生硬且第二遍实际为倒放——改为截取原始第 160–1026 帧的 7.13 秒纯正向循环，两端选择相似的双臂交叉姿势，并用 6 帧（约 100ms）预乘 alpha 过渡衔接；每次进入「工作中」从 0 秒重新播放，拖动后的恢复仍继续当前帧。
+- 优化：修复动画由 15.8MB 降至 5.48MB，保持 480×700、60fps 与透明 VP9 alpha。
+
+### English
+
+- Fix: the swaying character still flashed on isolated frames — rebuilt from the true-alpha 120fps source WebM, using five-frame temporal outlier detection to replace only 1–2-frame leg, silhouette, and transparency defects instead of blurring the whole motion sequence.
+- Fix: loop transitions felt abrupt because the second pass was actually reversed — the animation is now a 7.13-second forward-only loop from source frames 160–1026, bounded by similar crossed-arm poses and joined with a six-frame (~100ms) premultiplied-alpha transition. Entering `working` restarts at 0 seconds; resuming after drag continues the current frame.
+- Improvement: reduced the repaired animation from 15.8MB to 5.48MB while keeping 480×700, 60fps, and transparent VP9 alpha.
+
 ## v1.1.34 - 2026-08-21
 
 ### 中文

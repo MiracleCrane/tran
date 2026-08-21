@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import swayingCatUrl from '../assets/pet/swaying-cat-alpha.webp'
+import swayingCatUrl from '../assets/pet/swaying-cat-repaired.webm'
 
 /** 本轮计时（2026-08-17 用户要求）：悬浮在对话区左下角——输出的左边，不占
  *  纵向空间（别放顶部横条，也别塞进左侧栏）。运行中才出现，数字带流光。
@@ -27,11 +27,16 @@ export default function TurnTimerStrip(): JSX.Element | null {
           <path d="M12 8.5v4.5l3 2M9 2.5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
         </svg>
         <span className="tran-shimmer">{mm}:{ss}</span>
-        <img
+        <video
           src={swayingCatUrl}
-          alt=""
           draggable={false}
           className="tran-turn-timer-cat"
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          aria-hidden
         />
       </span>
     </div>

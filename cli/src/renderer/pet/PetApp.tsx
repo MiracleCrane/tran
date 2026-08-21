@@ -1,20 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PetMood, PetState } from '../../shared/ipc'
-import swayingCatUrl from '../assets/pet/swaying-cat-alpha.webp'
-import swayingCatStillUrl from '../assets/pet/swaying-cat-still.png'
+import swayingCatUrl from '../assets/pet/swaying-cat-repaired.webm'
 
 /**
  * 桌面宠物窗口（「Tran 以外」的展示位）的页面：一只魔性摇摆猫 + 状态气泡。
  * 与界面内 PetMascot 同素材同情绪，状态经主进程 pet:state 推过来。
  *
- * 素材：三段式抠图的真透明动画 webp（墨镜/腿完好），无限循环；首尾淡出帧
- * 的 alpha 已按帧亮度缩放——循环点是人物自然隐现，没有黑闪。waiting 换同帧
- * 定格 PNG（叠放切换避免解码闪烁）。
+ * 素材：使用 libvpx-vp9 保留原始 alpha 的透明 WebM。短时闪帧经五帧离群修补，
+ * 从两个相似姿势间截取纯正向循环并用 6 帧预乘 alpha 过渡衔接。waiting 与拖动
+ * 时直接暂停当前视频帧，恢复时继续播放，不再切换静态图层。
  *
  * 拖拽（2026-08-20 第三版）：pointermove 累计 movementX/Y，rAF 合帧上报主
- * 进程 setPosition；拖动期间切定格帧（动画合成开销是"卡"的主因）。
+ * 进程 setPosition；拖动期间暂停当前视频帧（动画合成开销是"卡"的主因）。
  * -webkit-app-region:drag 在透明窗口上不生效（Chromium 限制），别走回头路。
- * stage 的 1% 白底让全窗都能命中（透明像素在分层窗口上点不到）。
+ * stage 保持全透明，仅角色可见区域参与命中。
  */
 
 const BUBBLE_FALLBACK: Record<Exclude<PetMood, 'idle'>, string> = {
@@ -31,17 +30,19 @@ const CSS = `
     display: flex; align-items: flex-end; justify-content: center;
     cursor: grab; user-select: none; -webkit-user-select: none;
     touch-action: none;
-    /* Windows 分层窗口按像素 alpha 命中：全透明区域点不到。1% 白 =
-       肉眼不可见的全窗可点（拖哪、右键哪都行）。 */
-    background: rgba(255, 255, 255, 0.012);
+    /* Windows 分层窗口按像素 alpha 命中；仅角色可见区域参与拖动和右键，
+       舞台保持完全透明，避免在深浅背景上出现矩形底色。 */
+    background: transparent;
   }
   .pet-stage.dragging { cursor: grabbing; }
   .pet-img {
     width: 90px; height: auto; display: block; pointer-events: none;
-    transition: opacity 180ms ease, filter 180ms ease;
+    background: transparent; filter: url(#tran-pet-alpha-clean);
+    transition: filter 180ms ease;
   }
-  .pet-img.top { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); }
-  .pet-stage.mood-error .pet-img { filter: grayscale(.85) brightness(.92); }
+  .pet-stage.mood-error .pet-img {
+    filter: url(#tran-pet-alpha-clean) grayscale(.85) brightness(.92);
+  }
   .pet-bubble {
     position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
     max-width: 108px; padding: 4px 8px; border-radius: 10px;
@@ -65,6 +66,8 @@ export default function PetApp(): JSX.Element {
   const [state, setState] = useState<PetState>({ mood: 'idle' })
   const [dragging, setDragging] = useState(false)
   const stageRef = useRef<HTMLDivElement | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const previousMoodRef = useRef<PetMood>(state.mood)
   /** rAF 合帧用的增量累计与帧句柄。 */
   const pendingDelta = useRef({ dx: 0, dy: 0 })
   const rafId = useRef(0)
@@ -122,9 +125,19 @@ export default function PetApp(): JSX.Element {
     window.petApi?.dragEnd()
   }
 
-  // 动画层：waiting 或拖拽中显示定格（拖拽时动画合成是卡的主因）
+  // waiting 或拖拽中暂停当前帧（拖拽时动画合成是卡的主因）
   const animated = state.mood !== 'waiting' && !dragging
   const bubble = state.mood === 'idle' ? null : (state.label ?? BUBBLE_FALLBACK[state.mood])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const previousMood = previousMoodRef.current
+    previousMoodRef.current = state.mood
+    if (state.mood === 'working' && previousMood !== 'working') video.currentTime = 0
+    if (animated) void video.play().catch(() => undefined)
+    else video.pause()
+  }, [animated, state.mood])
 
   return (
     <div
@@ -141,10 +154,25 @@ export default function PetApp(): JSX.Element {
     >
       <style>{CSS}</style>
       {bubble && <div className={`pet-bubble mood-${state.mood}`}>{bubble}</div>}
-      <img className="pet-img" src={swayingCatStillUrl} alt="" draggable={false}
-        style={{ opacity: animated ? 0 : 1 }} />
-      <img className="pet-img top" src={swayingCatUrl} alt="" draggable={false}
-        style={{ opacity: animated ? 1 : 0 }} />
+      <svg width="0" height="0" aria-hidden style={{ position: 'absolute', pointerEvents: 'none' }}>
+        <filter id="tran-pet-alpha-clean" colorInterpolationFilters="sRGB">
+          <feComponentTransfer>
+            <feFuncA type="linear" slope="1.02" intercept="-0.02" />
+          </feComponentTransfer>
+        </filter>
+      </svg>
+      <video
+        ref={videoRef}
+        className="pet-img"
+        src={swayingCatUrl}
+        draggable={false}
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="auto"
+        aria-hidden
+      />
     </div>
   )
 }
