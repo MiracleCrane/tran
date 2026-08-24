@@ -577,18 +577,27 @@ const CopyIcon = (): JSX.Element => (
  *  外侧（样式见 styles.css 的 .tran-msg-copy）。
  *  两个图标：复制（渲染后的富文本——从 .prose-forge DOM 读 innerHTML 写
  *  text/html，纯文本回退用同批节点的 textContent）在前，Markdown 源文在后。
- *  用户消息也渲染成 markdown 之后，两种消息同一套口径。 */
+ *  用户消息也渲染成 markdown 之后，两种消息同一套口径。
+ *
+ *  2026-08-24 起 AI 侧按「整轮」复制：一轮（一条用户发言到下一轮边界之间的
+ *  所有 AI 消息）只在本轮最后一条消息上挂一组图标，复制内容聚合整轮——
+ *  MD 源文由 Transcript 预先拼好传入，富文本按 turnKey 从 DOM 捞本轮全部
+ *  消息的 .prose-forge（每条消息根节点都打着 data-turn-id）。 */
 const MessageCopyControls = memo(function MessageCopyControls({
   placement,
   text,
-  richRootRef
+  richRootRef,
+  turnKey
 }: {
   /** 挂在哪：AI 正文列末尾左下 / 用户气泡右下角（对应 .tran-msg-copy-*）。 */
   placement: 'assistant' | 'user'
-  /** Markdown 源文（MD 图标复制的内容；用户消息即原始输入）。 */
+  /** Markdown 源文（MD 图标复制的内容；AI 为整轮聚合，用户消息即原始输入）。 */
   text: string
-  /** 「复制」从这里捞渲染后的 .prose-forge（AI 为消息根节点，用户为气泡）。 */
-  richRootRef: RefObject<HTMLDivElement | null>
+  /** 「复制」从这里捞渲染后的 .prose-forge（仅用户气泡用；AI 走 turnKey 按轮捞）。 */
+  richRootRef?: RefObject<HTMLDivElement | null>
+  /** AI 整轮复制的轮标识（本轮首条 AI 消息 id）：按 data-turn-id 捞本轮所有
+   *  消息的 .prose-forge。 */
+  turnKey?: string
 }): JSX.Element {
   // useTransientFlag 管定时器的取消与卸载清理（同 PreRenderer 的复制钮）。
   const [copiedText, flashText] = useTransientFlag(1200)
@@ -605,7 +614,12 @@ const MessageCopyControls = memo(function MessageCopyControls({
   }
 
   const copyRich = async (): Promise<void> => {
-    const nodes = richRootRef.current?.querySelectorAll('.prose-forge')
+    // AI 按轮捞（整轮所有消息的 .prose-forge，DOM 顺序即输出顺序）；用户消息
+    // 只捞自己气泡里的。注意：虚拟列表把本轮更早的消息卸载出 DOM 时，富文本
+    // 复制只能拿到仍在渲染窗口内的部分（MD 源文复制始终是整轮全文）。
+    const nodes = turnKey
+      ? document.querySelectorAll(`[data-turn-id="${CSS.escape(turnKey)}"] .prose-forge`)
+      : richRootRef?.current?.querySelectorAll('.prose-forge')
     if (!nodes || nodes.length === 0) return
     const html = Array.from(nodes).map((n) => n.innerHTML).join('\n')
     const plain = Array.from(nodes).map((n) => n.textContent ?? '').join('\n\n')
@@ -657,7 +671,7 @@ const UserMessage = memo(function UserMessage({
   const atts = item.attachments ?? hydratedAttachments ?? []
   const at = messageTime(item.id)
   // 气泡根节点 ref：「复制」（富文本）从这里捞渲染后的 .prose-forge DOM
-  // （同 AI 消息的 rootRef 用法）。
+  // （AI 侧 2026-08-24 起改按轮复制，走 data-turn-id，不再用 rootRef）。
   const bubbleRef = useRef<HTMLDivElement>(null)
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
   const slashSkills = useSessionStore((s) => s.slashCommands)
@@ -1243,7 +1257,9 @@ const AssistantMessage = memo(function AssistantMessage({
   depth,
   deferHighlight = false,
   expandedBlockKey = null,
-  holdOpen = false
+  holdOpen = false,
+  turnKey,
+  turnMarkdown
 }: {
   item: AssistantItem
   depth: number
@@ -1253,19 +1269,18 @@ const AssistantMessage = memo(function AssistantMessage({
   /** turn 进行中且本条是本轮 live 消息：消息内不做成组折叠（等整轮结束）；
    *  单个卡片的完成即收起不受影响（2026-08-14 用户澄清的两层语义）。 */
   holdOpen?: boolean
+  /** 本条所属轮的标识（本轮首条 AI 消息 id）：打在消息根节点 data-turn-id 上，
+   *  整轮复制的富文本按它捞本轮全部 .prose-forge（2026-08-24 起复制按轮聚合）。 */
+  turnKey?: string
+  /** 整轮聚合的 Markdown 源文：只在本轮最后一条 AI 消息上有值（复制图标也只
+   *  挂在这条上）；中间消息不传、整轮无正文时为空。 */
+  turnMarkdown?: string
 }): JSX.Element {
   const isStreaming = !!item.streaming
   const at = messageTime(item.id)
-  // 消息根节点 ref：「复制富文本」从这里捞渲染后的 .prose-forge DOM。
-  const rootRef = useRef<HTMLDivElement>(null)
-  // Markdown 源文：blocks 在流式期间会有空洞（子代理事件交错），先过滤再拼。
-  const markdownSource = item.blocks
-    .filter((b): b is TextBlock => !!b && b.kind === 'text')
-    .map((b) => b.text)
-    .join('\n\n')
 
   return (
-    <div ref={rootRef} className={`group/msg relative ${depth === 0 ? 'tran-ai-col' : ''}`}>
+    <div data-turn-id={turnKey} className={`group/msg relative ${depth === 0 ? 'tran-ai-col' : ''}`}>
       {item.error && (
         <div className="mb-2 rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-1.5 text-xs text-red-300">
           {item.error}
@@ -1362,11 +1377,11 @@ const AssistantMessage = memo(function AssistantMessage({
           {formatTimeShort(at)}
         </div>
       )}
-      {/* 悬停复制：与时间戳同一套显隐机制、同样的显示口径（非流式、depth 0），
-          图标行落在正文列末尾的左下。没有任何正文块（纯工具/思考）时没有
-          可复制内容，不显示。 */}
-      {!isStreaming && depth === 0 && markdownSource && (
-        <MessageCopyControls placement="assistant" text={markdownSource} richRootRef={rootRef} />
+      {/* 悬停复制（2026-08-24 起按轮）：一轮 AI 输出只在最后一条消息上挂一组
+          图标，复制的是整轮聚合（turnMarkdown 由 Transcript 拼好，仅轮末消息
+          有值——中间消息和整轮无正文的轮次都不显示）。显隐机制与时间戳相同。 */}
+      {!isStreaming && depth === 0 && turnMarkdown && (
+        <MessageCopyControls placement="assistant" text={turnMarkdown} turnKey={turnKey} />
       )}
     </div>
   )
@@ -1475,6 +1490,48 @@ export default function Transcript({
   }, [attachmentKey, historyUserIds])
 
   const roots = useMemo(() => buildForest(items), [items])
+  /**
+   * 整轮复制的轮信息（2026-08-24 用户反馈：一轮被工具卡拆成多条 AI 消息，
+   * 每条下面都挂复制图标太吵——一轮只留一个入口）。轮边界口径与
+   * buildDisplayRows 一致：顶层连续的 assistant 消息算一轮，用户发言 /
+   * 压缩分隔 / 轮末改动卡等任何非 assistant 根节点都收掉上一轮；隐藏信封
+   * （system-reminder 等）在视觉上不存在，不打断轮。
+   * key = AI 消息 id；value.turnKey = 本轮首条消息 id（DOM 上 data-turn-id
+   * 的依据）；value.turnMarkdown = 整轮聚合的 MD 源文，只登记在本轮最后一
+   * 条消息上（有值 = 该挂复制图标），整轮无正文则一轮都没有。
+   */
+  const turnCopyByItemId = useMemo(() => {
+    const map = new Map<string, { turnKey: string; turnMarkdown?: string }>()
+    let turn: AssistantItem[] = []
+    const flushTurn = (): void => {
+      if (turn.length === 0) return
+      const turnKey = turn[0].id
+      // 整轮 MD 源文：各消息的正文块各自 \n\n 拼接（blocks 流式期间有空洞，
+      // 先 !!b 过滤），消息之间同样 \n\n；空消息不占分段。
+      const turnMarkdown = turn
+        .map((item) =>
+          item.blocks
+            .filter((b): b is TextBlock => !!b && b.kind === 'text')
+            .map((b) => b.text)
+            .join('\n\n')
+        )
+        .filter((s) => s.trim())
+        .join('\n\n')
+      for (const item of turn) map.set(item.id, { turnKey })
+      if (turnMarkdown) map.set(turn[turn.length - 1].id, { turnKey, turnMarkdown })
+      turn = []
+    }
+    for (const node of roots) {
+      if (isHiddenEnvelope(node)) continue
+      if (node.item.kind === 'assistant') {
+        turn.push(node.item as AssistantItem)
+        continue
+      }
+      flushTurn()
+    }
+    flushTurn()
+    return map
+  }, [roots])
   /**
    * 折叠决策的 sticky 记忆（2026-08 滚动稳定）：组第一次出现时，用户**在底部**
    * 才折成摘要行；在上翻阅读时出现的组保持展开——布局绝不在用户脚下变化。
@@ -2101,11 +2158,14 @@ export default function Transcript({
     if (row.kind === 'itemText') {
       // 轮级折叠下的混合消息：活动块已进集合组，这里只渲染文本（过滤结果
       // 走 WeakMap 缓存，item 引用不变就不破坏 memo）。
+      const turnCopy = turnCopyByItemId.get(row.node.item.id)
       return (
         <AssistantMessage
           item={textOnlyItemOf(row.node.item as AssistantItem)}
           depth={0}
           deferHighlight={deferHighlight}
+          turnKey={turnCopy?.turnKey}
+          turnMarkdown={turnCopy?.turnMarkdown}
         />
       )
     }
@@ -2133,6 +2193,8 @@ export default function Transcript({
         deferHighlight={deferHighlight}
         expandedBlockKey={lastExpandableKey}
         holdOpen={turnRunning && !row.node.item.isHistory}
+        turnKey={turnCopyByItemId.get(row.node.item.id)?.turnKey}
+        turnMarkdown={turnCopyByItemId.get(row.node.item.id)?.turnMarkdown}
       />
     )
   }

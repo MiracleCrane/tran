@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.42 - 2026-08-24
+
+### 中文
+
+- 修复：消息复制按钮改为**每轮对话只出现一次**，位于整轮回复末尾左下方（此前每个文本块下方都会出现，中间块全是噪音）；复制内容聚合整轮——MD 源文为该轮全部文本段按序拼接，富文本为该轮全部渲染内容。整轮无正文或流式中不显示。
+- 修复：宠物视频素材再次更新（腿部闪烁修复迭代）。
+
+### English
+
+- Fix: message copy buttons now appear only **once per conversation turn**, at the bottom-left of the turn's final assistant message (previously they showed under every text block, which was pure noise); copied content is aggregated across the whole turn — Markdown source concatenates all of the turn's text blocks in order, rich text covers all rendered content of the turn. Hidden while streaming or when the turn has no text.
+- Fix: pet video asset updated again (leg-flicker fix iteration).
+
 ## v1.1.41 - 2026-08-24
 
 ### 中文
