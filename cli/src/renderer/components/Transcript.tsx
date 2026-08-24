@@ -563,23 +563,32 @@ function EnvelopeGroupRow({ entries }: { entries: Array<{ id: string; text: stri
   )
 }
 
-/** 悬停复制控件：与时间戳（#43）共用 group/msg 悬停淡入机制，落在同一条侧边
- *  留白里、时间戳下方，两者组成一个悬停 meta 簇（样式见 styles.css 的
- *  .tran-msg-copy）。
- *  用户消息是纯文本，只有一个「复制」；AI 消息多给一种格式——Markdown 源文
- *  （blocks 里的原始文本）之外还能复制渲染后的富文本（从 .prose-forge DOM 读
- *  innerHTML 写 text/html，纯文本回退用同批节点的 textContent）。 */
+/* --- 复制控件的小图标（inline SVG，同 GitToolbar 的惯例） --- */
+const CopyIcon = (): JSX.Element => (
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+    <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z" />
+    <path d="M5.25 1.75C5.25.784 6.034 0 7 0h7.25C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11H7a1.75 1.75 0 0 1-1.75-1.75Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.25a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
+  </svg>
+)
+
+/** 悬停复制控件（2026-08-24 改版：Kimi Web 风格的小图标行，替代侧边留白里
+ *  的文字按钮）。与时间戳（#43）共用 group/msg 悬停淡入机制，但不再占侧边
+ *  留白——AI 挂在正文列末尾的左下、用户挂在气泡右下角，都贴在消息块底边
+ *  外侧（样式见 styles.css 的 .tran-msg-copy）。
+ *  两个图标：复制（渲染后的富文本——从 .prose-forge DOM 读 innerHTML 写
+ *  text/html，纯文本回退用同批节点的 textContent）在前，Markdown 源文在后。
+ *  用户消息也渲染成 markdown 之后，两种消息同一套口径。 */
 const MessageCopyControls = memo(function MessageCopyControls({
-  gutter,
+  placement,
   text,
   richRootRef
 }: {
-  /** 落在哪侧留白：与该消息的时间戳同侧。 */
-  gutter: 'left' | 'right'
-  /** 纯文本（用户消息）或 Markdown 源文（AI 消息）。 */
+  /** 挂在哪：AI 正文列末尾左下 / 用户气泡右下角（对应 .tran-msg-copy-*）。 */
+  placement: 'assistant' | 'user'
+  /** Markdown 源文（MD 图标复制的内容；用户消息即原始输入）。 */
   text: string
-  /** 传了就是 AI 消息：多一个「复制富文本」，从这里捞渲染后的 .prose-forge。 */
-  richRootRef?: RefObject<HTMLDivElement | null>
+  /** 「复制」从这里捞渲染后的 .prose-forge（AI 为消息根节点，用户为气泡）。 */
+  richRootRef: RefObject<HTMLDivElement | null>
 }): JSX.Element {
   // useTransientFlag 管定时器的取消与卸载清理（同 PreRenderer 的复制钮）。
   const [copiedText, flashText] = useTransientFlag(1200)
@@ -596,7 +605,7 @@ const MessageCopyControls = memo(function MessageCopyControls({
   }
 
   const copyRich = async (): Promise<void> => {
-    const nodes = richRootRef?.current?.querySelectorAll('.prose-forge')
+    const nodes = richRootRef.current?.querySelectorAll('.prose-forge')
     if (!nodes || nodes.length === 0) return
     const html = Array.from(nodes).map((n) => n.innerHTML).join('\n')
     const plain = Array.from(nodes).map((n) => n.textContent ?? '').join('\n\n')
@@ -614,25 +623,25 @@ const MessageCopyControls = memo(function MessageCopyControls({
   }
 
   return (
-    <div className={`tran-msg-copy tran-msg-copy-gutter-${gutter}`}>
+    <div className={`tran-msg-copy tran-msg-copy-${placement}`}>
+      <button
+        type="button"
+        className="tran-msg-copy-btn"
+        onClick={() => void copyRich()}
+        title="复制（渲染后的排版）"
+        aria-label="复制（渲染后的排版）"
+      >
+        {copiedRich ? '✓' : <CopyIcon />}
+      </button>
       <button
         type="button"
         className="tran-msg-copy-btn"
         onClick={() => void copyText()}
-        title={richRootRef ? '复制 Markdown（源文）' : '复制'}
+        title="复制 Markdown（源文）"
+        aria-label="复制 Markdown（源文）"
       >
-        {copiedText ? '✓' : richRootRef ? 'MD' : '复制'}
+        {copiedText ? '✓' : <span className="tran-msg-copy-md">MD</span>}
       </button>
-      {richRootRef && (
-        <button
-          type="button"
-          className="tran-msg-copy-btn"
-          onClick={() => void copyRich()}
-          title="复制富文本（渲染后的排版）"
-        >
-          {copiedRich ? '✓' : 'Aa'}
-        </button>
-      )}
     </div>
   )
 })
@@ -647,6 +656,9 @@ const UserMessage = memo(function UserMessage({
 }): JSX.Element {
   const atts = item.attachments ?? hydratedAttachments ?? []
   const at = messageTime(item.id)
+  // 气泡根节点 ref：「复制」（富文本）从这里捞渲染后的 .prose-forge DOM
+  // （同 AI 消息的 rootRef 用法）。
+  const bubbleRef = useRef<HTMLDivElement>(null)
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
   const slashSkills = useSessionStore((s) => s.slashCommands)
   const openAttachmentPreview = useUiStore((s) => s.openAttachmentPreview)
@@ -686,7 +698,7 @@ const UserMessage = memo(function UserMessage({
     // tran-user-msg / tran-user-bubble 是给外观主题用的稳定钩子：简约风把这里
     // 从「右对齐气泡」改成「左对齐 + 左侧强调竖线」，Tailwind 的转义类名不好选中。
     <div className="tran-user-msg group/msg relative flex justify-end">
-      <div className="tran-user-bubble max-w-[85%] rounded-[16px] rounded-tr-md border border-white/10 bg-gradient-to-br from-accent/[0.14] via-white/[0.06] to-white/[0.03] px-4 py-2.5 shadow-lg shadow-black/10">
+      <div ref={bubbleRef} className="tran-user-bubble max-w-[85%] rounded-[16px] rounded-tr-md border border-white/10 bg-gradient-to-br from-accent/[0.14] via-white/[0.06] to-white/[0.03] px-4 py-2.5 shadow-lg shadow-black/10">
         {(item.swarm || item.cutIn) && (
           <div className="mb-1 flex justify-end gap-1">
             {item.swarm && (
@@ -707,9 +719,10 @@ const UserMessage = memo(function UserMessage({
             )}
           </div>
         )}
-        {item.text && (
-          <div className="whitespace-pre-wrap break-words text-sm text-zinc-200">{item.text}</div>
-        )}
+        {/* 用户消息也走 markdown 管线（2026-08-24，与 AI 正文同一个 MessageText，
+            链接/路径可点、加粗代码可渲染；气泡内的排版微调见 styles.css 的
+            .tran-user-bubble .prose-forge——段落内软换行保留、段落间距收紧）。 */}
+        {item.text && <MessageText>{item.text}</MessageText>}
         {atts.length > 0 && (
           <div className="mt-2 flex flex-wrap justify-end gap-2">
             {atts.map((a, i) => {
@@ -755,9 +768,9 @@ const UserMessage = memo(function UserMessage({
           {formatTimeShort(at)}
         </div>
       )}
-      {/* 悬停复制：与时间戳同一个 meta 簇。纯文本消息只有一种格式；
+      {/* 悬停复制：与时间戳同一套显隐机制，图标行挂在气泡右下角。
           无文本（纯附件）时没有可复制内容，不显示。 */}
-      {item.text && <MessageCopyControls gutter="left" text={item.text} />}
+      {item.text && <MessageCopyControls placement="user" text={item.text} richRootRef={bubbleRef} />}
     </div>
   )
 })
@@ -1349,10 +1362,11 @@ const AssistantMessage = memo(function AssistantMessage({
           {formatTimeShort(at)}
         </div>
       )}
-      {/* 悬停复制：与时间戳同一个 meta 簇，同样的显示口径（非流式、depth 0）。
-          没有任何正文块（纯工具/思考）时没有可复制内容，不显示。 */}
+      {/* 悬停复制：与时间戳同一套显隐机制、同样的显示口径（非流式、depth 0），
+          图标行落在正文列末尾的左下。没有任何正文块（纯工具/思考）时没有
+          可复制内容，不显示。 */}
       {!isStreaming && depth === 0 && markdownSource && (
-        <MessageCopyControls gutter="right" text={markdownSource} richRootRef={rootRef} />
+        <MessageCopyControls placement="assistant" text={markdownSource} richRootRef={rootRef} />
       )}
     </div>
   )

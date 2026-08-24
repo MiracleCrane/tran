@@ -338,9 +338,6 @@ export default function Composer(): JSX.Element {
   const runningBashStartedAt = useSessionStore((s) => getToolChipStats(s).runningBashStartedAt)
   const agentTotal = useSessionStore((s) => getToolChipStats(s).agentTotal)
   const runningAgents = useSessionStore((s) => getToolChipStats(s).runningAgents)
-  /** 合并后的「后台任务」chip：命令 + 子代理一起数。 */
-  const runningTasks = runningBash + runningAgents
-  const taskTotal = bashTotal + agentTotal
   // #5c 忙碌原因（输入区提示文案用）：权限确认 / 提问等待 / 后台子任务。
   const pendingPermissionCount = useSessionStore((s) => s.pendingPermissions.length)
   const elicitationCount = useSessionStore((s) => s.elicitationQueue.length)
@@ -363,7 +360,7 @@ export default function Composer(): JSX.Element {
   const chipRowRef = useRef<HTMLDivElement | null>(null)
   /**
    * `/` 面板要浮在输入框**之上**，而它的定位祖先是输入框那一层，`bottom:100%`
-   * 只让开输入框本身——正好压住上面那条 chip 行（后台任务 / 上下文
+   * 只让开输入框本身——正好压住上面那条 chip 行（后台命令 / 子 Agent / 上下文
    * 环）。量一下 chip 行的高度，让面板再往上抬这么多。
    */
   const [chipRowHeight, setChipRowHeight] = useState(0)
@@ -1165,23 +1162,39 @@ export default function Composer(): JSX.Element {
           {stopReason && !statusError && <span className="text-zinc-600">结束: {stopReason}</span>}
           <button
             type="button"
-            data-chip="task"
-            onClick={() => toggleChip('task')}
+            data-chip="bash"
+            onClick={() => toggleChip('bash')}
             className={`flex items-center gap-1 transition hover:brightness-125 ${
-              runningTasks > 0 ? 'text-accent' : taskTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
+              runningBash > 0 ? 'text-blue-300' : bashTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
             }`}
-            title="后台任务（点击查看面板）"
+            title="后台命令（点击查看面板）"
           >
             <span>🕐</span>
-            <span className={runningTasks > 0 ? 'chip-flow-text' : undefined}>
-              {/* 空闲时不显示累计总数——「后台任务 (101)」这种总账是噪声
+            <span className={runningBash > 0 ? 'chip-flow-text' : undefined}>
+              {/* 空闲时不显示累计总数——「后台命令 (101)」这种总账是噪声
                   （2026-08-19 用户），看不出任何活；数字只在有任务运行时出现。
                   点它仍开面板看历史。 */}
-              {runningTasks > 0 ? `后台任务 ${runningTasks} 运行中` : '后台任务'}
+              {runningBash > 0 ? `后台命令 ${runningBash} 运行中` : '后台命令'}
             </span>
             {runningBash > 0 && runningBashStartedAt !== null && (
               <BashRunningElapsed startedAt={runningBashStartedAt} />
             )}
+          </button>
+          <button
+            type="button"
+            data-chip="agent"
+            onClick={() => toggleChip('agent')}
+            className={`flex shrink-0 items-center gap-1 transition hover:brightness-125 ${
+              runningAgents > 0 ? 'text-accent' : agentTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
+            }`}
+            title="子 Agent（点击查看面板）"
+          >
+            <span>✦</span>
+            <span className={runningAgents > 0 ? 'chip-flow-text' : undefined}>
+              {/* 括号只留运行数（2026-08-24 用户拍板）：(3/12) 里的总数是噪音，
+                  没有运行中就只显示名字，与「后台命令」chip 同口径。 */}
+              子 Agent{runningAgents > 0 ? ` (${runningAgents})` : ''}
+            </span>
           </button>
           {/* 这里原本还有一个「待办 (n/m)」chip。删掉了：正文顶部已经常驻一张
               待办卡片，同一份数据在一屏里出现两次，底下这个只是噪声。 */}

@@ -3077,41 +3077,49 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   }
 }
 
-/* 悬停复制控件（MessageCopyControls）：与时间戳同一套显隐机制、同一条侧边
-   留白，落在时间戳下方，两者组成一个悬停 meta 簇。
+/* 悬停复制控件（MessageCopyControls，2026-08-24 改版为 Kimi Web 风格图标行）：
+   与时间戳同一套显隐机制（group/msg 悬停淡入），但不再占侧边留白——AI 挂在
+   正文列末尾的左下、用户挂在气泡右下角，都贴在消息块底边外侧（top:100%），
+   不占布局高度。行间留白（行包装 py-1.5，合约 24px）刚好容下这一行。
    默认 pointer-events:none——opacity 0 时按钮虽看不见却还在原地，不关掉
-   会在留白里埋隐形点击陷阱；悬停淡入的同时恢复点击。 */
+   会在下一条消息顶部埋隐形点击陷阱；悬停淡入的同时恢复点击。
+   容器的 padding-top 是悬停桥：图标行与消息块底边之间不留空隙，指针从正文
+   滑下来不丢 :hover（padding 算元素自身 hover 区）。 */
 .tran-msg-copy {
   position: absolute;
   z-index: 5;
+  top: 100%;
   display: flex;
+  align-items: center;
   gap: 2px;
+  padding-top: 3px;
   opacity: 0;
   pointer-events: none;
   transition: opacity 140ms ease;
 }
-/* AI：右侧留白，时间戳（top 0.2rem）下方。 */
-.tran-msg-copy-gutter-right {
-  left: 100%;
-  margin-left: 0.5rem;
-  top: 1.2rem;
-}
-/* 用户：左侧留白，时间戳（top 0.8rem）下方。 */
-.tran-msg-copy-gutter-left {
+/* AI：正文列末尾左下（对齐正文左缘）。 */
+.tran-msg-copy-assistant {
   left: 0;
-  top: 2rem;
+}
+/* 用户：气泡右下角外侧。容器就是那条右对齐的 flex 行，right:0 即气泡右缘。 */
+.tran-msg-copy-user {
+  right: 0;
 }
 .group\/msg:hover .tran-msg-copy {
   opacity: 1;
   pointer-events: auto;
 }
-/* 小按钮与时间戳同色同字号，悬停提亮（交互对齐 .md-code-copy）。 */
+/* 小图标钮与时间戳同色，悬停提亮（交互对齐 .md-code-copy）。 */
 .tran-msg-copy-btn {
-  padding: 1px 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  min-height: 18px;
+  padding: 1px 3px;
   border-radius: 6px;
   font-size: 10px;
-  line-height: 1.2;
-  white-space: nowrap;
+  line-height: 1;
   color: rgb(113 113 122 / 0.9);
   transition: color 120ms ease, background-color 120ms ease;
 }
@@ -3119,10 +3127,36 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   color: #d4d4d8;
   background: rgba(255, 255, 255, 0.06);
 }
+/* MD 徽标用文字而非 SVG：13px 以下文字比手画的路径更清晰。 */
+.tran-msg-copy-md {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
 @media (prefers-reduced-motion: reduce) {
   .tran-msg-copy {
     transition: none;
   }
+}
+
+/* 用户气泡里的 markdown（2026-08-24：用户消息也走 MessageText）。字号沿用
+   原纯文本气泡的 14px；段落间距收紧一档，保住气泡的紧凑感。
+   p 上给 pre-wrap：用户在输入框里 Shift+Enter 打的单换行在 markdown 里是
+   软换行，默认会被并成一行——pre-wrap 让它按原样断行。只加在 p 上、不加在
+   容器上：块级元素之间的 \n 文本节点在 pre-wrap 下会渲染成幽灵空行
+   （.thinking-block 实测踩过，见上面 2559 行段的注释）。 */
+.tran-user-bubble .prose-forge {
+  font-size: 14px;
+}
+.tran-user-bubble .prose-forge p {
+  margin: 0.45em 0;
+  white-space: pre-wrap;
+}
+.tran-user-bubble .prose-forge p:first-child {
+  margin-top: 0;
+}
+.tran-user-bubble .prose-forge p:last-child {
+  margin-bottom: 0;
 }
 
 /* ============================================================================
@@ -3434,13 +3468,7 @@ div:has(textarea:focus) .composer-shortcut-hint {
     transform: translateX(100%);
     top: 0.2rem;
   }
-  /* 复制控件跟着时间戳搬到同侧，落在它下方。 */
-  :root[data-ui='flat'] .tran-msg-copy-gutter-left {
-    left: auto;
-    right: -0.5rem;
-    transform: translateX(100%);
-    top: 1.2rem;
-  }
+  /* 复制控件（2026-08-24 起）挂在气泡右下角，两套主题同一位置，无需覆写。 */
 }
 
 /* ============================================================================

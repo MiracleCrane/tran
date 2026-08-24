@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.41 - 2026-08-24
+
+### 中文
+
+- 优化：消息复制按钮重做——改为图标式固定位置（对齐 Kimi Web 样式）：AI 回复悬停时正文左下方出现「复制 / MD」两个图标，用户消息在气泡右下角；复制 = 渲染后富文本，MD = Markdown 源文。
+- 新增：用户消息正文改按 Markdown 渲染（加粗、代码、链接、列表均生效，换行按输入原样保留），复制同样支持源文与富文本两种格式。
+- 回退：输入框下方 chip 恢复为「后台命令」「子 Agent」两个独立 chip（v1.1.40 的合并不再采用）；子 Agent chip 计数只显示正在运行的数量，不再显示 `(运行/总数)`。
+- 修复：宠物视频素材再次更新（腿部闪烁修复迭代）。
+
+### English
+
+- Improvement: message copy buttons redesigned as fixed-position icons (matching Kimi Web): hovering an assistant reply shows copy / MD icons at the bottom-left of the content; user messages show them at the bubble's bottom-right. Copy = rendered rich text, MD = Markdown source.
+- New: user message bodies now render as Markdown (bold, code, links, lists; line breaks preserved as typed), and copying supports both source and rich-text formats.
+- Revert: the composer chips are two separate chips again — "后台命令" and "子 Agent" (the v1.1.40 merge is rolled back); the subagent chip now shows only the running count instead of `(running/total)`.
+- Fix: pet video asset updated again (leg-flicker fix iteration).
+
 ## v1.1.40 - 2026-08-24
 
 ### 中文
