@@ -105,9 +105,12 @@ function save(): void {
   }
 }
 
-/** 缓存键用内容哈希：命令可能很长，思考块更长，不适合直接做键。 */
-function cacheKey(kind: NoteKind, text: string): string {
-  return `${kind}:${createHash('sha1').update(text).digest('hex').slice(0, 16)}`
+/** 缓存键用内容哈希：命令可能很长，思考块更长，不适合直接做键。
+ *  键里带字数预算：预算不同就是不同的一句话，不该命中同一条缓存。
+ *  2026-08-24 整组总结 24 → 60 字时借此把旧预算下的缓存一次性失效
+ *  （免费通道，全部重打一遍无妨）；翻译没有截断预算，记 0。 */
+function cacheKey(kind: NoteKind, text: string, maxChars: number): string {
+  return `${kind}:${maxChars}:${createHash('sha1').update(text).digest('hex').slice(0, 16)}`
 }
 
 /** 跟随「AI 自动命名」开关：关掉它就是不想让 Tran 拿额度做总结类杂活。 */
@@ -132,7 +135,7 @@ async function note(
   const input = rawInput.replace(/\s+/g, ' ').trim().slice(0, opts.maxInput)
   if (!input) return null
 
-  const key = cacheKey(kind, input)
+  const key = cacheKey(kind, input, opts.maxChars)
   const cached = load()[key]
   if (cached !== undefined) return cached || null
 
@@ -168,8 +171,9 @@ async function note(
 
 /** 文件编辑说明上限：比命令说明宽一点，"改了哪个文件的什么"要多两三个字。 */
 const EDIT_NOTE_CHARS = 14
-/** 集合行整组总结上限：跟在计数后面，一句话。 */
-const GROUP_NOTE_CHARS = 24
+/** 集合行整组总结上限：跟在计数后面的一句话，行内容得下就全显，真超出行尾
+ *  交给 CSS 省略号 + 悬停全文气泡（2026-08-24 用户拍板，24 → 60）。 */
+const GROUP_NOTE_CHARS = 60
 /** 编辑说明的输入上限：路径 + 新内容头足够表达意图。 */
 const MAX_EDIT_SAMPLE_CHARS = 500
 /** 整组总结的输入上限：各块首句拼起来，太长截断。 */
@@ -321,7 +325,8 @@ export async function translateThinking(text: string): Promise<string | null> {
   const input = text.trim().slice(0, MAX_TRANSLATE_CHARS)
   if (!input) return null
 
-  const key = cacheKey('zh', input)
+  // 翻译没有截断预算，预算位记 0（见 cacheKey 注释）。
+  const key = cacheKey('zh', input, 0)
   const cached = load()[key]
   if (cached !== undefined) return cached || null
 

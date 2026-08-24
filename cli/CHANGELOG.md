@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.43 - 2026-08-24
+
+### 中文
+
+- 修复：折叠活动行的整组 AI 总结不再被 24 字预算腰斩（「检查进」这种半句话）——预算放宽到 60 字，行内容得下就全显；超出行尾由省略号接管，鼠标悬停总结文字会浮出美观的全文气泡（portal 渲染，不被行内裁剪）。
+- 优化：「复制」（富文本）按钮写入剪贴板的纯文本格式改为 Markdown 源文（此前是拍扁的肉眼排版，`**`、列表、标题结构全丢）。粘贴到 Tran 输入框、编辑器等纯文本目标时结构以 markdown 形态保留；粘贴到 Word 等富文本目标仍是渲染排版。
+
+### English
+
+- Fix: the per-group AI summary on collapsed activity rows is no longer guillotined by a 24-char budget (producing half-words like 「检查进」) — the budget is raised to 60 chars so it displays fully whenever the row has room; genuine overflow gets an ellipsis, and hovering the summary shows the full text in a polished floating bubble (portal-rendered, not clipped by the row).
+- Improvement: the copy (rich text) button now writes the Markdown source as the clipboard's plain-text flavor (previously flattened visual text, losing `**`, lists, and heading structure). Pasting into plain-text targets (including Tran's own composer) preserves the structure as Markdown; pasting into rich targets like Word still yields rendered formatting.
+
 ## v1.1.42 - 2026-08-24
 
 ### 中文

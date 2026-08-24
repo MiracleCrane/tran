@@ -1,4 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
@@ -622,7 +623,11 @@ const MessageCopyControls = memo(function MessageCopyControls({
       : richRootRef?.current?.querySelectorAll('.prose-forge')
     if (!nodes || nodes.length === 0) return
     const html = Array.from(nodes).map((n) => n.innerHTML).join('\n')
-    const plain = Array.from(nodes).map((n) => n.textContent ?? '').join('\n\n')
+    // text/plain 给 Markdown 源文而不是拍扁的 textContent（2026-08-24 用户反馈）：
+    // 粘到纯文本目标（含 Tran 自己的输入框——输入框不做 md 自动解析）时结构以
+    // markdown 形态保留；textContent 只剩肉眼排版，**、#、列表记号全丢。
+    const plain =
+      text || Array.from(nodes).map((n) => n.textContent ?? '').join('\n\n')
     try {
       await navigator.clipboard.write([
         new ClipboardItem({
@@ -1197,6 +1202,66 @@ function activityGroupSampleOf(blocks: AssistantBlock[]): string {
   return lines.join('\n').slice(0, 800)
 }
 
+/**
+ * 整组总结的悬停全文气泡（2026-08-24：总结预算放宽到 60 字，一行可能放不下——
+ * 截断交给 CSS 省略号，全文悬停查看，同次用户拍板）。外层按钮 overflow-hidden
+ * 会裁掉绝对定位子元素，气泡走 portal 挂到 body（同 ImageContextMenu 的套路）。
+ */
+function GroupNoteText({ note }: { note: string }): JSX.Element {
+  const [tip, setTip] = useState<{ left: number; top: number; below: boolean } | null>(null)
+  const [shown, setShown] = useState(false)
+
+  const hide = (): void => {
+    setTip(null)
+    setShown(false)
+  }
+
+  const show = (event: MouseEvent<HTMLSpanElement>): void => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    // 默认放上方（bottom 锚定，不用量气泡高度）；上方贴顶不够 72px 才翻到下边。
+    const below = rect.top < 72
+    // max-w-md = 448px，左边往屏内 clamp 一档防出屏。
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - 456))
+    setTip({ left, top: below ? rect.bottom + 6 : rect.top - 6, below })
+  }
+
+  // 挂载后下一帧再转正透明度/位移，做出 ~120ms 淡入。
+  useEffect(() => {
+    if (!tip) return
+    const frame = requestAnimationFrame(() => setShown(true))
+    return () => cancelAnimationFrame(frame)
+  }, [tip])
+
+  // 滚动（捕获阶段，虚拟列表自己的滚动容器也接得到）时收起；卸载随 effect 清理。
+  useEffect(() => {
+    if (!tip) return
+    window.addEventListener('scroll', hide, true)
+    return () => window.removeEventListener('scroll', hide, true)
+  }, [tip])
+
+  return (
+    <span className="min-w-0 truncate text-zinc-600" onMouseEnter={show} onMouseLeave={hide}>
+      · {note}
+      {tip &&
+        createPortal(
+          <div
+            className={`pointer-events-none fixed z-[100] max-w-md whitespace-normal rounded-lg border border-white/10 bg-zinc-900/95 px-2.5 py-1.5 text-xs text-zinc-300 shadow-xl backdrop-blur transition duration-[120ms] ease-out ${
+              shown ? 'translate-y-0 opacity-100' : `opacity-0 ${tip.below ? '-translate-y-1' : 'translate-y-1'}`
+            }`}
+            style={
+              tip.below
+                ? { left: tip.left, top: tip.top }
+                : { left: tip.left, bottom: window.innerHeight - tip.top }
+            }
+          >
+            {note}
+          </div>,
+          document.body
+        )}
+    </span>
+  )
+}
+
 const ActivityGroupCard = memo(function ActivityGroupCard({
   blocks,
   forceOpen = false,
@@ -1231,7 +1296,7 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
         <ActivitySummary segments={summarizeActivity(blocks)} />
         {/* AI 整组总结跟在计数后面，但优先级最低：pill 段 shrink-0 保住完整，
             空间不够时这句先截断（min-w-0 + truncate），绝不能把 pill 挤换行。 */}
-        {groupNote && <span className="min-w-0 truncate text-zinc-600">· {groupNote}</span>}
+        {groupNote && <GroupNoteText note={groupNote} />}
       </button>
       {everOpened && (
         <Collapse open={open}>
