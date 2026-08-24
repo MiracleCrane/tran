@@ -362,6 +362,21 @@ export function hasRunningDiskTasks(sessionId: string): boolean {
   return readDiskTasks(sessionId).some((t) => (t.status ?? '').toLowerCase() === 'running')
 }
 
+/** 按命令串找该会话最新的 process 磁盘任务（KimiBackend 合成后台回执用，
+ *  2026-08-21：kimi 0.37.2 起 terminal 工具完成帧不再带文本，task_id 只能从
+ *  磁盘记录反查）。磁盘 kind 已被 readDiskTasks 归一为 'bash'（原始 'process'）。
+ *  精确匹配（trim 后）命中多条时取 startedAt 最新；无匹配返回 null。 */
+export function findLatestDiskProcessTask(sessionId: string, command: string): KimiTaskInfo | null {
+  const wanted = command.trim()
+  if (!wanted) return null
+  const hits = readDiskTasks(sessionId).filter(
+    (t) => t.kind === 'bash' && t.command?.trim() === wanted
+  )
+  if (!hits.length) return null
+  hits.sort((a, b) => Date.parse(b.startedAt ?? '') - Date.parse(a.startedAt ?? ''))
+  return hits[0]
+}
+
 /** 拉取某会话的全部 tasks：REST（web server 托管任务）+ 磁盘（ACP 后台任务，
  *  #34）按 id 合并，REST 优先。server 不可用且无磁盘记录时返回 null（降级）。 */
 export async function getSessionTasks(sessionId: string): Promise<KimiTaskInfo[] | null> {

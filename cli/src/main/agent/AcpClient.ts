@@ -46,6 +46,8 @@ export interface AcpClientOptions {
     fs?: { readTextFile?: boolean; writeTextFile?: boolean }
     terminal?: boolean
   }
+  /** 额外注入 ACP 子进程的环境变量（在 process.env 之上覆盖）。 */
+  extraEnv?: Record<string, string>
 }
 
 /** JSON-RPC error with the ACP error code attached (e.g. -32000 authRequired). */
@@ -196,7 +198,8 @@ export class AcpClient {
     log(logTag, `spawn ACP ${displayPath ?? command} ${args.join(' ')}`)
     const child = spawn(command, fullArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true
+      windowsHide: true,
+      ...(this.options.extraEnv ? { env: { ...process.env, ...this.options.extraEnv } } : {})
     })
     this.child = child
 

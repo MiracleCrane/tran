@@ -25,7 +25,9 @@ import {
   type AcpRpcMessage
 } from './AcpClient'
 import { resolveWindowsKimiCommand } from '../windowsKimi'
-import { hasRunningDiskTasks } from '../kimiServerApi'
+import { checkKimiVersion } from '../kimiVersion'
+import { legacyEngineFlagForKimiVersion } from '../kimiLegacyGate'
+import { findLatestDiskProcessTask, hasRunningDiskTasks } from '../kimiServerApi'
 import { recordSessionTitle, removeSessionTitle } from '../sessionTitles'
 import { generateAiTitle } from '../aiTitles'
 import { deleteKimiSession } from '../sessionDelete'
@@ -71,6 +73,9 @@ interface ActiveKimiSession {
   thinkingBlockIndex: number | null
   nextBlockIndex: number
   toolResults: Set<string>
+  /** toolCallId → 已到达的 rawInput 合并快照（run_in_background 常在后续
+   *  tool_call_update 才到，完成帧判后台靠它，2026-08-21）。完成/失败时清除。 */
+  toolRawInputs: Map<string, Record<string, unknown>>
   skills: SkillInfo[]
   lastUsage?: TokenUsage
   /** 隐藏轮（/usage）：标志置位期间该会话所有流式事件不转发渲染层，只累积文本。 */
@@ -366,6 +371,7 @@ export class KimiBackend {
       thinkingBlockIndex: null,
       nextBlockIndex: 0,
       toolResults: new Set(),
+      toolRawInputs: new Map(),
       skills: [],
       hiddenTurn: false,
       hiddenText: '',
@@ -1727,6 +1733,9 @@ export class KimiBackend {
       let promise!: Promise<AcpClient>
       promise = (async () => {
         const resolved = await resolveWindowsKimiCommand()
+        // 版本门用的探测：checkKimiVersion 有 6h 缓存，热路径零开销；首次调用
+        // 会跑一次 `kimi --version`（并行查 npm 最新版，均有超时保护）。
+        const kimiVersion = await checkKimiVersion()
         return AcpClient.start({
           command: resolved.command,
           argsPrefix: resolved.argsPrefix,
@@ -1734,6 +1743,13 @@ export class KimiBackend {
           displayPath: resolved.displayPath,
           logTag: 'kimi',
           clientInfo: { name: 'tran', title: 'Tran', version: '1.0.0' },
+          // 2026-08-24：Kimi Code 0.37.0–0.38.0 临时兼容——版本门逻辑与背景见
+          // kimiLegacyGate.ts（v2 终端守卫导致 Grep/Glob 必炸；上游 PR #3183 已合并待发布）。
+          // 探测失败时会注入 legacy 标志（比 v2 守卫更安全）。
+          ...(() => {
+            const extraEnv = legacyEngineFlagForKimiVersion(kimiVersion.currentVersion ?? null)
+            return extraEnv ? { extraEnv } : {}
+          })(),
           clientCapabilities: {
             fs: { readTextFile: true, writeTextFile: true },
             terminal: true
@@ -1844,6 +1860,7 @@ export class KimiBackend {
     if (type === 'tool_call') {
       this.sealReplayStream(session)
       const toolUseId = asString(update.toolCallId) ?? cryptoId()
+      this.cacheToolRawInput(session, toolUseId, update)
       replay.messages.push({
         type: 'assistant',
         uuid: `kimi-replay-${cryptoId()}`,
@@ -1862,13 +1879,20 @@ export class KimiBackend {
       // rawInput 随 update 才到（后台标记 run_in_background）：回填进 tool_use 块。
       const rawInput = asRecord(update.rawInput)
       if (rawInput) mergeReplayToolInput(replay, toolUseId, rawInput)
+      this.cacheToolRawInput(session, toolUseId, update)
       const status = asString(update.status)
-      const content = stringifyToolResult(update.rawOutput ?? update.content ?? update.title ?? status ?? '')
       if (status === 'completed' || status === 'failed') {
         replay.terminalToolCalls.add(toolUseId)
         replay.pendingToolResults.delete(toolUseId)
-        pushReplayToolResult(replay, toolUseId, content, status === 'failed')
+        pushReplayToolResult(
+          replay,
+          toolUseId,
+          this.terminalResultText(session, toolUseId, update, status),
+          status === 'failed'
+        )
+        session.toolRawInputs.delete(toolUseId)
       } else {
+        const content = stringifyToolResult(update.rawOutput ?? update.content ?? update.title ?? status ?? '')
         replay.pendingToolResults.set(toolUseId, { content, isError: false })
       }
       return
@@ -2063,6 +2087,7 @@ export class KimiBackend {
     if (type === 'tool_call') {
       const toolUseId = asString(update.toolCallId) ?? cryptoId()
       session.turnHadToolCall = true
+      this.cacheToolRawInput(session, toolUseId, update)
       // 工具调用是独立的 assistant 消息；先封停当前流式消息（思考/正文），
       // 否则渲染层会把工具卡覆盖到正在流式的那条消息上。
       this.sealStreamMessage(session)
@@ -2076,12 +2101,14 @@ export class KimiBackend {
       if (status === 'completed' || status === 'failed') {
         if (session.toolResults.has(toolUseId)) return
         session.toolResults.add(toolUseId)
+        this.cacheToolRawInput(session, toolUseId, update)
         this.emitToolResult(
           session,
           toolUseId,
-          stringifyToolResult(update.rawOutput ?? update.content ?? update.title ?? status),
+          this.terminalResultText(session, toolUseId, update, status),
           status === 'failed'
         )
+        session.toolRawInputs.delete(toolUseId)
         return
       }
       // in_progress 等中间态：转发流式内容（子代理输出等），partial 标记让
@@ -2089,6 +2116,7 @@ export class KimiBackend {
       //  run_in_background 在这里才到）一并下传，渲染层合并进 block.input。
       let partialText = stringifyToolResult(update.rawOutput ?? update.content)
       const rawInput = asRecord(update.rawInput)
+      this.cacheToolRawInput(session, toolUseId, update)
       // #30：输入未闭合时 kimi 把"工具输入 JSON 的累积快照"当 in_progress
       // content 逐字推流（{"command":"… 不断增长）——这是输入不是输出，不当
       // 卡片正文渲染。但快照里已拼出的 command/description 正是摘要要等的
@@ -2623,6 +2651,57 @@ export class KimiBackend {
     } as unknown as SDKMessage)
   }
 
+  /** 缓存 toolCallId 的 rawInput 合并快照：首帧常缺 run_in_background（它在
+   *  后续 update 才到），完成帧判后台必须看合并后的全集。 */
+  private cacheToolRawInput(
+    session: ActiveKimiSession,
+    toolUseId: string,
+    update: Record<string, unknown>
+  ): void {
+    const rawInput = asRecord(update.rawInput)
+    if (!rawInput) return
+    const prev = session.toolRawInputs.get(toolUseId)
+    session.toolRawInputs.set(toolUseId, prev ? { ...prev, ...rawInput } : rawInput)
+  }
+
+  /** kimi 0.37.2 起 terminal 工具的完成帧只带 {type:'terminal', terminalId}、
+   *  不带文本结果（宿主刻意去重，期望客户端渲染终端面板）——Tran 的两条链路
+   *  都断在这：前台工具卡空输出，后台任务面板解析不到启动回执（2026-08-21）。
+   *  这里凭 terminalId 回查 AcpTerminalHost 台账补齐：
+   *  - 前台：台账捕获的全量输出直接当结果文本（输出已被宿主按 outputByteLimit
+   *    截断，沿用现有体量惯例）；
+   *  - 后台（rawInput.run_in_background）：终端还在跑，按命令串反查最新 process
+   *    磁盘任务，合成渲染层 backgroundTaskInfo 认识的启动回执
+   *    （toolStats.ts 只认 `task_id:` 行 + `status: running` 字样）。
+   *  非 terminal 结果原样走 stringifyToolResult，行为不变。 */
+  private terminalResultText(
+    session: ActiveKimiSession,
+    toolUseId: string,
+    update: Record<string, unknown>,
+    status: string | undefined
+  ): string {
+    const fallback = stringifyToolResult(update.rawOutput ?? update.content ?? update.title ?? status)
+    const terminalId = terminalIdFromContent(update.rawOutput ?? update.content)
+    if (!terminalId) return fallback
+    const record = this.terminalHost.getTerminalRecord(terminalId)
+    const rawInput = session.toolRawInputs.get(toolUseId)
+    if (rawInput?.run_in_background === true) {
+      const command = asString(rawInput.command) ?? record?.command ?? ''
+      const task = command && session.acpSessionId
+        ? findLatestDiskProcessTask(session.acpSessionId, command)
+        : null
+      // 磁盘还没落盘/命令对不上时退化为无 task_id 的回执：面板仍能认出
+      // 这是后台任务（input 里有 run_in_background），只是少了状态校正锚点。
+      const receipt: string[] = []
+      if (task) receipt.push(`task_id: ${task.id}`)
+      if (command) receipt.push(command)
+      receipt.push('status: running')
+      return receipt.join('\n')
+    }
+    if (record?.output) return record.output
+    return fallback
+  }
+
   private emitResult(
     session: ActiveKimiSession,
     result: {
@@ -3044,6 +3123,24 @@ function stringifyToolContentItem(value: unknown): string {
   if (item.type === 'terminal') return asString(item.command) ?? asString(item.output) ?? ''
   if (item.type === 'diff') return asString(item.diff) ?? ''
   return asString(item.text) ?? asString(item.title) ?? ''
+}
+
+/** 从工具结果 content 里抠 terminalId（kimi 0.37.2 去重形态：完成帧 content
+ *  只剩 {type:'terminal', terminalId} 一项）。单个对象或数组都认。 */
+function terminalIdFromContent(value: unknown): string | undefined {
+  const probe = (item: unknown): string | undefined => {
+    const record = asRecord(item)
+    if (record?.type !== 'terminal') return undefined
+    return asString(record.terminalId)
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const hit = probe(item)
+      if (hit) return hit
+    }
+    return undefined
+  }
+  return probe(value)
 }
 
 /** #40 从流式输入 JSON 快照残片里抢救已拼出的 command/description（卡片摘要用）。

@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useSessionStore } from '../store/sessionStore'
-import { AGENT_TOOL_NAMES, collectBackgroundTaskBlocks, collectToolBlocks, countRunningTools } from '../utils/toolStats'
+import type { ToolBlock } from '../types'
+import {
+  AGENT_TOOL_NAMES,
+  collectBackgroundTaskBlocks,
+  collectToolBlocks,
+  countRunningBackgroundTasks,
+  countRunningTools
+} from '../utils/toolStats'
 import { isToolRowActive, PlanRow, ToolRow } from './taskRows'
 
 /** chips 独立浮层（kimi web 同款）：点哪个 chip 弹哪个自己的面板，portal 挂
@@ -10,7 +17,7 @@ import { isToolRowActive, PlanRow, ToolRow } from './taskRows'
 /** #12 归档阈值：默认只显示活跃项 + 最近 N 条历史，其余收进"查看全部"。 */
 const RECENT_HISTORY_LIMIT = 8
 
-export type ChipKind = 'bash' | 'agent' | 'plan'
+export type ChipKind = 'task' | 'plan'
 
 export interface ChipAnchor {
   left: number
@@ -47,36 +54,63 @@ export default function ChipPopover({
     return () => document.removeEventListener('pointerdown', onPointerDown, true)
   }, [onClose])
 
-  // 「后台命令」面板只列真后台任务（口径同 chip 计数）。
-  const bashBlocks = kind === 'bash' ? collectBackgroundTaskBlocks(items) : []
-  const agentBlocks = kind === 'agent' ? collectToolBlocks(items, AGENT_TOOL_NAMES) : []
+  // 「后台任务」面板分两节：命令（只列真后台任务）+ 子代理（口径同 chip 计数）。
+  const bashBlocks = kind === 'task' ? collectBackgroundTaskBlocks(items) : []
+  const agentBlocks = kind === 'task' ? collectToolBlocks(items, AGENT_TOOL_NAMES) : []
+  const runningBash = kind === 'task' ? countRunningBackgroundTasks(items, swarmTasks) : 0
   const runningAgents =
-    kind === 'agent' ? countRunningTools(items, AGENT_TOOL_NAMES, swarmTasks, turnRunning) : 0
+    kind === 'task' ? countRunningTools(items, AGENT_TOOL_NAMES, swarmTasks, turnRunning) : 0
   const planDone = planEntries.filter((e) => e.status === 'completed').length
 
+  const runningTasks = runningBash + runningAgents
   const title =
-    kind === 'bash'
-      ? `后台命令 · ${bashBlocks.length}`
-      : kind === 'agent'
-        ? `子 Agent · ${runningAgents} 运行中`
-        : `待办 · ${planDone}/${planEntries.length}`
+    kind === 'task'
+      ? runningTasks > 0
+        ? `后台任务 · ${runningTasks} 运行中`
+        : '后台任务'
+      : `待办 · ${planDone}/${planEntries.length}`
   const empty =
-    kind === 'bash'
-      ? bashBlocks.length === 0
-      : kind === 'agent'
-        ? agentBlocks.length === 0
-        : planEntries.length === 0
+    kind === 'task'
+      ? bashBlocks.length === 0 && agentBlocks.length === 0
+      : planEntries.length === 0
 
-  // #12 排序：最新在前（collectToolBlocks 返回时间正序，倒转）；活跃项再置顶突出。
-  const newestFirst = (kind === 'bash' ? bashBlocks : agentBlocks).slice().reverse()
-  const activeBlocks = newestFirst.filter((b) => isToolRowActive(b, swarmTasks))
-  const historyBlocks = newestFirst.filter((b) => !isToolRowActive(b, swarmTasks))
-  const visibleHistory = showAllHistory ? historyBlocks : historyBlocks.slice(0, RECENT_HISTORY_LIMIT)
-  const hiddenHistoryCount = historyBlocks.length - visibleHistory.length
+  // #12 排序：最新在前（collectToolBlocks 返回时间正序，倒转）；活跃项再置顶突出；
+  // 历史默认只露最近 N 条，其余收进「查看全部」。命令/子代理两节共用这套切分。
+  const renderBlockList = (blocks: ToolBlock[]): JSX.Element => {
+    const newestFirst = blocks.slice().reverse()
+    const activeBlocks = newestFirst.filter((b) => isToolRowActive(b, swarmTasks))
+    const historyBlocks = newestFirst.filter((b) => !isToolRowActive(b, swarmTasks))
+    const visibleHistory = showAllHistory ? historyBlocks : historyBlocks.slice(0, RECENT_HISTORY_LIMIT)
+    const hiddenHistoryCount = historyBlocks.length - visibleHistory.length
+    return (
+      <>
+        {[...activeBlocks, ...visibleHistory].map((b) => (
+          <ToolRow key={b.toolUseId} block={b} />
+        ))}
+        {hiddenHistoryCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => setShowAllHistory(true)}
+            className="mt-0.5 w-full rounded-lg px-2 py-1.5 text-left text-[11px] text-zinc-500 transition hover:bg-white/[0.03] hover:text-zinc-300"
+          >
+            查看全部（还有 {hiddenHistoryCount} 条历史）
+          </button>
+        ) : showAllHistory && historyBlocks.length > RECENT_HISTORY_LIMIT ? (
+          <button
+            type="button"
+            onClick={() => setShowAllHistory(false)}
+            className="mt-0.5 w-full rounded-lg px-2 py-1.5 text-left text-[11px] text-zinc-500 transition hover:bg-white/[0.03] hover:text-zinc-300"
+          >
+            收起历史
+          </button>
+        ) : null}
+      </>
+    )
+  }
 
-  // #28 浮层加宽：子 Agent 行要预览完整任务描述（原 w-80 截断成"额度悬浮卡…"），
-  // 给到 30rem；bash/待办适度加宽到 24rem。max-w 兜底小窗口不溢出屏幕。
-  const widthCls = kind === 'agent' ? 'w-[30rem]' : 'w-96'
+  // #28 浮层加宽：子代理行要预览完整任务描述（原 w-80 截断成"额度悬浮卡…"），
+  // 「后台任务」给到 30rem；待办适度加宽到 24rem。max-w 兜底小窗口不溢出屏幕。
+  const widthCls = kind === 'task' ? 'w-[30rem]' : 'w-96'
 
   return createPortal(
     <div
@@ -95,26 +129,18 @@ export default function ChipPopover({
           planEntries.map((entry, i) => <PlanRow key={i} entry={entry} index={i} />)
         ) : (
           <>
-            {[...activeBlocks, ...visibleHistory].map((b) => (
-              <ToolRow key={b.toolUseId} block={b} />
-            ))}
-            {hiddenHistoryCount > 0 ? (
-              <button
-                type="button"
-                onClick={() => setShowAllHistory(true)}
-                className="mt-0.5 w-full rounded-lg px-2 py-1.5 text-left text-[11px] text-zinc-500 transition hover:bg-white/[0.03] hover:text-zinc-300"
-              >
-                查看全部（还有 {hiddenHistoryCount} 条历史）
-              </button>
-            ) : showAllHistory && historyBlocks.length > RECENT_HISTORY_LIMIT ? (
-              <button
-                type="button"
-                onClick={() => setShowAllHistory(false)}
-                className="mt-0.5 w-full rounded-lg px-2 py-1.5 text-left text-[11px] text-zinc-500 transition hover:bg-white/[0.03] hover:text-zinc-300"
-              >
-                收起历史
-              </button>
-            ) : null}
+            {bashBlocks.length > 0 && (
+              <>
+                <div className="px-2 pb-0.5 pt-1 text-[10px] text-zinc-600">命令</div>
+                {renderBlockList(bashBlocks)}
+              </>
+            )}
+            {agentBlocks.length > 0 && (
+              <>
+                <div className="px-2 pb-0.5 pt-1 text-[10px] text-zinc-600">子代理</div>
+                {renderBlockList(agentBlocks)}
+              </>
+            )}
           </>
         )}
       </div>

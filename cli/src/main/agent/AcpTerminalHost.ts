@@ -22,19 +22,38 @@ interface TerminalEntry {
   id: string
   sessionId: string
   child: ChildProcess
+  /** 展示/比对用命令行（command + args 拼接；精确匹配仍以工具 rawInput.command 为准）。 */
+  command: string
   output: string
   outputByteLimit: number
   truncated: boolean
+  createdAt: number
   exitStatus?: TerminalExitStatus
   exitPromise: Promise<TerminalExitStatus>
   released: boolean
 }
+
+/** 终端完结/释放后的留存快照（kimi 0.37.2 起 terminal 工具完成帧只带
+ *  {type:'terminal', terminalId}、不带文本结果，KimiBackend 凭 terminalId
+ *  回查这里补齐输出，2026-08-21）。 */
+export interface TerminalRecord {
+  command: string
+  output: string
+  exitCode: number | null
+  signal: string | null
+  createdAt: number
+}
+
+/** 台账上限：只留最近 50 个终端（短会话几十个终端封顶，够完成帧回查用；
+ *  完成帧通常紧随 release，容量远用不满）。 */
+const TERMINAL_LEDGER_LIMIT = 50
 
 type SessionCwdResolver = (sessionId: string) => string | undefined
 
 /** Owns ACP client-side terminal processes and their bounded output/lifetime. */
 export class AcpTerminalHost {
   private readonly terminals = new Map<string, TerminalEntry>()
+  private readonly records = new Map<string, TerminalRecord>()
 
   constructor(private readonly sessionCwd: SessionCwdResolver) {}
 
@@ -87,9 +106,11 @@ export class AcpTerminalHost {
       id: terminalId,
       sessionId,
       child,
+      command: [command, ...args].join(' '),
       output: '',
       outputByteLimit: boundedOutputLimit(params.outputByteLimit),
       truncated: false,
+      createdAt: Date.now(),
       exitPromise,
       released: false
     }
@@ -105,9 +126,42 @@ export class AcpTerminalHost {
         signal: signal == null ? null : String(signal)
       }
       terminal.exitStatus = status
+      this.recordTerminal(terminal)
       settleExit(status)
     })
     return { terminalId }
+  }
+
+  /** 按 terminalId 回查终端快照：活着的终端给实时快照（后台任务完成帧到达时
+   *  进程还在跑），已完结/释放的查台账。 */
+  getTerminalRecord(terminalId: string): TerminalRecord | undefined {
+    const live = this.terminals.get(terminalId)
+    if (live) {
+      return {
+        command: live.command,
+        output: live.output,
+        exitCode: live.exitStatus?.exitCode ?? null,
+        signal: live.exitStatus?.signal ?? null,
+        createdAt: live.createdAt
+      }
+    }
+    return this.records.get(terminalId)
+  }
+
+  private recordTerminal(terminal: TerminalEntry): void {
+    if (this.records.has(terminal.id)) return
+    if (this.records.size >= TERMINAL_LEDGER_LIMIT) {
+      // Map 按插入序迭代，删最老一条保持容量上限。
+      const oldest = this.records.keys().next().value
+      if (oldest !== undefined) this.records.delete(oldest)
+    }
+    this.records.set(terminal.id, {
+      command: terminal.command,
+      output: terminal.output,
+      exitCode: terminal.exitStatus?.exitCode ?? null,
+      signal: terminal.exitStatus?.signal ?? null,
+      createdAt: terminal.createdAt
+    })
   }
 
   private output(terminal: TerminalEntry): Record<string, unknown> {
@@ -156,6 +210,8 @@ export class AcpTerminalHost {
   private async release(terminal: TerminalEntry): Promise<void> {
     if (terminal.released) return
     terminal.released = true
+    // 释放即对 kimi 不可见，但完成帧可能随后才到——先留快照再删活表。
+    this.recordTerminal(terminal)
     this.terminals.delete(terminal.id)
     await this.kill(terminal)
   }

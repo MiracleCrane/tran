@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.40 - 2026-08-24
+
+### 中文
+
+- 修复：Kimi 0.37.2+ 把 Bash 路由到客户端终端后，后台命令面板彻底断链（完成帧只回传 terminalId、不带文本回执，导致 task_id 提取失败、运行计数恒为 0、任务一启动就显示"已完成"）；前台 Bash 卡片输出空白也一并修复。Tran 现在为主进程终端建台账，完成时合成回执文本，面板链路全部复活。
+- 优化：输入框下方的「后台命令」与「子 Agent」两个 chip 合并为「后台任务」，计数合并、浮层分「命令」「子代理」两节展示。
+- 修复：Kimi 0.37.0–0.38.0 的 v2 引擎守卫只放行 Bash 指纹，导致 Grep/Glob 必报 "ACP runtime only supports interactive Bash tool processes"。Tran 现在按版本自动注入 `KIMI_CODE_LEGACY_FLAG=1` 切到 legacy 引擎绕行（上游 PR #3183 已合并，含修复的正式版发布后自动恢复 v2，也可用隐藏环境变量 `TRAN_KIMI_LEGACY=0/1` 人工覆盖）。
+- 修复：宠物视频腿部间歇性消失（重制 swaying-cat 素材）。
+
+### English
+
+- Fix: after Kimi 0.37.2 routed Bash through the client terminal, the background-commands panel broke completely (completion frames carry only a terminalId, no text receipt, so task_id extraction failed, the running count stayed at 0, and tasks showed "done" immediately); blank foreground Bash cards are fixed too. Tran now keeps a terminal ledger in the main process and synthesizes the receipt text on completion, reviving the whole panel chain.
+- Improvement: the two composer chips "后台命令" (background commands) and "子 Agent" (subagents) are merged into a single "后台任务" (background tasks) chip with a combined count and a two-section popover.
+- Fix: Kimi 0.37.0–0.38.0's v2 engine guard only allows the Bash spawn fingerprint, so Grep/Glob always fail with "ACP runtime only supports interactive Bash tool processes". Tran now version-gates an automatic `KIMI_CODE_LEGACY_FLAG=1` injection to route around it via the legacy engine (upstream PR #3183 is merged; once a release ships the fix, Tran returns to v2 automatically; hidden env `TRAN_KIMI_LEGACY=0/1` overrides manually).
+- Fix: pet video legs disappearing intermittently (remastered swaying-cat asset).
+
 ## v1.1.39 - 2026-08-21
 
 ### 中文
