@@ -26,6 +26,7 @@ type SessionListSnapshot = {
 }
 
 const PINNED_SESSIONS_KEY = 'forge.pinnedSessions.v1'
+const QA_HIDDEN_KEY = 'forge.qaSectionHidden.v1'
 
 const DAY = 86_400_000
 const GROUP_ORDER = ['今天', '昨天', '本周', '更早'] as const
@@ -44,11 +45,14 @@ const SESSION_LOAD_MORE_THRESHOLD_PX = 180
 const PREVIEW_WIDTH_PX = 256
 const PREVIEW_MAX_HEIGHT_PX = 168
 const PREVIEW_GAP_PX = 10
-/** 悬停预览的出现延迟：350→650ms（2026-08-24 用户：扫过会话列表误出）。
- *  停住才出，扫读不触发。 */
-const PREVIEW_SHOW_DELAY_MS = 650
-/** 行/侧栏移出后的收卡宽限（指针跨隙上卡用，见 scheduleHidePreview）。 */
-const PREVIEW_HIDE_GRACE_MS = 150
+/** 悬停预览的出现延迟：350→650→700ms（2026-08-24 用户：扫过会话列表误出；
+ *  2026-08-25 对齐 Codex 桌面版手感）。停住才出，扫读不触发。 */
+const PREVIEW_SHOW_DELAY_MS = 700
+/** 收卡后的即开窗口（2026-08-25 逆向 Codex）：一张卡刚关，300ms 内悬停
+ *  下一行跳过出现延迟——扫列表时首张之后的卡即开即换。 */
+const PREVIEW_SKIP_DELAY_WINDOW_MS = 300
+/** 安全三角底边的纵向外扩：行/卡近缘上下各让 8px（见 beginTriangleWatch）。 */
+const PREVIEW_SAFE_TRIANGLE_PAD_PX = 8
 
 /** 悬停预览卡的数据。状态由 SessionPreviewCard 独立持有（模块级 setter 注入），
  *  不进 Sidebar 的 state——否则每次悬停/移开都整列表重渲染。 */
@@ -60,6 +64,10 @@ interface SessionPreviewData {
   cwd?: string
   lastModified: number
   firstPrompt?: string
+  /** 冷缓存兜底：首条消息还在路上，摘要区先占位撑高（防落地时卡片跳高）。 */
+  summaryPending?: boolean
+  /** 仅首张卡淡入（2026-08-25 Codex 式动画减法）：行间切换是瞬时替换，不加类。 */
+  animate?: boolean
   /** 会话动作集中营（2026-08-20 用户：「这几个功能都加上图标，和归档放到一个
    *  地方去」）：置顶/重命名/删除/归档全部收进预览卡底部图标排。 */
   session: SessionListItem
@@ -71,6 +79,9 @@ interface SessionPreviewData {
 
 let previewSetter: ((p: SessionPreviewData | null) => void) | null = null
 
+/** 预览卡 DOM（安全三角要量它的实际位置/高度）：ref 回调登记，卸载自动置空。 */
+let previewCardEl: HTMLElement | null = null
+
 function showSessionPreview(p: SessionPreviewData | null): void {
   previewSetter?.(p)
 }
@@ -78,6 +89,7 @@ function showSessionPreview(p: SessionPreviewData | null): void {
 function SessionPreviewCard({
   onHoldOpen,
   onClose,
+  onTriangleLeave,
   onPin,
   onRename,
   onDelete,
@@ -85,6 +97,8 @@ function SessionPreviewCard({
 }: {
   onHoldOpen: () => void
   onClose: () => void
+  /** 离卡不立即收：交给安全三角判断（目的地=当前行）。 */
+  onTriangleLeave: (e: PointerEvent<HTMLElement>) => void
   onPin: (session: SessionListItem) => void
   onRename: (key: string, currentSummary: string) => void
   onDelete: (key: string) => void
@@ -103,10 +117,13 @@ function SessionPreviewCard({
   const projectName = preview.cwd ? preview.cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : null
   return createPortal(
     <div
-      className="glass-panel tran-enter fixed z-[90] w-64 rounded-2xl p-3 shadow-2xl"
+      ref={(el) => {
+        previewCardEl = el
+      }}
+      className={`glass-panel fixed z-[90] w-64 rounded-2xl p-3 shadow-2xl${preview.animate ? ' tran-preview-enter' : ''}`}
       style={{ top: preview.top, left: preview.left }}
       onPointerEnter={onHoldOpen}
-      onPointerLeave={onClose}
+      onPointerLeave={onTriangleLeave}
     >
       <div className="flex items-baseline gap-2">
         <div className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-100">{preview.summary}</div>
@@ -120,11 +137,16 @@ function SessionPreviewCard({
           <span className="truncate">{projectName}</span>
         </div>
       )}
-      {preview.firstPrompt && (
+      {preview.firstPrompt ? (
         <div className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-zinc-500">
           {preview.firstPrompt}
         </div>
-      )}
+      ) : preview.summaryPending ? (
+        // 冷缓存占位（2026-08-25）：摘要 IPC 未到先撑住 3 行高度
+        //（11px × leading-relaxed 1.625 × 3 ≈ 54px），firstPrompt 落地
+        // 补齐时卡片不跳高。
+        <div className="mt-1.5 min-h-[54px]" aria-hidden />
+      ) : null}
       {/* 会话动作集中营（2026-08-20 用户：「这几个功能都加上图标，和归档放到
           一个地方去」）：置顶/重命名/删除/归档收进预览卡底部一排图标；行内悬停
           操作组随之删除（它贴着行右缘淡入、光标就在按钮上，是误触之源）。预览卡
@@ -224,6 +246,18 @@ function writePinnedSessions(keys: Set<string>): void {
   window.localStorage.setItem(PINNED_SESSIONS_KEY, JSON.stringify([...keys]))
 }
 
+function readQaHidden(): boolean {
+  try {
+    return window.localStorage.getItem(QA_HIDDEN_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeQaHidden(hidden: boolean): void {
+  window.localStorage.setItem(QA_HIDDEN_KEY, hidden ? '1' : '0')
+}
+
 function groupSessionsByTime(
   sessions: SessionListItem[]
 ): SessionGroup[] {
@@ -310,8 +344,22 @@ const SearchIcon = (): JSX.Element => (
 const SECTION_LABEL_SHIMMER: Record<string, string> = {
   置顶: 'seg-shimmer seg-shimmer-bash',
   项目: 'seg-shimmer seg-shimmer-edit',
-  最近: 'seg-shimmer seg-shimmer-read'
+  最近: 'seg-shimmer seg-shimmer-read',
+  问答: 'seg-shimmer seg-shimmer-project'
 }
+
+// 「问答」分区：固定收 screen-assist 悬浮问答工具的会话（demo 期硬编码，
+// 值即 normalizeCwdForCompare('C:\\LegacyD\\projects\\screen-assist') 的结果）。
+const QA_SECTION_LABEL = '问答'
+const QA_SESSION_CWD = 'c:/legacyd/projects/screen-assist'
+
+const EyeIcon = ({ off }: { off?: boolean }): JSX.Element => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+    <circle cx="12" cy="12" r="3" />
+    {off ? <line x1="2" y1="2" x2="22" y2="22" /> : null}
+  </svg>
+)
 
 const FolderIcon = (): JSX.Element => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
@@ -536,6 +584,15 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const [groupMode] = useState<SessionGroupMode>('project')
   /** 「全部」视图里被折叠的 cwd 组（label = 完整路径）。 */
   const [collapsedGroupLabels, setCollapsedGroupLabels] = useState<Set<string>>(() => new Set())
+  // 「问答」分区整体显隐（工具栏眼睛开关），偏好存 localStorage
+  const [qaHidden, setQaHidden] = useState<boolean>(() => readQaHidden())
+  const toggleQaHidden = (): void => {
+    setQaHidden((h) => {
+      const next = !h
+      writeQaHidden(next)
+      return next
+    })
+  }
   const [appVersion, setAppVersion] = useState('')
   const [aiNamingBusy, setAiNamingBusy] = useState(false)
   /** 批量命名进度（主进程逐条推送）：没进度显示就是用户眼里的"卡住"。 */
@@ -570,11 +627,18 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       .catch(() => {})
   }, [])
   const previewTimerRef = useRef<number | null>(null)
-  /** 行移出后的延迟收卡定时器：给指针留出跨空隙上到预览卡的时间窗
-   *  （2026-08-20 用户：归档按钮在卡里，卡随行移出即消失，根本点不到）。 */
-  const previewHideTimerRef = useRef<number | null>(null)
   /** 预览请求代际号（见 schedulePreview 的竞态守卫）。 */
   const previewSeqRef = useRef(0)
+  /** 卡当前是否开着（即开判定 + 真实收卡时刻记录用）。 */
+  const previewOpenRef = useRef(false)
+  /** 上一次真实收卡的时刻（performance.now）：300ms 内换行跳过出现延迟。 */
+  const lastPreviewCloseAtRef = useRef(0)
+  /** 当前预览所属行：安全三角的回行判定与离卡镜像三角的目的地。 */
+  const previewRowElRef = useRef<HTMLElement | null>(null)
+  /** 首条消息缓存（sessionId → preview）：pointerenter 即预热，开卡不等 IPC。 */
+  const previewCacheRef = useRef(new Map<string, SessionPreview>())
+  /** 安全三角的 document 捕获阶段 pointermove 监听（见 beginTriangleWatch）。 */
+  const triangleWatchRef = useRef<{ onMove: (e: globalThis.PointerEvent) => void } | null>(null)
 
   useEffect(() => {
     void window.api.getAppVersion().then(setAppVersion).catch(() => {})
@@ -615,17 +679,83 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     }
   }
 
-  const cancelPreviewHide = (): void => {
-    if (previewHideTimerRef.current !== null) {
-      window.clearTimeout(previewHideTimerRef.current)
-      previewHideTimerRef.current = null
+  const cancelTriangleWatch = (): void => {
+    const watch = triangleWatchRef.current
+    if (watch) {
+      document.removeEventListener('pointermove', watch.onMove, true)
+      triangleWatchRef.current = null
     }
+  }
+
+  const hidePreview = (): void => {
+    cancelPreviewTimer()
+    cancelTriangleWatch()
+    // 作废在途请求：不然移开后才返回的 IPC 会把预览卡又弹回来。
+    previewSeqRef.current++
+    // 只在真实收卡时记录时刻（卡没开着就不算——滚动/切会话时顺手调到
+    // 这里不会白送即开窗口）；卸载清理不走本函数，不刷新该时间戳。
+    if (previewOpenRef.current) lastPreviewCloseAtRef.current = window.performance.now()
+    previewOpenRef.current = false
+    showSessionPreview(null)
+  }
+
+  /** 安全三角（2026-08-25 逆向 Codex 桌面版，取代原 150ms 收卡宽限定时器）：
+   *  顶点 = 移出瞬间的指针位置，底边 = 目标物近缘纵向 ±8px。指针在三角形内
+   *  移动 = 正朝目标去，卡保持；回到行/上了卡由各自的 pointerenter 接管；
+   *  一旦偏出三角立即收卡，不等任何定时器。纯几何：t=(x-x0)/dx 处对上下两条
+   *  边做线性插值，y 落在其间即在三角内。滚动已由 onScroll→hidePreview 兜底，
+   *  故不再加 elementFromPoint 轮询。 */
+  const beginTriangleWatch = (
+    apex: { x: number; y: number },
+    base: { x: number; top: number; bottom: number },
+    rowEl: HTMLElement,
+    cardEl: HTMLElement
+  ): void => {
+    cancelTriangleWatch()
+    const onMove = (e: globalThis.PointerEvent): void => {
+      const target = e.target
+      // 回到行 / 上了卡：它们的 pointerenter 会取消监听并接管，这里放行。
+      if (target instanceof Element && (rowEl.contains(target) || cardEl.contains(target))) return
+      const dx = base.x - apex.x
+      // 底边与顶点同 x（垂直离开）：没有朝目标的分量，直接收。
+      if (dx === 0) {
+        hidePreview()
+        return
+      }
+      const t = (e.clientX - apex.x) / dx
+      if (t >= 0 && t <= 1) {
+        const yTop = apex.y + (base.top - apex.y) * t
+        const yBottom = apex.y + (base.bottom - apex.y) * t
+        if (e.clientY >= yTop && e.clientY <= yBottom) return // 仍在安全三角内
+      }
+      hidePreview()
+    }
+    triangleWatchRef.current = { onMove }
+    document.addEventListener('pointermove', onMove, true)
   }
 
   const schedulePreview = (key: string, s: SessionListItem, el: HTMLElement): void => {
     cancelPreviewTimer()
-    // 指针从预览卡移回行：收回中的卡重新定住。
-    cancelPreviewHide()
+    // 从预览卡/安全三角回到行：取消三角监听，卡重新定住。
+    cancelTriangleWatch()
+    previewRowElRef.current = el
+    // 进立即预热首条消息 IPC（2026-08-25）：不等出现延迟，结果按 sessionId
+    // 缓存；700ms 后开卡时缓存几乎总是热的，卡片一次成型、无高度跳变。
+    if (!previewCacheRef.current.has(s.sessionId)) {
+      void window.api
+        .getSessionPreview(s.sessionId)
+        .catch(() => ({} as SessionPreview))
+        .then((data) => {
+          previewCacheRef.current.set(s.sessionId, data)
+        })
+    }
+    // 卡还开着（行↔卡往返/换行）或刚收卡 300ms 内：即开——扫列表时首张
+    // 之后的卡即开即换的手感来源。
+    const delay =
+      previewOpenRef.current ||
+      window.performance.now() - lastPreviewCloseAtRef.current < PREVIEW_SKIP_DELAY_WINDOW_MS
+        ? 0
+        : PREVIEW_SHOW_DELAY_MS
     previewTimerRef.current = window.setTimeout(() => {
       previewTimerRef.current = null
       const rect = el.getBoundingClientRect()
@@ -646,53 +776,91 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       // 用旧行内容/坐标覆盖新行的预览卡。seq 记本次调度的代际，回来时不是
       // 最新一发就丢弃。
       const seq = ++previewSeqRef.current
+      // 首张卡才淡入；卡已开着时的换行是瞬时替换（动画减法，2026-08-25）。
+      const animate = !previewOpenRef.current
+      previewOpenRef.current = true
+      const base: SessionPreviewData = {
+        key,
+        top,
+        left,
+        summary: s.summary || '(未命名)',
+        ...(s.cwd ? { cwd: s.cwd } : {}),
+        lastModified: s.lastModified,
+        session: s,
+        pinned: pinnedSessionKeys.has(key),
+        running: s.running || runningSdkSessionIds.includes(s.sessionId),
+        animate
+      }
+      const cached = previewCacheRef.current.get(s.sessionId)
+      if (cached) {
+        showSessionPreview({ ...base, ...(cached.firstPrompt ? { firstPrompt: cached.firstPrompt } : {}) })
+        return
+      }
+      // 冷缓存兜底：先用同步数据（标题/项目/时间）开卡，摘要区占位撑高；
+      // firstPrompt 落地后补齐（seq 不是最新一发就丢弃）。
+      showSessionPreview({ ...base, summaryPending: true })
       void window.api
         .getSessionPreview(s.sessionId)
         .catch(() => ({} as SessionPreview))
         .then((data) => {
+          previewCacheRef.current.set(s.sessionId, data)
           if (seq !== previewSeqRef.current) return
-          showSessionPreview({
-            key,
-            top,
-            left,
-            summary: s.summary || '(未命名)',
-            ...(s.cwd ? { cwd: s.cwd } : {}),
-            lastModified: s.lastModified,
-            ...(data.firstPrompt ? { firstPrompt: data.firstPrompt } : {}),
-            session: s,
-            pinned: pinnedSessionKeys.has(key),
-            running: s.running || runningSdkSessionIds.includes(s.sessionId)
-          })
+          showSessionPreview({ ...base, ...(data.firstPrompt ? { firstPrompt: data.firstPrompt } : {}) })
         })
-    }, PREVIEW_SHOW_DELAY_MS)
+    }, delay)
   }
 
-  const hidePreview = (): void => {
-    cancelPreviewTimer()
-    cancelPreviewHide()
-    // 作废在途请求：不然移开后才返回的 IPC 会把预览卡又弹回来。
-    previewSeqRef.current++
-    showSessionPreview(null)
-  }
-
-  /** 行移出不立刻收卡：留一小段给指针跨过行与卡之间的空隙上到卡上
-   *  （滚动/点击/切换等显式关闭仍走 hidePreview 立即收）。
-   *  2026-08-24：300→150ms（用户：移走了还赖着）。够跨 10px 空隙上卡即可，
-   *  扫过列表时卡片不再一直挂在头上。 */
-  const scheduleHidePreview = (): void => {
-    cancelPreviewHide()
-    previewHideTimerRef.current = window.setTimeout(() => {
-      previewHideTimerRef.current = null
-      // 另一行的预览正在排期（A→B 快速移动）：让位给新卡，别收。
-      if (previewTimerRef.current !== null) return
+  /** 行移出：卡还没出（延迟中）就放弃这次排期；卡已开则起安全三角——
+   *  朝卡移动保持、偏航立即收（不再有 150ms 宽限定时器）。 */
+  const beginRowLeaveWatch = (e: PointerEvent<HTMLElement>): void => {
+    if (!previewOpenRef.current) {
+      cancelPreviewTimer()
+      return
+    }
+    const rowEl = previewRowElRef.current
+    const cardEl = previewCardEl
+    if (!rowEl || !cardEl) {
       hidePreview()
-    }, PREVIEW_HIDE_GRACE_MS)
+      return
+    }
+    const cardRect = cardEl.getBoundingClientRect()
+    beginTriangleWatch(
+      { x: e.clientX, y: e.clientY },
+      {
+        x: cardRect.left,
+        top: cardRect.top - PREVIEW_SAFE_TRIANGLE_PAD_PX,
+        bottom: cardRect.bottom + PREVIEW_SAFE_TRIANGLE_PAD_PX
+      },
+      rowEl,
+      cardEl
+    )
   }
 
-  /** 指针上到预览卡：show/hide 两个定时器都取消，卡保持常开（点归档就靠它）。 */
+  /** 离卡镜像三角（2026-08-25）：目的地换回当前行，几何同上。 */
+  const beginCardLeaveWatch = (e: PointerEvent<HTMLElement>): void => {
+    const rowEl = previewRowElRef.current
+    const cardEl = previewCardEl
+    if (!previewOpenRef.current || !rowEl || !cardEl) {
+      hidePreview()
+      return
+    }
+    const rowRect = rowEl.getBoundingClientRect()
+    beginTriangleWatch(
+      { x: e.clientX, y: e.clientY },
+      {
+        x: rowRect.right,
+        top: rowRect.top - PREVIEW_SAFE_TRIANGLE_PAD_PX,
+        bottom: rowRect.bottom + PREVIEW_SAFE_TRIANGLE_PAD_PX
+      },
+      rowEl,
+      cardEl
+    )
+  }
+
+  /** 指针上到预览卡：show 定时器与三角监听都取消，卡保持常开（点归档就靠它）。 */
   const holdPreviewOpen = (): void => {
     cancelPreviewTimer()
-    cancelPreviewHide()
+    cancelTriangleWatch()
   }
   const [pinnedSessionKeys, setPinnedSessionKeys] = useState<Set<string>>(() => readPinnedSessions())
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
@@ -1060,8 +1228,26 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       clearSessionCacheReleaseTimer()
       clearPrefetchResumeTimer()
       cancelPreviewTimer()
+      cancelTriangleWatch()
       document.documentElement.classList.remove('sidebar-motion')
     }
+  }, [])
+
+  // 预览卡显式 dismissal（2026-08-25）：Esc（捕获阶段）与窗口失焦立即收卡；
+  // 列表滚动已在 handleSessionListScroll 里收。hidePreview 只依赖 ref，
+  // 空依赖数组安全。
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') hidePreview()
+    }
+    const onBlur = (): void => hidePreview()
+    document.addEventListener('keydown', onKeyDown, true)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true)
+      window.removeEventListener('blur', onBlur)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // 兜底：当前会话一变就收预览。上面 handleOpenSession 里已经收了一次，但
@@ -1264,9 +1450,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       !!s.cwd &&
       addedProjectPaths.has(normalizeCwdForCompare(s.cwd)) &&
       (!homePath || normalizeCwdForCompare(s.cwd) !== homePath)
+    const isQaSession = (s: SessionListItem): boolean =>
+      normalizeCwdForCompare(s.cwd ?? '') === QA_SESSION_CWD
+    const qa = qaHidden ? [] : rest.filter(isQaSession).sort((a, b) => b.lastModified - a.lastModified)
     const inProject = rest.filter(isProjectSession)
     const recent = rest
-      .filter((s) => !isProjectSession(s))
+      .filter((s) => !isProjectSession(s) && !isQaSession(s))
       .sort((a, b) => b.lastModified - a.lastModified)
     const cwdGroups =
       sessionScope === 'all'
@@ -1286,11 +1475,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         : []
     return [
       ...(pinned.length ? [{ label: '置顶', items: pinned, section: true }] : []),
+      ...(qa.length ? [{ label: QA_SECTION_LABEL, items: qa, section: true }] : []),
       ...cwdGroups,
       ...emptyProjectGroups,
       ...(recent.length ? [{ label: '最近', items: recent, section: true }] : [])
     ]
-  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjectPaths, addedProjectRawPaths, homePath])
+  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjectPaths, addedProjectRawPaths, homePath, qaHidden])
   sessionGroupsRef.current = sessionGroups
 
   const visibleSessionKeys = useMemo(
@@ -1497,7 +1687,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     ))
 
   return (
-    <div key="sidebar-expanded" onPointerLeave={scheduleHidePreview} className="sidebar-expand glass-sidebar flex h-full min-h-0 w-64 shrink-0 flex-col rounded-[18px] border">
+    // 离开整个侧栏与离开行同一套处理（2026-08-25 安全三角）：卡在 portal 里、
+    // 不是侧栏后代，行→卡的路上本事件必触发；行自己的 leave 先起三角，这里
+    // 只是把三角顶点更新到更靠卡的位置，语义不变。
+    <div key="sidebar-expanded" onPointerLeave={beginRowLeaveWatch} className="sidebar-expand glass-sidebar flex h-full min-h-0 w-64 shrink-0 flex-col rounded-[18px] border">
       {/* brand + 隐藏切换（全窗口唯一品牌位，标题栏不再重复；文字挂常静流光，
           2026-08 用户点名要的动效）。头部只留一颗「隐藏侧边栏」（Alt+Q 唤回，
           左缘悬停也能浮出）——图标条模式 2026-08-18 用户拍板整体砍掉。 */}
@@ -1612,6 +1805,13 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               <ChecklistIcon />
             </button>
             <button
+              onClick={toggleQaHidden}
+              className={`flex h-5 w-5 items-center justify-center rounded-md transition hover:bg-white/[0.05] hover:text-zinc-200 ${qaHidden ? 'text-zinc-600' : 'text-zinc-400'}`}
+              title={qaHidden ? '显示「问答」分区' : '隐藏「问答」分区'}
+            >
+              <EyeIcon off={qaHidden} />
+            </button>
+            <button
               onClick={startSessionRefreshTransition}
               className="flex h-5 w-5 items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
               title="刷新"
@@ -1666,7 +1866,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
           // cwd 折叠组头只在「全部 + 按项目」下启用；合成段（置顶/最近）与
           // 其余情况用纯文本组头。
           const cwdGroupHeader = !g.section && sessionScope === 'all' && groupMode === 'project'
-          const groupCollapsed = cwdGroupHeader && collapsedGroupLabels.has(g.label)
+          const qaSectionHeader = g.section && g.label === QA_SECTION_LABEL
+          const groupCollapsed = (cwdGroupHeader || qaSectionHeader) && collapsedGroupLabels.has(g.label)
           // Codex 式段标题：第一个项目组前面立一块「项目」分隔（2026-08-18
           // 用户：「项目置顶最近这几个字得有啊」——原先还要求置顶/最近段存在
           // 才显示，全是项目的列表就一个段标都没有）。
@@ -1723,6 +1924,15 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                   </svg>
                 </button>
               </div>
+            ) : qaSectionHeader ? (
+              <button
+                type="button"
+                onClick={() => toggleGroupCollapsed(g.label)}
+                className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[13px] font-semibold text-zinc-400 transition hover:text-zinc-200"
+              >
+                <span className="text-[8px] text-zinc-500">{groupCollapsed ? '▸' : '▾'}</span>
+                <span className={`truncate ${SECTION_LABEL_SHIMMER[g.label] ?? ''}`}>{g.label}</span>
+              </button>
             ) : (
               <div className="flex items-center gap-1.5 px-2 py-1 text-[13px] font-semibold text-zinc-400">
                 <span className={`truncate ${SECTION_LABEL_SHIMMER[g.label] ?? ''}`}>{g.label}</span>
@@ -1781,10 +1991,14 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                       }}
                       onPointerEnter={(e) => {
                         handleSidebarPointerGlow(e)
-                        if (!multiMode) schedulePreview(key, s, e.currentTarget)
+                        // 重命名输入中 / 删除确认弹窗开着时不排预览（2026-08-25，
+                        // 同 multiMode 守卫一式）。
+                        if (!multiMode && editingId === null && confirmDeleteId === null) {
+                          schedulePreview(key, s, e.currentTarget)
+                        }
                       }}
                       onPointerMove={handleSidebarPointerGlow}
-                      onPointerLeave={scheduleHidePreview}
+                      onPointerLeave={beginRowLeaveWatch}
                       className={`sidebar-session-row relative w-full rounded-md border px-2 py-[5px] text-left ${
                         // 标题全程占满行宽：行内悬停操作组已随预览卡动作集中营
                         // 删除（2026-08-20），无任何右缘遮挡。
@@ -1996,6 +2210,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       <SessionPreviewCard
         onHoldOpen={holdPreviewOpen}
         onClose={hidePreview}
+        onTriangleLeave={beginCardLeaveWatch}
         onPin={togglePinnedSession}
         onRename={(key, currentSummary) => {
           setEditingId(key)

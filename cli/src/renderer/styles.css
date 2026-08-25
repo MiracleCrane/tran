@@ -2687,6 +2687,19 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   animation: tran-fade-rise 180ms var(--easing-out) both;
 }
 
+/* 会话悬停预览卡入场（2026-08-25 Codex 式动画减法）：仅 100ms 淡入、无位移；
+ *  行间切换为瞬时替换（JS 侧不给换行卡加此类），消失 = 直接卸载。与共享的
+ *  tran-enter 分家：那边一动全身，预览卡要独立节奏。 */
+.tran-preview-enter {
+  animation: tran-fade-in 100ms var(--easing-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tran-preview-enter {
+    animation: none;
+  }
+}
+
 .tran-msg-enter {
   animation: tran-fade-rise var(--motion-med) var(--easing-out) both;
 }
@@ -3084,7 +3097,15 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
    默认 pointer-events:none——opacity 0 时按钮虽看不见却还在原地，不关掉
    会在下一条消息顶部埋隐形点击陷阱；悬停淡入的同时恢复点击。
    容器的 padding-top 是悬停桥：图标行与消息块底边之间不留空隙，指针从正文
-   滑下来不丢 :hover（padding 算元素自身 hover 区）。 */
+   滑下来不丢 :hover（padding 算元素自身 hover 区，悬停时容器整体
+   pointer-events:auto，桥才真正接得住指针）。
+   2026-08-25 用户反馈「鼠标稍微移出一点点就消失」：
+   1) 桥加宽到 6px， crossing 容错大一点；
+   2) 离开延迟隐藏——transition 的 after-state 规则决定延迟方向：悬停规则里
+      delay 0（立刻出现），基础规则里 opacity 延迟 250ms 才淡出，短暂划出
+      再划回来不会闪没；pointer-events 同步延迟到淡出结束（390ms）才关，
+      淡出窗口内划回图标上仍能命中、hover 链重新接上。隐藏态（含延迟窗口
+      结束后）始终 pointer-events:none，不拦截下一条消息。 */
 .tran-msg-copy {
   position: absolute;
   z-index: 5;
@@ -3092,10 +3113,12 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding-top: 3px;
+  padding-top: 6px;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 140ms ease;
+  transition:
+    opacity 140ms ease 250ms,
+    pointer-events 0s linear 390ms;
 }
 /* AI：正文列末尾左下（对齐正文左缘）。 */
 .tran-msg-copy-assistant {
@@ -3108,6 +3131,10 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
 .group\/msg:hover .tran-msg-copy {
   opacity: 1;
   pointer-events: auto;
+  /* 进入方向：立刻出现（覆盖基础规则的 250ms/390ms 离开延迟）。 */
+  transition:
+    opacity 140ms ease 0ms,
+    pointer-events 0s linear 0ms;
 }
 /* 小图标钮与时间戳同色，悬停提亮（交互对齐 .md-code-copy）。 */
 .tran-msg-copy-btn {
@@ -3134,8 +3161,17 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   letter-spacing: 0.02em;
 }
 @media (prefers-reduced-motion: reduce) {
+  /* 只砍过渡时长；250ms 离开延迟不是「动效」而是划出容错（见上方 2026-08-25
+     注释），reduced-motion 下保留——否则这批用户的图标照样一划就没。 */
   .tran-msg-copy {
-    transition: none;
+    transition:
+      opacity 0s ease 250ms,
+      pointer-events 0s linear 250ms;
+  }
+  .group\/msg:hover .tran-msg-copy {
+    transition:
+      opacity 0s ease 0ms,
+      pointer-events 0s linear 0ms;
   }
 }
 

@@ -340,6 +340,8 @@ function buildDisplayRows(
     const textBearing = (node: ItemNode): boolean =>
       node.item.kind === 'assistant' &&
       node.item.blocks.some((b) => !!b && b.kind === 'text')
+    /** 轮内最后一条含正文消息 id：开口尾段的组 id 锚点（见 flushSegment 注释）。 */
+    let lastTextId: string | null = null
 
     /** 当前段（正文边界之间）的节点 + 轮内下标。 */
     let seg: Array<{ node: ItemNode; index: number }> = []
@@ -365,17 +367,28 @@ function buildDisplayRows(
         if (!firstId && closing) firstId = closing.item.id
         groupBlocks.push(...closingActs)
       }
+      // 组 id 锚点（2026-08-25 改）：闭段锚在**收段的正文消息** id 上，开口尾段
+      // 锚在轮内最后一条正文消息 id 上（加 tail 前缀避免与该正文消息闭合的前一段
+      // 撞键）；整轮还没有正文（轮刚起步的流式开口段）才退回段内第一个被折节点。
+      // 旧锚点就是 firstId——历史注水把段**向前**延伸时 firstId 变、组行换 id
+      // 重挂载，sticky 折叠态查找落空退回 atBottom 判定，组被意外摊开（且
+      // firstItemIndex 补偿的旧 key 反推法也死在同一个 id 漂移上）。注水只往
+      // 头部加更早的条目，收段/轮内最后的正文消息永远在已加载部分里，id 稳定。
+      let groupId: string | null = null
+      if (closing) groupId = `turn-group-${closing.item.id}`
+      else if (lastTextId) groupId = `turn-group-tail-${lastTextId}`
+      else if (firstId) groupId = `turn-group-${firstId}`
       // ≥2 块才折：单块段（纯文本解说 + 每步单命令的轮次）保持普通卡片 inline
       // 显示——那不属于"该折没折"，是用户定稿的直排（2026-08-21 拍板）。
-      const fold =
-        groupBlocks.length >= 2 && firstId !== null && shouldFold(`turn-group-${firstId}`)
-      if (!fold) {
+      const fold = groupBlocks.length >= 2 && groupId !== null && shouldFold(groupId)
+      if (!fold || groupId === null) {
         for (const { node } of seg) rows.push({ kind: 'item', node })
         seg = []
         return 'full'
       }
+      const stableGroupId: string = groupId
       const groupRow = (): DisplayRow => {
-        const id = `turn-group-${firstId}`
+        const id = stableGroupId
         const pureTools = groupBlocks.every((b): b is ToolBlock => b.kind === 'tool')
         return pureTools
           ? { kind: 'toolGroup', id, blocks: groupBlocks as ToolBlock[] }
@@ -403,6 +416,7 @@ function buildDisplayRows(
       const node = turnNodes[i]
       if (textBearing(node)) {
         const mode = flushSegment(node, false)
+        lastTextId = node.item.id
         rows.push({ kind: mode === 'text' ? 'itemText' : 'item', node })
       } else {
         seg.push({ node, index: i })
@@ -760,6 +774,17 @@ const UserMessage = memo(function UserMessage({
                     src={a.dataUrl}
                     alt={a.name}
                     className="max-h-44 max-w-[220px] rounded-lg border border-white/10 object-cover"
+                    // 高度占位（2026-08-25）：图片无固有尺寸声明，解码完成后行高
+                    // 才撑开，历史注水补图时整片视口抖动。先给 4/3 中性占位，
+                    // onLoad 换成真实宽高比（直接改 DOM：style prop 值不变，React
+                    // 重渲染不会回拨）。max-h-44/max-w 约束不变。
+                    style={{ aspectRatio: '4 / 3' }}
+                    onLoad={(e) => {
+                      const img = e.currentTarget
+                      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                        img.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`
+                      }
+                    }}
                   />
                 </button>
               ) : (
@@ -1462,7 +1487,10 @@ export default function Transcript({
   const sessionKey = useSessionStore((s) => s.meta?.sessionId ?? '')
   // Virtuoso 头部插入补偿（见下面 displayRows 的注释）。基数取大数，只减不加。
   const firstItemIndexRef = useRef(FIRST_ITEM_INDEX_BASE)
-  const prevFirstRowKeyRef = useRef<string | null>(null)
+  /** 已消费的历史注水事件号（与 sessionStore.historyPrependSeq 对齐）。 */
+  const consumedPrependSeqRef = useRef(0)
+  /** 上一帧的显示行数：prepend 补偿按行数净增量计量（单位见下方注释）。 */
+  const prevDisplayRowCountRef = useRef(0)
   const prevSessionKeyRef = useRef(sessionKey)
   /** #45 附件持久化分桶键：sdkSessionId 重启 resume 后稳定（bridge id 每次都变）。 */
   const attachmentKey = useSessionStore((s) => s.meta?.sdkSessionId ?? s.meta?.sessionId ?? '')
@@ -1617,9 +1645,20 @@ export default function Transcript({
    * `setTranscriptScrolling(false)` 一到就立刻续上并 set 一批到最前面。
    *
    * Virtuoso 对这个场景的正解是 `firstItemIndex`：取一个大基数，每次头部插入
-   * 就把它减去插入条数，Virtuoso 据此把视觉位置钉住不动。这里用「上一帧的首行
-   * key 在新数组里的下标」反推插入了多少——比让 store 额外上报计数更难出错，
-   * 分组（toolGroup/envelopeGroup）导致的行数变化也一并算对。
+   * 就把它减去插入条数，Virtuoso 据此把视觉位置钉住不动。
+   *
+   * 补偿单位是**显示行**（firstItemIndex 以 displayRows 计），store 只能按条目
+   * 计数——条目→行不是 1:1（toolGroup/activityGroup 多并一、噪音信封整条丢弃、
+   * 折叠段被注水向前延伸后组行不变但块变多）。旧实现用「上一帧首行 key 在新数组
+   * 里的下标」反推行数，正死在组行 id 变化上：折叠段向前延伸 → 组 id 变 →
+   * findIndex 落空 → 补偿被跳过（2026-08-25 实证视口被拽下约 50 行）。
+   *
+   * 现改为：store 每实际前置一批就 bump `historyPrependSeq`（触发信号），这里
+   * 发现 seq 前进时直接量**行数净增量**——注水只往头部加内容，seq 前进期间的
+   * rows.length 增量即头部插入的显示行数；折叠段延伸合并进既有组行时增量天然
+   * 小于 50，正是要补偿的真实行数。残留边界：prepend 与轮末折叠/流式追加落在
+   * 同一帧时行差会把它们一并计入（注水期间滚动已暂停、流式与注水极少同帧，
+   * 代价是一次性的轻微偏移，远好于旧法的整段拽动）。
    */
   const { displayRows, firstItemIndex } = useMemo(() => {
     const turnJustEnded = prevTurnRunningRef.current && !turnRunning
@@ -1643,17 +1682,16 @@ export default function Transcript({
     if (prevSessionKeyRef.current !== sessionKey) {
       prevSessionKeyRef.current = sessionKey
       firstItemIndexRef.current = FIRST_ITEM_INDEX_BASE
-      prevFirstRowKeyRef.current = null
+      consumedPrependSeqRef.current = useSessionStore.getState().historyPrependSeq
       foldDecisionsRef.current.clear()
     }
-    const firstKey = rows.length ? rowKeyOf(rows[0]) : null
-    const prevKey = prevFirstRowKeyRef.current
-    if (prevKey !== null && firstKey !== prevKey) {
-      const insertedAbove = rows.findIndex((row) => rowKeyOf(row) === prevKey)
-      // >0 才是"头部插入"；-1 是旧首行已不在（换会话/清空），不动基数。
+    const prependSeq = useSessionStore.getState().historyPrependSeq
+    if (prependSeq !== consumedPrependSeqRef.current) {
+      const insertedAbove = rows.length - prevDisplayRowCountRef.current
       if (insertedAbove > 0) firstItemIndexRef.current -= insertedAbove
+      consumedPrependSeqRef.current = prependSeq
     }
-    prevFirstRowKeyRef.current = firstKey
+    prevDisplayRowCountRef.current = rows.length
     return { displayRows: rows, firstItemIndex: firstItemIndexRef.current }
   }, [roots, sessionKey, turnRunning])
   // #48 导航条目：顶层用户消息（排除系统信封；子代理转发的本就不在顶层行），

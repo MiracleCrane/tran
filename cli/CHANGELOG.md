@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.45 - 2026-08-25
+
+### 中文
+
+- 修复：上翻阅读历史时视图不再被往下拽（滚动「三连修」：滚动补偿改为 store 事件驱动、不再依赖会随注水漂移的首行 key；折叠组 id 改锚段尾正文消息、注水不再导致整组摊开；历史图片加宽高比占位、解码完成不再撑高行）。
+- 优化：侧边栏会话悬停预览全面对齐 Codex 手感——700ms 停住才出，收卡后 300ms 内换行瞬开；指针入行即预热数据，出现不再抖；安全三角取代固定宽限（朝卡走不收、走偏立收）；首张卡 100ms 淡入、换行瞬时替换；Esc/窗口失焦/滚动即收；重命名或删除确认期间不弹。
+- 优化：消息复制按钮悬停容错——移向图标不再中途消失（hover 桥加宽 + 指针事件修正），移出 250ms 后才淡出。
+- 新增：侧边栏「问答」分区——集中收纳 screen-assist 悬浮问答工具的会话（demo 期按目录硬编码），工具栏眼睛开关控制整体显隐并记忆偏好。
+
+### English
+
+- Fix: scrolling up through history no longer yanks the view downward (three-part fix: scroll compensation is now store-event-driven instead of relying on the first-row key that drifts on prepend; fold-group ids are anchored to the segment's closing text message so prepends no longer re-expand whole groups; history images get an aspect-ratio placeholder so they no longer grow rows after decode).
+- Improvement: the sidebar session hover preview now matches Codex's feel — appears after a 700ms dwell, instantly reopens on the next row within a 300ms window; preview data is prefetched on row entry so appearance never jitters; a safe triangle replaces the fixed hide grace (moving toward the card never closes it, straying closes instantly); first card fades in over 100ms, row-to-row swaps are instant; Escape / window blur / scrolling dismiss it; no preview while renaming or confirming deletion.
+- Improvement: message copy buttons are hover-forgiving — moving toward the icons no longer breaks the hover chain (wider bridge + pointer-events fix), and they linger 250ms before fading out.
+- New: a "问答" (Q&A) sidebar section collecting sessions of the screen-assist floating Q&A tool (directory hardcoded for the demo), with an eye toggle in the toolbar to show/hide the section, persisted.
+
 ## v1.1.44 - 2026-08-24
 
 ### 中文

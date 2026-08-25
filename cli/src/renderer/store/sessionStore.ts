@@ -154,6 +154,14 @@ interface SessionStore {
   bootstrapped: boolean
   meta: SessionMeta | null
   items: TranscriptItem[]
+  /** 历史渐进注水（头部 prepend）事件号：每实际前置一批旧条目 +1。
+   *  Transcript 的 firstItemIndex 滚动补偿以此为触发信号——不再靠「上一帧
+   *  首行 key 反推行数」（折叠段向前延伸时组行 id 会变，findIndex 落空，
+   *  补偿被跳过、视口被拽下去，2026-08-25 实证）。 */
+  historyPrependSeq: number
+  /** 最近一批实际前置的条目数（条目级，非显示行；行数由 Transcript 自测，
+   *  见 buildDisplayRows 补偿段注释）。仅供排查/断言，补偿不直接消费它。 */
+  historyPrependCount: number
   status: SessionStatus
   pendingPermissions: PermissionRequestPayload[]
   /** The Anthropic message id currently streaming (shared by every token event
@@ -679,7 +687,15 @@ function scheduleHistoryHydrationStep(
         if (s.meta?.sessionId !== task.bridgeSessionId) return {}
         // #7 去重用 Set：原先 chunk × items 双重扫描，长会话渐进注水是 O(n²)。
         const existing = new Set(s.items.map((item) => item.id))
-        return { items: [...chunk.filter((item) => !existing.has(item.id)), ...s.items] }
+        const fresh = chunk.filter((item) => !existing.has(item.id))
+        // 全部被去重吃掉 = 这一批没有实际前置，不动 seq（补偿以 seq 为触发，
+        // 空批触发会把同帧的其它行数变化误当头部插入）。
+        if (fresh.length === 0) return {}
+        return {
+          items: [...fresh, ...s.items],
+          historyPrependSeq: s.historyPrependSeq + 1,
+          historyPrependCount: fresh.length
+        }
       })
     }
 
@@ -1924,6 +1940,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   meta: null,
   effort: 'high',
   items: [],
+  historyPrependSeq: 0,
+  historyPrependCount: 0,
   status: emptyStatus,
   pendingPermissions: [],
   currentStreamingMsgId: null,
