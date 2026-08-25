@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.44 - 2026-08-24
+
+### 中文
+
+- 优化：「后台命令」chip 改名「后台任务」，运行数与耗时一起收进后面的括号——`后台任务 (1 运行中 · 01:14)`，空闲时只显示名字（浮层标题同步改名）。
+- 优化：侧边栏会话悬停预览不再"顽固"——出现延迟 350→650ms（扫过/扫读列表不再误出，停住才出），移出收卡宽限 300→150ms，指针离开整个侧栏也会快速收起（预览卡上的置顶/重命名/删除/归档操作不受影响）。
+
+### English
+
+- Improvement: the "后台命令" chip is renamed to "后台任务", with the running count and elapsed time folded into trailing parentheses — `后台任务 (1 运行中 · 01:14)`; idle shows just the name (popover title renamed too).
+- Improvement: the sidebar session hover preview is no longer "sticky" — show delay raised 350→650ms (sweeping or scanning the list no longer triggers it; it only appears when you dwell), hide grace reduced 300→150ms, and leaving the whole sidebar also dismisses it quickly (the card's pin/rename/delete/archive actions are unaffected).
+
 ## v1.1.43 - 2026-08-24
 
 ### 中文

@@ -44,6 +44,11 @@ const SESSION_LOAD_MORE_THRESHOLD_PX = 180
 const PREVIEW_WIDTH_PX = 256
 const PREVIEW_MAX_HEIGHT_PX = 168
 const PREVIEW_GAP_PX = 10
+/** 悬停预览的出现延迟：350→650ms（2026-08-24 用户：扫过会话列表误出）。
+ *  停住才出，扫读不触发。 */
+const PREVIEW_SHOW_DELAY_MS = 650
+/** 行/侧栏移出后的收卡宽限（指针跨隙上卡用，见 scheduleHidePreview）。 */
+const PREVIEW_HIDE_GRACE_MS = 150
 
 /** 悬停预览卡的数据。状态由 SessionPreviewCard 独立持有（模块级 setter 注入），
  *  不进 Sidebar 的 state——否则每次悬停/移开都整列表重渲染。 */
@@ -659,7 +664,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             running: s.running || runningSdkSessionIds.includes(s.sessionId)
           })
         })
-    }, 350)
+    }, PREVIEW_SHOW_DELAY_MS)
   }
 
   const hidePreview = (): void => {
@@ -670,8 +675,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     showSessionPreview(null)
   }
 
-  /** 行移出不立刻收卡：留 300ms 给指针跨过行与卡之间的空隙上到卡上
-   *  （滚动/点击/切换等显式关闭仍走 hidePreview 立即收）。 */
+  /** 行移出不立刻收卡：留一小段给指针跨过行与卡之间的空隙上到卡上
+   *  （滚动/点击/切换等显式关闭仍走 hidePreview 立即收）。
+   *  2026-08-24：300→150ms（用户：移走了还赖着）。够跨 10px 空隙上卡即可，
+   *  扫过列表时卡片不再一直挂在头上。 */
   const scheduleHidePreview = (): void => {
     cancelPreviewHide()
     previewHideTimerRef.current = window.setTimeout(() => {
@@ -679,7 +686,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       // 另一行的预览正在排期（A→B 快速移动）：让位给新卡，别收。
       if (previewTimerRef.current !== null) return
       hidePreview()
-    }, 300)
+    }, PREVIEW_HIDE_GRACE_MS)
   }
 
   /** 指针上到预览卡：show/hide 两个定时器都取消，卡保持常开（点归档就靠它）。 */
@@ -1490,7 +1497,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     ))
 
   return (
-    <div key="sidebar-expanded" className="sidebar-expand glass-sidebar flex h-full min-h-0 w-64 shrink-0 flex-col rounded-[18px] border">
+    <div key="sidebar-expanded" onPointerLeave={scheduleHidePreview} className="sidebar-expand glass-sidebar flex h-full min-h-0 w-64 shrink-0 flex-col rounded-[18px] border">
       {/* brand + 隐藏切换（全窗口唯一品牌位，标题栏不再重复；文字挂常静流光，
           2026-08 用户点名要的动效）。头部只留一颗「隐藏侧边栏」（Alt+Q 唤回，
           左缘悬停也能浮出）——图标条模式 2026-08-18 用户拍板整体砍掉。 */}

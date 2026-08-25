@@ -47,7 +47,7 @@ export default function ChipPopover({
     return () => document.removeEventListener('pointerdown', onPointerDown, true)
   }, [onClose])
 
-  // 「后台命令」面板只列真后台任务（口径同 chip 计数）。
+  // 「后台任务」面板只列真后台任务（口径同 chip 计数）。
   const bashBlocks = kind === 'bash' ? collectBackgroundTaskBlocks(items) : []
   const agentBlocks = kind === 'agent' ? collectToolBlocks(items, AGENT_TOOL_NAMES) : []
   const runningAgents =
@@ -56,7 +56,7 @@ export default function ChipPopover({
 
   const title =
     kind === 'bash'
-      ? `后台命令 · ${bashBlocks.length}`
+      ? `后台任务 · ${bashBlocks.length}`
       : kind === 'agent'
         ? `子 Agent · ${runningAgents} 运行中`
         : `待办 · ${planDone}/${planEntries.length}`

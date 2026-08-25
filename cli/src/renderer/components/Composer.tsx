@@ -1167,18 +1167,20 @@ export default function Composer(): JSX.Element {
             className={`flex items-center gap-1 transition hover:brightness-125 ${
               runningBash > 0 ? 'text-blue-300' : bashTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
             }`}
-            title="后台命令（点击查看面板）"
+            title="后台任务（点击查看面板）"
           >
             <span>🕐</span>
             <span className={runningBash > 0 ? 'chip-flow-text' : undefined}>
-              {/* 空闲时不显示累计总数——「后台命令 (101)」这种总账是噪声
+              {/* 空闲时不显示累计总数——「后台任务 (101)」这种总账是噪声
                   （2026-08-19 用户），看不出任何活；数字只在有任务运行时出现。
-                  点它仍开面板看历史。 */}
-              {runningBash > 0 ? `后台命令 ${runningBash} 运行中` : '后台命令'}
+                  点它仍开面板看历史。2026-08-24：改名「后台任务」，运行数与耗时
+                  一起收进后面的括号。 */}
+              {runningBash > 0 ? `后台任务 (${runningBash} 运行中` : '后台任务'}
             </span>
             {runningBash > 0 && runningBashStartedAt !== null && (
               <BashRunningElapsed startedAt={runningBashStartedAt} />
             )}
+            {runningBash > 0 && <span>)</span>}
           </button>
           <button
             type="button"
@@ -1192,7 +1194,7 @@ export default function Composer(): JSX.Element {
             <span>✦</span>
             <span className={runningAgents > 0 ? 'chip-flow-text' : undefined}>
               {/* 括号只留运行数（2026-08-24 用户拍板）：(3/12) 里的总数是噪音，
-                  没有运行中就只显示名字，与「后台命令」chip 同口径。 */}
+                  没有运行中就只显示名字，与「后台任务」chip 同口径。 */}
               子 Agent{runningAgents > 0 ? ` (${runningAgents})` : ''}
             </span>
           </button>
