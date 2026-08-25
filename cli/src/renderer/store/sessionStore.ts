@@ -273,11 +273,11 @@ interface SessionStore {
   setGoalEnabled: (on: boolean) => Promise<void>
   reset: () => void
 
-  /** On app start: only marks bootstrapped — meta stays null so the home page
-   *  (Onboarding) shows（2026-08-25 起启动不再自动进入上次项目）。 */
+  /** On app start: auto-enter the last-used project if any, else leave meta null
+   *  so Onboarding shows. Sets bootstrapped regardless. */
   bootstrap: () => Promise<void>
-  /** 进入某个项目的空会话态：只切界面，后端推迟到第一条消息（懒创建，
-   *  与 newChat 同机制）。首页（Onboarding）进项目/打开最近会话走这里。 */
+  /** 启动时进入上次的项目：只切界面，后端推迟到第一条消息（懒创建，
+   *  与 newChat 同机制）。bootstrap 内部使用，不给 UI 直接调。 */
   openStartupProject: (cwd: string, model?: string) => Promise<void>
   /** Switch the active working directory (project): close the current session and
    *  start a fresh one in the new cwd (history is per-cwd in the sidebar). */
@@ -2447,24 +2447,28 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (get().bootstrapped || get().meta) return
     if (startupBootstrapPromise) return startupBootstrapPromise
 
-    // 2026-08-25 用户决策：启动不再自动进入上次项目（原先这里 getStartupProject
-    // → openStartupProject，一开 Tran 就隐式落进某个项目目录），统一停在 !meta
-    // 的首页（App.tsx → Onboarding），进项目/开会话都改由首页显式触发。
-    // forge:getStartupProject 主进程接口保留，渲染端自此没有调用方。
-    startupBootstrapPromise = Promise.resolve().then(() => {
-      set({ bootstrapped: true })
-      startupBootstrapPromise = null
-    })
+    // 2026-08-26 回退：v1.1.48 曾按误解决策改为启动停首页（用户原意是"在不
+    // 注册为项目的目录里工作"，不是"不进项目"），这里恢复自动进入上次项目
+    // （懒创建，见 openStartupProject 注释）。
+    startupBootstrapPromise = (async () => {
+      try {
+        const proj = await window.api.getStartupProject()
+        if (proj) {
+          const provider = await window.api.getActiveProvider()
+          await get().openStartupProject(proj.path, provider?.model)
+        }
+      } finally {
+        set({ bootstrapped: true })
+        startupBootstrapPromise = null
+      }
+    })()
 
     return startupBootstrapPromise
   },
 
   /**
-   * 进入某个项目的空会话态 —— **懒创建**，与 newChat 同一套机制。
+   * 启动时进入上次的项目 —— **懒创建**，与 newChat 同一套机制。
    *
-   * 2026-08-25 起启动路径不再调它（bootstrap 停在首页，见 bootstrap 注释）；
-   * 现在的调用方是首页（Onboarding）：「最近会话」先靠它落进目标项目，再走
-   * openSessionCrossProject resume，避免 switchProject 那样白起一个后端空壳。
    *
    * 此前这里直接调 startSession()，也就是每开一次 Tran 就真的 `session/new`
    * 一个空会话落盘；用户进来还没说话就切去历史会话，那条 "New Session" 就
@@ -2575,8 +2579,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessionConfigDirty: false,
       sessionModelDirty: false,
       bridgeEnded: false,
-      sessions: [],
-      sessionsHasMore: false,
+      // 2026-08-26 切项目不再清空 sessions/sessionsHasMore：清空的瞬间侧栏
+      // 整列闪空 → 骨架/空态 → startSession 后 refreshSessions 再填回，表现
+      // 就是"切个项目，左边目录整个收缩重载一次"。与 openSessionCrossProject
+      // 同款修复（见该处注释）：旧列表留到 refreshSessions 拿新数据原地替换
+      //（它连 sessionsHasMore 一起覆盖），只有真正变化的行走进出动画。
       slashCommands: [],
       planEntries: [],
       planUpdatedAt: null,

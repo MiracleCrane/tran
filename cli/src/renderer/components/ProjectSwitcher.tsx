@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { ClaudeExecutionBackend, Project } from '../../shared/ipc'
 import Collapse from './Collapse'
@@ -6,7 +6,7 @@ import { isWslProjectPath, normalizeCwdForCompare } from '../../shared/paths'
 import { emitForgeEvent, onForgeEvent } from '../events'
 
 const FolderIcon = (): JSX.Element => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
     <path
       d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"
       stroke="currentColor"
@@ -42,7 +42,7 @@ const TrashIcon = (): JSX.Element => (
   </svg>
 )
 const ChevronIcon = ({ up }: { up: boolean }): JSX.Element => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
     <path
       d={up ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'}
       stroke="currentColor"
@@ -71,7 +71,7 @@ function normalizePickedProjectPath(path: string, backend: ClaudeExecutionBacken
   return path.replace(/^\\\\wsl\$\\/i, '\\\\wsl.localhost\\')
 }
 
-export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): JSX.Element {
+export default function ProjectSwitcher(): JSX.Element | null {
   const meta = useSessionStore((s) => s.meta)
   const switchProject = useSessionStore((s) => s.switchProject)
   const reset = useSessionStore((s) => s.reset)
@@ -146,7 +146,7 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
     : null
   // cwd 不在已添加项目里 = 无项目会话（Codex 的 "no project" 形态），
   // 标签直说，不再拿目录末段冒充项目名；完整路径仍在 title 上。
-  const currentLabel = current?.name ?? (meta?.cwd ? '无项目' : '项目')
+  const currentLabel = current?.name ?? '无项目'
 
   /** 「不在项目中工作」：会话落在用户主目录，不进项目列表（addProject 只收
    *  显式添加的目录——switchProject 不会污染项目列表）。 */
@@ -224,29 +224,25 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
     }
   }
 
-  const trigger = collapsed ? (
+  // 标题栏项目 chip（2026-08-26 从侧栏顶部搬进 WindowTitlebar，用户要求
+  // 「显眼点」）：文件夹 + 项目名（无项目会话显示「无项目」）+ chevron，
+  // 带底色/描边/hover 的按钮态，不再是纯展示文本。
+  const trigger = (
     <button
+      type="button"
       onClick={() => setOpen((o) => !o)}
       title={picking ? '正在打开文件选择器…' : (current?.path ?? meta?.cwd ?? '')}
-      className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200"
+      className="flex h-7 max-w-56 items-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.045] px-2.5 text-[12px] font-medium text-zinc-200 transition hover:bg-white/[0.09] hover:text-zinc-50"
     >
       {picking ? (
-        <span className="h-3.5 w-3.5 animate-spin rounded-full border border-white/20 border-t-accent" />
+        <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-white/20 border-t-accent" />
       ) : (
         <FolderIcon />
       )}
-    </button>
-  ) : (
-    <button
-      onClick={() => setOpen((o) => !o)}
-      title={current?.path ?? meta?.cwd ?? ''}
-      className="flex h-8 w-full items-center gap-2 rounded-xl px-2.5 text-[11px] text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100"
-    >
-      <FolderIcon />
-      <span className="flex-1 truncate text-left">
-        {picking ? '正在打开文件选择器…' : currentLabel}
+      <span className="truncate">{picking ? '正在打开文件选择器…' : currentLabel}</span>
+      <span className="shrink-0 text-zinc-500">
+        <ChevronIcon up={open} />
       </span>
-      <ChevronIcon up={open} />
     </button>
   )
 
@@ -254,10 +250,8 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
     ? ['windows', 'wsl']
     : ['windows']
 
-  // Shared project list + "add" row. `open` drives the stagger transition; in
-  // the expanded sidebar it lives inside <Collapse> (so it animates), in the
-  // collapsed icon rail it's shown directly in a floating frame (the rail is
-  // too narrow for in-place expand).
+  // 共享的项目列表 + 「添加」行：`open` 驱动外层 Collapse 的开合动画，
+  // 行内容进来就是定稿（不做逐行 stagger，见下方行内注释）。
   const listContent = (
     <>
       <div className="max-h-60 overflow-y-auto">
@@ -400,58 +394,34 @@ export default function ProjectSwitcher({ collapsed }: { collapsed: boolean }): 
     </>
   )
 
-  // Collapsed icon rail: too narrow (w-14) for the frame to grow in place,
-  // so the list floats beside the icon instead.
-  if (collapsed) {
-    return (
-      <div className={`project-switcher-root relative ${elevated ? 'is-elevated' : ''}`}>
-        {trigger}
-        {open && <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />}
-        <Collapse
-          open={open}
-          className={`absolute left-0 top-full mt-1 w-56 ${
-            elevated ? 'z-[70]' : 'z-50'
-          } ${open ? '' : 'pointer-events-none'}`}
-        >
-          <div
-            className="glass-panel-soft project-switcher-panel rounded-2xl p-1.5"
-            onClick={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            {listContent}
-          </div>
-        </Collapse>
-      </div>
-    )
-  }
+  // meta 为空 = Onboarding 首跑（启动自动进入上次项目恢复后，只有首次运行
+  // 没有 meta）：此时不渲染 chip，避免在 Onboarding 上叠一个切换入口。
+  if (!meta) return null
 
-  // Expanded sidebar: the frame ITSELF enlarges — trigger + list share one
-  // glass-panel-soft frame, which is absolutely positioned so growing it
-  // overlaps the session list instead of shoving it. A placeholder reserves
-  // the trigger's footprint in the flow.
+  // 面板以浮层形式挂在 chip 正下方（下拉式），不再像侧栏时代那样就地撑开
+  // 框架——标题栏没有流式空间可占。整体 no-drag：标题栏是窗口拖拽区，
+  // 不标的话 chip 和面板都点不动（同标题栏「显示侧边栏」按钮的处理）。
   return (
-    <div className={`project-switcher-root relative ${elevated ? 'is-elevated' : ''}`}>
-      <div
-        className={`glass-panel-soft project-switcher-panel absolute inset-x-0 top-0 rounded-2xl p-1.5 ${
-          elevated ? 'z-[70]' : 'z-50'
-        }`}
-        onClick={(event) => event.stopPropagation()}
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        {trigger}
-        <Collapse open={open}>
-          <div className="pt-0.5">{listContent}</div>
-        </Collapse>
-      </div>
+    <div
+      className={`project-switcher-root relative ${elevated ? 'is-elevated' : ''}`}
+      style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
+    >
+      {trigger}
       {open && <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />}
-      <div className="invisible" aria-hidden>
-        <div className="glass-panel-soft rounded-2xl p-1.5">
-          <div className="flex h-8 items-center gap-2 px-2.5 text-[11px]">
-            <span className="w-[15px]" />
-            <span className="flex-1 truncate">{currentLabel}</span>
-          </div>
+      <Collapse
+        open={open}
+        className={`absolute left-0 top-full mt-1.5 w-64 ${
+          elevated ? 'z-[70]' : 'z-50'
+        } ${open ? '' : 'pointer-events-none'}`}
+      >
+        <div
+          className="glass-panel-soft project-switcher-panel rounded-2xl p-1.5"
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {listContent}
         </div>
-      </div>
+      </Collapse>
     </div>
   )
 }

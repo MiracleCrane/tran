@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.1.49 - 2026-08-26
+
+### 中文
+
+- 回退：启动恢复自动进入上次项目（v1.1.48 的「启动停无项目主页」是对需求的误解——「不在项目中工作」指在不注册为项目的目录里开干，该入口早已在项目切换菜单里）。懒创建同步恢复：启动、新建对话在发出第一条消息前不会在 Kimi 层面产生空壳会话。
+- 优化：项目切换入口搬到窗口标题栏并显眼化——原标题栏纯展示的项目名变为完整切换下拉（切换/添加/重命名/删除项目、不在项目中工作），侧栏顶部的旧下拉随之移除。
+- 优化：「新建对话」按钮改 Codex 风格——左侧 compose 图标 + 文字 + 右缘 ⊕ 图标。
+- 修复：切换项目时侧栏会话列表不再闪空重载（不再同步清空列表，旧列表保留到新列表原地替换，行级动画自动过渡）。
+- 修复：xhh 终端按钮在某些环境下弹不出窗口（start 空标题参数与外壳关联打开两个坑）。
+
+### English
+
+- Revert: startup once again auto-enters the last project (v1.1.48's "land on a no-project home" was based on a misreading — "work outside any project" means working in a directory that isn't a registered project, an entry that already exists in the project menu). Lazy creation is restored too: neither startup nor New Chat creates a real backend session before the first message is sent.
+- Improvement: project switching moved to the window titlebar and made prominent — the previously passive project-name chip is now a full switcher dropdown (switch / add / rename / remove projects, work outside any project); the old sidebar-top dropdown is removed.
+- Improvement: the "新建对话" (New Chat) button adopts Codex's style — compose icon + label + a circled-plus on the right edge.
+- Fix: the sidebar session list no longer flashes empty when switching projects (the list is no longer cleared synchronously; the old list stays until the new one replaces it in place with row-level animations).
+- Fix: the xhh terminal button failed to spawn a visible window in some environments (two shell quirks: `start` needs an explicit empty title argument, and launching must go through a .cmd file for shell association).
+
 ## v1.1.48 - 2026-08-25
 
 ### 中文

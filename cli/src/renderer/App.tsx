@@ -3,6 +3,7 @@ import { useSessionStore, foldBackgroundSwarmTasks, takeAttachedSwarmTasks } fro
 import { useUiStore, type View } from './store/uiStore'
 import { installShortcuts } from './shortcuts'
 import Onboarding from './components/Onboarding'
+import ProjectSwitcher from './components/ProjectSwitcher'
 import SidebarShell from './components/SidebarShell'
 import Transcript from './components/Transcript'
 import Composer from './components/Composer'
@@ -121,10 +122,6 @@ function WindowTitlebar(): JSX.Element {
   const [maximized, setMaximized] = useState(false)
   const sidebarHidden = useUiStore((s) => s.sidebarHidden)
   const toggleSidebarHidden = useUiStore((s) => s.toggleSidebarHidden)
-  const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
-  // 当前项目名（路径末段）显示在标题栏左侧——「这个会话属于哪个项目」一眼可见
-  //（2026-08-17 用户要求；zcode 顶栏的项目 chip 同款位置）。
-  const projectName = cwd ? cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : null
   useEffect(() => {
     let alive = true
     void window.api.isWindowMaximized().then((v) => {
@@ -156,18 +153,11 @@ function WindowTitlebar(): JSX.Element {
             </svg>
           </button>
         )}
-        {projectName && (
-          <span
-            className="flex items-center gap-1.5 text-[11px] text-zinc-500"
-            title={cwd}
-            style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-            </svg>
-            {projectName}
-          </span>
-        )}
+        {/* 项目切换 chip（2026-08-26 从侧栏顶部搬进标题栏，替代原先纯展示的
+            项目名 span）：位置沿袭 2026-08-17「会话属于哪个项目一眼可见」，
+            现在整个 chip 就是 ProjectSwitcher 的触发器，面板功能全保留。
+            组件内部自读 meta，Onboarding 首跑（meta 为空）时不渲染。 */}
+        <ProjectSwitcher />
       </div>
       {/* 停靠面板图标（Git/待办/目标）并进标题栏——原先单列一行的顶栏撤销，
           顶部两行 chrome 并成一行（2026-08-17 用户：「上面这块正文空间没用起来」）。 */}

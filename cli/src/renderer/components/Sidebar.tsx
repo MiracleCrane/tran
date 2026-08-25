@@ -5,7 +5,6 @@ import { useUiStore, type View } from '../store/uiStore'
 import Collapse from './Collapse'
 import ConfirmDialog from './ConfirmDialog'
 import { AppLogo } from './AppLogo'
-import ProjectSwitcher from './ProjectSwitcher'
 import type { ClaudeExecutionBackend, SessionListItem, SessionPreview } from '../../shared/ipc'
 import { normalizeCwdForCompare } from '../../shared/paths'
 import { relTime } from '../utils/format'
@@ -391,6 +390,14 @@ const EditIcon = (): JSX.Element => (
       strokeWidth="1.6"
       strokeLinejoin="round"
     />
+  </svg>
+)
+/** 圆圈加号（2026-08-26 「新建对话」按钮右缘，Codex 式：左铅笔 + 文案 +
+ *  右缘 circled-plus）。 */
+const CircledPlusIcon = (): JSX.Element => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+    <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
+    <path d="M12 8.5v7M8.5 12h7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
   </svg>
 )
 const TrashIcon = (): JSX.Element => (
@@ -1721,21 +1728,26 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         </button>
       </div>
 
-      {/* project switcher + new chat + provider */}
-      {/* 顶部这一坨整体压扁：项目选择 + 新建对话 + 「最近会话」标题 + 视图切换
-          + 搜索 + 分组切换，六段东西各占一行，会话列表被推到半屏以下。
+      {/* new chat（项目切换 2026-08-26 搬进标题栏 chip，侧栏顶部只留新建对话） */}
+      {/* 顶部这一坨整体压扁：新建对话 + 「最近会话」标题 + 视图切换
+          + 搜索 + 分组切换，五段东西各占一行，会话列表被推到半屏以下。
           这里收紧间距、按钮矮一档，并把「按时间/按项目」并进标题行——省掉
           一整行只放一个小按钮的浪费。 */}
       <div className="sidebar-deferred-content is-ready relative z-[70] space-y-2 px-4 pb-2 pt-2">
-        <ProjectSwitcher collapsed={false} />
+        {/* 新建对话：Codex 式排布（2026-08-26）——左侧铅笔图标 + 文案，
+            右缘圆圈加号（ml-auto 推到边），安静的 zinc 色调。 */}
         <button
           onClick={() => {
             void newChat()
             setView('chat')
           }}
-          className="glass-control flex h-9 w-full items-center justify-center gap-2 rounded-full px-3 text-[13px] font-medium text-zinc-300 transition hover:bg-white/[0.09]"
+          className="glass-control flex h-9 w-full items-center gap-2 rounded-full px-3.5 text-[13px] font-medium text-zinc-300 transition hover:bg-white/[0.09]"
         >
-          + 新建对话
+          <EditIcon />
+          新建对话
+          <span className="ml-auto text-zinc-500">
+            <CircledPlusIcon />
+          </span>
         </button>
       </div>
 
