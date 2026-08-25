@@ -1670,9 +1670,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                   active ? 'is-active border-transparent bg-[#313131] text-zinc-100' : 'border-transparent text-[#c3c3c3]'
                 }`}
               >
-                {/* 单行标题（2026-08 用户定稿）：一行尽量放长，时间不再占第二行，
-                    收进 hover 提示（title）。 */}
-                <div className="flex items-center gap-1.5 text-sm" title={relTime(s.lastModified)}>
+                {/* 单行标题（2026-08 用户定稿）：一行尽量放长，时间不占第二行，
+                    由悬停预览卡展示（原生 title 提示会与预览卡重复，2026-08-25 去掉）。 */}
+                <div className="flex items-center gap-1.5 text-sm">
                   <span className="min-w-0 flex-1 truncate">{s.summary || '(未命名)'}</span>
                   <span className={`session-runtime-badge ${snapshot.showRuntimeBadges ? 'is-visible' : ''}`}>
                     {backendLabel(s.runtimeBackend)}
@@ -2027,10 +2027,11 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                           </span>
                         )}
                         <span className="min-w-0 flex-1">
-                          {/* 单行标题：时间收进 hover 提示，不再占第二行（2026-08
-                              用户定稿）。运行中=标题多色流光（2026-08-19 用户：
-                              「不要紫色的点了，运行中会话的流光花哨点」）。 */}
-                          <div className="flex items-center gap-1.5 text-sm" title={relTime(s.lastModified)}>
+                          {/* 单行标题：时间不占第二行，由悬停预览卡展示（原生
+                              title 提示与预览卡重复，2026-08-25 去掉）。运行中=标题
+                              多色流光（2026-08-19 用户：「不要紫色的点了，运行中
+                              会话的流光花哨点」）。 */}
+                          <div className="flex items-center gap-1.5 text-sm">
                             <span
                               className={`min-w-0 flex-1 truncate ${
                                 s.running || runningSdkSessionIds.includes(s.sessionId)

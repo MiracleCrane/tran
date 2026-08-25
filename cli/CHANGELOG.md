@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.46 - 2026-08-25
+
+### 中文
+
+- 修复：侧边栏会话悬停时不再同时弹出两个提示——会话行上的原生时间 tooltip 与悬停预览卡重复（卡内已有时间），原生提示已移除，时间统一由预览卡展示。
+
+### English
+
+- Fix: hovering a sidebar session no longer pops up two overlapping hints — the row's native time tooltip duplicated the hover preview card (which already shows the time); the native tooltip is removed and the preview card is the single source.
+
 ## v1.1.45 - 2026-08-25
 
 ### 中文
