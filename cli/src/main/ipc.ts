@@ -33,6 +33,7 @@ import {
 } from './mcpBrowserRegistration'
 import { setOverlayTargetDisplay, stopControlOverlay } from './controlOverlay'
 import { launchScreenAssist } from './screenAssist'
+import { launchXhh } from './xhh'
 import {
   listProviders,
   getActiveProvider,
@@ -1184,6 +1185,8 @@ export function registerIpc(
   })
 
   ipcMain.handle('forge:launchScreenAssist', async () => launchScreenAssist())
+
+  ipcMain.handle('forge:launchXhh', async () => launchXhh())
 
   ipcMain.handle('forge:getSessionMessages', async (
     _e,

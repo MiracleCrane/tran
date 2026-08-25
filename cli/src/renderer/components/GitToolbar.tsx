@@ -6,6 +6,7 @@ import Collapse from './Collapse'
 import ConfirmDialog from './ConfirmDialog'
 import ChangesPanel from './ChangesPanel'
 import { onOpenChangesPanel } from '../events'
+import HoverTip from './HoverTip'
 
 /* --- icons --- */
 const BranchIcon = (): JSX.Element => (
@@ -244,10 +245,11 @@ function FileRow({
         <button
           onClick={onAction}
           disabled={loading}
-          title={actionTitle}
+          aria-label={actionTitle}
           className="shrink-0 rounded p-0.5 text-zinc-600 opacity-60 transition hover:opacity-100 hover:text-zinc-200 disabled:opacity-30"
         >
-          {actionIcon}
+          {/* 2026-08-25：原生 title= 太丑，统一换 HoverTip 气泡 */}
+          <HoverTip tip={actionTitle ?? ''}>{actionIcon}</HoverTip>
         </button>
       )}
     </div>
@@ -640,14 +642,44 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
     }, '提交', { invalidateLog: true })
   }
 
-  // If not a git repo, render nothing.
+  // 非 git 目录（gitChecked 后 branch 仍是 null）：工具条本体不渲染，但「改动」
+  // 抽屉的宿主必须在——轮次卡/会话 pill 的 openChangesPanel 监听在上面的 hook
+  // 里照常挂着，此前这条早退路径没有抽屉 DOM，非 git 会话点了等于没点
+  // （2026-08-25 用户抓包：「本会话 N 个文件已更改」是死按钮）。补一个极简
+  // 抽屉：只认 changes，里面是一句诚实说明（复用 ChangesPanel 的空态样式），
+  // 不挂 ChangesPanel 本体，免得 gitWorkingChanges 在非 git 目录空转报错。
   if (!branch) {
     if (gitChecked) {
-      if (!cornerAction) return <></>
+      const changesOpen = renderedDrawer === 'changes'
+      if (!cornerAction && !changesOpen) return <></>
       return (
         <div className="relative z-30 shrink-0 border-b border-white/[0.06]">
-          <div className="h-5" aria-hidden="true" />
-          <div className="git-toolbar-corner-action">{cornerAction}</div>
+          {cornerAction ? (
+            <>
+              <div className="h-5" aria-hidden="true" />
+              <div className="git-toolbar-corner-action">{cornerAction}</div>
+            </>
+          ) : null}
+          <Collapse
+            open={drawer === 'changes'}
+            className={`git-drawer-collapse absolute left-0 right-0 top-full z-40 shadow-[0_24px_60px_rgba(0,0,0,0.28)] ${
+              drawer === 'changes' ? 'pointer-events-auto' : 'pointer-events-none'
+            }`}
+          >
+            <div className="git-drawer-shell max-h-[46vh] overflow-y-auto border-b border-t border-t-white/[0.06] border-b-white/[0.18] bg-[#090a0e]/[0.98] text-zinc-300 shadow-[0_18px_44px_rgba(0,0,0,0.24)]">
+              <div className="git-drawer-content px-3 py-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500/80">工作区改动</span>
+                  <button onClick={() => setDrawer(null)} className="rounded px-1 py-0.5 text-zinc-600 transition hover:text-zinc-300">
+                    ✕
+                  </button>
+                </div>
+                <div className="py-6 text-center text-[11px] text-zinc-500">
+                  该目录不是 Git 仓库，查看不了工作区改动
+                </div>
+              </div>
+            </div>
+          </Collapse>
         </div>
       )
     }
@@ -689,24 +721,24 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
         {/* Status dots */}
         {dirty && (
           <div className="flex items-center gap-1 pl-0.5">
-            {status.staged.length > 0 && <span className={`${dotCls} bg-yellow-500`} title={`${status.staged.length} 已暂存`} />}
-            {status.unstaged.length > 0 && <span className={`${dotCls} bg-blue-500`} title={`${status.unstaged.length} 已改动`} />}
-            {status.untracked.length > 0 && <span className={`${dotCls} bg-green-500`} title={`${status.untracked.length} 未跟踪`} />}
-            {status.conflicts.length > 0 && <span className={`${dotCls} bg-red-500`} title={`${status.conflicts.length} 冲突`} />}
+            {status.staged.length > 0 && <HoverTip tip={`${status.staged.length} 已暂存`}><span className={`${dotCls} bg-yellow-500`} /></HoverTip>}
+            {status.unstaged.length > 0 && <HoverTip tip={`${status.unstaged.length} 已改动`}><span className={`${dotCls} bg-blue-500`} /></HoverTip>}
+            {status.untracked.length > 0 && <HoverTip tip={`${status.untracked.length} 未跟踪`}><span className={`${dotCls} bg-green-500`} /></HoverTip>}
+            {status.conflicts.length > 0 && <HoverTip tip={`${status.conflicts.length} 冲突`}><span className={`${dotCls} bg-red-500`} /></HoverTip>}
           </div>
         )}
 
         <span className="h-3 w-px shrink-0 bg-white/[0.08]" />
 
         {/* Sync: fetch / pull / push */}
-        <button onClick={() => runGitAction(() => window.api.gitFetch(cwd), '拉取(fetch)')} disabled={loading} className={btnCls} title="拉取远端信息(不合并)">
-          <FetchIcon />
+        <button onClick={() => runGitAction(() => window.api.gitFetch(cwd), '拉取(fetch)')} disabled={loading} className={btnCls} aria-label="拉取远端信息(不合并)">
+          <HoverTip tip="拉取远端信息(不合并)"><FetchIcon /></HoverTip>
         </button>
-        <button onClick={() => runGitAction(() => window.api.gitPull(cwd), '拉取', { invalidateLog: true })} disabled={loading} className={btnCls} title="拉取并合并">
-          <PullIcon /> 拉取
+        <button onClick={() => runGitAction(() => window.api.gitPull(cwd), '拉取', { invalidateLog: true })} disabled={loading} className={btnCls} aria-label="拉取并合并">
+          <HoverTip tip="拉取并合并"><PullIcon /> 拉取</HoverTip>
         </button>
-        <button onClick={() => runGitAction(() => window.api.gitPush(cwd), '推送')} disabled={loading} className={btnCls} title="推送">
-          <PushIcon /> 推送
+        <button onClick={() => runGitAction(() => window.api.gitPush(cwd), '推送')} disabled={loading} className={btnCls} aria-label="推送">
+          <HoverTip tip="推送"><PushIcon /> 推送</HoverTip>
         </button>
 
         <span className="h-3 w-px shrink-0 bg-white/[0.08]" />
@@ -715,9 +747,9 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
         <button
           onClick={() => toggleDrawer('changes')}
           className={`${btnCls} ${activeBtn('changes')}`}
-          title="查看工作区全部改动"
+          aria-label="查看工作区全部改动"
         >
-          <DiffIcon /> 改动
+          <HoverTip tip="查看工作区全部改动"><DiffIcon /> 改动</HoverTip>
           {totalChanges > 0 && <span className="rounded bg-accent/20 px-1 text-[9px] text-accent">{totalChanges}</span>}
         </button>
 
@@ -726,9 +758,9 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
           onClick={() => toggleDrawer('commit')}
           disabled={loading}
           className={`${btnCls} ${activeBtn('commit')}`}
-          title="暂存与提交"
+          aria-label="暂存与提交"
         >
-          <CommitIcon /> 提交
+          <HoverTip tip="暂存与提交"><CommitIcon /> 提交</HoverTip>
           {status.staged.length > 0 && <span className="rounded bg-accent/20 px-1 text-[9px] text-accent">{status.staged.length}</span>}
         </button>
 
@@ -737,22 +769,22 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
           onClick={() => toggleDrawer('stash')}
           disabled={loading || status.clean}
           className={`${btnCls} ${activeBtn('stash')}`}
-          title="储藏"
+          aria-label="储藏"
         >
-          <StashIcon /> 储藏
+          <HoverTip tip="储藏"><StashIcon /> 储藏</HoverTip>
         </button>
 
         <span className="h-3 w-px shrink-0 bg-white/[0.08]" />
 
         {/* Log */}
-        <button onClick={() => toggleDrawer('log')} disabled={loading} className={`${btnCls} ${activeBtn('log')}`} title="提交历史">
-          <LogIcon /> 日志
+        <button onClick={() => toggleDrawer('log')} disabled={loading} className={`${btnCls} ${activeBtn('log')}`} aria-label="提交历史">
+          <HoverTip tip="提交历史"><LogIcon /> 日志</HoverTip>
         </button>
 
         {/* Output indicator (shows after push/pull/fetch produce text) */}
         {output && (
-          <button onClick={() => toggleDrawer('output')} className={`${btnCls} ${activeBtn('output')}`} title="上次操作输出">
-            输出
+          <button onClick={() => toggleDrawer('output')} className={`${btnCls} ${activeBtn('output')}`} aria-label="上次操作输出">
+            <HoverTip tip="上次操作输出">输出</HoverTip>
           </button>
         )}
 
@@ -825,9 +857,9 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                         })}
                         disabled={loading}
                         className="rounded p-0.5 text-zinc-600 hover:text-red-400"
-                        title={`删除 ${b.name}`}
+                        aria-label={`删除 ${b.name}`}
                       >
-                        <TrashIcon />
+                        <HoverTip tip={`删除 ${b.name}`}><TrashIcon /></HoverTip>
                       </button>
                     )}
                   </div>
@@ -846,10 +878,10 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                   placeholder="新分支名"
                   className="flex-1 rounded-lg border border-white/[0.1] bg-bg-elev/60 px-2 py-1 text-[11px] text-zinc-200 outline-none focus:border-accent/50"
                 />
-                <label className="flex items-center gap-1 text-[10px] text-zinc-500" title="创建后推送到远端并设置上游">
+                <HoverTip tip="创建后推送到远端并设置上游"><label className="flex items-center gap-1 text-[10px] text-zinc-500">
                   <input type="checkbox" checked={pushUpstream} onChange={(e) => setPushUpstream(e.target.checked)} className="accent-accent" />
                   推送
-                </label>
+                </label></HoverTip>
                 <button onClick={createBranch} disabled={loading || !newBranchName.trim()} className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-zinc-300 transition hover:bg-white/[0.06] disabled:opacity-40">
                   <PlusIcon /> 创建
                 </button>
@@ -964,9 +996,9 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                   onClick={doCommit}
                   disabled={loading || status.staged.length === 0}
                   className="flex items-center gap-1 rounded-lg bg-accent px-3 py-1.5 text-[11px] font-medium text-white transition hover:brightness-110 disabled:opacity-40"
-                  title={status.staged.length === 0 ? '没有已暂存的改动' : '提交已暂存的改动'}
+                  aria-label={status.staged.length === 0 ? '没有已暂存的改动' : '提交已暂存的改动'}
                 >
-                  <CommitIcon /> 提交{status.staged.length > 0 ? ` (${status.staged.length})` : ''}
+                  <HoverTip tip={status.staged.length === 0 ? '没有已暂存的改动' : '提交已暂存的改动'}><CommitIcon /> 提交{status.staged.length > 0 ? ` (${status.staged.length})` : ''}</HoverTip>
                 </button>
               </div>
             </div>
@@ -1012,9 +1044,9 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                       })}
                       disabled={loading}
                       className="shrink-0 rounded p-0.5 text-zinc-600 opacity-0 transition hover:text-amber-400 group-hover:opacity-100 disabled:opacity-30"
-                      title="撤销此提交"
+                      aria-label="撤销此提交"
                     >
-                      <RevertIcon />
+                      <HoverTip tip="撤销此提交"><RevertIcon /></HoverTip>
                     </button>
                   </div>
                 ))
@@ -1053,8 +1085,8 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                   <div className="py-3 text-center text-[11px] text-zinc-600">暂无储藏</div>
                 ) : (
                   stashList.map((s, i) => (
-                    <div key={i} className="truncate rounded-lg px-2 py-1 font-mono text-[10px] text-zinc-500 hover:bg-white/[0.05]" title={s}>
-                      {s}
+                    <div key={i} className="truncate rounded-lg px-2 py-1 font-mono text-[10px] text-zinc-500 hover:bg-white/[0.05]">
+                      <HoverTip tip={s}>{s}</HoverTip>
                     </div>
                   ))
                 )}

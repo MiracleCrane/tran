@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { openChangesPanel } from '../events'
+import HoverTip from './HoverTip'
 
 /**
  * 输入框正上方的「N 个文件已更改 +X -Y」悬浮胶囊（Codex 同款）。
@@ -75,17 +76,18 @@ export default function SessionChangesPill(): JSX.Element | null {
         {open && (
           <div className="absolute bottom-full left-1/2 mb-2 w-[min(420px,70vw)] -translate-x-1/2 overflow-hidden rounded-xl border border-border-subtle bg-bg-elev shadow-xl shadow-black/40">
             {shown.map((f) => (
-              <button
-                key={f.path}
-                type="button"
-                onClick={() => review(f.path)}
-                title={f.path}
-                className="flex w-full items-center gap-3 px-3 py-1.5 text-left transition hover:bg-white/[0.05]"
-              >
-                <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-200">{fileName(f.path)}</span>
-                <span className="shrink-0 text-[11px] tabular-nums text-emerald-400">+{f.added}</span>
-                <span className="shrink-0 text-[11px] tabular-nums text-red-400">-{f.removed}</span>
-              </button>
+              // 2026-08-25：原生 title= 太丑，统一换 HoverTip 气泡（全文路径）。
+              <HoverTip key={f.path} tip={f.path} tipClassName="break-all" className="block">
+                <button
+                  type="button"
+                  onClick={() => review(f.path)}
+                  className="flex w-full items-center gap-3 px-3 py-1.5 text-left transition hover:bg-white/[0.05]"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-200">{fileName(f.path)}</span>
+                  <span className="shrink-0 text-[11px] tabular-nums text-emerald-400">+{f.added}</span>
+                  <span className="shrink-0 text-[11px] tabular-nums text-red-400">-{f.removed}</span>
+                </button>
+              </HoverTip>
             ))}
             {rest > 0 && (
               <div className="border-t border-white/[0.05] px-3 py-1.5 text-[11px] text-zinc-500">
@@ -94,16 +96,17 @@ export default function SessionChangesPill(): JSX.Element | null {
             )}
           </div>
         )}
-        <button
-          type="button"
-          onClick={() => review()}
-          title="查看本次会话的工作区改动"
-          className="mb-1.5 flex items-center gap-2 rounded-full border border-border-subtle bg-bg-elev px-3.5 py-1.5 text-[12px] text-zinc-300 shadow-lg shadow-black/30 transition hover:bg-bg-hover"
-        >
-          <span>本会话 {files.length} 个文件已更改</span>
-          <span className="tabular-nums text-emerald-400">+{addedTotal}</span>
-          <span className="tabular-nums text-red-400">-{removedTotal}</span>
-        </button>
+        <HoverTip tip="查看本次会话的工作区改动">
+          <button
+            type="button"
+            onClick={() => review()}
+            className="mb-1.5 flex items-center gap-2 rounded-full border border-border-subtle bg-bg-elev px-3.5 py-1.5 text-[12px] text-zinc-300 shadow-lg shadow-black/30 transition hover:bg-bg-hover"
+          >
+            <span>本会话 {files.length} 个文件已更改</span>
+            <span className="tabular-nums text-emerald-400">+{addedTotal}</span>
+            <span className="tabular-nums text-red-400">-{removedTotal}</span>
+          </button>
+        </HoverTip>
       </div>
     </div>
   )

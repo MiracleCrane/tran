@@ -3,6 +3,7 @@ import type { GitFileChange, GitWorkingChanges } from '../../shared/ipc'
 import DiffView from './DiffView'
 import ConfirmDialog from './ConfirmDialog'
 import { langForPath } from './CodeBlock'
+import HoverTip from './HoverTip'
 
 /**
  * 会话级"改动"面板（Codex 风格）：工作区相对 HEAD 的全部改动聚合视图。
@@ -185,12 +186,13 @@ export default function ChangesPanel({ cwd, refreshKey, initialPath, initialRequ
           <button
             onClick={() => load({ keepDiffs: false })}
             className="rounded px-1.5 py-0.5 text-[10px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
-            title="刷新"
+            aria-label="刷新"
           >
-            刷新
+            {/* 2026-08-25：原生 title= 太丑，统一换 HoverTip 气泡 */}
+            <HoverTip tip="刷新">刷新</HoverTip>
           </button>
-          <button onClick={onClose} className="rounded px-1 py-0.5 text-zinc-600 transition hover:text-zinc-300" title="关闭">
-            ✕
+          <button onClick={onClose} className="rounded px-1 py-0.5 text-zinc-600 transition hover:text-zinc-300" aria-label="关闭">
+            <HoverTip tip="关闭">✕</HoverTip>
           </button>
         </div>
       </div>
@@ -221,13 +223,19 @@ export default function ChangesPanel({ cwd, refreshKey, initialPath, initialRequ
                   }`}
                   onClick={() => toggleFile(file)}
                 >
-                  <span className={`w-3 shrink-0 text-center font-mono font-semibold ${meta.cls}`} title={meta.label}>
-                    {meta.letter}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate font-mono" title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}>
+                  <HoverTip tip={meta.label}>
+                    <span className={`w-3 shrink-0 text-center font-mono font-semibold ${meta.cls}`}>
+                      {meta.letter}
+                    </span>
+                  </HoverTip>
+                  <HoverTip
+                    tip={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
+                    tipClassName="break-all"
+                    className="min-w-0 flex-1 truncate font-mono"
+                  >
                     {dir && <span className="text-zinc-600">{dir}</span>}
                     <span className="text-zinc-300">{base}</span>
-                  </span>
+                  </HoverTip>
                   {file.binary ? (
                     <span className="shrink-0 text-[10px] text-zinc-600">二进制</span>
                   ) : (
@@ -244,9 +252,9 @@ export default function ChangesPanel({ cwd, refreshKey, initialPath, initialRequ
                       setConfirmRevert(file)
                     }}
                     className="shrink-0 rounded px-1 py-0.5 text-[10px] text-zinc-600 opacity-0 transition hover:bg-white/[0.08] hover:text-red-300 group-hover:opacity-100"
-                    title={file.status === 'untracked' ? '删除此文件' : '还原到 HEAD'}
+                    aria-label={file.status === 'untracked' ? '删除此文件' : '还原到 HEAD'}
                   >
-                    还原
+                    <HoverTip tip={file.status === 'untracked' ? '删除此文件' : '还原到 HEAD'}>还原</HoverTip>
                   </button>
                 </div>
                 {isOpen && (

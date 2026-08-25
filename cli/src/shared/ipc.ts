@@ -821,6 +821,8 @@ export interface ForgeApi {
   listSessions(cwd: string, opts?: SessionListOptions): Promise<SessionListItem[]>
   /** 启动 screen-assist 悬浮问答工具（作为 Tran 子进程，退出时一并回收）。 */
   launchScreenAssist(): Promise<{ ok: boolean; already?: boolean; error?: string }>
+  /** 弹出 xhh 终端窗口（独立进程，不随 Tran 退出回收）。 */
+  launchXhh(): Promise<{ ok: boolean; error?: string }>
   getSessionMessages(
     sessionId: string,
     cwd: string,

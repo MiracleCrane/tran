@@ -556,6 +556,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   }, [loadArchived])
   // #5b 运行中会话标识：并行契约新增字段，包含当前正在跑 turn 的 sdkSessionId。
   const runningSdkSessionIds = useSessionStore((s) => s.runningSdkSessionIds)
+  // 未读回复计数（2026-08-25）：行右缘气泡，键 = sessionKey(s)。
+  const unreadReplies = useSessionStore((s) => s.unreadReplies)
   const loading = useSessionStore((s) => s.sessionsLoading)
   const sessionsHasMore = useSessionStore((s) => s.sessionsHasMore)
   const refresh = useSessionStore((s) => s.refreshSessions)
@@ -1966,6 +1968,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               const s = item.session
               const key = sessionKey(s)
               const active = s.sessionId === meta.sdkSessionId && view === 'chat'
+              // 当前打开的会话永不显示未读气泡（store 侧也不计，这里是双保险）。
+              const unreadCount = active ? 0 : (unreadReplies[key] ?? 0)
               const editing = editingId === key
               const inserting = newlyInsertedSessionKeys.has(key)
               const exiting = item.exiting
@@ -2063,6 +2067,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                             <span className={`session-runtime-badge transition-opacity ${wslSupportEnabled ? 'is-visible' : ''}`}>
                               {backendLabel(s.runtimeBackend)}
                             </span>
+                            {/* 未读气泡（2026-08-25）：shrink-0 占 flex 行一席，标题
+                                truncate 自动让位，不撑行高、不扰布局。计数变化不重复
+                                播 pop 动画（元素不重建，仅首次挂载播一次）。 */}
+                            {unreadCount > 0 && (
+                              <span className="session-unread-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>
+                            )}
                           </div>
                         </span>
                       </span>

@@ -138,6 +138,42 @@ function storeComposerDrafts(drafts: Record<string, string>): void {
   }
 }
 
+/** 未读回复计数（2026-08-25 用户：「后台会话回复完了我都不知道」）：侧栏会话行
+ *  的气泡数字。键与侧栏行键一致（Sidebar.sessionKey：`${runtimeBackend ?? 'windows'}:${sdkSessionId}`），
+ *  只记本运行期间新完成的 turn，不做历史回填；重启保留（localStorage），上限 99。 */
+const UNREAD_REPLIES_STORAGE_KEY = 'forge.unreadReplies.v1'
+const UNREAD_REPLIES_MAX = 99
+
+function unreadSessionKey(sdkSessionId: string, backend?: ClaudeExecutionBackend): string {
+  return `${backend ?? 'windows'}:${sdkSessionId}`
+}
+
+function readStoredUnreadReplies(): Record<string, number> {
+  try {
+    const raw = window.localStorage.getItem(UNREAD_REPLIES_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    // 持久化的值不能信：只收正整数，顺带压回上限（老版本/手改的值原样重放
+    // 会把气泡撑爆）。
+    const out: Record<string, number> = {}
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v) && v > 0) out[k] = Math.min(Math.floor(v), UNREAD_REPLIES_MAX)
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function storeUnreadReplies(counts: Record<string, number>): void {
+  try {
+    window.localStorage.setItem(UNREAD_REPLIES_STORAGE_KEY, JSON.stringify(counts))
+  } catch {
+    /* ignore */
+  }
+}
+
 /** A buffered `content_block_delta` waiting to be folded into the store in a
  *  single batched update (one per animation frame). See streamBatcher.ts. */
 export interface StreamDeltaBatch {
@@ -211,6 +247,11 @@ interface SessionStore {
    *  切视图/切会话/重启不丢，发送成功后清空。 */
   composerDrafts: Record<string, string>
   setComposerDraft: (sessionKey: string, text: string) => void
+  /** 未读回复计数（键见 UNREAD_REPLIES_STORAGE_KEY 注释）：后台/未打开会话
+   *  turn 完成 +1，打开即清；侧栏行右缘气泡用。 */
+  unreadReplies: Record<string, number>
+  noteReplyCompleted: (sessionKey: string) => void
+  clearUnread: (sessionKey: string) => void
 
   startSession: (args: StartArgs) => Promise<void>
   sendMessage: (text: string, attachments?: PickedFile[], opts?: { cutIn?: boolean }) => Promise<void>
@@ -232,11 +273,11 @@ interface SessionStore {
   setGoalEnabled: (on: boolean) => Promise<void>
   reset: () => void
 
-  /** On app start: auto-enter the last-used project if any, else leave meta null
-   *  so Onboarding shows. Sets bootstrapped regardless. */
+  /** On app start: only marks bootstrapped — meta stays null so the home page
+   *  (Onboarding) shows（2026-08-25 起启动不再自动进入上次项目）。 */
   bootstrap: () => Promise<void>
-  /** 启动时进入上次的项目：只切界面，后端推迟到第一条消息（懒创建，
-   *  与 newChat 同机制）。bootstrap 内部使用，不给 UI 直接调。 */
+  /** 进入某个项目的空会话态：只切界面，后端推迟到第一条消息（懒创建，
+   *  与 newChat 同机制）。首页（Onboarding）进项目/打开最近会话走这里。 */
   openStartupProject: (cwd: string, model?: string) => Promise<void>
   /** Switch the active working directory (project): close the current session and
    *  start a fresh one in the new cwd (history is per-cwd in the sidebar). */
@@ -291,6 +332,12 @@ interface SessionStore {
   prefetchSessionHistory: (sdkSessionId: string, backend?: ClaudeExecutionBackend) => Promise<void>
   pruneSessionHistoryCache: (visibleSessionIds: string[]) => void
   setTranscriptScrolling: (scrolling: boolean) => void
+  /** 注水龙头（2026-08-26「所滚即所得」）：渲染层上报视口相对已加载历史的
+   *  位置——'bottom' 钉底（followOutput 兜底，前置扰动不可见）、'edge' 逼近
+   *  已加载顶部（需要续注，放慢节奏等测量收敛）、'mid' 停留阅读区（暂停注水：
+   *  每批 50 条前置都靠 Virtuoso 估计行高调整，估计误差就是停手后持续漂移
+   *  的来源）。 */
+  setHistoryPreloadZone: (zone: HistoryPreloadZone) => void
   renameSession: (sessionId: string, title: string, backend?: ClaudeExecutionBackend) => Promise<void>
   /** 永久删除。成功返回 null；失败返回错误文案（调用方必须显式提示——
    *  2026-08-14 用户反馈"删了没反应"：只塞 status.error 的小字没人看得见）。 */
@@ -375,6 +422,9 @@ const ALL_SESSIONS_LIMIT = 200
 const HISTORY_PRELOAD_CHUNK_SIZE = 50
 const HISTORY_HYDRATION_IDLE_TIMEOUT_MS = 700
 const HISTORY_HYDRATION_SCROLL_PAUSE_MS = 140
+/** 逼近已加载顶部（edge）时的注水节奏：放慢到 160ms，让新前置的行在视口上方
+ *  overscan 里完成真实测高、估计误差收敛后再注下一批（2026-08-26 漂移修复）。 */
+const HISTORY_HYDRATION_EDGE_INTERVAL_MS = 160
 const HISTORY_HYDRATION_RELEASE_MS = 2_000
 let startupBootstrapPromise: Promise<void> | null = null
 let sessionNavigationSeq = 0
@@ -532,6 +582,10 @@ interface SessionHistoryHydrationTask {
 
 let activeHistoryHydrationTask: SessionHistoryHydrationTask | null = null
 let transcriptScrolling = false
+/** 视口位置三态（含义见 setHistoryPreloadZone 注释）。默认 'bottom'：会话打开
+ *  即钉底，与 Transcript 的 atBottomRef 初值一致。 */
+export type HistoryPreloadZone = 'bottom' | 'edge' | 'mid'
+let historyPreloadZone: HistoryPreloadZone = 'bottom'
 
 /** turn 结束后刷新侧栏会话列表（防抖）：kimi 在会话产生内容后才持久化/更新
  *  session/list 条目，只在 startSession 时刷新会漏掉"刚聊完"的会话。 */
@@ -671,7 +725,9 @@ function scheduleHistoryHydrationStep(
       cancelActiveHistoryHydration()
       return
     }
-    if (transcriptScrolling) {
+    if (transcriptScrolling || historyPreloadZone === 'mid') {
+      // 滚动中 / 停留阅读区：暂停注水（阅读区前置 = 估计行高调校 = 停手后
+      // 持续漂移，2026-08-26）。靠同一颗定时器轮询，解除条件满足即续注。
       task.timeoutId = window.setTimeout(
         () => scheduleHistoryHydrationStep(get, set, task),
         HISTORY_HYDRATION_SCROLL_PAUSE_MS
@@ -704,7 +760,11 @@ function scheduleHistoryHydrationStep(
     }
   }
 
-  if ('requestIdleCallback' in window) {
+  if (historyPreloadZone === 'edge') {
+    // edge 模式固定节奏慢注（不走 requestIdleCallback——用户停手阅读时 idle
+    // 立刻就绪，等于全速连注，测高误差来不及收敛）。
+    task.timeoutId = setTimeout(run, HISTORY_HYDRATION_EDGE_INTERVAL_MS)
+  } else if ('requestIdleCallback' in window) {
     task.idleId = window.requestIdleCallback(run, { timeout: HISTORY_HYDRATION_IDLE_TIMEOUT_MS })
   } else {
     task.timeoutId = setTimeout(run, 48)
@@ -1966,6 +2026,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   elicitationQueue: [],
   runningSdkSessionIds: [],
   composerDrafts: readStoredComposerDrafts(),
+  unreadReplies: readStoredUnreadReplies(),
 
   async refreshTodos() {
     const sdkSessionId = get().meta?.sdkSessionId
@@ -2001,6 +2062,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     else delete drafts[sessionKey]
     storeComposerDrafts(drafts)
     set({ composerDrafts: drafts })
+  },
+
+  noteReplyCompleted(sessionKey) {
+    const counts = { ...get().unreadReplies }
+    counts[sessionKey] = Math.min((counts[sessionKey] ?? 0) + 1, UNREAD_REPLIES_MAX)
+    storeUnreadReplies(counts)
+    set({ unreadReplies: counts })
+  },
+
+  clearUnread(sessionKey) {
+    // 没有条目时连 set 都省掉（openSession 是热路径，每次切会话都会调）。
+    if (!(sessionKey in get().unreadReplies)) return
+    const counts = { ...get().unreadReplies }
+    delete counts[sessionKey]
+    storeUnreadReplies(counts)
+    set({ unreadReplies: counts })
   },
 
   async startSession(args) {
@@ -2370,24 +2447,24 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (get().bootstrapped || get().meta) return
     if (startupBootstrapPromise) return startupBootstrapPromise
 
-    startupBootstrapPromise = (async () => {
-      try {
-        const proj = await window.api.getStartupProject()
-        if (proj) {
-          const provider = await window.api.getActiveProvider()
-          await get().openStartupProject(proj.path, provider?.model)
-        }
-      } finally {
-        set({ bootstrapped: true })
-        startupBootstrapPromise = null
-      }
-    })()
+    // 2026-08-25 用户决策：启动不再自动进入上次项目（原先这里 getStartupProject
+    // → openStartupProject，一开 Tran 就隐式落进某个项目目录），统一停在 !meta
+    // 的首页（App.tsx → Onboarding），进项目/开会话都改由首页显式触发。
+    // forge:getStartupProject 主进程接口保留，渲染端自此没有调用方。
+    startupBootstrapPromise = Promise.resolve().then(() => {
+      set({ bootstrapped: true })
+      startupBootstrapPromise = null
+    })
 
     return startupBootstrapPromise
   },
 
   /**
-   * 启动时进入上次的项目 —— **懒创建**，与 newChat 同一套机制。
+   * 进入某个项目的空会话态 —— **懒创建**，与 newChat 同一套机制。
+   *
+   * 2026-08-25 起启动路径不再调它（bootstrap 停在首页，见 bootstrap 注释）；
+   * 现在的调用方是首页（Onboarding）：「最近会话」先靠它落进目标项目，再走
+   * openSessionCrossProject resume，避免 switchProject 那样白起一个后端空壳。
    *
    * 此前这里直接调 startSession()，也就是每开一次 Tran 就真的 `session/new`
    * 一个空会话落盘；用户进来还没说话就切去历史会话，那条 "New Session" 就
@@ -2618,6 +2695,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   applySessionRunningChanged(p) {
+    // 未读气泡用的「这轮真的跑过」判定：必须在本函数任何状态改动之前取样
+    //（markSdkSessionRunning 与下面的列表 set 都会把 running 写成新值）。
+    // 渲染层重载（刷新窗口）时 running=true 推送发生在重载前、
+    // runningSdkSessionIds 是空的——sessions 列表的 running 是主进程轮询合并的，
+    // 能接住这种半边生命周期。
+    const wasRunning = p.acpSessionId
+      ? get().runningSdkSessionIds.includes(p.acpSessionId) ||
+        get().sessions.some((it) => it.sessionId === p.acpSessionId && !!it.running)
+      : false
     // 后台缓冲的 running（attach 时恢复忙碌态用）+ #41 计时/提示随 turn 结束清掉。
     const bg = backgroundSessions.get(p.sessionId)
     if (bg) {
@@ -2652,6 +2738,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       })
       return changed ? { sessions } : {}
     })
+    // 未读气泡（2026-08-25）：turn 结束（running=true→false）且不是当前打开的
+    // 会话 → 该行未读 +1。当前会话用户正看着，永远不计；渲染层重载后到达的
+    // 孤立 running=false（wasRunning=false）不计，防启动期假未读。
+    if (!p.running && wasRunning && p.acpSessionId && get().meta?.sdkSessionId !== p.acpSessionId) {
+      const backend = get().sessions.find((it) => it.sessionId === p.acpSessionId)?.runtimeBackend
+      get().noteReplyCompleted(unreadSessionKey(p.acpSessionId, backend))
+    }
   },
 
   dismissTurnStall() {
@@ -2797,6 +2890,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
+  setHistoryPreloadZone(zone: HistoryPreloadZone) {
+    if (historyPreloadZone === zone) return
+    historyPreloadZone = zone
+    // 解除暂停（离开阅读区）时立刻续注，不等下一颗轮询定时器。
+    if (zone !== 'mid' && activeHistoryHydrationTask) {
+      scheduleHistoryHydrationStep(get, set, activeHistoryHydrationTask)
+    }
+  },
+
   async newChat() {
     const meta = get().meta
     if (!meta) return
@@ -2903,6 +3005,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const meta = get().meta
     if (!meta) return
     if (meta.sdkSessionId === sdkSessionId) return
+    // 打开即已读：attach / resume 两条分支共用这一个入口（2026-08-25 未读气泡）。
+    get().clearUnread(unreadSessionKey(sdkSessionId, backend))
     cancelActiveHistoryHydration()
     const { model, permissionMode } = meta
     // 会话归哪个 agent 后端由**这条会话**决定，不是当前会话、更不是全局偏好：
@@ -3168,6 +3272,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     deleteSessionHistoryCache(meta.cwd, sessionId, backend)
     forgetSessionLocalState(sessionId)
     get().setComposerDraft(sessionId, '')
+    // 未读计数同样按会话清（同 forgetSessionLocalState 的死键理由，2026-08-25）。
+    get().clearUnread(unreadSessionKey(sessionId, backend))
     set((s) => ({ sessions: s.sessions.filter((x) => x.sessionId !== sessionId) }))
     // Deleted the active conversation → start fresh.
     if (meta.sdkSessionId === sessionId) {
@@ -3206,6 +3312,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         deleteSessionHistoryCache(meta.cwd, target.sessionId, target.backend)
         forgetSessionLocalState(target.sessionId)
         get().setComposerDraft(target.sessionId, '')
+        // 同单删：未读计数按会话清，防死键滞留（2026-08-25）。
+        get().clearUnread(unreadSessionKey(target.sessionId, target.backend))
       } catch {
         failed += 1
       }

@@ -3,6 +3,7 @@ import ShortcutSettings from './ShortcutSettings'
 import SettingText from './SettingText'
 import BrowserBridgeCard from './BrowserBridgeCard'
 import DesktopControlCard from './DesktopControlCard'
+import XhhCard from './XhhCard'
 import ConfirmDialog from './ConfirmDialog'
 import type {
   ComposerModel,
@@ -1126,6 +1127,8 @@ export default function SettingsPanel(): JSX.Element {
         {category === 'tools' && <BrowserBridgeCard />}
 
         {category === 'tools' && <DesktopControlCard />}
+
+        {category === 'tools' && <XhhCard />}
 
         {category === 'assistant' && (
         <section className="glass-panel-soft rounded-2xl p-4">

@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.1.48 - 2026-08-25
+
+### 中文
+
+- 修复：WebSearch 等纯文本工具的结果不再被当成 diff 渲染（此前出现 "+0 -0" 和两列相同行号 +「统一/拆分」开关）——只有编辑族工具且结果真是 unified diff 才走 DiffView，其余一律纯文本。
+- 新增：启动默认进入无项目主页——不再自动打开上次项目；主页列出已有项目（点击进入）与最近会话 Top10（跨项目，点击直接恢复），保留浏览新文件夹入口。
+- 新增：侧边栏会话未读气泡——后台会话有新回复完成时，行右缘出现 accent 紫渐变计数药丸（柔光 + 首次回弹动效），点开即清，重启后仍记得（localStorage）。
+- 修复：直播输出渐进折叠补全最后断点——闭段后新生的开口尾段继承前段折叠决策（v1.1.47 只补了闭段继承，尾段仍一摊到底）；整轮折叠恢复「只留最新几条展开」。
+- 修复：滚动「所滚即所得」——阅读区暂停历史注水（钉底或逼近已加载顶部才注），滚动补偿改头部锚点反推（不再被同帧流式/折叠污染），停手后视图不再自己漂移。
+- 优化：「向你提问」在折叠摘要里改用专属气泡问号图标与靛蓝微光（此前和思考同款✦同款色）；整组总结与末段的间距对齐。
+- 修复：非 git 目录的会话点变更 pill 是死按钮——现在给出诚实说明「该目录不是 Git 仓库」；git 仓库内行为不变。
+- 优化：变更 UI 的原生 title 提示全部换成好看的气泡 tooltip（新 HoverTip 组件：变更胶囊、轮次变更卡、Git 工具条 16 处、改动面板 5 处）。
+- 新增：设置 → 工具 页加 xhh 卡片——一键弹出独立 xhh 终端窗口（不随 Tran 退出回收）。
+
+### English
+
+- Fix: plain-text tool results (e.g. WebSearch) are no longer rendered as diffs (which produced "+0 -0" and two identical line-number columns plus a unified/split toggle) — only edit-family tools with a real unified diff go through DiffView; everything else renders as plain text.
+- New: Tran starts on a no-project home page instead of auto-opening the last project; the home lists saved projects (click to enter) and the top-10 recent sessions across projects (click to resume), with the browse-new-folder entry kept.
+- New: unread-reply badges on sidebar sessions — when a background session finishes a reply, an accent-purple gradient count pill (soft glow, pop-in animation) appears on the row; cleared on open, persisted across restarts.
+- Fix: progressive folding's last gap closed — the open tail segment born after a segment closes now inherits the fold decision (v1.1.47 only fixed closed-segment inheritance, so the tail still sprawled); live turns again keep only the newest few cards expanded.
+- Fix: "what you scroll is what you get" — history preloading pauses while you're reading (only loads when pinned at bottom or near the loaded top edge), and scroll compensation now uses head-row anchors (immune to same-frame streaming/fold noise); the view no longer drifts after you stop scrolling.
+- Improvement: "向你提问" gets its own question-bubble icon and indigo shimmer in activity summaries (previously the same ✦ icon and tone as thinking); group-note spacing aligned with segment gaps.
+- Fix: the changes pill was a dead button for sessions in non-git directories — now shows an honest "not a Git repository" note; git repos behave as before.
+- Improvement: native title tooltips across the changes UI replaced with polished bubble tooltips (new HoverTip component: changes pill, turn changes card, 16 spots in the Git toolbar, 5 in the changes panel).
+- New: an xhh card in Settings → Tools — launches an independent xhh terminal window (not reaped when Tran quits).
+
 ## v1.1.47 - 2026-08-25
 
 ### 中文

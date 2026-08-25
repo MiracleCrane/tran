@@ -534,7 +534,18 @@ const ToolCallCard = memo(function ToolCallCard({
             />
           )}
           {!isSubagent && resultText && !bashInfo.isBash && (
-            <DiffView text={resultText} lang={langForTool(block.name, block.input)} />
+            // 只有编辑族工具的结果才是补丁；WebSearch/Read/Grep 等纯文本走
+            // DiffView 会硬解析出 "+0 -0" 和两列相同行号（2026-08-25 用户截图，
+            // 与 2026-08-14 Bash 同款问题——当时只豁免了 Bash，漏了其余纯文本工具）。
+            // 内容再兜一道：结果不像 unified diff 的（Write 落地回执等）也走纯文本。
+            EDIT_TOOL_NAMES.has(block.name) && /^(@@ |--- |\+\+\+ )/m.test(resultText) ? (
+              <DiffView text={resultText} lang={langForTool(block.name, block.input)} />
+            ) : (
+              <CodeBlock
+                text={resultText}
+                className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white/[0.035] px-2.5 py-2 text-xs leading-relaxed text-zinc-400"
+              />
+            )
           )}
 
           {!resultText && block.status === 'running' && (

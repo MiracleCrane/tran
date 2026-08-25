@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { TurnChangesItem } from '../types'
 import { useSessionStore } from '../store/sessionStore'
 import ConfirmDialog from './ConfirmDialog'
+import HoverTip from './HoverTip'
 
 /**
  * 一轮对话的文件改动汇总卡（Codex 同款）：「已编辑 N 个文件 +X -Y」+ 文件列表，
@@ -106,12 +107,14 @@ export default function TurnChangesCard({
         {!reverted && (
           <div className="border-t border-white/[0.05]">
             {shown.map((f) => (
+              // 2026-08-25：原生 title= 太丑，统一换 HoverTip 气泡（全文路径）。
+              <HoverTip key={f.path} tip={f.path} tipClassName="break-all" className="block">
               <button
                 key={f.path}
                 type="button"
                 onClick={() => onReview(f.path)}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition hover:bg-white/[0.03]"
-                title={f.path}
+                aria-label={f.path}
               >
                 <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-500">
                   {dirName(f.path) && <span className="text-zinc-600">{dirName(f.path)}/</span>}
@@ -120,6 +123,7 @@ export default function TurnChangesCard({
                 <span className="shrink-0 text-[11px] tabular-nums text-emerald-400">+{f.added}</span>
                 <span className="shrink-0 text-[11px] tabular-nums text-red-400">-{f.removed}</span>
               </button>
+              </HoverTip>
             ))}
             {rest > 0 && (
               <button

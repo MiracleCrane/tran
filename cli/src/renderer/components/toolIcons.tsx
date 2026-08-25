@@ -43,6 +43,13 @@ ICONS['think'] = {
   html: '<path d="M10 2.5c.35 3.9 2.1 5.65 6 6-3.9.35-5.65 2.1-6 6-.35-3.9-2.1-5.65-6-6 3.9-.35 5.65-2.1 6-6Z" fill="currentColor"/><path d="M15.2 12.6c.18 1.95 1.05 2.82 3 3-1.95.18-2.82 1.05-3 3-.18-1.95-1.05-2.82-3-3 1.95-.18 2.82-1.05 3-3Z" fill="currentColor" opacity="0.65"/>'
 }
 
+/** 向你提问图标（2026-08-25 用户：「提问怎么和思考一个图标」）：气泡 + 问号，
+ *  手绘补齐（Codex 提取集没有这一类，同 todoList 的做法）。 */
+ICONS['ask'] = {
+  viewBox: '0 0 20 20',
+  html: '<path d="M4 3.5h12A1.5 1.5 0 0 1 17.5 5v7a1.5 1.5 0 0 1-1.5 1.5h-6l-3.7 2.8v-2.8H4A1.5 1.5 0 0 1 2.5 12V5A1.5 1.5 0 0 1 4 3.5Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8.2 7.7c.2-1.1 1-1.8 2-1.8 1.1 0 2 .8 2 1.9 0 1.4-1.6 1.7-1.9 2.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="10.2" cy="12.3" r="0.95" fill="currentColor"/>'
+}
+
 /** 待办清单图标（2026-08-14 用户：「todoList 前面也要加图标」）：首行打勾 +
  *  两条横线的清单造型。Codex 提取集里没有这一类，手绘补齐。 */
 ICONS['todo'] = {

@@ -62,6 +62,11 @@ function looksEnglish(text: string): boolean {
 }
 /** Virtuoso firstItemIndex 的起始基数：头部每插入 N 条就减 N，够减很久。 */
 const FIRST_ITEM_INDEX_BASE = 1_000_000
+/** 注水龙头（2026-08-26）：非钉底时，首条可见行距已加载顶部不足这么多行
+ *  算 edge 区（需要续注历史），否则是 mid 阅读区（暂停注水）。 */
+const HISTORY_PRELOAD_EDGE_ROWS = 40
+/** prepend 补偿的头部锚点行数（见 displayRows memo 补偿段注释）。 */
+const PREPEND_ANCHOR_ROW_COUNT = 8
 /** 思考框内距底多少像素以内算"还贴着底"（继续跟随流式输出）。 */
 const THINKING_FOLLOW_BOTTOM_THRESHOLD_PX = 24
 // #48/#50 高亮判定：用户消息行顶距视口顶多少 px 内算"视口顶部附近"。
@@ -378,13 +383,18 @@ function buildDisplayRows(
       if (closing) groupId = `turn-group-${closing.item.id}`
       else if (lastTextId) groupId = `turn-group-tail-${lastTextId}`
       else if (firstId) groupId = `turn-group-${firstId}`
-      // 闭段决策继承（2026-08-26 修 live 不折回归）：闭段键是全新键，sticky 表里
-      // 没有记录，foldDecisionFor 会按闭段帧的 atBottom 重新判定——而 live 期间
-      // 悬停/点击 bar（#8b）或上滚早已解除跟随钉住，判定落 false 且 sticky 不可
-      // 翻，整段在本轮剩余时间一直摊开（实证 20+ 张活动卡，轮末才被 turnJustEnded
-      // 收起）。该段作为开口尾段时已按"组第一次出现时用户在底部"登记过决策，闭段
-      // 只是换锚不是新组——把尾段键（或尚无正文时的 firstId 回退键）的登记决策
-      // 继承给闭段键。旧锚点（一律 firstId）键不变所以天然没这个病。
+      // 决策继承（2026-08-26 修 live 不折回归，两轮修复）：
+      // 轮级血缘——v1.1.21「边输出边折叠」之所以稳，是因为整轮只有一条组、键在
+      // 轮首（发送后必钉住）登记一次 sticky=true，之后边长边折不再重判。段级化
+      // （2026-08-20）后每段/每尾各拿新键各自登记，live 期间悬停/点击 bar（#8b）
+      // 或上滚解除跟随钉住后，新键按当时的 atBottom=false 登记且 sticky 不可翻，
+      // 该段本轮剩余时间一直摊开（实证：首批折成一行后，闭段再长 13+ 块全摊开，
+      // 轮末才被 turnJustEnded 收起）。修复＝把整轮的折叠决定串成一条血缘：
+      // ① 闭段键继承该段开口尾段时期已登记的决策（闭段只是换锚不是新组）；
+      // ② 闭段后新生的开口尾段继承刚闭合段的决策（同轮同决定）。
+      // 链路只在某段从未成组（<2 块无登记）处断开，退回按当时 atBottom 新判；
+      // 整轮第一个段（尚无正文）不做继承——「上翻阅读时出现的组保持展开」的
+      // 设计规则在轮粒度上完整保留。
       let inheritFrom: string | null = null
       if (closing) {
         inheritFrom = lastTextId
@@ -393,6 +403,8 @@ function buildDisplayRows(
             ? `turn-group-${firstId}`
             : null
         if (inheritFrom === groupId) inheritFrom = null
+      } else if (lastTextId) {
+        inheritFrom = `turn-group-${lastTextId}`
       }
       // ≥2 块才折：单块段（纯文本解说 + 每步单命令的轮次）保持普通卡片 inline
       // 显示——那不属于"该折没折"，是用户定稿的直排（2026-08-21 拍板）。
@@ -1074,7 +1086,7 @@ const TOOL_ACTIVITY_META: Record<string, { label: string; icon: string; tone: st
   CronCreate: { label: '创建定时任务', icon: 'todo', tone: 'todo' },
   CronDelete: { label: '删除定时任务', icon: 'todo', tone: 'todo' },
   CronList: { label: '查看定时任务', icon: 'todo', tone: 'todo' },
-  AskUserQuestion: { label: '向你提问', icon: 'think', tone: 'think' },
+  AskUserQuestion: { label: '向你提问', icon: 'ask', tone: 'ask' },
   CreateGoal: { label: '创建目标', icon: 'todo', tone: 'todo' },
   UpdateGoal: { label: '更新目标', icon: 'todo', tone: 'todo' }
 }
@@ -1281,7 +1293,7 @@ function GroupNoteText({ note }: { note: string }): JSX.Element {
   }, [tip])
 
   return (
-    <span className="min-w-0 truncate text-zinc-600" onMouseEnter={show} onMouseLeave={hide}>
+    <span className="ml-1 min-w-0 truncate text-zinc-600" onMouseEnter={show} onMouseLeave={hide}>
       · {note}
       {tip &&
         createPortal(
@@ -1505,8 +1517,10 @@ export default function Transcript({
   const firstItemIndexRef = useRef(FIRST_ITEM_INDEX_BASE)
   /** 已消费的历史注水事件号（与 sessionStore.historyPrependSeq 对齐）。 */
   const consumedPrependSeqRef = useRef(0)
-  /** 上一帧的显示行数：prepend 补偿按行数净增量计量（单位见下方注释）。 */
+  /** 上一帧的显示行数：锚点全灭时退回行数净增量（见下方补偿段注释）。 */
   const prevDisplayRowCountRef = useRef(0)
+  /** 上一帧头部若干行的 key：prepend 补偿的锚点（行数 = 后移量，精确到行）。 */
+  const prevHeadRowKeysRef = useRef<string[]>([])
   const prevSessionKeyRef = useRef(sessionKey)
   /** #45 附件持久化分桶键：sdkSessionId 重启 resume 后稳定（bridge id 每次都变）。 */
   const attachmentKey = useSessionStore((s) => s.meta?.sdkSessionId ?? s.meta?.sessionId ?? '')
@@ -1519,6 +1533,7 @@ export default function Transcript({
   // 重渲染，可接受。
   const turnRunning = useSessionStore((s) => s.status.running)
   const setTranscriptScrolling = useSessionStore((s) => s.setTranscriptScrolling)
+  const setHistoryPreloadZone = useSessionStore((s) => s.setHistoryPreloadZone)
   // #36：turn 运行中发送会进 pendingQueue 而不是 items，只看 items 的话
   // 这一路不会回底（而排队恰恰是运行中发送的默认路径）。
   const pendingQueueLength = useSessionStore((s) => s.pendingQueue.length)
@@ -1665,16 +1680,18 @@ export default function Transcript({
    *
    * 补偿单位是**显示行**（firstItemIndex 以 displayRows 计），store 只能按条目
    * 计数——条目→行不是 1:1（toolGroup/activityGroup 多并一、噪音信封整条丢弃、
-   * 折叠段被注水向前延伸后组行不变但块变多）。旧实现用「上一帧首行 key 在新数组
-   * 里的下标」反推行数，正死在组行 id 变化上：折叠段向前延伸 → 组 id 变 →
-   * findIndex 落空 → 补偿被跳过（2026-08-25 实证视口被拽下约 50 行）。
+   * 折叠段被注水向前延伸后组行不变但块变多）。store 每实际前置一批就 bump
+   * `historyPrependSeq` 作触发信号；行数在这里精确量：上一帧**头部 8 行的 key**
+   * 在新数组里集体后移，后移量（新下标 − 旧下标）即头部插入的显示行数。只认
+   * 头部锚点，prepend 同帧的尾部流式追加/轮末折叠不会混进计数（2026-08-26 前
+   * 用 rows.length 净增量，同帧其它变化会一并算入、firstItemIndex 错位 = 内容
+   * 整片平移 k 行）。key 的跨帧稳定性由 2026-08-25 的组 id 锚点修复保证（组 id
+   * 锚在收段正文消息上，注水向前延伸不再换 id）。锚点全灭（头部行同帧被折没，
+   * 理论边界）才退回行数净增量。
    *
-   * 现改为：store 每实际前置一批就 bump `historyPrependSeq`（触发信号），这里
-   * 发现 seq 前进时直接量**行数净增量**——注水只往头部加内容，seq 前进期间的
-   * rows.length 增量即头部插入的显示行数；折叠段延伸合并进既有组行时增量天然
-   * 小于 50，正是要补偿的真实行数。残留边界：prepend 与轮末折叠/流式追加落在
-   * 同一帧时行差会把它们一并计入（注水期间滚动已暂停、流式与注水极少同帧，
-   * 代价是一次性的轻微偏移，远好于旧法的整段拽动）。
+   * 注意：即使行数补偿精确，Virtuoso 仍按**估计行高**换算像素，每批前置的估计
+   * 误差都会体现为视口偏移——所以阅读区干脆不注水（见 publishHistoryPreloadZone
+   * 的 'mid' 暂停，2026-08-26「所滚即所得」）。
    */
   const { displayRows, firstItemIndex } = useMemo(() => {
     const turnJustEnded = prevTurnRunningRef.current && !turnRunning
@@ -1712,11 +1729,23 @@ export default function Transcript({
     }
     const prependSeq = useSessionStore.getState().historyPrependSeq
     if (prependSeq !== consumedPrependSeqRef.current) {
-      const insertedAbove = rows.length - prevDisplayRowCountRef.current
+      // 头部锚点反推插入行数（精确到行，不受同帧尾部变化污染，见上方注释）。
+      const anchors = prevHeadRowKeysRef.current
+      let insertedAbove: number | null = null
+      for (let k = 0; k < anchors.length; k++) {
+        const idx = rows.findIndex((row) => rowKeyOf(row) === anchors[k])
+        if (idx !== -1) {
+          insertedAbove = idx - k
+          break
+        }
+      }
+      // 锚点全灭（理论边界）：退回行数净增量。
+      if (insertedAbove === null) insertedAbove = rows.length - prevDisplayRowCountRef.current
       if (insertedAbove > 0) firstItemIndexRef.current -= insertedAbove
       consumedPrependSeqRef.current = prependSeq
     }
     prevDisplayRowCountRef.current = rows.length
+    prevHeadRowKeysRef.current = rows.slice(0, PREPEND_ANCHOR_ROW_COUNT).map(rowKeyOf)
     return { displayRows: rows, firstItemIndex: firstItemIndexRef.current }
   }, [roots, sessionKey, turnRunning])
   // #48 导航条目：顶层用户消息（排除系统信封；子代理转发的本就不在顶层行），
@@ -1821,6 +1850,8 @@ export default function Transcript({
     // 重新钉住 = 回到底部跟随，按钮必然该收；解除钉住则**不**反过来亮按钮
     // ——解除可能只是点了下 bar，人还在底部（按钮由几何距离/atBottomStateChange 管）。
     if (nextAtBottom) setShowLatest(false)
+    // 钉住状态是注水龙头的 bottom 判定来源，翻转即上报。
+    publishHistoryPreloadZone()
   }
 
   // "↓ 最新"按钮的钉住路径：滚到底并显式重新钉住跟随。悬停/点击解除跟随后
@@ -1890,6 +1921,20 @@ export default function Transcript({
   // 改为：scroller 滚动/渲染范围变化后，在 rAF 里取视口顶上方最后一条用户消息行。
   const lastRenderedRangeRef = useRef<ListRange>({ startIndex: 0, endIndex: 0 })
   const navHighlightFrameRef = useRef<number | null>(null)
+
+  /** 注水龙头上报（2026-08-26「所滚即所得」）：钉底 = bottom（followOutput
+   *  兜底，前置扰动不可见）；非钉底时按渲染范围首行距已加载顶部的行数分
+   *  edge（要续注了）/ mid（阅读区，暂停注水——阅读区前置的估计行高调校
+   *  就是停手后持续漂移的来源）。startIndex 含顶部 overscan，edge 阈值实际
+   *  更宽，偏保守（宁早勿晚）。store 侧同值短路，滚动期逐帧调用无妨。 */
+  const publishHistoryPreloadZone = (): void => {
+    if (atBottomRef.current) {
+      setHistoryPreloadZone('bottom')
+      return
+    }
+    const relStart = lastRenderedRangeRef.current.startIndex - firstItemIndexRef.current
+    setHistoryPreloadZone(relStart < HISTORY_PRELOAD_EDGE_ROWS ? 'edge' : 'mid')
+  }
 
   const cancelNavHighlightFrame = (): void => {
     if (navHighlightFrameRef.current !== null) {
@@ -1962,6 +2007,7 @@ export default function Transcript({
   const handleRangeChanged = (range: ListRange): void => {
     lastRenderedRangeRef.current = range
     scheduleActiveUserNavUpdate()
+    publishHistoryPreloadZone()
   }
 
   // 会话切换/新消息改变条目后重算高亮（不依赖滚动事件）；scrollElement 晚于
@@ -2198,8 +2244,10 @@ export default function Transcript({
       clearHighlightTimer()
       clearScrollIntentTimer()
       setTranscriptScrolling(false)
+      // 水龙头复位：换会话/卸载后别把一个 'mid' 留给下个会话（会冻结注水）。
+      setHistoryPreloadZone('bottom')
     }
-  }, [sessionKey, setTranscriptScrolling])
+  }, [sessionKey, setTranscriptScrolling, setHistoryPreloadZone])
 
   // #36 发送消息 = 明确"去底部"意图：即使用户之前上翻/点击/悬停解除了跟随，
   // 自己发出消息时也重新钉住并滚到底（与"↓ 最新"按钮同一条路径）。判定：
