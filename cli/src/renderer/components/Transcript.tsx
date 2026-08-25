@@ -248,7 +248,7 @@ function textOnlyItemOf(item: AssistantItem): AssistantItem {
 
 function buildDisplayRows(
   roots: ItemNode[],
-  shouldFold: (groupKey: string) => boolean,
+  shouldFold: (groupKey: string, inheritFrom?: string | null) => boolean,
   holdLiveOpen = false
 ): DisplayRow[] {
   const rows: DisplayRow[] = []
@@ -378,9 +378,25 @@ function buildDisplayRows(
       if (closing) groupId = `turn-group-${closing.item.id}`
       else if (lastTextId) groupId = `turn-group-tail-${lastTextId}`
       else if (firstId) groupId = `turn-group-${firstId}`
+      // 闭段决策继承（2026-08-26 修 live 不折回归）：闭段键是全新键，sticky 表里
+      // 没有记录，foldDecisionFor 会按闭段帧的 atBottom 重新判定——而 live 期间
+      // 悬停/点击 bar（#8b）或上滚早已解除跟随钉住，判定落 false 且 sticky 不可
+      // 翻，整段在本轮剩余时间一直摊开（实证 20+ 张活动卡，轮末才被 turnJustEnded
+      // 收起）。该段作为开口尾段时已按"组第一次出现时用户在底部"登记过决策，闭段
+      // 只是换锚不是新组——把尾段键（或尚无正文时的 firstId 回退键）的登记决策
+      // 继承给闭段键。旧锚点（一律 firstId）键不变所以天然没这个病。
+      let inheritFrom: string | null = null
+      if (closing) {
+        inheritFrom = lastTextId
+          ? `turn-group-tail-${lastTextId}`
+          : firstId
+            ? `turn-group-${firstId}`
+            : null
+        if (inheritFrom === groupId) inheritFrom = null
+      }
       // ≥2 块才折：单块段（纯文本解说 + 每步单命令的轮次）保持普通卡片 inline
       // 显示——那不属于"该折没折"，是用户定稿的直排（2026-08-21 拍板）。
-      const fold = groupBlocks.length >= 2 && groupId !== null && shouldFold(groupId)
+      const fold = groupBlocks.length >= 2 && groupId !== null && shouldFold(groupId, inheritFrom)
       if (!fold || groupId === null) {
         for (const { node } of seg) rows.push({ kind: 'item', node })
         seg = []
@@ -1663,7 +1679,7 @@ export default function Transcript({
   const { displayRows, firstItemIndex } = useMemo(() => {
     const turnJustEnded = prevTurnRunningRef.current && !turnRunning
     prevTurnRunningRef.current = turnRunning
-    const foldDecisionFor = (groupKey: string): boolean => {
+    const foldDecisionFor = (groupKey: string, inheritFrom?: string | null): boolean => {
       const map = foldDecisionsRef.current
       // 轮刚结束一律折（覆盖轮中"上翻不折"的决定）——「轮末收齐」优先于滚动
       // 稳定；且段完即折后组键在轮中就可能已登记，不覆盖会永远摊开。
@@ -1673,6 +1689,15 @@ export default function Transcript({
       }
       const existing = map.get(groupKey)
       if (existing !== undefined) return existing
+      // 闭段换锚（2026-08-25）后新键没有登记：沿用该段开口尾段时期已登记的
+      // 决策（见 buildDisplayRows 闭段决策继承注释），不重新按 atBottom 判定。
+      if (inheritFrom) {
+        const inherited = map.get(inheritFrom)
+        if (inherited !== undefined) {
+          map.set(groupKey, inherited)
+          return inherited
+        }
+      }
       const decision = atBottomRef.current
       map.set(groupKey, decision)
       return decision

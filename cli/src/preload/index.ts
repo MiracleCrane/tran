@@ -41,6 +41,7 @@ const api: ForgeApi = {
   closeSession: (sessionId) => ipcRenderer.invoke('forge:closeSession', sessionId),
   destroySession: (sessionId) => ipcRenderer.invoke('forge:destroySession', sessionId),
   listSessions: (cwd, opts) => ipcRenderer.invoke('forge:listSessions', cwd, opts),
+  launchScreenAssist: () => ipcRenderer.invoke('forge:launchScreenAssist'),
   getSessionMessages: (sessionId, cwd, backend) =>
     ipcRenderer.invoke('forge:getSessionMessages', sessionId, cwd, backend),
   renameSession: (sessionId, title, cwd, backend) =>

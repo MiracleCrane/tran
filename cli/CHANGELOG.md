@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.47 - 2026-08-25
+
+### 中文
+
+- 修复：直播输出时恢复渐进折叠——一轮回复中只保留最新几条思考/工具卡展开，较早的自动折进汇总行（v1.1.45 改折叠组锚点后，闭段组换了新 id、折叠状态没继承，导致整轮一直摊开）。
+- 新增：侧边栏「问答」分区头部加 ▶ 启动按钮——一键启动 screen-assist 悬浮问答工具（作为 Tran 子进程运行，Tran 退出时自动回收进程树）。
+
+### English
+
+- Fix: progressive folding during live streaming is back — within a turn only the newest few thinking/tool cards stay expanded while older ones fold into the summary row automatically (v1.1.45's group-id re-anchor gave closed segments a fresh id that didn't inherit the fold state, so the whole turn stayed expanded).
+- New: a ▶ launch button on the "问答" sidebar section header — starts the screen-assist floating Q&A tool (runs as a Tran child process; its process tree is cleaned up when Tran quits).
+
 ## v1.1.46 - 2026-08-25
 
 ### 中文

@@ -819,6 +819,8 @@ export interface ForgeApi {
    *  closeSession 的"切走=后台化"语义）。 */
   destroySession(sessionId: string): Promise<void>
   listSessions(cwd: string, opts?: SessionListOptions): Promise<SessionListItem[]>
+  /** 启动 screen-assist 悬浮问答工具（作为 Tran 子进程，退出时一并回收）。 */
+  launchScreenAssist(): Promise<{ ok: boolean; already?: boolean; error?: string }>
   getSessionMessages(
     sessionId: string,
     cwd: string,

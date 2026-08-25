@@ -353,6 +353,12 @@ const SECTION_LABEL_SHIMMER: Record<string, string> = {
 const QA_SECTION_LABEL = '问答'
 const QA_SESSION_CWD = 'c:/legacyd/projects/screen-assist'
 
+const PlayIcon = (): JSX.Element => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M8 5v14l11-7z" />
+  </svg>
+)
+
 const EyeIcon = ({ off }: { off?: boolean }): JSX.Element => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -1925,14 +1931,27 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                 </button>
               </div>
             ) : qaSectionHeader ? (
-              <button
-                type="button"
-                onClick={() => toggleGroupCollapsed(g.label)}
-                className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[13px] font-semibold text-zinc-400 transition hover:text-zinc-200"
-              >
-                <span className="text-[8px] text-zinc-500">{groupCollapsed ? '▸' : '▾'}</span>
-                <span className={`truncate ${SECTION_LABEL_SHIMMER[g.label] ?? ''}`}>{g.label}</span>
-              </button>
+              <div className="flex w-full items-center gap-1 px-2 py-1">
+                <button
+                  type="button"
+                  onClick={() => toggleGroupCollapsed(g.label)}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[13px] font-semibold text-zinc-400 transition hover:text-zinc-200"
+                >
+                  <span className="text-[8px] text-zinc-500">{groupCollapsed ? '▸' : '▾'}</span>
+                  <span className={`truncate ${SECTION_LABEL_SHIMMER[g.label] ?? ''}`}>{g.label}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void window.api.launchScreenAssist()
+                  }}
+                  className="shrink-0 rounded p-0.5 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+                  title="启动 screen-assist 问答工具"
+                >
+                  <PlayIcon />
+                </button>
+              </div>
             ) : (
               <div className="flex items-center gap-1.5 px-2 py-1 text-[13px] font-semibold text-zinc-400">
                 <span className={`truncate ${SECTION_LABEL_SHIMMER[g.label] ?? ''}`}>{g.label}</span>

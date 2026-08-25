@@ -32,6 +32,7 @@ import {
   unregisterMcpServer
 } from './mcpBrowserRegistration'
 import { setOverlayTargetDisplay, stopControlOverlay } from './controlOverlay'
+import { launchScreenAssist } from './screenAssist'
 import {
   listProviders,
   getActiveProvider,
@@ -1181,6 +1182,8 @@ export function registerIpc(
     }
     return items
   })
+
+  ipcMain.handle('forge:launchScreenAssist', async () => launchScreenAssist())
 
   ipcMain.handle('forge:getSessionMessages', async (
     _e,
