@@ -253,7 +253,7 @@ function textOnlyItemOf(item: AssistantItem): AssistantItem {
 
 function buildDisplayRows(
   roots: ItemNode[],
-  shouldFold: (groupKey: string, inheritFrom?: string | null) => boolean,
+  shouldFold: (groupKey: string, inheritFrom?: string | null, forceFold?: boolean) => boolean,
   holdLiveOpen = false
 ): DisplayRow[] {
   const rows: DisplayRow[] = []
@@ -289,6 +289,23 @@ function buildDisplayRows(
     const acts = item.blocks.filter((b): b is AssistantBlock => !!b && (b.kind === 'tool' || b.kind === 'thinking'))
     const hasText = item.blocks.some((b) => !!b && b.kind === 'text')
     return acts.length > 0 && hasText ? acts : null
+  }
+
+  /**
+   * 收段消息**流式期间**的混合活动块（2026-08-26 修折叠延迟）：mixedActivityOf
+   * 对流式消息一律返回 null（「正在跑的活动必须实时可见」），于是段尾混合消息
+   * 自身的思考/工具块要等消息**封口**（下一个 tool_call 或轮末，秒级）才进组
+   * ——短段（前序块 + 收段消息自身的块才够 ≥2）因此正文都流半天了还没折。
+   * 正文块已出现即收段（textBearing 不看 streaming）：kimi/claude 的消息都是
+   * 先思考后正文，正文开流时前面的思考/工具事实已定稿，直接并入组行；组行
+   *  blocks 每帧随流式重建（计数动态性已验证），即便有迟到 delta 也照更新。
+   * 仅用于 closing——段内/尾段的流式节点仍按原规则保持展开。
+   */
+  const streamingClosingActsOf = (node: ItemNode): AssistantBlock[] | null => {
+    const item = node.item
+    if (item.kind !== 'assistant' || item.error || !item.streaming) return null
+    const acts = item.blocks.filter((b): b is AssistantBlock => !!b && (b.kind === 'tool' || b.kind === 'thinking'))
+    return acts.length > 0 ? acts : null
   }
 
   /**
@@ -367,7 +384,9 @@ function buildDisplayRows(
           foldedIndexes.add(index)
         }
       }
-      const closingActs = closing ? (mixedActivityOf(closing) ?? []) : []
+      // 收段消息流式期间的活动块也并入（streamingClosingActsOf，见上方注释）——
+      // 正文开流即折，不等封口。
+      const closingActs = closing ? (mixedActivityOf(closing) ?? streamingClosingActsOf(closing) ?? []) : []
       if (closingActs.length) {
         if (!firstId && closing) firstId = closing.item.id
         groupBlocks.push(...closingActs)
@@ -392,9 +411,9 @@ function buildDisplayRows(
       // 轮末才被 turnJustEnded 收起）。修复＝把整轮的折叠决定串成一条血缘：
       // ① 闭段键继承该段开口尾段时期已登记的决策（闭段只是换锚不是新组）；
       // ② 闭段后新生的开口尾段继承刚闭合段的决策（同轮同决定）。
-      // 链路只在某段从未成组（<2 块无登记）处断开，退回按当时 atBottom 新判；
-      // 整轮第一个段（尚无正文）不做继承——「上翻阅读时出现的组保持展开」的
-      // 设计规则在轮粒度上完整保留。
+      // 链路只在某段从未成组（<2 块无登记）处断开，退回按当时 atBottom 新判。
+      // 注（2026-08-26 第三轮）：live 轮的组现已一律折（见 foldDecisionFor 的
+      // forceFold），血缘只是兜底；atBottom 门控只剩历史/已结束轮的组在用。
       let inheritFrom: string | null = null
       if (closing) {
         inheritFrom = lastTextId
@@ -408,7 +427,9 @@ function buildDisplayRows(
       }
       // ≥2 块才折：单块段（纯文本解说 + 每步单命令的轮次）保持普通卡片 inline
       // 显示——那不属于"该折没折"，是用户定稿的直排（2026-08-21 拍板）。
-      const fold = groupBlocks.length >= 2 && groupId !== null && shouldFold(groupId, inheritFrom)
+      // isLiveSegment 透传为 forceFold：进行中的这轮一律边长边折。
+      const fold =
+        groupBlocks.length >= 2 && groupId !== null && shouldFold(groupId, inheritFrom, isLiveSegment)
       if (!fold || groupId === null) {
         for (const { node } of seg) rows.push({ kind: 'item', node })
         seg = []
@@ -1657,15 +1678,23 @@ export default function Transcript({
     return map
   }, [roots])
   /**
-   * 折叠决策的 sticky 记忆（2026-08 滚动稳定）：组第一次出现时，用户**在底部**
-   * 才折成摘要行；在上翻阅读时出现的组保持展开——布局绝不在用户脚下变化。
-   * 一旦定了就不再翻转（已经折的组不因为你上翻而重新展开，反之亦然），
+   * 折叠决策的 sticky 记忆（2026-08 滚动稳定）：历史/已结束轮的组第一次出现时，
+   * 用户**在底部**才折成摘要行；在上翻阅读时出现的组保持展开——布局绝不在用户
+   * 脚下变化。一旦定了就不再翻转（已经折的组不因为你上翻而重新展开，反之亦然），
    * 换会话时清空（见下面 useMemo 里的 prevSessionKeyRef 分支）。
    *
-   * 例外（2026-08-17 用户：「对话都结束了还不会把这些 bar 收起来」）：成组
+   * 例外一（2026-08-17 用户：「对话都结束了还不会把这些 bar 收起来」）：成组
    * 被 holdLiveOpen 推迟到轮末之后，"是否在底部"的判定落在轮末瞬间——跟随
    * 钉底时 atBottom 可能是 false（增长不补滚的中间态），整轮就此永久摊开。
    * 所以**轮刚结束时新成的组一律折**，sticky 只约束轮次中途冒出的组。
+   *
+   * 例外二（2026-08-26 用户：「已经输出了好几句了，思考工具这些还没折起来？」）：
+   * **进行中的这轮（isLiveSegment）一律折**，不问 atBottom。原规则的动机是
+   * 「上翻阅读时上方冒出新组、折叠拽动阅读位置」——该场景现由注水龙头兜住
+   * （'mid' 阅读区/滚动中暂停注水，sessionStore scheduleHistoryHydrationStep），
+   * 而 live 轮的折叠发生在转录底部：用户上翻阅读时它在视口**之下**，高度变化
+   * 不影响阅读位置；用户在底部看流式时折叠正是 v1.1.21 起就要的「边输出边折」。
+   * 此前轮起步时未钉住（悬停 bar #8b 解钉后 steer/队列自动起轮）整轮摊开到轮末。
    */
   const foldDecisionsRef = useRef(new Map<string, boolean>())
   const prevTurnRunningRef = useRef(false)
@@ -1696,11 +1725,12 @@ export default function Transcript({
   const { displayRows, firstItemIndex } = useMemo(() => {
     const turnJustEnded = prevTurnRunningRef.current && !turnRunning
     prevTurnRunningRef.current = turnRunning
-    const foldDecisionFor = (groupKey: string, inheritFrom?: string | null): boolean => {
+    const foldDecisionFor = (groupKey: string, inheritFrom?: string | null, forceFold = false): boolean => {
       const map = foldDecisionsRef.current
       // 轮刚结束一律折（覆盖轮中"上翻不折"的决定）——「轮末收齐」优先于滚动
       // 稳定；且段完即折后组键在轮中就可能已登记，不覆盖会永远摊开。
-      if (turnJustEnded) {
+      // forceFold（2026-08-26）：进行中的这轮一律折，见上方 sticky 注释例外二。
+      if (turnJustEnded || forceFold) {
         map.set(groupKey, true)
         return true
       }

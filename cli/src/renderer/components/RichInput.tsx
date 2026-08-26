@@ -59,7 +59,18 @@ function tokenize(value: string, resolve: RichInputProps['resolveCommand']): Seg
   return segments
 }
 
-/** DOM → 字符串。胶囊还原成它代表的原始字符（data-raw）。 */
+/**
+ * DOM → 字符串。胶囊还原成它代表的原始字符（data-raw）。
+ *
+ * 换行的正字是 <br>，但对块级元素兜底（2026-08-26 用户：「换行每次发出去就
+ * 没了」）：浏览器默认 Enter、撤销、execCommand 都可能在根下留下 <div>/<p>，
+ * 旧版只当普通元素递归，换行就此丢失。规则：
+ *   - 进入 <div>/<p> 时先补一个 '\n'——块边界本身就是一次换行；例外两种：
+ *     它前面没有任何内容（根的开头，补了会多出空行），或前一个兄弟已是 <br>
+ *     （块本来就会另起一行，再补就叠行）；
+ *   - 整块只含一个 <br> 的（浏览器表示空行的标准画法 <div><br></div>）不再
+ *     递归，边界的那个 '\n' 已经代表这个空行，再递归会叠出第二个。
+ */
 function serialize(root: HTMLElement): string {
   let out = ''
   const walk = (node: Node): void => {
@@ -76,6 +87,14 @@ function serialize(root: HTMLElement): string {
     if (node.tagName === 'BR') {
       out += '\n'
       return
+    }
+    if (node.tagName === 'DIV' || node.tagName === 'P') {
+      const atStart = !node.previousSibling && out.length === 0
+      const prev = node.previousSibling
+      const afterBr = prev instanceof HTMLElement && prev.tagName === 'BR'
+      if (!atStart && !afterBr) out += '\n'
+      const only = node.childNodes.length === 1 ? node.firstChild : null
+      if (only instanceof HTMLElement && only.tagName === 'BR') return
     }
     for (const child of Array.from(node.childNodes)) walk(child)
   }
@@ -282,6 +301,30 @@ export default function RichInput({
       onKeyDown={(event) => {
         // 组词期间的 Enter / 上下键属于输入法（选字、翻页），一律放行。
         if (event.nativeEvent.isComposing || event.keyCode === 229) return
+        // Shift+Enter 手动插 <br>（2026-08-26 用户：「换行每次发出去就没了」）：
+        // 浏览器默认行为是在 contenteditable 里拆 <div> 块，而 serialize 的换行
+        // 正字是 <br>，换行在 emit 时就丢了。拦住默认行为、只插 <br>，保住
+        // 「换行只有 <br> 一种画法」的不变量（render 写 '\n' 也是 <br>）。
+        // Composer 本来就忽略 Shift+Enter，所以不再向上转发。
+        if (event.key === 'Enter' && event.shiftKey) {
+          event.preventDefault()
+          const root = ref.current
+          const sel = window.getSelection()
+          if (root && sel && sel.rangeCount > 0) {
+            const range = sel.getRangeAt(0)
+            if (root.contains(range.startContainer)) {
+              range.deleteContents()
+              const br = document.createElement('br')
+              range.insertNode(br)
+              range.setStartAfter(br)
+              range.collapse(true)
+              sel.removeAllRanges()
+              sel.addRange(range)
+            }
+          }
+          emit()
+          return
+        }
         onKeyDown?.(event)
       }}
       onPaste={(event) => {

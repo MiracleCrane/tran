@@ -37,6 +37,13 @@ import { DEFAULT_KIMI_MODEL_ID } from '../../shared/models'
 import { normalizeCwdForCompare } from '../../shared/paths'
 import { emitForgeEvent } from '../events'
 import { backgroundTaskInfo, taskTerminalFromEnvelope } from '../utils/toolStats'
+import {
+  clearTodoOverrides,
+  pruneVanishedTodoOverrides,
+  readTodoOverrides,
+  storeTodoOverrides,
+  todoKeyOf
+} from '../lib/todoOverrides'
 
 /** 每个会话（按 sdkSessionId）最近使用的权限模式。kimi CLI 的 session/load
  *  不会恢复会话模式（init 恒报 default），Tran 侧持久化并在 resume 时重放，
@@ -102,6 +109,8 @@ function forgetSessionLocalState(sdkSessionId: string): void {
   } catch {
     /* ignore */
   }
+  // 手动待办覆盖也在那个 JSON blob 里，同样按会话清（2026-08-26）。
+  clearTodoOverrides(sdkSessionId)
 }
 
 function storePermissionMode(sdkSessionId: string | undefined, mode: string): void {
@@ -226,6 +235,13 @@ interface SessionStore {
   /** 待办最后一次被 agent 更新的时刻（ms）。plan 是纯推送、无补拉，
    *  卡片需要据此显示陈旧度，否则旧快照看起来永远像当前状态。 */
   planUpdatedAt: number | null
+  /** 手动勾掉的待办（2026-08-26）：纯本地覆盖层，ACP 写不回去。键为
+   *  todoKeyOf(content)，存储/合并/清理语义见 lib/todoOverrides.ts。
+   *  当前会话一份，sdkSessionId 变化时换载（见文件尾部 subscribe）。 */
+  todoOverrides: Record<string, true>
+  /** 手动勾掉/取消勾掉一条待办。服务端已完成的条目不调它——ACP 只读，
+   *  「取消完成」没有真值可回退，手动层只负责把未完成勾成完成（及撤销）。 */
+  toggleTodoComplete: (entry: PlanEntry) => void
   /** kimi 本地 server 轮询到的会话 tasks（Swarm 可视化；null = server 不可用降级）。 */
   swarmTasks: KimiTaskInfo[] | null
   /** 隐藏 /usage 轮解析出的上下文用量（system/context_usage；null 表示无数据）。 */
@@ -2027,6 +2043,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   runningSdkSessionIds: [],
   composerDrafts: readStoredComposerDrafts(),
   unreadReplies: readStoredUnreadReplies(),
+  todoOverrides: {},
 
   async refreshTodos() {
     const sdkSessionId = get().meta?.sdkSessionId
@@ -2053,7 +2070,31 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
     // 实时 plan 帧比服务端记录新就不覆盖：ACP 那条是推送，永远更及时。
     if (localAt !== null && localAt >= result.updatedAt) return
-    set({ planEntries: result.entries, planUpdatedAt: result.updatedAt })
+    // 手动勾掉的覆盖懒清理（2026-08-26）：条目从服务端列表消失就丢弃对应
+    // override——kimi 全量重写列表，消失的条目基本不会原文回归。空列表不清
+    // （可能是没落盘的瞬时态），见 pruneVanishedTodoOverrides 注释。
+    const prunedOverrides = pruneVanishedTodoOverrides(get().todoOverrides, result.entries)
+    if (prunedOverrides) storeTodoOverrides(sdkSessionId, prunedOverrides)
+    set({
+      planEntries: result.entries,
+      planUpdatedAt: result.updatedAt,
+      ...(prunedOverrides ? { todoOverrides: prunedOverrides } : {})
+    })
+  },
+
+  toggleTodoComplete(entry) {
+    const sdkSessionId = get().meta?.sdkSessionId
+    if (!sdkSessionId) return
+    const key = todoKeyOf(entry.content)
+    const current = get().todoOverrides
+    // 服务端已完成且无 override：不动。ACP 只读，「取消完成」没有真值可回退；
+    // 手动层只负责把未完成勾成完成，以及撤销这个手动勾。
+    if (entry.status === 'completed' && !current[key]) return
+    const next = { ...current }
+    if (next[key]) delete next[key]
+    else next[key] = true
+    storeTodoOverrides(sdkSessionId, next)
+    set({ todoOverrides: next })
   },
 
   setComposerDraft(sessionKey, text) {
@@ -4169,3 +4210,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   }
 }))
+
+/** 手动待办覆盖按 sdkSessionId 存取（lib/todoOverrides.ts，2026-08-26）：
+ *  切会话/重置时 meta.sdkSessionId 一变就换载当前会话那份。放 subscribe 而
+ *  不是散在各路切会话 action 里——meta 的写入点太多，漏一个就是 A 会话的
+ *  手动勾选串到 B 会话的面板上。 */
+let todoOverrideSessionId: string | undefined
+useSessionStore.subscribe((s) => {
+  const id = s.meta?.sdkSessionId
+  if (id === todoOverrideSessionId) return
+  todoOverrideSessionId = id
+  useSessionStore.setState({ todoOverrides: id ? readTodoOverrides(id) : {} })
+})

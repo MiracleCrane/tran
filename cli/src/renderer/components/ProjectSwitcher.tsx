@@ -232,7 +232,7 @@ export default function ProjectSwitcher(): JSX.Element | null {
       type="button"
       onClick={() => setOpen((o) => !o)}
       title={picking ? '正在打开文件选择器…' : (current?.path ?? meta?.cwd ?? '')}
-      className="flex h-7 max-w-56 items-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.045] px-2.5 text-[12px] font-medium text-zinc-200 transition hover:bg-white/[0.09] hover:text-zinc-50"
+      className="flex h-7 max-w-56 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-zinc-200 transition hover:bg-white/[0.09] hover:text-zinc-50"
     >
       {picking ? (
         <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-white/20 border-t-accent" />

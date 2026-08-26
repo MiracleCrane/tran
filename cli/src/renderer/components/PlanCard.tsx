@@ -1,7 +1,9 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { PlanEntry } from '../types'
+import { mergeTodoOverrides, todoKeyOf } from '../lib/todoOverrides'
 import Collapse from './Collapse'
+import HoverTip from './HoverTip'
 
 /** 超过这个时长没更新就显示陈旧提示。注意"陈旧"指的是**待办内容本身**没推进
  *  （kimi 的设计：待办只在模型调 todo_list 时才变，后台任务完成只在下一轮注入），
@@ -56,7 +58,13 @@ const ListGlyph = (): JSX.Element => (
  *  completed 打勾、in_progress 紫色高亮（优先显示 activeForm）。
  *  docked=true 时去掉顶部常驻条的带宽/分隔线（右侧停靠面板里用）。 */
 const PlanCard = memo(function PlanCard({ docked = false }: { docked?: boolean }): JSX.Element | null {
-  const entries = useSessionStore((s) => s.planEntries)
+  const serverEntries = useSessionStore((s) => s.planEntries)
+  const todoOverrides = useSessionStore((s) => s.todoOverrides)
+  const toggleTodoComplete = useSessionStore((s) => s.toggleTodoComplete)
+  // 手动勾掉（2026-08-26，仅本地覆盖层，见 lib/todoOverrides.ts）合并进服务端
+  // 列表：override 命中的未完成条目按 completed 显示。下面 hasUnfinished/done/
+  // 横幅逻辑全部吃合并后的 entries——用户勾掉的条目不该再触发陈旧提示和催更。
+  const entries = mergeTodoOverrides(serverEntries, todoOverrides)
   const planUpdatedAt = useSessionStore((s) => s.planUpdatedAt)
   const running = useSessionStore((s) => s.status.running)
   const swarmTasks = useSessionStore((s) => s.swarmTasks)
@@ -202,23 +210,46 @@ const PlanCard = memo(function PlanCard({ docked = false }: { docked?: boolean }
   const rowOf = (entry: PlanEntry, index: number): JSX.Element => {
     const active = entry.status === 'in_progress'
     const completed = entry.status === 'completed'
+    // 手动勾掉的行可再点取消（恢复 agent 推送的状态）；agent 自己报完成的行
+    // 不可点——ACP 只读，「取消完成」没有真值可回退。
+    const userCompleted = completed && todoOverrides[todoKeyOf(entry.content)] === true
+    const toggleable = !completed || userCompleted
+    const checkbox = (
+      <span
+        className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border transition-colors ${
+          completed
+            ? 'tran-check-pop border-green-500/60 bg-green-500/20 text-green-400'
+            : active
+              ? 'border-accent/70 bg-accent/25 text-accent'
+              : 'border-white/20 text-transparent'
+        }${toggleable && !completed ? ' group-hover:border-white/60' : ''}`}
+      >
+        {/* 与待办浮层（taskRows.PlanRow）同一枚 SVG 勾：文本字形在小圆圈里基线对不齐。 */}
+        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+    )
     return (
-      // key 带状态：完成瞬间重挂载，打勾弹入 + 划线动画只播一次。
-      <div key={`${index}-${entry.status}`} className="flex items-start gap-2 py-1">
-        <span
-          className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border ${
-            completed
-              ? 'tran-check-pop border-green-500/60 bg-green-500/20 text-green-400'
-              : active
-                ? 'border-accent/70 bg-accent/25 text-accent'
-                : 'border-white/20 text-transparent'
-          }`}
-        >
-          {/* 与待办浮层（taskRows.PlanRow）同一枚 SVG 勾：文本字形在小圆圈里基线对不齐。 */}
-          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </span>
+      // key 带状态：完成瞬间重挂载，打勾弹入 + 划线动画只播一次（手动勾掉同理）。
+      // 整行可点：点复选圈或条目文本都是同一个手动勾掉动作。
+      <div
+        key={`${index}-${entry.status}`}
+        role={toggleable ? 'button' : undefined}
+        onClick={toggleable ? () => toggleTodoComplete(entry) : undefined}
+        className={`-mx-1 flex items-start gap-2 rounded px-1 py-1${
+          toggleable ? ' group cursor-pointer transition-colors hover:bg-white/[0.04]' : ''
+        }`}
+      >
+        {toggleable ? (
+          <HoverTip
+            tip={userCompleted ? '取消手动勾掉（恢复 agent 推送的状态）' : '手动勾掉（仅本地，agent 列表更新不覆盖）'}
+          >
+            {checkbox}
+          </HoverTip>
+        ) : (
+          checkbox
+        )}
         <span
           className={`min-w-0 flex-1 break-words text-xs leading-relaxed ${
             completed

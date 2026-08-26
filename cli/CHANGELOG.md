@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.1.50 - 2026-08-26
+
+### 中文
+
+- 修复：富文本输入框 Shift+Enter 换行不再丢失（此前发出后换行全没了——改为拦截插入 `<br>` 并加固取值逻辑，撤销/粘贴残留的 div 结构也能正确还原）。
+- 修复：直播折叠两处——这轮在你上翻/悬停过之后才开始时，整轮不再摊开（live 轮一律边输出边折）；正文（真实文字）开始流的那一瞬前面的思考/工具卡立刻收进汇总行，不再等下一个工具调用。
+- 新增：路径 pill 与外链的右键菜单——路径：复制路径 / 预览 / 在资源管理器中显示；链接：复制链接 / 打开链接（图片右键菜单同款样式）。
+- 新增：输入框 markdown 预览开关（工具栏眼睛按钮）——预览态按消息同款管线渲染草稿，Esc/Enter 返回编辑，光标原样保留。
+- 优化：排队消息卡片重设计（quiet 风、悬停才显示取回/删除、全文悬停气泡），并显示图片缩略图与附件胶囊（不再只有「N 个附件」）。
+- 新增：待办支持手动勾选完成——复选圈可点（仅本地覆盖，agent 更新列表不覆盖你的勾选；勾掉后「未完」提示与催更自然停止）。
+- 优化：markdown 表格美化——圆角外框、表头底色、去掉竖向网格线只留行间细分隔、行 hover 提亮、超宽表栏内横向滚动。
+- 优化：新建对话按钮与标题栏项目 chip 去边框（悬停才出底色，对齐 Codex quiet 风）；项目切换下拉面板改为不透明（正文不再透上来）。
+
+### English
+
+- Fix: Shift+Enter line breaks in the rich composer are no longer lost on send (previously all breaks vanished — now intercepted as `<br>` insertions, and the serializer is hardened against div-structured leftovers from undo/paste).
+- Fix: two live-folding issues — turns started after you scrolled up / hovered (unpinned) no longer stay sprawled (live turns always fold progressively); the moment real text starts streaming, the preceding thinking/tool cards fold into the summary row immediately instead of waiting for the next tool call.
+- New: right-click menus for path pills and external links — paths: copy path / preview / reveal in Explorer; links: copy link / open link (same styling as the image context menu).
+- New: markdown preview toggle for the composer (eye button in the toolbar) — previews the draft with the same pipeline as messages; Esc/Enter returns to editing with the caret intact.
+- Improvement: queued-message cards redesigned (quiet style, hover-revealed restore/delete, full text via hover bubble), and they now show image thumbnails and attachment chips instead of a bare "N attachments".
+- New: todos can be checked off manually — clickable checkbox (local override only; the agent's list updates never clobber your checks; "unfinished" banners and nagging stop accordingly).
+- Improvement: prettier markdown tables — rounded outer border, header background, no vertical gridlines (row separators only), row hover highlight, wide tables scroll horizontally within the column.
+- Improvement: the New Chat button and titlebar project chip drop their borders (quiet style, background only on hover); the project switcher dropdown is now opaque (chat content no longer bleeds through).
+
 ## v1.1.49 - 2026-08-26
 
 ### 中文

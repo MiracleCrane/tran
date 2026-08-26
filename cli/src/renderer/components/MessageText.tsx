@@ -8,6 +8,8 @@ import { useUiStore } from '../store/uiStore'
 import type { UserAttachment } from '../types'
 import { pathToUserAttachment, pickedFileToUserAttachment } from '../utils/attachments'
 import { showImageContextMenu } from './ImageContextMenu'
+import { showInlineContextMenu } from './InlineContextMenu'
+import HoverTip from './HoverTip'
 import { LinkIcon } from './LinkIcon'
 
 function isPathLike(s: string): boolean {
@@ -97,21 +99,41 @@ function CodeRenderer({ className, children: c }: any): JSX.Element {
   if (!isBlock && isPathLike(text)) {
     const path = normalizePathForPreview(text)
     return (
-      <button
-        type="button"
-        onClick={(event) => {
-          const cwd = useSessionStore.getState().meta?.cwd ?? ''
-          if (event.ctrlKey) {
-            void window.api.revealInExplorer(cwd, path)
-            return
-          }
-          openPathPreview(cwd, path, useUiStore.getState().openAttachmentPreview)
-        }}
-        className="mx-0.5 inline rounded bg-white/[0.07] px-1 font-mono text-[0.85em] text-zinc-200 transition hover:bg-white/[0.14] hover:underline"
-        title={`预览 ${path}；Ctrl+点击在资源管理器中显示`}
-      >
-        {text}
-      </button>
+      // 原生 title 换成 HoverTip（2026-08-26：右键菜单上线，提示里补「右键复制」；
+      // 原生 title 样式丑，用户此前已嫌过原生悬停提示）。
+      <HoverTip tip={`预览 ${path}；Ctrl+点击在资源管理器中显示；右键复制路径`} tipClassName="break-all">
+        <button
+          type="button"
+          onClick={(event) => {
+            const cwd = useSessionStore.getState().meta?.cwd ?? ''
+            if (event.ctrlKey) {
+              void window.api.revealInExplorer(cwd, path)
+              return
+            }
+            openPathPreview(cwd, path, useUiStore.getState().openAttachmentPreview)
+          }}
+          onContextMenu={(event) => {
+            // 整颗 pill 是 button，选不中文字；右键给复制入口（2026-08-26 用户：
+            // 「让我没办法复制这个链接里面的文字」）。复制的是用户看到的原始文本
+            // （含 :line 行号），不是 preview 用的归一化路径。
+            const cwd = useSessionStore.getState().meta?.cwd ?? ''
+            showInlineContextMenu(event, [
+              { label: '复制路径', action: () => void navigator.clipboard.writeText(text).catch(() => {}) },
+              {
+                label: '预览',
+                action: () => openPathPreview(cwd, path, useUiStore.getState().openAttachmentPreview)
+              },
+              {
+                label: '在资源管理器中显示',
+                action: () => void window.api.revealInExplorer(cwd, path)
+              }
+            ])
+          }}
+          className="mx-0.5 inline rounded bg-white/[0.07] px-1 font-mono text-[0.85em] text-zinc-200 transition hover:bg-white/[0.14] hover:underline"
+        >
+          {text}
+        </button>
+      </HoverTip>
     )
   }
 
@@ -187,6 +209,19 @@ function LinkRenderer({
         {...props}
         href={linkTarget}
         onClick={handleClick}
+        onContextMenu={(event) => {
+          // 外链右键菜单（2026-08-26 用户：链接整段可点，「没办法复制这个链接里面
+          // 的文字」）。只挂外链；file/路径类链接左键是预览，右键行为需求未提，不动。
+          if (!external || !linkTarget) return
+          const fullHref = normalizeExternalHref(linkTarget)
+          showInlineContextMenu(event, [
+            { label: '复制链接', action: () => void navigator.clipboard.writeText(fullHref).catch(() => {}) },
+            {
+              label: '打开链接',
+              action: () => window.open(fullHref, '_blank', 'noopener,noreferrer')
+            }
+          ])
+        }}
         title={title}
         className="text-[#3d9bff] no-underline transition hover:brightness-125"
       >

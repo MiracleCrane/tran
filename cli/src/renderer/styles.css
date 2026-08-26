@@ -636,6 +636,13 @@ textarea:focus-visible {
     overflow: visible;
   }
 
+  /* 项目切换下拉（标题栏 chip 的浮层）：用户实测太透看不清（2026-08-26），
+     直接拉满不透明——它悬在正文上方，底内容透过来根本没法读。 */
+  .project-switcher-panel {
+    --glass-soft-alpha: 1;
+    --glass-frost-soft-alpha: 1;
+  }
+
   .glass-control {
     --glass-edge-size: 0.9px;
     --glass-edge-opacity: 0.15;
@@ -2589,15 +2596,43 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   color: #a1a1aa;
   margin: 0.5em 0;
 }
+/* 表格（2026-08-26 用户：「搞漂亮点」）：圆角外框 + 表头底色 + 只留行间
+   分隔线（去掉竖向网格线，清爽）；separate + border-spacing:0 圆角才生效。
+   display:block + overflow-x 让超宽表在栏内横向滚动而不是顶破版面。 */
 .prose-forge table {
-  border-collapse: collapse;
-  margin: 0.5em 0;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0.6em 0;
   font-size: 13px;
+  border: 1px solid rgba(238, 232, 226, 0.12);
+  border-radius: 8px;
 }
 .prose-forge th,
 .prose-forge td {
-  border: 1px solid rgba(238, 232, 226, 0.14);
-  padding: 5px 9px;
+  padding: 6px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(238, 232, 226, 0.08);
+}
+.prose-forge thead th {
+  background: rgba(255, 255, 255, 0.035);
+  font-weight: 600;
+  color: rgb(228, 228, 231);
+  border-bottom: 1px solid rgba(238, 232, 226, 0.14);
+  white-space: nowrap;
+}
+/* 末行不再要底线：外框已经收口。 */
+.prose-forge tbody tr:last-child td {
+  border-bottom: none;
+}
+/* 行 hover 微微提亮，扫读长表不丢行。 */
+.prose-forge tbody tr {
+  transition: background-color 100ms ease;
+}
+.prose-forge tbody tr:hover {
+  background: rgba(255, 255, 255, 0.025);
 }
 .prose-forge hr {
   border: none;

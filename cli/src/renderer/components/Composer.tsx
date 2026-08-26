@@ -21,6 +21,8 @@ import ModePanel from './ModePanel'
 import { AGENT_TOOL_NAMES, backgroundTaskInfo, collectBackgroundTaskBlocks, countRunningBackgroundTasks, countRunningTools, countTotalTools, withServerTaskStatus } from '../utils/toolStats'
 import { pickedFileToUserAttachment, splitPickedFiles, userAttachmentToPickedFile } from '../utils/attachments'
 import ChipPopover, { type ChipAnchor, type ChipKind } from './ChipPopover'
+import HoverTip from './HoverTip'
+import MessageText from './MessageText'
 import UsageRings from './UsageRings'
 import { defaultModelsForAgent, modelLabelForAgent } from '../../shared/models'
 import { onForgeEvent } from '../events'
@@ -463,6 +465,36 @@ export default function Composer(): JSX.Element {
   useEffect(() => {
     void window.api.getPreferences().then((p) => setRichComposer(p.richComposer === true)).catch(() => {})
   }, [])
+
+  // 草稿 Markdown 预览（2026-08-26 用户：「输入框的md格式能不能也渲染，或者说
+  // 加个切换开关」）。不在可编辑框里做内联渲染（contenteditable+markdown 是个
+  // 坑，用户也认可预览切换方案）：预览只是把整个输入区换成同一份 text 的只读
+  // 渲染视图（与消息同一条 MessageText 管线）。草稿本体在 store，预览不碰它；
+  // textarea 保持挂载（仅 hidden），退出预览后光标选区原样还在。纯本地开关，
+  // 不持久化。
+  const [previewing, setPreviewing] = useState(false)
+  const exitPreview = useCallback((): void => {
+    setPreviewing(false)
+    // 富文本模式焦点由 RichInput 自理，这里只回焦经典 textarea。
+    if (!richComposer) window.requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [richComposer])
+  // 预览期间输入框不在焦点链上：窗口级监听 Enter/Esc 回编辑态（preventDefault
+  // 防 Enter 落在某个聚焦按钮上误触发点击）。
+  useEffect(() => {
+    if (!previewing) return
+    const onPreviewKeyDown = (e: globalThis.KeyboardEvent): void => {
+      if (e.key !== 'Escape' && e.key !== 'Enter') return
+      e.preventDefault()
+      exitPreview()
+    }
+    window.addEventListener('keydown', onPreviewKeyDown)
+    return () => window.removeEventListener('keydown', onPreviewKeyDown)
+  }, [previewing, exitPreview])
+  // 草稿在预览期间被清空（如队列取回、外部清草稿）时自动退回编辑态，
+  // 免得对着一个空预览框发呆。
+  useEffect(() => {
+    if (previewing && !text.trim()) setPreviewing(false)
+  }, [previewing, text])
   /** 给 RichInput 的分词回调：只有真实存在的命令才画成胶囊。 */
   const resolveCommandName = useCallback(
     (inputName: string): string | null => {
@@ -607,14 +639,16 @@ export default function Composer(): JSX.Element {
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current
-    if (!textarea || manualTextareaHeight !== null) return
+    // 预览期间 textarea 是 hidden 的，scrollHeight 量出来是 0——跳过测量，
+    // 退出预览时本 effect 随 previewing 依赖重跑，高度照原样算回来。
+    if (!textarea || manualTextareaHeight !== null || previewing) return
 
     const previousHeight = textarea.style.height
     textarea.style.height = 'auto'
     const measured = clampComposerHeight(textarea.scrollHeight, heightBounds)
     textarea.style.height = previousHeight
     setAutoTextareaHeight((height) => (height === measured ? height : measured))
-  }, [heightBounds, manualTextareaHeight, text])
+  }, [heightBounds, manualTextareaHeight, text, previewing])
 
   // Model options follow the current backend: 用户自定义列表优先，其次后端
   // (ACP configOptions) 上报的模型，最后兜底内置列表。
@@ -1082,64 +1116,139 @@ export default function Composer(): JSX.Element {
       <div className="mx-auto max-w-5xl">
         {pending.length > 0 && (
           <div className="mb-1.5">
-            <div className="mb-1 flex items-center gap-2 px-1 text-[10px] text-zinc-600">
+            <div className="mb-1 flex items-center gap-1.5 px-1 text-[10px] leading-4 text-zinc-600">
+              {/* 队列小图标（纯描边列表感，与工具栏 svg 同一套惯例）。 */}
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" className="shrink-0" aria-hidden>
+                <path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
               {statusError && !running ? (
                 <>
                   {/* #20：turn 出错后队列不再自动落地，给出明确出路。 */}
                   <span className="text-red-400/90">
-                    队列 · {pending.length}　会话出错，排队消息已暂停发送
+                    队列 · {pending.length} · 会话出错，排队消息已暂停发送
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => void resendPendingQueue()}
-                    className="rounded px-1 text-accent transition hover:bg-white/[0.05]"
-                    title="依次重发全部排队消息"
-                  >
-                    重发
-                  </button>
-                  <button
-                    type="button"
-                    onClick={clearPendingQueue}
-                    className="rounded px-1 text-zinc-500 transition hover:bg-white/[0.05] hover:text-red-300"
-                    title="丢弃全部排队消息"
-                  >
-                    清空
-                  </button>
+                  <HoverTip tip="依次重发全部排队消息">
+                    <button
+                      type="button"
+                      onClick={() => void resendPendingQueue()}
+                      className="rounded-md border border-white/10 px-1.5 text-accent transition hover:bg-white/[0.06]"
+                    >
+                      重发
+                    </button>
+                  </HoverTip>
+                  <HoverTip tip="丢弃全部排队消息">
+                    <button
+                      type="button"
+                      onClick={clearPendingQueue}
+                      className="rounded-md border border-white/10 px-1.5 text-zinc-500 transition hover:bg-white/[0.06] hover:text-red-300"
+                    >
+                      清空
+                    </button>
+                  </HoverTip>
                 </>
               ) : (
-                <span>队列 · {pending.length}　当前回合结束后自动逐条发送</span>
+                <span>队列 · {pending.length} · 当前回合结束后自动逐条发送</span>
               )}
             </div>
-            <div className="flex max-h-32 flex-col gap-1.5 overflow-y-auto">
-              {pending.map((p, i) => (
-                <div
-                  key={p.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => restorePending(p.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') restorePending(p.id)
-                  }}
-                  className="glass-panel flex cursor-pointer items-start gap-2 rounded-xl border border-dashed border-white/15 px-3 py-1.5 text-xs text-zinc-400 transition hover:border-accent/40"
-                  title="点击取回编辑"
-                >
-                  <span className="shrink-0 pt-0.5 text-[10px] text-zinc-600">{i + 1}.</span>
-                  <span className="line-clamp-2 min-w-0 flex-1 break-words">
-                    {p.text || (p.attachments?.length ? `${p.attachments.length} 个附件` : '…')}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      removePendingMessage(p.id)
+            {/* 2026-08-26 改版（用户：「排队消息的样子不好看啊」）：虚线玻璃卡
+                换成 Codex 式的安静卡片——纯色微亮底、无描边；两行裁剪收成一行，
+                全文挪进 HoverTip；操作按钮平时隐身，行悬停/聚焦才现身。 */}
+            <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
+              {pending.map((p, i) => {
+                // 2026-08-26 附件也要看得见（用户）：此前纯附件消息只渲染一句
+                // 「N 个附件」。图片画小缩略图（dataUrl），其余画小胶囊；
+                // 名字/数据都拿不出来的才算不可用，退回旧的计数文案。
+                const atts = (p.attachments ?? []).filter((a) => a.name || a.dataUrl)
+                const hasText = p.text.trim().length > 0
+                return (
+                  <div
+                    key={p.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => restorePending(p.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') restorePending(p.id)
                     }}
-                    className="shrink-0 text-zinc-500 transition hover:text-red-300"
-                    title="从队列删除"
+                    className="group flex cursor-pointer items-center gap-2 rounded-lg bg-white/[0.03] px-2.5 py-1.5 text-xs text-zinc-400 transition hover:bg-white/[0.06]"
                   >
-                    ×
-                  </button>
-                </div>
-              ))}
+                    <span className="shrink-0 font-mono text-[10px] text-zinc-600">{i + 1}</span>
+                    <div className="min-w-0 flex-1">
+                      {hasText && (
+                        <HoverTip tip={p.text} className="block" tipClassName="whitespace-pre-wrap break-words">
+                          <span className="line-clamp-1 break-words">{p.text}</span>
+                        </HoverTip>
+                      )}
+                      {atts.length > 0 && (
+                        <div className={`flex flex-wrap items-center gap-1 ${hasText ? 'mt-1' : ''}`}>
+                          {atts.map((a, ai) =>
+                            a.kind === 'image' && a.dataUrl ? (
+                              <HoverTip key={ai} tip={a.name}>
+                                <img
+                                  src={a.dataUrl}
+                                  alt={a.name}
+                                  className="h-8 w-8 rounded-md border border-white/10 object-cover"
+                                />
+                              </HoverTip>
+                            ) : (
+                              <HoverTip key={ai} tip={a.name || a.kind}>
+                                <span className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/20 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                                  {/* 图标口径与输入框附件区一致。 */}
+                                  <span className="text-zinc-500">
+                                    {a.kind === 'text' ? '📄' : a.kind === 'directory' ? '📁' : a.kind === 'image' ? '🖼' : '📎'}
+                                  </span>
+                                  <span className="max-w-[8rem] truncate">{a.name}</span>
+                                </span>
+                              </HoverTip>
+                            )
+                          )}
+                        </div>
+                      )}
+                      {!hasText && atts.length === 0 && (
+                        <span>{p.attachments?.length ? `${p.attachments.length} 个附件` : '…'}</span>
+                      )}
+                    </div>
+                    {/* 行操作：hover 才现身；focus-within 兜底键盘 Tab 进来的情况。 */}
+                    <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
+                      <HoverTip tip="取回编辑">
+                        <button
+                          type="button"
+                          aria-label="取回编辑"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            restorePending(p.id)
+                          }}
+                          className="flex h-5 w-5 items-center justify-center rounded text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                            <path
+                              d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </button>
+                      </HoverTip>
+                      <HoverTip tip="从队列删除">
+                        <button
+                          type="button"
+                          aria-label="从队列删除"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            removePendingMessage(p.id)
+                          }}
+                          className="flex h-5 w-5 items-center justify-center rounded text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                          </svg>
+                        </button>
+                      </HoverTip>
+                    </span>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}
@@ -1465,11 +1574,11 @@ export default function Composer(): JSX.Element {
               maxHeight: heightBounds.max
             }}
             className="composer-textarea w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-500"
-            hidden={richComposer}
+            hidden={richComposer || previewing}
           />
           {/* 实验：富文本输入框。两条路都在，靠设置切——地基换了但旧路一行没动，
               不合适随时切回去。 */}
-          {richComposer && (
+          {richComposer && !previewing && (
             <RichInput
               value={text}
               onChange={(next) => {
@@ -1485,6 +1594,25 @@ export default function Composer(): JSX.Element {
               resolveCommand={resolveCommandForChip}
               className="rich-input border-0 bg-transparent px-1 py-1 text-sm leading-relaxed text-zinc-200 outline-none"
             />
+          )}
+          {/* 预览态：输入区整体换成草稿的只读渲染视图（textarea/RichInput 都退场，
+              两种输入模式共用这一条）。高度/内边距对齐 textarea，切换不跳动。 */}
+          {previewing && (
+            <div className="relative">
+              <div
+                className="overflow-y-auto px-1 py-1 text-sm leading-relaxed"
+                style={{
+                  height: textareaHeight,
+                  minHeight: heightBounds.min,
+                  maxHeight: heightBounds.max
+                }}
+              >
+                <MessageText>{text}</MessageText>
+              </div>
+              <span className="pointer-events-none absolute right-1.5 top-0.5 text-[10px] text-zinc-600">
+                预览 · Esc 返回编辑
+              </span>
+            </div>
           )}
           {attachments.length > 0 && (
             <div className="flex flex-wrap items-end gap-1.5 px-1 pt-2">
@@ -1576,10 +1704,47 @@ export default function Composer(): JSX.Element {
               )}
             </button>
             <span className="composer-shortcut-hint px-2 text-[11px] text-zinc-500">
-              <kbd className="font-sans text-zinc-400">Enter</kbd> 发送 ·{' '}
-              <kbd className="font-sans text-zinc-400">Shift+Enter</kbd> 换行 ·{' '}
-              <kbd className="font-sans text-zinc-400">Ctrl+S</kbd> 打断并发送
+              {previewing ? (
+                <>
+                  <kbd className="font-sans text-zinc-400">Esc</kbd> /{' '}
+                  <kbd className="font-sans text-zinc-400">Enter</kbd> 返回编辑
+                </>
+              ) : (
+                <>
+                  <kbd className="font-sans text-zinc-400">Enter</kbd> 发送 ·{' '}
+                  <kbd className="font-sans text-zinc-400">Shift+Enter</kbd> 换行 ·{' '}
+                  <kbd className="font-sans text-zinc-400">Ctrl+S</kbd> 打断并发送
+                </>
+              )}
             </span>
+            {/* 草稿预览开关：有草稿才可用，空草稿禁用并在悬停里说明。
+                放工具栏左侧提示区而不是输入框右上角——右上角已被顶边拖高手柄
+                与「恢复自动高度」按钮占用，再叠一个图标只会互相打架。 */}
+            <HoverTip
+              tip={text.trim() ? (previewing ? '返回编辑（Esc）' : '预览 Markdown 渲染效果') : '先输入内容再预览'}
+            >
+              <button
+                type="button"
+                onClick={() => (previewing ? exitPreview() : setPreviewing(true))}
+                disabled={!previewing && !text.trim()}
+                aria-pressed={previewing}
+                aria-label="预览草稿"
+                className={`flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                  previewing ? 'bg-white/[0.07] text-accent' : 'text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200'
+                }`}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M1.5 12S5 4.5 12 4.5 22.5 12 22.5 12 19 19.5 12 19.5 1.5 12 1.5 12z"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinejoin="round"
+                  />
+                  <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+                </svg>
+                预览
+              </button>
+            </HoverTip>
             <div className="composer-actions ml-auto flex items-center gap-1.5">
               {meta && <ModePanel />}
               {/* Swarm 状态徽章：检测到本会话有进行中的 AgentSwarm（server tasks

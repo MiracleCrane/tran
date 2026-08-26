@@ -1741,7 +1741,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             void newChat()
             setView('chat')
           }}
-          className="glass-control flex h-9 w-full items-center gap-2 rounded-full px-3.5 text-[13px] font-medium text-zinc-300 transition hover:bg-white/[0.09]"
+          className="flex h-9 w-full items-center gap-2 rounded-full px-3.5 text-[13px] font-medium text-zinc-300 transition hover:bg-white/[0.09]"
         >
           <EditIcon />
           新建对话

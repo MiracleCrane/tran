@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useSessionStore, foldBackgroundSwarmTasks, takeAttachedSwarmTasks } from './store/sessionStore'
+import { todoKeyOf } from './lib/todoOverrides'
 import { useUiStore, type View } from './store/uiStore'
 import { installShortcuts } from './shortcuts'
 import Onboarding from './components/Onboarding'
@@ -17,6 +18,7 @@ import AttachmentPreviewPane from './components/AttachmentPreviewPane'
 import SessionSearchPalette from './components/SessionSearchPalette'
 import PermissionModal from './components/PermissionModal'
 import ImageContextMenuHost from './components/ImageContextMenu'
+import InlineContextMenuHost from './components/InlineContextMenu'
 import TooltipHost from './components/TooltipHost'
 /**
  * 全屏工具面板一律懒加载：它们只有点进去才用得上，却占了首屏 bundle 相当一块
@@ -209,7 +211,11 @@ function WindowTitlebar(): JSX.Element {
 function DockButtons(): JSX.Element {
   const dock = useUiStore((s) => s.rightDock)
   const setRightDock = useUiStore((s) => s.setRightDock)
-  const planPending = useSessionStore((s) => s.planEntries.some((e) => e.status !== 'completed'))
+  // 手动勾掉（仅本地，lib/todoOverrides.ts）也算完成：圆点是给用户看的，
+  // 用户自己勾掉的条目不该再顶着「未完」提示。
+  const planPending = useSessionStore((s) =>
+    s.planEntries.some((e) => e.status !== 'completed' && s.todoOverrides[todoKeyOf(e.content)] !== true)
+  )
   const goalActive = useSessionStore((s) => s.goal?.status === 'active')
   const items = [
     {
@@ -776,6 +782,7 @@ export default function App(): JSX.Element {
           </div>
           <PermissionModal />
           <ImageContextMenuHost />
+          <InlineContextMenuHost />
           <TooltipHost />
           <PetMascot />
           <SessionSearchPalette />
