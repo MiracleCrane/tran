@@ -5,6 +5,7 @@ import BrowserBridgeCard from './BrowserBridgeCard'
 import DesktopControlCard from './DesktopControlCard'
 import XhhCard from './XhhCard'
 import ConfirmDialog from './ConfirmDialog'
+import HoverTip from './HoverTip'
 import type {
   ComposerModel,
   EffortLevel,
@@ -1329,27 +1330,32 @@ export default function SettingsPanel(): JSX.Element {
               {kimiVersion?.updateAvailable && (
                 <div className="mt-2 space-y-2">
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setKimiConfirmOpen(true)}
-                      disabled={upgradingKimi || kimiVersion.installMethod === 'unknown'}
-                      title={
+                    <HoverTip
+                      tip={
                         kimiVersion.installMethod === 'unknown'
                           ? `无法判断安装方式（${kimiVersion.installPath ?? ''}），请手动升级`
                           : kimiVersion.upgradeCommand
                       }
-                      className="rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                      tipClassName="break-all text-left"
                     >
-                      {upgradingKimi ? '升级中…' : `一键升级到 ${kimiVersion.latestVersion ?? '最新版'}`}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void copyKimiUpgrade()}
-                      className="rounded-md border border-border-subtle px-2 py-1.5 text-[11px] text-zinc-400 transition hover:bg-bg-hover hover:text-zinc-200"
-                      title={kimiVersion.upgradeCommand}
-                    >
-                      {kimiCopied ? '已复制' : '复制命令'}
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => setKimiConfirmOpen(true)}
+                        disabled={upgradingKimi || kimiVersion.installMethod === 'unknown'}
+                        className="rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {upgradingKimi ? '升级中…' : `一键升级到 ${kimiVersion.latestVersion ?? '最新版'}`}
+                      </button>
+                    </HoverTip>
+                    <HoverTip tip={kimiVersion.upgradeCommand} tipClassName="break-all text-left">
+                      <button
+                        type="button"
+                        onClick={() => void copyKimiUpgrade()}
+                        className="rounded-md border border-border-subtle px-2 py-1.5 text-[11px] text-zinc-400 transition hover:bg-bg-hover hover:text-zinc-200"
+                      >
+                        {kimiCopied ? '已复制' : '复制命令'}
+                      </button>
+                    </HoverTip>
                   </div>
                   {kimiUpgradeMsg && (
                     <div className="text-[11px] leading-relaxed text-zinc-400">{kimiUpgradeMsg}</div>
@@ -1389,9 +1395,11 @@ export default function SettingsPanel(): JSX.Element {
                     {updateProgress?.totalBytes && <span>{formatSpeed(updateProgress.bytesPerSecond)}</span>}
                   </div>
                   {updateProgress?.path && (
-                    <div className="mt-1 truncate text-[11px] text-zinc-600" title={updateProgress.path}>
-                      {updateProgress.path}
-                    </div>
+                    <HoverTip tip={updateProgress.path} tipClassName="break-all text-left" className="block">
+                      <div className="mt-1 truncate text-[11px] text-zinc-600">
+                        {updateProgress.path}
+                      </div>
+                    </HoverTip>
                   )}
                 </div>
               )}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Collapse from './Collapse'
+import HoverTip from './HoverTip'
 
 export interface DisclosureOption {
   value: string
@@ -120,6 +121,32 @@ export default function DisclosureSelect({
     </Collapse>
   )
 
+  // title prop 不再落到原生 title=（全 app 禁用）：包一层 HoverTip。仅传了
+  // title 时才包，免得没提示的触发器多一个无意义包裹层。
+  const triggerButton = (
+    <button
+      type="button"
+      onClick={() => setOpen((o) => !o)}
+      disabled={disabled}
+      className={`flex w-full items-center gap-1.5 rounded-md text-left text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-zinc-300 ${
+        compact ? 'px-1.5 py-0.5 text-[11px]' : 'px-2.5 py-1.5 text-xs'
+      }`}
+      aria-expanded={open}
+    >
+      {triggerLeading}
+      <span className={`min-w-0 flex-1 truncate ${current?.accentClass ?? ''}`}>{label}</span>
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill="none"
+        className={`shrink-0 text-zinc-500 transition-transform duration-[150ms] ease-out ${open ? 'rotate-180' : ''}`}
+      >
+        <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
+  )
+
   return (
     <div className={`relative ${elevated ? 'z-[80]' : 'z-auto'} ${className ?? ''}`}>
       {/* The one frame. Absolute so enlarging it overlaps content instead of
@@ -143,28 +170,13 @@ export default function DisclosureSelect({
         onPointerDown={(event) => event.stopPropagation()}
       >
         {placement === 'top' ? optionsList : null}
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          disabled={disabled}
-          title={title}
-          className={`flex w-full items-center gap-1.5 rounded-md text-left text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-zinc-300 ${
-            compact ? 'px-1.5 py-0.5 text-[11px]' : 'px-2.5 py-1.5 text-xs'
-          }`}
-          aria-expanded={open}
-        >
-          {triggerLeading}
-          <span className={`min-w-0 flex-1 truncate ${current?.accentClass ?? ''}`}>{label}</span>
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            className={`shrink-0 text-zinc-500 transition-transform duration-[150ms] ease-out ${open ? 'rotate-180' : ''}`}
-          >
-            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+        {title ? (
+          <HoverTip tip={title} className="block w-full">
+            {triggerButton}
+          </HoverTip>
+        ) : (
+          triggerButton
+        )}
         {placement === 'bottom' ? optionsList : null}
       </div>
 

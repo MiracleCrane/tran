@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useUiStore } from '../store/uiStore'
 import { useSessionStore } from '../store/sessionStore'
 import { fmtK } from '../utils/format'
+import HoverTip from './HoverTip'
 import type { DeepseekBalanceInfo, PlanUsageInfo, UsageLimitWindow } from '../../shared/ipc'
 
 /**
@@ -74,22 +75,23 @@ function pct2(ratio: number | undefined): string | null {
   return ratio === undefined ? null : `${Math.round(ratio * 100)}%`
 }
 
-/** 单个小圆环：pct 为 null 时置灰显示"—"（无数据）。 */
+/** 单个小圆环：pct 为 null 时置灰显示"—"（无数据）。
+ *  tip 走 HoverTip 气泡（2026-08-26 起全站禁用原生 title=）。 */
 function Ring({
   pct,
   label,
-  title
+  tip
 }: {
   pct: number | null
   label: string
-  title?: string
+  tip: string
 }): JSX.Element {
   const danger = pct !== null && pct >= 80
   const r = 6.5
   const c = 2 * Math.PI * r
   const frac = (pct ?? 0) / 100
   return (
-    <span className="flex items-center gap-1" title={title}>
+    <HoverTip tip={tip} className="flex items-center gap-1">
       <svg width="18" height="18" viewBox="0 0 20 20" className="shrink-0" aria-hidden>
         <circle cx="10" cy="10" r={r} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="2.4" />
         {pct !== null && (
@@ -112,7 +114,7 @@ function Ring({
         )}
       </svg>
       <span className="text-[9px] text-zinc-500">{label}</span>
-    </span>
+    </HoverTip>
   )
 }
 
@@ -265,29 +267,31 @@ export default function UsageRings(): JSX.Element {
       onPointerEnter={() => setHover(true)}
       onPointerLeave={() => setHover(false)}
     >
-      <button
-        type="button"
-        onClick={() => setPinned(!pinned)}
-        className="flex items-center gap-2.5 rounded px-1.5 py-0.5 transition hover:bg-white/[0.06]"
-        aria-expanded={open}
-        title="用量（点击钉住）"
-      >
-        <Ring
-          pct={rollingRatio !== undefined ? rollingRatio * 100 : null}
-          label={rollingLabel}
-          title={`${rollingLabel} 额度 ${pct2(rollingRatio) ?? '—'}`}
-        />
-        <Ring
-          pct={weeklyRatio !== undefined ? weeklyRatio * 100 : null}
-          label="周"
-          title={`每周额度 ${pct2(weeklyRatio) ?? '—'}`}
-        />
-        <Ring
-          pct={contextPct}
-          label="上下文"
-          title={`上下文 ${contextPct === null ? '—' : `${Math.round(contextPct)}%`}`}
-        />
-      </button>
+      <HoverTip tip="用量（点击钉住）">
+        <button
+          type="button"
+          onClick={() => setPinned(!pinned)}
+          className="flex items-center gap-2.5 rounded px-1.5 py-0.5 transition hover:bg-white/[0.06]"
+          aria-expanded={open}
+          aria-label="用量（点击钉住）"
+        >
+          <Ring
+            pct={rollingRatio !== undefined ? rollingRatio * 100 : null}
+            label={rollingLabel}
+            tip={`${rollingLabel} 额度 ${pct2(rollingRatio) ?? '—'}`}
+          />
+          <Ring
+            pct={weeklyRatio !== undefined ? weeklyRatio * 100 : null}
+            label="周"
+            tip={`每周额度 ${pct2(weeklyRatio) ?? '—'}`}
+          />
+          <Ring
+            pct={contextPct}
+            label="上下文"
+            tip={`上下文 ${contextPct === null ? '—' : `${Math.round(contextPct)}%`}`}
+          />
+        </button>
+      </HoverTip>
 
       {open && anchor && createPortal(
         // 宽度自适应：原先写死 w-80(320px)。窗口窄到 320px 上下时整张卡会顶出

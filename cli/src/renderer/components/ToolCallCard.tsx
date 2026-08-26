@@ -7,6 +7,7 @@ import DiffView from './DiffView'
 import SwarmCard from './SwarmCard'
 import { useCheapNote } from '../hooks/useCheapNote'
 import { ToolGlyph, FRIENDLY_TOOL_NAMES } from './toolIcons'
+import HoverTip from './HoverTip'
 
 function normalizeResult(result: unknown): string {
   if (result == null) return ''
@@ -333,6 +334,27 @@ const ToolCallCard = memo(function ToolCallCard({
   const inputText = !collapsed && bashInfo.isBash ? bashInfo.command : ''
   const streaming = isSubagent && block.status === 'running'
 
+  // MCP 全名（mcp__server__tool）太长，行内只显示工具叶名，全名进悬停气泡。
+  // 后台/定时类工具显示中文名（TaskStop 这类原名认不出——2026-08-18
+  // 用户：「TaskStop 是啥为啥是英文」），原名收进气泡。不需要提示时不包气泡
+  // （HoverTip 对空 tip 也会渲染空气泡，不能无条件包）。
+  const toolNameText =
+    FRIENDLY_TOOL_NAMES[block.name] ??
+    (block.name.startsWith('mcp__') ? (block.name.split('__').pop() ?? block.name) : block.name)
+  const toolNameTip =
+    block.name.startsWith('mcp__') || FRIENDLY_TOOL_NAMES[block.name] ? block.name : null
+  const toolNameEl = (
+    <span
+      className={`shrink-0 font-mono text-xs font-medium ${
+        toolShimmerTone(block.name)
+          ? `seg-shimmer seg-shimmer-${toolShimmerTone(block.name)}`
+          : 'text-zinc-300'
+      }`}
+    >
+      {toolNameText}
+    </span>
+  )
+
   // 命令一句话说明（便宜模型）。只在 Kimi **没给** description 时问——给了就说明
   // 意图已经有了，再问一遍是白花额度。pending 期间不问：那时 command 可能还在
   // 流式拼接（见 #30），拿到的是半条命令。
@@ -368,9 +390,11 @@ const ToolCallCard = memo(function ToolCallCard({
         {/* 失败/被拒：行首小红叉（2026-08-14 用户：「出错了就在前面打个红叉，
             小小的那种，不要在后面体现」），行尾不再出「出错」状态文字。 */}
         {(block.status === 'error' || block.status === 'denied') && (
-          <span className="shrink-0 text-[10px] leading-none text-red-400" title={meta.label}>
-            ✗
-          </span>
+          <HoverTip tip={meta.label}>
+            <span className="shrink-0 text-[10px] leading-none text-red-400">
+              ✗
+            </span>
+          </HoverTip>
         )}
         {/* Codex 风工具图标（2026-08）：不同操作不同小图标，SVG 为 Codex 桌面版
             实测提取的原版（见 toolIcons.tsx）。子代理行同样给图标，在徽章前。 */}
@@ -383,31 +407,19 @@ const ToolCallCard = memo(function ToolCallCard({
               子代理
             </span>
             {bg?.isBackground && (
-              <span
-                className="shrink-0 rounded bg-blue-950/50 px-1.5 py-0.5 text-[10px] font-medium text-blue-300"
-                title="后台任务：派出后不阻塞对话，完成通知稍后到达"
-              >
-                后台
-              </span>
+              <HoverTip tip="后台任务：派出后不阻塞对话，完成通知稍后到达" tipClassName="text-left" className="inline-flex shrink-0">
+                <span className="rounded bg-blue-950/50 px-1.5 py-0.5 text-[10px] font-medium text-blue-300">
+                  后台
+                </span>
+              </HoverTip>
             )}
           </>
+        ) : toolNameTip ? (
+          <HoverTip tip={toolNameTip} tipClassName="break-all" className="inline-flex shrink-0">
+            {toolNameEl}
+          </HoverTip>
         ) : (
-          <span
-            // MCP 全名（mcp__server__tool）太长，行内只显示工具叶名，全名进 title。
-            // 后台/定时类工具显示中文名（TaskStop 这类原名认不出——2026-08-18
-            // 用户：「TaskStop 是啥为啥是英文」），原名收进 title。
-            title={
-              block.name.startsWith('mcp__') || FRIENDLY_TOOL_NAMES[block.name] ? block.name : undefined
-            }
-            className={`shrink-0 font-mono text-xs font-medium ${
-              toolShimmerTone(block.name)
-                ? `seg-shimmer seg-shimmer-${toolShimmerTone(block.name)}`
-                : 'text-zinc-300'
-            }`}
-          >
-            {FRIENDLY_TOOL_NAMES[block.name] ??
-              (block.name.startsWith('mcp__') ? (block.name.split('__').pop() ?? block.name) : block.name)}
-          </span>
+          toolNameEl
         )}
         {/* 状态（2026-08 定稿）：完成**什么都不显示**——成功是默认态，满屏绿勾
             纯噪声；失败/被拒改走行首小红叉（同上）。运行中/排队中的文字挪到
@@ -430,14 +442,18 @@ const ToolCallCard = memo(function ToolCallCard({
         {/* 说明跟在命令**后面**而不是取代它：用户需要看见真正要跑的是什么，
             说明只是帮他一眼看懂。拿不到说明时这里什么都不显示。 */}
         {commandNote && (
-          <span className="shrink-0 truncate text-xs text-zinc-600" title={commandNote}>
-            · {commandNote}
-          </span>
+          <HoverTip tip={commandNote} tipClassName="break-words text-left" className="inline-flex shrink-0">
+            <span className="truncate text-xs text-zinc-600">
+              · {commandNote}
+            </span>
+          </HoverTip>
         )}
         {editNote && (
-          <span className="shrink-0 truncate text-xs text-zinc-600" title={editNote}>
-            · {editNote}
-          </span>
+          <HoverTip tip={editNote} tipClassName="break-words text-left" className="inline-flex shrink-0">
+            <span className="truncate text-xs text-zinc-600">
+              · {editNote}
+            </span>
+          </HoverTip>
         )}
       </button>
 

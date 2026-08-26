@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import type { HealthCheckItem, WslHealthReport } from '../../shared/ipc'
+import HoverTip from './HoverTip'
 
 const STATE_STYLE: Record<HealthCheckItem['state'], { dot: string; text: string; label: string }> = {
   pass: { dot: 'bg-emerald-400', text: 'text-emerald-300', label: 'OK' },
@@ -111,11 +112,15 @@ export default function WslHealthPanel(): JSX.Element {
             <div className="mb-3 grid gap-2 text-[11px] text-zinc-500 sm:grid-cols-2">
               <div>
                 <span className="text-zinc-600">Windows cwd</span>
-                <div className="truncate font-mono text-zinc-300" title={report.cwd}>{report.cwd}</div>
+                <HoverTip tip={report.cwd} className="block min-w-0" tipClassName="text-left break-all">
+                  <div className="truncate font-mono text-zinc-300">{report.cwd}</div>
+                </HoverTip>
               </div>
               <div>
                 <span className="text-zinc-600">WSL cwd</span>
-                <div className="truncate font-mono text-zinc-300" title={report.cwdWsl}>{report.cwdWsl ?? 'unmapped'}</div>
+                <HoverTip tip={report.cwdWsl ?? 'unmapped'} className="block min-w-0" tipClassName="text-left break-all">
+                  <div className="truncate font-mono text-zinc-300">{report.cwdWsl ?? 'unmapped'}</div>
+                </HoverTip>
               </div>
             </div>
 

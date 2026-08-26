@@ -3,6 +3,7 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import type { RuntimeStatus } from '../../shared/ipc'
 import { onForgeEvent } from '../events'
+import HoverTip from './HoverTip'
 
 function shortVersion(version: string | undefined): string {
   if (!version) return 'Agent ?'
@@ -97,66 +98,71 @@ export default function RuntimeStatusStrip(): JSX.Element {
   return (
     <div className="px-1 pb-0 pt-1">
       <div className="flex w-full items-center gap-0.5 overflow-hidden rounded-[14px] border border-white/[0.03] bg-white/[0.006] px-1 py-0 text-zinc-500">
-        <button
-          type="button"
-          onClick={() => setView(backend === 'wsl' && wslSupportEnabled ? 'wslHealth' : 'settings')}
-          className={`${chip} shrink-0`}
-          title="运行环境设置"
-        >
-          <span className={`h-1.5 w-1.5 rounded-full ${backend === 'wsl' ? 'bg-sky-400' : 'bg-emerald-400'}`} />
-          <span>{backend === 'wsl' ? 'WSL' : 'Windows'}</span>
-          {wslSupportEnabled && status?.wslDistro && (
-            <span className="max-w-24 truncate text-zinc-600">{status.wslDistro}</span>
-          )}
-        </button>
-        {summaryIssue && (
+        <HoverTip tip="运行环境设置">
           <button
             type="button"
-            onClick={() => {
-              setView('translate')
-              setSummaryIssue(null)
-            }}
-            className={`${chip} shrink-0 text-amber-400/90 hover:text-amber-300`}
-            title={`${summaryIssue.detail}
-
-点击前往「AI 辅助」检查配置；点掉即忽略本次提示。`}
+            onClick={() => setView(backend === 'wsl' && wslSupportEnabled ? 'wslHealth' : 'settings')}
+            className={`${chip} shrink-0`}
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-            <span>
-              {summaryIssue.kind === 'quota'
-                ? '摘要额度已用尽'
-                : summaryIssue.kind === 'network'
-                  ? '摘要 API 连不上'
-                  : '摘要 Key 失效'}
-            </span>
+            <span className={`h-1.5 w-1.5 rounded-full ${backend === 'wsl' ? 'bg-sky-400' : 'bg-emerald-400'}`} />
+            <span>{backend === 'wsl' ? 'WSL' : 'Windows'}</span>
+            {wslSupportEnabled && status?.wslDistro && (
+              <span className="max-w-24 truncate text-zinc-600">{status.wslDistro}</span>
+            )}
           </button>
+        </HoverTip>
+        {summaryIssue && (
+          <HoverTip
+            tip={`${summaryIssue.detail}\n\n点击前往「AI 辅助」检查配置；点掉即忽略本次提示。`}
+            tipClassName="whitespace-pre-line break-words text-left"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setView('translate')
+                setSummaryIssue(null)
+              }}
+              className={`${chip} shrink-0 text-amber-400/90 hover:text-amber-300`}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+              <span>
+                {summaryIssue.kind === 'quota'
+                  ? '摘要额度已用尽'
+                  : summaryIssue.kind === 'network'
+                    ? '摘要 API 连不上'
+                    : '摘要 Key 失效'}
+              </span>
+            </button>
+          </HoverTip>
         )}
         <div className={`runtime-provider-reveal ${showProvider ? 'is-visible' : ''}`}>
+          <HoverTip tip="运营商配置" className="inline-flex min-w-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (showProvider) setView('providers')
+              }}
+              className={`${chip} min-w-0`}
+              disabled={!showProvider}
+              tabIndex={showProvider ? 0 : -1}
+              aria-hidden={!showProvider}
+            >
+              <span className="text-zinc-600">运营商</span>
+              <span className="truncate text-zinc-300">{providerName}</span>
+            </button>
+          </HoverTip>
+        </div>
+        <HoverTip tip={versionTitle} tipClassName="break-all text-left" className="ml-auto inline-flex shrink-0">
           <button
             type="button"
-            onClick={() => {
-              if (showProvider) setView('providers')
-            }}
-            className={`${chip} min-w-0`}
-            title="运营商配置"
-            disabled={!showProvider}
-            tabIndex={showProvider ? 0 : -1}
-            aria-hidden={!showProvider}
+            onClick={() => setView(backend === 'wsl' && wslSupportEnabled ? 'wslHealth' : 'settings')}
+            className={`${chip} ${status?.versionError ? 'text-amber-300' : ''}`}
           >
-            <span className="text-zinc-600">运营商</span>
-            <span className="truncate text-zinc-300">{providerName}</span>
+            <span className="text-zinc-600">Agent</span>
+            <span className="text-zinc-300">{agentName}</span>
+            <span className="font-mono text-zinc-300">{version}</span>
           </button>
-        </div>
-        <button
-          type="button"
-          onClick={() => setView(backend === 'wsl' && wslSupportEnabled ? 'wslHealth' : 'settings')}
-          className={`${chip} ml-auto shrink-0 ${status?.versionError ? 'text-amber-300' : ''}`}
-          title={versionTitle}
-        >
-          <span className="text-zinc-600">Agent</span>
-          <span className="text-zinc-300">{agentName}</span>
-          <span className="font-mono text-zinc-300">{version}</span>
-        </button>
+        </HoverTip>
       </div>
     </div>
   )

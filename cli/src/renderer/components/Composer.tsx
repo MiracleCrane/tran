@@ -296,22 +296,24 @@ function TurnStallNotice({
   return (
     <span className="flex shrink-0 items-center gap-2 text-amber-300/90">
       <span>已 {silentMin} 分钟无响应</span>
-      <button
-        type="button"
-        onClick={onDismiss}
-        className="rounded border border-white/15 px-1.5 py-0.5 text-[10px] text-zinc-300 transition hover:bg-white/[0.08]"
-        title="继续等待本轮完成（若持续无响应会再次提醒）"
-      >
-        继续等待
-      </button>
-      <button
-        type="button"
-        onClick={onInterrupt}
-        className="rounded border border-red-900/60 bg-red-950/40 px-1.5 py-0.5 text-[10px] text-red-300 transition hover:bg-red-950/60"
-        title="打断本轮（与停止按钮同一条 cancel 路径）"
-      >
-        打断
-      </button>
+      <HoverTip tip="继续等待本轮完成（若持续无响应会再次提醒）">
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="rounded border border-white/15 px-1.5 py-0.5 text-[10px] text-zinc-300 transition hover:bg-white/[0.08]"
+        >
+          继续等待
+        </button>
+      </HoverTip>
+      <HoverTip tip="打断本轮（与停止按钮同一条 cancel 路径）">
+        <button
+          type="button"
+          onClick={onInterrupt}
+          className="rounded border border-red-900/60 bg-red-950/40 px-1.5 py-0.5 text-[10px] text-red-300 transition hover:bg-red-950/60"
+        >
+          打断
+        </button>
+      </HoverTip>
     </span>
   )
 }
@@ -1258,55 +1260,59 @@ export default function Composer(): JSX.Element {
           {statusError && (
             <span className="flex min-w-0 items-center gap-1 text-red-400">
               <span className="truncate">{statusError}</span>
-              <button
-                type="button"
-                onClick={clearError}
-                className="shrink-0 rounded px-0.5 text-red-400/70 transition hover:bg-white/[0.06] hover:text-red-300"
-                title="关闭错误提示"
-              >
-                ×
-              </button>
+              <HoverTip tip="关闭错误提示">
+                <button
+                  type="button"
+                  onClick={clearError}
+                  aria-label="关闭错误提示"
+                  className="shrink-0 rounded px-0.5 text-red-400/70 transition hover:bg-white/[0.06] hover:text-red-300"
+                >
+                  ×
+                </button>
+              </HoverTip>
             </span>
           )}
           {stopReason && !statusError && <span className="text-zinc-600">结束: {stopReason}</span>}
-          <button
-            type="button"
-            data-chip="bash"
-            onClick={() => toggleChip('bash')}
-            className={`flex items-center gap-1 transition hover:brightness-125 ${
-              runningBash > 0 ? 'text-blue-300' : bashTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
-            }`}
-            title="后台任务（点击查看面板）"
-          >
-            <span>🕐</span>
-            <span className={runningBash > 0 ? 'chip-flow-text' : undefined}>
-              {/* 空闲时不显示累计总数——「后台任务 (101)」这种总账是噪声
-                  （2026-08-19 用户），看不出任何活；数字只在有任务运行时出现。
-                  点它仍开面板看历史。2026-08-24：改名「后台任务」，运行数与耗时
-                  一起收进后面的括号。 */}
-              {runningBash > 0 ? `后台任务 (${runningBash} 运行中` : '后台任务'}
-            </span>
-            {runningBash > 0 && runningBashStartedAt !== null && (
-              <BashRunningElapsed startedAt={runningBashStartedAt} />
-            )}
-            {runningBash > 0 && <span>)</span>}
-          </button>
-          <button
-            type="button"
-            data-chip="agent"
-            onClick={() => toggleChip('agent')}
-            className={`flex shrink-0 items-center gap-1 transition hover:brightness-125 ${
-              runningAgents > 0 ? 'text-accent' : agentTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
-            }`}
-            title="子 Agent（点击查看面板）"
-          >
-            <span>✦</span>
-            <span className={runningAgents > 0 ? 'chip-flow-text' : undefined}>
-              {/* 括号只留运行数（2026-08-24 用户拍板）：(3/12) 里的总数是噪音，
-                  没有运行中就只显示名字，与「后台任务」chip 同口径。 */}
-              子 Agent{runningAgents > 0 ? ` (${runningAgents})` : ''}
-            </span>
-          </button>
+          <HoverTip tip="后台任务（点击查看面板）">
+            <button
+              type="button"
+              data-chip="bash"
+              onClick={() => toggleChip('bash')}
+              className={`flex items-center gap-1 transition hover:brightness-125 ${
+                runningBash > 0 ? 'text-blue-300' : bashTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
+              }`}
+            >
+              <span>🕐</span>
+              <span className={runningBash > 0 ? 'chip-flow-text' : undefined}>
+                {/* 空闲时不显示累计总数——「后台任务 (101)」这种总账是噪声
+                    （2026-08-19 用户），看不出任何活；数字只在有任务运行时出现。
+                    点它仍开面板看历史。2026-08-24：改名「后台任务」，运行数与耗时
+                    一起收进后面的括号。 */}
+                {runningBash > 0 ? `后台任务 (${runningBash} 运行中` : '后台任务'}
+              </span>
+              {runningBash > 0 && runningBashStartedAt !== null && (
+                <BashRunningElapsed startedAt={runningBashStartedAt} />
+              )}
+              {runningBash > 0 && <span>)</span>}
+            </button>
+          </HoverTip>
+          <HoverTip tip="子 Agent（点击查看面板）">
+            <button
+              type="button"
+              data-chip="agent"
+              onClick={() => toggleChip('agent')}
+              className={`flex shrink-0 items-center gap-1 transition hover:brightness-125 ${
+                runningAgents > 0 ? 'text-accent' : agentTotal > 0 ? 'text-zinc-400' : 'text-zinc-600'
+              }`}
+            >
+              <span>✦</span>
+              <span className={runningAgents > 0 ? 'chip-flow-text' : undefined}>
+                {/* 括号只留运行数（2026-08-24 用户拍板）：(3/12) 里的总数是噪音，
+                    没有运行中就只显示名字，与「后台任务」chip 同口径。 */}
+                子 Agent{runningAgents > 0 ? ` (${runningAgents})` : ''}
+              </span>
+            </button>
+          </HoverTip>
           {/* 这里原本还有一个「待办 (n/m)」chip。删掉了：正文顶部已经常驻一张
               待办卡片，同一份数据在一屏里出现两次，底下这个只是噪声。 */}
           <UsageRings />
@@ -1351,27 +1357,41 @@ export default function Composer(): JSX.Element {
           onDrop={(e) => void onDrop(e)}
         >
           <div className="composer-focus-ring" aria-hidden />
-          <div
-            className="composer-resize-zone"
-            role="separator"
-            aria-orientation="horizontal"
-            tabIndex={0}
-            aria-label="调整输入框高度"
-            title="拖动调整输入框高度，双击恢复自动"
-            onPointerDown={beginTextareaResize}
-            onDoubleClick={resetTextareaHeight}
-          />
+          {/* HoverTip 的定位锚是它的包裹 span（见下方预览开关同款注释），所以
+              手柄带的 absolute 定位整个挪到包裹层；内层 div 用 inline style 把
+              .composer-resize-zone 自带的 top/left/right/height 归零，贴满包裹层，
+              视觉与 hit 区域和以前完全一致。 */}
+          <HoverTip
+            tip="拖动调整输入框高度，双击恢复自动"
+            className="absolute inset-x-0 -top-[0.45rem] z-[3] block h-[0.9rem]"
+          >
+            <div
+              className="composer-resize-zone"
+              style={{ top: 0, right: 0, left: 0, height: '100%' }}
+              role="separator"
+              aria-orientation="horizontal"
+              tabIndex={0}
+              aria-label="调整输入框高度"
+              onPointerDown={beginTextareaResize}
+              onDoubleClick={resetTextareaHeight}
+            />
+          </HoverTip>
           {/* #38：手动拖拽的高度会持久化覆盖自动增高，双击手柄的旧恢复途径太隐蔽，
               手动模式激活期间给出一个可见的恢复入口。 */}
           {manualTextareaHeight !== null && (
-            <button
-              type="button"
-              className="composer-height-reset"
-              title="输入框高度已手动锁定，点击恢复自动增高"
-              onClick={resetTextareaHeight}
+            <HoverTip
+              tip="输入框高度已手动锁定，点击恢复自动增高"
+              className="absolute -top-[0.4rem] right-3 z-[4] block"
             >
-              恢复自动高度
-            </button>
+              <button
+                type="button"
+                className="composer-height-reset"
+                style={{ top: 0, right: 0 }}
+                onClick={resetTextareaHeight}
+              >
+                恢复自动高度
+              </button>
+            </HoverTip>
           )}
           {/* 草稿预览开关（2026-08-26 改版：原在底部工具栏，用户嫌「太丑」挪进
               输入框右上角）。icon-only 小眼睛，z-[5] 压过顶边拖高手柄（z3）和
@@ -1460,24 +1480,25 @@ export default function Composer(): JSX.Element {
                       {command.source === 'skill' && (
                         // 改名入口。用 span+role 而不是嵌套 <button>（button 里套
                         // button 是非法 HTML，浏览器会把内层踢出去）。
-                        <span
-                          role="button"
-                          tabIndex={-1}
-                          title="给这个命令起个别名"
-                          aria-label="重命名"
-                          onMouseDown={(event) => {
-                            event.preventDefault()
-                            event.stopPropagation()
-                            setAliasEditor({
-                              name: command.name,
-                              value: aliases[command.name] ?? displayName(command.name, agentBackend, aliases)
-                            })
-                            setSlashContext(null)
-                          }}
-                          className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-zinc-600 transition hover:bg-white/10 hover:text-zinc-300"
-                        >
-                          改名
-                        </span>
+                        <HoverTip tip="给这个命令起个别名" className="inline-flex shrink-0">
+                          <span
+                            role="button"
+                            tabIndex={-1}
+                            aria-label="重命名"
+                            onMouseDown={(event) => {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              setAliasEditor({
+                                name: command.name,
+                                value: aliases[command.name] ?? displayName(command.name, agentBackend, aliases)
+                              })
+                              setSlashContext(null)
+                            }}
+                            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-zinc-600 transition hover:bg-white/10 hover:text-zinc-300"
+                          >
+                            改名
+                          </span>
+                        </HoverTip>
                       )}
                     </button>
                   ))
@@ -1557,25 +1578,28 @@ export default function Composer(): JSX.Element {
           {activeCommand && (
             <div className="mb-1.5 flex flex-wrap items-center gap-1.5 px-1">
               {/* 原名不再平铺在胶囊里：它跟别名说的是同一件事，挤在一起只是噪声
-                  （2026-08 用户反馈「这个灰字是什么」）。挪进 title，悬停即可看到。 */}
+                  （2026-08 用户反馈「这个灰字是什么」）。挪进 HoverTip，悬停即可看到。
+                  名字区和 × 各挂各的气泡，避免嵌套 HoverTip 一次弹两层。 */}
               <span
-                title={`/${activeCommand}`}
                 className="tran-enter inline-flex max-w-full items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/[0.12] py-1 pl-2 pr-1 text-[12px] text-zinc-100"
               >
-                <SkillGlyph />
-                <span className="truncate">{displayName(activeCommand, agentBackend, aliases)}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveCommand(null)
-                    textareaRef.current?.focus()
-                  }}
-                  title="移除命令"
-                  aria-label="移除命令"
-                  className="ml-0.5 shrink-0 rounded px-1 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
-                >
-                  ×
-                </button>
+                <HoverTip tip={`/${activeCommand}`} className="inline-flex min-w-0 items-center gap-1.5">
+                  <SkillGlyph />
+                  <span className="truncate">{displayName(activeCommand, agentBackend, aliases)}</span>
+                </HoverTip>
+                <HoverTip tip="移除命令" className="inline-flex shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveCommand(null)
+                      textareaRef.current?.focus()
+                    }}
+                    aria-label="移除命令"
+                    className="ml-0.5 shrink-0 rounded px-1 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+                  >
+                    ×
+                  </button>
+                </HoverTip>
               </span>
             </div>
           )}
@@ -1655,42 +1679,50 @@ export default function Composer(): JSX.Element {
                 // 看不出贴的是哪张。点击开预览面板，右上角 × 移除。
                 a.kind === 'image' && a.data ? (
                   <div key={`${a.path}-${i}`} className="tran-enter group/att relative">
-                    <button
-                      type="button"
-                      onClick={() => useUiStore.getState().openAttachmentPreview(pickedFileToUserAttachment(a))}
-                      className="block overflow-hidden rounded-lg border border-white/10 outline-none ring-accent/50 transition hover:brightness-110 focus-visible:ring-2"
-                      title={`预览 ${a.name}`}
-                    >
-                      <img
-                        src={`data:${a.mimeType};base64,${a.data}`}
-                        alt={a.name}
-                        className="h-14 w-14 object-cover"
-                      />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(i)}
-                      className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-white/15 bg-bg-panel text-[10px] leading-none text-zinc-400 opacity-0 transition group-hover/att:opacity-100 hover:text-red-300"
-                      title="移除"
-                    >
-                      ×
-                    </button>
+                    <HoverTip tip={`预览 ${a.name}`} className="block">
+                      <button
+                        type="button"
+                        onClick={() => useUiStore.getState().openAttachmentPreview(pickedFileToUserAttachment(a))}
+                        aria-label={`预览 ${a.name}`}
+                        className="block overflow-hidden rounded-lg border border-white/10 outline-none ring-accent/50 transition hover:brightness-110 focus-visible:ring-2"
+                      >
+                        <img
+                          src={`data:${a.mimeType};base64,${a.data}`}
+                          alt={a.name}
+                          className="h-14 w-14 object-cover"
+                        />
+                      </button>
+                    </HoverTip>
+                    <HoverTip tip="移除" className="absolute -right-1.5 -top-1.5 z-[1]">
+                      <button
+                        type="button"
+                        onClick={() => removeAttachment(i)}
+                        aria-label="移除附件"
+                        className="flex h-4 w-4 items-center justify-center rounded-full border border-white/15 bg-bg-panel text-[10px] leading-none text-zinc-400 opacity-0 transition group-hover/att:opacity-100 hover:text-red-300"
+                      >
+                        ×
+                      </button>
+                    </HoverTip>
                   </div>
                 ) : (
                   <span
                     key={`${a.path}-${i}`}
                     className="tran-enter glass-control flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-zinc-300"
-                    title={a.path}
                   >
-                    <span className="text-zinc-500">{a.kind === 'text' ? '📄' : a.kind === 'directory' ? '📁' : '📎'}</span>
-                    <span className="max-w-[12rem] truncate">{a.name}</span>
-                    <button
-                      onClick={() => removeAttachment(i)}
-                      className="text-zinc-500 transition hover:text-red-300"
-                      title="移除"
-                    >
-                      ×
-                    </button>
+                    {/* 路径气泡只挂名字区、× 各挂各的，避免嵌套 HoverTip 一次弹两层。 */}
+                    <HoverTip tip={a.path} tipClassName="break-all" className="inline-flex min-w-0 items-center gap-1.5">
+                      <span className="text-zinc-500">{a.kind === 'text' ? '📄' : a.kind === 'directory' ? '📁' : '📎'}</span>
+                      <span className="max-w-[12rem] truncate">{a.name}</span>
+                    </HoverTip>
+                    <HoverTip tip="移除" className="inline-flex shrink-0">
+                      <button
+                        onClick={() => removeAttachment(i)}
+                        aria-label="移除附件"
+                        className="text-zinc-500 transition hover:text-red-300"
+                      >
+                        ×
+                      </button>
+                    </HoverTip>
                   </span>
                 )
               )}
@@ -1705,38 +1737,44 @@ export default function Composer(): JSX.Element {
           {attachmentError && (
             <div className="flex min-w-0 items-center gap-1 px-1 pt-2 text-[11px] text-orange-300">
               <span className="truncate">{attachmentError}</span>
-              <button
-                type="button"
-                onClick={() => setAttachmentError(null)}
-                className="shrink-0 rounded px-0.5 text-orange-300/70 transition hover:bg-white/[0.06] hover:text-orange-200"
-                title="关闭提示"
-              >
-                ×
-              </button>
+              <HoverTip tip="关闭提示" className="inline-flex shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setAttachmentError(null)}
+                  aria-label="关闭提示"
+                  className="shrink-0 rounded px-0.5 text-orange-300/70 transition hover:bg-white/[0.06] hover:text-orange-200"
+                >
+                  ×
+                </button>
+              </HoverTip>
             </div>
           )}
           <div className="composer-toolbar flex flex-wrap items-center gap-2 px-1 pt-1.5">
-            <button
-              type="button"
-              onClick={() => void pickAttachment()}
-              disabled={!meta || pickingFile}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-40"
-              title={pickingFile ? '正在打开文件选择器…' : '添加附件(从工作目录选择文件)'}
-            >
-              {pickingFile ? (
-                <span className="h-3.5 w-3.5 animate-spin rounded-full border border-white/20 border-t-accent" />
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7l8.8-8.8a3.5 3.5 0 0 1 5 5L10.4 18a2 2 0 0 1-2.8-2.8l7.7-7.7"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              )}
-            </button>
+            {/* 附件按钮禁用态（无会话/选择器打开中）不冒鼠标事件，提示挂在
+                HoverTip 的包裹 span 上才能照常悬停可见。 */}
+            <HoverTip tip={pickingFile ? '正在打开文件选择器…' : '添加附件（从工作目录选择文件）'}>
+              <button
+                type="button"
+                onClick={() => void pickAttachment()}
+                disabled={!meta || pickingFile}
+                aria-label="添加附件"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-40"
+              >
+                {pickingFile ? (
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border border-white/20 border-t-accent" />
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7l8.8-8.8a3.5 3.5 0 0 1 5 5L10.4 18a2 2 0 0 1-2.8-2.8l7.7-7.7"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+              </button>
+            </HoverTip>
             <span className="composer-shortcut-hint px-2 text-[11px] text-zinc-500">
               <kbd className="font-sans text-zinc-400">Enter</kbd> 发送 ·{' '}
               <kbd className="font-sans text-zinc-400">Shift+Enter</kbd> 换行 ·{' '}
@@ -1748,17 +1786,40 @@ export default function Composer(): JSX.Element {
                   有 running 子代理，或 ACP 侧有 running 的 AgentSwarm 工具调用）
                   时亮起，结束后自动消失。 */}
               {meta && swarmRunning && (
-                <span
-                  className="flex h-7 items-center gap-1.5 rounded-md border border-accent/50 px-2 text-[11px] text-accent"
-                  title="Swarm 并行子代理运行中"
-                >
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-                  Swarm
-                </span>
+                <HoverTip tip="Swarm 并行子代理运行中">
+                  <span
+                    className="flex h-7 items-center gap-1.5 rounded-md border border-accent/50 px-2 text-[11px] text-accent"
+                  >
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+                    Swarm
+                  </span>
+                </HoverTip>
               )}
-              {meta && (
+              {/* DisclosureSelect 的 title prop 已在组件内部走 HoverTip（不再
+                  落原生 title=），但计划模式下整组触发器要的是「权限由计划接管」
+                  这一句，且禁用态不冒鼠标事件，提示只能挂在外层 HoverTip 的包裹
+                  span 上，因此只有 plan 时多包一层。 */}
+              {meta && meta.permissionMode === 'plan' ? (
+                <HoverTip tip="计划模式下权限由计划接管">
+                  <DisclosureSelect
+                    value={modeBeforePlan ?? 'default'}
+                    options={PERMISSION_MODE_OPTIONS}
+                    onChange={(v) => void setPermissionMode(v as PermissionMode)}
+                    placement="top"
+                    compact
+                    naked
+                    disabled
+                    triggerLeading={
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="shrink-0 text-zinc-400">
+                        <path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6l7.5-3z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+                        <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    }
+                  />
+                </HoverTip>
+              ) : meta ? (
                 <DisclosureSelect
-                  value={meta.permissionMode === 'plan' ? (modeBeforePlan ?? 'default') : meta.permissionMode}
+                  value={meta.permissionMode}
                   options={PERMISSION_MODE_OPTIONS}
                   onChange={(v) => {
                     if (v !== meta.permissionMode) void setPermissionMode(v as PermissionMode)
@@ -1766,8 +1827,6 @@ export default function Composer(): JSX.Element {
                   placement="top"
                   compact
                   naked
-                  disabled={meta.permissionMode === 'plan'}
-                  title={meta.permissionMode === 'plan' ? '计划模式下权限由计划接管' : undefined}
                   triggerLeading={
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="shrink-0 text-zinc-400">
                       <path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6l7.5-3z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
@@ -1775,7 +1834,7 @@ export default function Composer(): JSX.Element {
                     </svg>
                   }
                 />
-              )}
+              ) : null}
               {meta && (
                 <DisclosureSelect
                   value={effort}
@@ -1804,43 +1863,48 @@ export default function Composer(): JSX.Element {
                 />
               )}
               {running && (
-                <button
-                  onClick={() => void interrupt()}
-                  className="h-7 shrink-0 rounded-md px-2 text-[11px] font-medium text-red-400/90 transition hover:bg-red-950/40 hover:text-red-300"
-                  title="中断当前处理"
-                >
-                  停止
-                </button>
+                <HoverTip tip="中断当前处理">
+                  <button
+                    onClick={() => void interrupt()}
+                    className="h-7 shrink-0 rounded-md px-2 text-[11px] font-medium text-red-400/90 transition hover:bg-red-950/40 hover:text-red-300"
+                  >
+                    停止
+                  </button>
+                </HoverTip>
               )}
               {/* 发送：Codex 风圆形按钮。可发时浅色实底（黑箭头），不可发时
-                  幽灵灰。不再用紫色长条——工具栏要浑然一体（2026-08）。 */}
-              <button
-                onClick={() => void submit()}
-                disabled={!text.trim() && attachments.length === 0}
-                title="发送"
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition disabled:cursor-not-allowed ${
-                  !text.trim() && attachments.length === 0
-                    ? 'bg-white/[0.05] text-zinc-600'
-                    : 'bg-zinc-200 text-zinc-900 hover:bg-white'
-                }`}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSlashContext(null)
-                  setShowTemplates((open) => !open)
-                }}
-                className={`composer-template-button flex h-7 items-center justify-center rounded-md px-1.5 text-[11px] text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 ${
-                  showTemplates ? 'is-open' : ''
-                }`}
-                title="Prompt 模板"
-              >
-                模板
-              </button>
+                  幽灵灰。不再用紫色长条——工具栏要浑然一体（2026-08）。
+                  禁用态不冒鼠标事件，提示挂在 HoverTip 的包裹 span 上。 */}
+              <HoverTip tip="发送" className="inline-flex shrink-0">
+                <button
+                  onClick={() => void submit()}
+                  disabled={!text.trim() && attachments.length === 0}
+                  aria-label="发送"
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition disabled:cursor-not-allowed ${
+                    !text.trim() && attachments.length === 0
+                      ? 'bg-white/[0.05] text-zinc-600'
+                      : 'bg-zinc-200 text-zinc-900 hover:bg-white'
+                  }`}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              </HoverTip>
+              <HoverTip tip="Prompt 模板" className="inline-flex shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSlashContext(null)
+                    setShowTemplates((open) => !open)
+                  }}
+                  className={`composer-template-button flex h-7 items-center justify-center rounded-md px-1.5 text-[11px] text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 ${
+                    showTemplates ? 'is-open' : ''
+                  }`}
+                >
+                  模板
+                </button>
+              </HoverTip>
             </div>
           </div>
           {dragActive && (

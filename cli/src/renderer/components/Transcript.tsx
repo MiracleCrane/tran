@@ -16,6 +16,7 @@ import ToolGroupCard from './ToolGroupCard'
 import CompactionDivider from './CompactionDivider'
 import Collapse from './Collapse'
 import EmptyState from './EmptyState'
+import HoverTip from './HoverTip'
 import QueryResultCard from './QueryResultCard'
 import TurnChangesCard from './TurnChangesCard'
 import { openChangesPanel } from '../events'
@@ -564,27 +565,28 @@ function SystemEnvelope({ text }: { text: string }): JSX.Element {
   const label = title ?? (text.startsWith('<cron-fire') ? '定时任务触发' : '系统消息')
   return (
     <div className="flex justify-center">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="max-w-[85%] rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-1.5 text-left transition hover:bg-white/[0.04]"
-        title={expanded ? '收起' : '展开原文'}
-      >
-        <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-          <span aria-hidden>⚙</span>
-          <span className="truncate">{label}</span>
-          {kind && (
-            <span className={kind === 'completed' ? 'text-emerald-400/80' : 'text-red-300/80'}>
-              {kind === 'completed' ? '完成' : kind === 'failed' ? '失败' : '丢失'}
-            </span>
+      <HoverTip tip={expanded ? '收起' : '展开原文'} className="flex max-w-[85%] justify-center">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="w-full rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-1.5 text-left transition hover:bg-white/[0.04]"
+        >
+          <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+            <span aria-hidden>⚙</span>
+            <span className="truncate">{label}</span>
+            {kind && (
+              <span className={kind === 'completed' ? 'text-emerald-400/80' : 'text-red-300/80'}>
+                {kind === 'completed' ? '完成' : kind === 'failed' ? '失败' : '丢失'}
+              </span>
+            )}
+          </div>
+          {expanded && (
+            <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[10px] leading-relaxed text-zinc-600">
+              {text}
+            </pre>
           )}
-        </div>
-        {expanded && (
-          <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[10px] leading-relaxed text-zinc-600">
-            {text}
-          </pre>
-        )}
-      </button>
+        </button>
+      </HoverTip>
     </div>
   )
 }
@@ -604,17 +606,18 @@ function EnvelopeGroupRow({ entries }: { entries: Array<{ id: string; text: stri
   return (
     <div className="flex justify-center">
       <div className="max-w-[85%]">
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] text-zinc-600 transition hover:bg-white/[0.04] hover:text-zinc-500"
-          title={expanded ? '收起' : '展开'}
-        >
-          <span aria-hidden>⚙</span>
-          <span>系统消息 ×{entries.length}</span>
-          {completed > 0 && <span className="text-emerald-400/70">{completed} 完成</span>}
-          {failed > 0 && <span className="text-red-300/70">{failed} 失败</span>}
-        </button>
+        <HoverTip tip={expanded ? '收起' : '展开'}>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] text-zinc-600 transition hover:bg-white/[0.04] hover:text-zinc-500"
+          >
+            <span aria-hidden>⚙</span>
+            <span>系统消息 ×{entries.length}</span>
+            {completed > 0 && <span className="text-emerald-400/70">{completed} 完成</span>}
+            {failed > 0 && <span className="text-red-300/70">{failed} 失败</span>}
+          </button>
+        </HoverTip>
         {expanded && (
           <div className="mt-1 max-h-64 space-y-1 overflow-y-auto">
             {entries.map((entry) => (
@@ -706,24 +709,26 @@ const MessageCopyControls = memo(function MessageCopyControls({
 
   return (
     <div className={`tran-msg-copy tran-msg-copy-${placement}`}>
-      <button
-        type="button"
-        className="tran-msg-copy-btn"
-        onClick={() => void copyRich()}
-        title="复制（渲染后的排版）"
-        aria-label="复制（渲染后的排版）"
-      >
-        {copiedRich ? '✓' : <CopyIcon />}
-      </button>
-      <button
-        type="button"
-        className="tran-msg-copy-btn"
-        onClick={() => void copyText()}
-        title="复制 Markdown（源文）"
-        aria-label="复制 Markdown（源文）"
-      >
-        {copiedText ? '✓' : <span className="tran-msg-copy-md">MD</span>}
-      </button>
+      <HoverTip tip="复制（渲染后的排版）">
+        <button
+          type="button"
+          className="tran-msg-copy-btn"
+          onClick={() => void copyRich()}
+          aria-label="复制（渲染后的排版）"
+        >
+          {copiedRich ? '✓' : <CopyIcon />}
+        </button>
+      </HoverTip>
+      <HoverTip tip="复制 Markdown（源文）">
+        <button
+          type="button"
+          className="tran-msg-copy-btn"
+          onClick={() => void copyText()}
+          aria-label="复制 Markdown（源文）"
+        >
+          {copiedText ? '✓' : <span className="tran-msg-copy-md">MD</span>}
+        </button>
+      </HoverTip>
     </div>
   )
 })
@@ -759,9 +764,9 @@ const UserMessage = memo(function UserMessage({
       <div className="tran-user-msg group/msg relative flex justify-end">
         <SkillCard invocation={skillInvocation} {...(item.cutIn ? { cutIn: true } : {})} />
         {at !== undefined && (
-          <div className="tran-msg-time tran-msg-time-gutter-left" title={formatTimeFull(at)}>
+          <HoverTip tip={formatTimeFull(at)} className="tran-msg-time tran-msg-time-gutter-left">
             {formatTimeShort(at)}
-          </div>
+          </HoverTip>
         )}
       </div>
     )
@@ -784,20 +789,18 @@ const UserMessage = memo(function UserMessage({
         {(item.swarm || item.cutIn) && (
           <div className="mb-1 flex justify-end gap-1">
             {item.swarm && (
-              <span
-                className="rounded bg-accent/15 px-1.5 py-0.5 text-[9px] font-medium text-accent"
-                title="该条发送时注入了 Swarm 并行指令前缀"
-              >
-                Swarm
-              </span>
+              <HoverTip tip="该条发送时注入了 Swarm 并行指令前缀" tipClassName="text-left">
+                <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[9px] font-medium text-accent">
+                  Swarm
+                </span>
+              </HoverTip>
             )}
             {item.cutIn && (
-              <span
-                className="rounded bg-white/[0.08] px-1.5 py-0.5 text-[9px] font-medium text-zinc-300"
-                title="Ctrl+S 打断并发送（插队）"
-              >
-                插队
-              </span>
+              <HoverTip tip="Ctrl+S 打断并发送（插队）" tipClassName="text-left">
+                <span className="rounded bg-white/[0.08] px-1.5 py-0.5 text-[9px] font-medium text-zinc-300">
+                  插队
+                </span>
+              </HoverTip>
             )}
           </div>
         )}
@@ -811,55 +814,60 @@ const UserMessage = memo(function UserMessage({
               const canPreviewText = a.kind === 'text' && typeof a.text === 'string'
               const canOpen = canPreviewText || !!a.dataUrl || !!a.path
               return a.kind === 'image' && a.dataUrl ? (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={(event) => handleAttachmentClick(event, a)}
-                  onContextMenu={(event) => showImageContextMenu(event, a.dataUrl ?? '', a.name)}
-                  className="rounded-lg outline-none ring-accent/50 transition hover:brightness-110 focus-visible:ring-2"
-                  title={`预览 ${a.name}；右键复制/另存图片`}
-                >
-                  <img
-                    src={a.dataUrl}
-                    alt={a.name}
-                    className="max-h-44 max-w-[220px] rounded-lg border border-white/10 object-cover"
-                    // 高度占位（2026-08-25）：图片无固有尺寸声明，解码完成后行高
-                    // 才撑开，历史注水补图时整片视口抖动。先给 4/3 中性占位，
-                    // onLoad 换成真实宽高比（直接改 DOM：style prop 值不变，React
-                    // 重渲染不会回拨）。max-h-44/max-w 约束不变。
-                    style={{ aspectRatio: '4 / 3' }}
-                    onLoad={(e) => {
-                      const img = e.currentTarget
-                      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-                        img.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`
-                      }
-                    }}
-                  />
-                </button>
+                <HoverTip key={i} tip={`预览 ${a.name}；右键复制/另存图片`} tipClassName="break-words text-left">
+                  <button
+                    type="button"
+                    onClick={(event) => handleAttachmentClick(event, a)}
+                    onContextMenu={(event) => showImageContextMenu(event, a.dataUrl ?? '', a.name)}
+                    className="rounded-lg outline-none ring-accent/50 transition hover:brightness-110 focus-visible:ring-2"
+                  >
+                    <img
+                      src={a.dataUrl}
+                      alt={a.name}
+                      className="max-h-44 max-w-[220px] rounded-lg border border-white/10 object-cover"
+                      // 高度占位（2026-08-25）：图片无固有尺寸声明，解码完成后行高
+                      // 才撑开，历史注水补图时整片视口抖动。先给 4/3 中性占位，
+                      // onLoad 换成真实宽高比（直接改 DOM：style prop 值不变，React
+                      // 重渲染不会回拨）。max-h-44/max-w 约束不变。
+                      style={{ aspectRatio: '4 / 3' }}
+                      onLoad={(e) => {
+                        const img = e.currentTarget
+                        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                          img.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`
+                        }
+                      }}
+                    />
+                  </button>
+                </HoverTip>
               ) : (
-                <button
+                // 禁用时按钮本身不触发鼠标事件，悬停提示靠 HoverTip 外层 span 承接。
+                <HoverTip
                   key={i}
-                  type="button"
-                  onClick={canOpen ? (event) => handleAttachmentClick(event, a) : undefined}
-                  disabled={!canOpen}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-zinc-300 transition enabled:hover:bg-white/[0.06] disabled:cursor-default disabled:opacity-80"
-                  title={canOpen ? `预览 ${a.name}；Ctrl+点击在资源管理器中显示` : a.name}
+                  tip={canOpen ? `预览 ${a.name}；Ctrl+点击在资源管理器中显示` : a.name}
+                  tipClassName="break-words text-left"
                 >
-                  <span className="text-zinc-500">{a.kind === 'text' ? '📄' : '📎'}</span>
-                  <span className="max-w-[10rem] truncate">{a.name}</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={canOpen ? (event) => handleAttachmentClick(event, a) : undefined}
+                    disabled={!canOpen}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-zinc-300 transition enabled:hover:bg-white/[0.06] disabled:cursor-default disabled:opacity-80"
+                  >
+                    <span className="text-zinc-500">{a.kind === 'text' ? '📄' : '📎'}</span>
+                    <span className="max-w-[10rem] truncate">{a.name}</span>
+                  </button>
+                </HoverTip>
               )
             })}
           </div>
         )}
       </div>
-      {/* #43 时间戳：默认隐藏、悬停该条消息才浮出 HH:mm:ss，title 给完整年月日时分秒；
+      {/* #43 时间戳：默认隐藏、悬停该条消息才浮出 HH:mm:ss，HoverTip 气泡给完整年月日时分秒；
           绝对定位落在气泡左侧的留白里（见 styles.css 的 .tran-msg-time 注释）。
           挂在外层 flex 容器上而不是气泡里——气泡是靠右的，留白在它外面。 */}
       {at !== undefined && (
-        <div className="tran-msg-time tran-msg-time-gutter-left" title={formatTimeFull(at)}>
+        <HoverTip tip={formatTimeFull(at)} className="tran-msg-time tran-msg-time-gutter-left">
           {formatTimeShort(at)}
-        </div>
+        </HoverTip>
       )}
       {/* 悬停复制：与时间戳同一套显隐机制，图标行挂在气泡右下角。
           无文本（纯附件）时没有可复制内容，不显示。 */}
@@ -1056,17 +1064,18 @@ const LatestButton = memo(function LatestButton({
   const running = useSessionStore((s) => s.status.running)
   return (
     <div className="group/latest absolute bottom-4 left-1/2 -translate-x-1/2" data-follow-no-lock>
-      <button
-        onClick={() => onJump(running ? 'auto' : 'smooth')}
-        title="回到最新"
-        aria-label="回到最新"
-        className="glass-control relative flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 transition hover:text-zinc-200"
-      >
-        {running && <span aria-hidden className="latest-pulse-ring" />}
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
+      <HoverTip tip="回到最新">
+        <button
+          onClick={() => onJump(running ? 'auto' : 'smooth')}
+          aria-label="回到最新"
+          className="glass-control relative flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 transition hover:text-zinc-200"
+        >
+          {running && <span aria-hidden className="latest-pulse-ring" />}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </HoverTip>
     </div>
   )
 })
@@ -1507,14 +1516,14 @@ const AssistantMessage = memo(function AssistantMessage({
       })()}
       {/* 流式不再单独挂"输出中…"指示——思考标题的紫黄流光 + 正文滚动本身
           就是信号；全局状态（计时/排队）由输入框上方那条承担。 */}
-      {/* #43 时间戳：默认隐藏、悬停该条消息才浮出 HH:mm:ss，title 给完整年月日时分秒；
+      {/* #43 时间戳：默认隐藏、悬停该条消息才浮出 HH:mm:ss，HoverTip 气泡给完整年月日时分秒；
           绝对定位落在容器右侧的留白里（见 styles.css 的 .tran-msg-time 注释）。
           只在 depth 0 显示：嵌套的子代理消息没有那条 92% 宽度限制，右侧没有
           留白可用，标上去只会压在字上——顶层那条时间已经够定位了。 */}
       {!isStreaming && at !== undefined && depth === 0 && (
-        <div className="tran-msg-time tran-msg-time-gutter-right" title={formatTimeFull(at)}>
+        <HoverTip tip={formatTimeFull(at)} className="tran-msg-time tran-msg-time-gutter-right">
           {formatTimeShort(at)}
-        </div>
+        </HoverTip>
       )}
       {/* 悬停复制（2026-08-24 起按轮）：一轮 AI 输出只在最后一条消息上挂一组
           图标，复制的是整轮聚合（turnMarkdown 由 Transcript 拼好，仅轮末消息

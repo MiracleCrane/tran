@@ -288,9 +288,9 @@ const PlanCard = memo(function PlanCard({ docked = false }: { docked?: boolean }
             {allDone ? '已完成' : `已完成 ${done}/${entries.length}`}
           </span>
           {showStale && (
-            <span className="shrink-0 text-[11px] text-zinc-600" title="待办由 AI 主动推送，会话空闲时不会自行刷新">
-              · {staleLabel(staleSince)}
-            </span>
+            <HoverTip tip="待办由 AI 主动推送，会话空闲时不会自行刷新" tipClassName="text-left" className="inline-flex shrink-0">
+              <span className="text-[11px] text-zinc-600">· {staleLabel(staleSince)}</span>
+            </HoverTip>
           )}
         </button>
         {/* 催更已经发出去了：这一轮是 Tran 自己发的，必须让用户看见——否则就是

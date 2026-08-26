@@ -1,5 +1,6 @@
 import { useSessionStore } from '../store/sessionStore'
 import UsageRings from './UsageRings'
+import HoverTip from './HoverTip'
 
 /** 底部状态栏：左侧只保留瞬态诊断（结束原因/错误），右侧 UsageRings。
  *  cwd/权限/轮数/token 已移除（与项目选择器、输入区选择器重复，token 恒空）。 */
@@ -18,14 +19,16 @@ export default function StatusBar(): JSX.Element {
         {error && (
           <span className="flex min-w-0 items-center gap-1 text-red-400">
             <span className="truncate">{error}</span>
-            <button
-              type="button"
-              onClick={clearError}
-              className="shrink-0 rounded px-0.5 text-red-400/70 transition hover:bg-white/[0.06] hover:text-red-300"
-              title="关闭错误提示"
-            >
-              ×
-            </button>
+            <HoverTip tip="关闭错误提示" className="inline-flex shrink-0">
+              <button
+                type="button"
+                onClick={clearError}
+                aria-label="关闭错误提示"
+                className="rounded px-0.5 text-red-400/70 transition hover:bg-white/[0.06] hover:text-red-300"
+              >
+                ×
+              </button>
+            </HoverTip>
           </span>
         )}
         <UsageRings />

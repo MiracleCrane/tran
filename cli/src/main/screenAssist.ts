@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -8,6 +8,8 @@ import { join } from 'node:path'
  * 窗口是独立顶层窗口，只是生命周期挂在 Tran 上
  * （before-quit 用 taskkill /T 收掉整棵进程树，避免 uv→pythonw 孤儿）。
  * 路径解析：打包版读 resources/tools/screen-assist，开发版读仓库 tools/screen-assist。
+ * 注意：打包版 resources 在 Program Files 下是只读的，uv 的 .venv 必须
+ * 指到用户目录（UV_PROJECT_ENVIRONMENT），否则首跑 Access Denied。
  */
 const UV_EXE = 'C:\\LegacyD\\Python\\Python312\\Scripts\\uv.exe'
 
@@ -17,6 +19,12 @@ function resolveScreenAssistDir(): string | null {
     join(__dirname, '..', '..', '..', 'tools', 'screen-assist')
   ]
   return candidates.find((p) => existsSync(join(p, 'main.py'))) ?? null
+}
+
+function venvDir(): string {
+  const dir = join(app.getPath('appData'), 'Tran', 'tools-env', 'screen-assist')
+  mkdirSync(dir, { recursive: true })
+  return dir
 }
 
 let child: ChildProcess | null = null
@@ -38,6 +46,7 @@ export function launchScreenAssist(): LaunchScreenAssistResult {
   try {
     child = spawn(UV_EXE, ['run', 'pythonw', 'main.py'], {
       cwd: dir,
+      env: { ...process.env, UV_PROJECT_ENVIRONMENT: venvDir() },
       windowsHide: true,
       stdio: 'ignore'
     })

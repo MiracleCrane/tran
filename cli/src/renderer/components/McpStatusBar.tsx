@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useTransientFlag } from '../hooks/useTransientFlag'
+import HoverTip from './HoverTip'
 import type { McpServerEntry, McpServerStatusKind } from '../../shared/ipc'
 
 /** MCP server 状态区（#15）：会话初始化时隐藏 /mcp 轮解析出的连接状态，
@@ -68,19 +69,20 @@ export default function McpStatusBar(): JSX.Element | null {
     return (
       // 收起态：一枚胶囊搞定——全绿就只显示「MCP · n」，有异常才把数字标橙。
       <div className="mx-auto flex w-full max-w-5xl shrink-0 items-center px-6 pb-1.5 pt-0.5 text-[11px]">
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          title="展开 MCP 状态"
-          className="flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.03] px-2 py-0.5 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
-        >
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${abnormal > 0 ? 'bg-amber-400' : 'bg-emerald-400'}`}
-          />
-          MCP · {servers.length}
-          {abnormal > 0 && <span className="text-amber-400">{abnormal} 异常</span>}
-          <span className="text-zinc-600">▸</span>
-        </button>
+        <HoverTip tip="展开 MCP 状态">
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.03] px-2 py-0.5 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${abnormal > 0 ? 'bg-amber-400' : 'bg-emerald-400'}`}
+            />
+            MCP · {servers.length}
+            {abnormal > 0 && <span className="text-amber-400">{abnormal} 异常</span>}
+            <span className="text-zinc-600">▸</span>
+          </button>
+        </HoverTip>
       </div>
     )
   }
@@ -89,34 +91,39 @@ export default function McpStatusBar(): JSX.Element | null {
     // 2026-08 重样式：服务器收成小胶囊 + 底部发丝分割线。之前是裸文本行直接
     // 压在对话内容上，和待办卡提示、消息正文三段糊在一起，边界感为零。
     <div className="mx-auto flex w-full max-w-5xl shrink-0 items-center gap-2 border-b border-white/[0.06] px-6 pb-2 pt-0.5 text-[11px] text-zinc-500">
-      <button
-        type="button"
-        onClick={() => setExpanded(false)}
-        title="收起 MCP 状态"
-        className="shrink-0 rounded-full p-1 text-zinc-600 transition hover:bg-white/[0.06] hover:text-zinc-300"
-      >
-        ▾
-      </button>
+      <HoverTip tip="收起 MCP 状态">
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          aria-label="收起 MCP 状态"
+          className="shrink-0 rounded-full p-1 text-zinc-600 transition hover:bg-white/[0.06] hover:text-zinc-300"
+        >
+          ▾
+        </button>
+      </HoverTip>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {servers.map((server) => (
-          <span
+          <HoverTip
             key={server.name}
+            tip={server.error ?? serverLabel(server)}
+            tipClassName="break-words text-left"
             className="flex min-w-0 items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.03] px-2 py-0.5"
-            title={server.error ?? serverLabel(server)}
           >
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[server.status]}`} />
             <span className="truncate">{serverLabel(server)}</span>
-          </span>
+          </HoverTip>
         ))}
       </div>
-      <button
-        type="button"
-        onClick={refresh}
-        title="重新查询 MCP 状态"
-        className="shrink-0 rounded-full p-1 text-zinc-600 transition hover:bg-white/[0.06] hover:text-zinc-300"
-      >
-        <RefreshIcon spinning={refreshing} />
-      </button>
+      <HoverTip tip="重新查询 MCP 状态">
+        <button
+          type="button"
+          onClick={refresh}
+          aria-label="重新查询 MCP 状态"
+          className="shrink-0 rounded-full p-1 text-zinc-600 transition hover:bg-white/[0.06] hover:text-zinc-300"
+        >
+          <RefreshIcon spinning={refreshing} />
+        </button>
+      </HoverTip>
     </div>
   )
 }

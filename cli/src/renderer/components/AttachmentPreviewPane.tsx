@@ -5,6 +5,7 @@ import { useUiStore } from '../store/uiStore'
 import type { UserAttachment } from '../types'
 import { pathToUserAttachment, pickedFileToUserAttachment } from '../utils/attachments'
 import MessageText from './MessageText'
+import HoverTip from './HoverTip'
 import { showImageContextMenu } from './ImageContextMenu'
 
 type TextMode = 'rendered' | 'source'
@@ -119,21 +120,26 @@ function DirectoryView({
         </div>
       )}
       {entries.map((entry) => (
-        <button
+        <HoverTip
           key={entry.path}
-          type="button"
-          onClick={(event) => onOpen(event, entry.path)}
-          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-zinc-300 transition hover:bg-white/[0.06]"
-          title={`预览 ${entry.name}；Ctrl+点击在资源管理器中打开`}
+          tip={`预览 ${entry.name}；Ctrl+点击在资源管理器中打开`}
+          tipClassName="text-left"
+          className="block"
         >
-          <span className="w-8 shrink-0 rounded-md border border-white/[0.08] bg-white/[0.035] px-1 py-0.5 text-center text-[9px] uppercase tracking-wide text-zinc-500">
-            {entry.kind === 'directory' ? 'dir' : 'file'}
-          </span>
-          <span className="min-w-0 flex-1 truncate font-mono">{entry.name}</span>
-          <span className="shrink-0 text-[10px] uppercase tracking-wide text-zinc-600">
-            {entry.kind === 'directory' ? '' : formatBytes(entry.size)}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={(event) => onOpen(event, entry.path)}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-zinc-300 transition hover:bg-white/[0.06]"
+          >
+            <span className="w-8 shrink-0 rounded-md border border-white/[0.08] bg-white/[0.035] px-1 py-0.5 text-center text-[9px] uppercase tracking-wide text-zinc-500">
+              {entry.kind === 'directory' ? 'dir' : 'file'}
+            </span>
+            <span className="min-w-0 flex-1 truncate font-mono">{entry.name}</span>
+            <span className="shrink-0 text-[10px] uppercase tracking-wide text-zinc-600">
+              {entry.kind === 'directory' ? '' : formatBytes(entry.size)}
+            </span>
+          </button>
+        </HoverTip>
       ))}
     </div>
   )
@@ -293,39 +299,51 @@ export default function AttachmentPreviewPane(): JSX.Element | null {
         }`}
       >
         {canGoBack && (
-          <button
-            type="button"
-            onClick={goBack}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
-            title="返回上一级"
-          >
-            <BackIcon />
-          </button>
+          <HoverTip tip="返回上一级">
+            <button
+              type="button"
+              onClick={goBack}
+              aria-label="返回上一级"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
+            >
+              <BackIcon />
+            </button>
+          </HoverTip>
         )}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-zinc-100" title={renderCurrent.path ?? renderCurrent.name}>
-            {renderCurrent.name}
-          </div>
+          <HoverTip
+            tip={renderCurrent.path ?? renderCurrent.name}
+            tipClassName="break-all text-left"
+            className="block min-w-0"
+          >
+            <div className="truncate text-sm font-medium text-zinc-100">
+              {renderCurrent.name}
+            </div>
+          </HoverTip>
           {meta && <div className="mt-0.5 text-[10px] uppercase tracking-wide text-zinc-600">{meta}</div>}
         </div>
         {renderCurrent.path && (
+          <HoverTip tip="在资源管理器中打开">
+            <button
+              type="button"
+              onClick={() => void window.api.revealInExplorer(cwd, renderCurrent.path ?? renderCurrent.name)}
+              aria-label="在资源管理器中打开"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
+            >
+              <RevealIcon />
+            </button>
+          </HoverTip>
+        )}
+        <HoverTip tip="关闭预览">
           <button
             type="button"
-            onClick={() => void window.api.revealInExplorer(cwd, renderCurrent.path ?? renderCurrent.name)}
+            onClick={close}
+            aria-label="关闭预览"
             className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
-            title="在资源管理器中打开"
           >
-            <RevealIcon />
+            <CloseIcon />
           </button>
-        )}
-        <button
-          type="button"
-          onClick={close}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
-          title="关闭预览"
-        >
-          <CloseIcon />
-        </button>
+        </HoverTip>
       </div>
 
       <div className={`attachment-preview-content min-h-0 flex-1 overflow-auto p-2 ${contentSwitching ? 'is-switching' : ''}`}>

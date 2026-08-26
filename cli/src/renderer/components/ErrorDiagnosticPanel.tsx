@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
+import HoverTip from './HoverTip'
 
 interface Diagnosis {
   title: string
@@ -95,9 +96,11 @@ export default function ErrorDiagnosticPanel(): JSX.Element {
         <div className="min-w-0 flex-1">
           <div className="font-medium text-red-200">{diagnosis.title}</div>
           <div className="mt-0.5 text-zinc-400">{diagnosis.detail}</div>
-          <div className="mt-1 truncate font-mono text-[11px] text-red-300/80" title={error}>
-            {error}
-          </div>
+          <HoverTip tip={error} className="block min-w-0" tipClassName="text-left break-words">
+            <div className="mt-1 truncate font-mono text-[11px] text-red-300/80">
+              {error}
+            </div>
+          </HoverTip>
         </div>
         <button
           type="button"
@@ -106,14 +109,16 @@ export default function ErrorDiagnosticPanel(): JSX.Element {
         >
           {copied ? '已复制' : '复制诊断日志'}
         </button>
-        <button
-          type="button"
-          onClick={clearError}
-          className="shrink-0 rounded-lg border border-red-900/40 bg-black/20 px-2 py-1 text-[11px] text-red-100 transition hover:bg-red-950/50"
-          title="关闭错误提示"
-        >
-          ×
-        </button>
+        <HoverTip tip="关闭错误提示" className="shrink-0">
+          <button
+            type="button"
+            onClick={clearError}
+            aria-label="关闭错误提示"
+            className="rounded-lg border border-red-900/40 bg-black/20 px-2 py-1 text-[11px] text-red-100 transition hover:bg-red-950/50"
+          >
+            ×
+          </button>
+        </HoverTip>
       </div>
     </div>
   )

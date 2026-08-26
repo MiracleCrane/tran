@@ -3,6 +3,7 @@ import { useUiStore } from '../store/uiStore'
 import { useArchiveStore } from '../store/archiveStore'
 import { useSessionStore } from '../store/sessionStore'
 import { relTime } from '../utils/format'
+import HoverTip from './HoverTip'
 import type { SessionListItem } from '../../shared/ipc'
 
 /**
@@ -196,19 +197,20 @@ export default function ArchivePanel(): JSX.Element {
               >
                 ✓
               </button>
-              <button
-                type="button"
-                onClick={() => void openSession(s)}
-                className="min-w-0 flex-1 text-left"
-                title="恢复并打开"
-              >
-                <span className="block truncate text-xs text-zinc-200">
-                  {s.summary || '(未命名)'}
-                </span>
-                <span className="block truncate text-[10px] text-zinc-600">
-                  {s.cwd ?? ''} · {relTime(s.lastModified)}
-                </span>
-              </button>
+              <HoverTip tip="恢复并打开" className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => void openSession(s)}
+                  className="w-full min-w-0 text-left"
+                >
+                  <span className="block truncate text-xs text-zinc-200">
+                    {s.summary || '(未命名)'}
+                  </span>
+                  <span className="block truncate text-[10px] text-zinc-600">
+                    {s.cwd ?? ''} · {relTime(s.lastModified)}
+                  </span>
+                </button>
+              </HoverTip>
               <button
                 type="button"
                 onClick={() => void unarchive(s.sessionId).then(() => void refresh())}

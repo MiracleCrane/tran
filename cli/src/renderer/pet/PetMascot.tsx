@@ -3,6 +3,7 @@ import { usePetStore } from '../store/petStore'
 import { useUiStore } from '../store/uiStore'
 import swayingCatUrl from '../assets/pet/swaying-cat-repaired.webm'
 import PetAlphaFilter, { PET_ALPHA_FILTER_URL } from './PetAlphaFilter'
+import HoverTip from '../components/HoverTip'
 import { useDraggablePetPosition } from './useDraggablePetPosition'
 
 /**
@@ -60,29 +61,32 @@ export default function PetMascot(): JSX.Element | null {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
-      title="拖动宠物"
     >
-      {mood !== 'idle' && label && (
-        <div className="mb-1.5 max-w-[120px] truncate rounded-xl border border-white/10 bg-[#16141f]/90 px-2.5 py-1 text-[11px] text-zinc-200 shadow-lg">
-          {label}
+      {/* 原生 title= 全 app 禁用；外层是 fixed 定位，HoverTip 包在内部
+          （包外面的话零尺寸行内 span 量不到位置）。 */}
+      <HoverTip tip="拖动宠物" className="flex w-full flex-col items-center">
+        {mood !== 'idle' && label && (
+          <div className="mb-1.5 max-w-[120px] truncate rounded-xl border border-white/10 bg-[#16141f]/90 px-2.5 py-1 text-[11px] text-zinc-200 shadow-lg">
+            {label}
+          </div>
+        )}
+        <div className={mood === 'error' ? 'grayscale-[.85] brightness-[.92]' : ''}>
+          <PetAlphaFilter />
+          <video
+            ref={videoRef}
+            src={swayingCatUrl}
+            draggable={false}
+            className="block w-[90px] bg-transparent"
+            style={{ filter: PET_ALPHA_FILTER_URL }}
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="auto"
+            aria-hidden
+          />
         </div>
-      )}
-      <div className={mood === 'error' ? 'grayscale-[.85] brightness-[.92]' : ''}>
-        <PetAlphaFilter />
-        <video
-          ref={videoRef}
-          src={swayingCatUrl}
-          draggable={false}
-          className="block w-[90px] bg-transparent"
-          style={{ filter: PET_ALPHA_FILTER_URL }}
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="auto"
-          aria-hidden
-        />
-      </div>
+      </HoverTip>
     </div>
   )
 }

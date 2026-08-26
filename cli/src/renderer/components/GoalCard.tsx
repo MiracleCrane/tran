@@ -2,6 +2,7 @@ import { memo, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { GoalControlAction, GoalStatus } from '../../shared/ipc'
 import ConfirmDialog from './ConfirmDialog'
+import HoverTip from './HoverTip'
 
 /** 目标卡片（goal 循环）：目标文本（两行截断可展开）+ 状态徽章 + 进度 x/y
  *  + 暂停/继续/停止按钮。挂在对话区顶部（PlanCard 旁）。 */
@@ -41,16 +42,17 @@ const GoalCard = memo(function GoalCard({ docked = false }: { docked?: boolean }
           <span className="shrink-0 text-accent">
             <GoalIcon />
           </span>
-          <button
-            type="button"
-            onClick={() => setExpanded((e) => !e)}
-            className={`min-w-0 flex-1 text-left text-xs text-zinc-200 ${
-              expanded ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'
-            }`}
-            title={expanded ? '收起' : '展开目标全文'}
-          >
-            {goal.objective}
-          </button>
+          <HoverTip tip={expanded ? '收起' : '展开目标全文'} className="min-w-0 flex-1">
+            <button
+              type="button"
+              onClick={() => setExpanded((e) => !e)}
+              className={`w-full min-w-0 text-left text-xs text-zinc-200 ${
+                expanded ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'
+              }`}
+            >
+              {goal.objective}
+            </button>
+          </HoverTip>
           <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${statusMeta.cls}`}>
             {statusMeta.label}
           </span>

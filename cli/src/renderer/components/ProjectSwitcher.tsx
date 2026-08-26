@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { useSessionStore } from '../store/sessionStore'
 import type { ClaudeExecutionBackend, Project } from '../../shared/ipc'
 import Collapse from './Collapse'
+import HoverTip from './HoverTip'
 import { isWslProjectPath, normalizeCwdForCompare } from '../../shared/paths'
 import { emitForgeEvent, onForgeEvent } from '../events'
 
@@ -145,7 +146,7 @@ export default function ProjectSwitcher(): JSX.Element | null {
     ? projects.find((p) => normalizeCwdForCompare(p.path) === currentCwd) ?? null
     : null
   // cwd 不在已添加项目里 = 无项目会话（Codex 的 "no project" 形态），
-  // 标签直说，不再拿目录末段冒充项目名；完整路径仍在 title 上。
+  // 标签直说，不再拿目录末段冒充项目名；完整路径挂 HoverTip 气泡。
   const currentLabel = current?.name ?? '无项目'
 
   /** 「不在项目中工作」：会话落在用户主目录，不进项目列表（addProject 只收
@@ -228,22 +229,26 @@ export default function ProjectSwitcher(): JSX.Element | null {
   // 「显眼点」）：文件夹 + 项目名（无项目会话显示「无项目」）+ chevron，
   // 带底色/描边/hover 的按钮态，不再是纯展示文本。
   const trigger = (
-    <button
-      type="button"
-      onClick={() => setOpen((o) => !o)}
-      title={picking ? '正在打开文件选择器…' : (current?.path ?? meta?.cwd ?? '')}
-      className="flex h-7 max-w-56 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-zinc-200 transition hover:bg-white/[0.09] hover:text-zinc-50"
+    <HoverTip
+      tip={picking ? '正在打开文件选择器…' : (current?.path ?? meta?.cwd ?? '')}
+      tipClassName="break-all text-left"
     >
-      {picking ? (
-        <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-white/20 border-t-accent" />
-      ) : (
-        <FolderIcon />
-      )}
-      <span className="truncate">{picking ? '正在打开文件选择器…' : currentLabel}</span>
-      <span className="shrink-0 text-zinc-500">
-        <ChevronIcon up={open} />
-      </span>
-    </button>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex h-7 max-w-56 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-zinc-200 transition hover:bg-white/[0.09] hover:text-zinc-50"
+      >
+        {picking ? (
+          <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-white/20 border-t-accent" />
+        ) : (
+          <FolderIcon />
+        )}
+        <span className="truncate">{picking ? '正在打开文件选择器…' : currentLabel}</span>
+        <span className="shrink-0 text-zinc-500">
+          <ChevronIcon up={open} />
+        </span>
+      </button>
+    </HoverTip>
   )
 
   const addProjectBackends: ClaudeExecutionBackend[] = wslSupportEnabled
@@ -331,27 +336,31 @@ export default function ProjectSwitcher(): JSX.Element | null {
                     </>
                   ) : (
                     <>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setEditingPath(p.path)
-                          setEditText(p.name)
-                        }}
-                        className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
-                        title="重命名"
-                      >
-                        <EditIcon />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setConfirmPath(p.path)
-                        }}
-                        className="rounded-lg p-1 text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
-                        title="删除"
-                      >
-                        <TrashIcon />
-                      </button>
+                      <HoverTip tip="重命名">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setEditingPath(p.path)
+                            setEditText(p.name)
+                          }}
+                          aria-label="重命名"
+                          className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
+                        >
+                          <EditIcon />
+                        </button>
+                      </HoverTip>
+                      <HoverTip tip="删除">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setConfirmPath(p.path)
+                          }}
+                          aria-label="删除"
+                          className="rounded-lg p-1 text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
+                        >
+                          <TrashIcon />
+                        </button>
+                      </HoverTip>
                     </>
                   )}
                 </div>

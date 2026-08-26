@@ -3,6 +3,7 @@ import { useSessionStore } from '../store/sessionStore'
 import ProviderFormModal from './ProviderFormModal'
 import { emitForgeEvent, onForgeEvent } from '../events'
 import { RefreshIcon, ToolPanelAlert, ToolPanelButton, ToolPanelHeader } from './ToolPanelChrome'
+import HoverTip from './HoverTip'
 import type {
   AgentBackendId,
   ClaudeExecutionBackend,
@@ -232,14 +233,17 @@ export default function ProvidersPanel(): JSX.Element {
           }
           actions={
             <>
-              <ToolPanelButton
-                onClick={() => void manualRefresh()}
-                disabled={refreshing}
-                title="刷新运营商"
-              >
-                <RefreshIcon spinning={refreshing} />
-                <span>{refreshing ? '刷新中' : '刷新'}</span>
-              </ToolPanelButton>
+              {/* ToolPanelButton 会把多余 props 原样铺到原生 <button> 上，
+                  title= 是原生提示（全 app 禁用）——气泡包在外面。 */}
+              <HoverTip tip="刷新运营商">
+                <ToolPanelButton
+                  onClick={() => void manualRefresh()}
+                  disabled={refreshing}
+                >
+                  <RefreshIcon spinning={refreshing} />
+                  <span>{refreshing ? '刷新中' : '刷新'}</span>
+                </ToolPanelButton>
+              </HoverTip>
               {!isHermesProfile && (
                 <ToolPanelButton variant="primary" onClick={openAdd}>
                   + 添加运营商

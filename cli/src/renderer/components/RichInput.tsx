@@ -161,7 +161,49 @@ function placeCaret(root: HTMLElement, offset: number): void {
   sel.addRange(range)
 }
 
+/**
+ * 胶囊悬停气泡。原生 title= 全 app 禁用（2026-08-25 用户嫌丑，统一走 HoverTip），
+ * 但这里的胶囊是 render() 手写出来的命令式 DOM、包不进 React 组件——于是按
+ * HoverTip 的同一套视觉与定位规则（深色玻璃、默认上方、贴顶 72px 翻下、
+ * ~120ms 淡入、滚动即收）手写一个等价气泡。模块级单例：同时只有一个输入框。
+ */
+let chipTipEl: HTMLDivElement | null = null
+
+function hideChipTip(): void {
+  chipTipEl?.remove()
+  chipTipEl = null
+  window.removeEventListener('scroll', hideChipTip, true)
+}
+
+function showChipTip(chip: HTMLElement, text: string): void {
+  hideChipTip()
+  const rect = chip.getBoundingClientRect()
+  const below = rect.top < 72
+  // max-w-md = 448px，左边往屏内 clamp 一档防出屏（同 HoverTip）。
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - 456))
+  const tip = document.createElement('div')
+  tip.className =
+    'pointer-events-none fixed z-[100] max-w-md whitespace-normal rounded-lg border border-white/10 ' +
+    'bg-zinc-900/95 px-2.5 py-1.5 text-left text-xs text-zinc-300 shadow-xl backdrop-blur ' +
+    `transition duration-[120ms] ease-out opacity-0 ${below ? '-translate-y-1' : 'translate-y-1'}`
+  tip.textContent = text
+  tip.style.left = `${left}px`
+  if (below) tip.style.top = `${rect.bottom + 6}px`
+  else tip.style.bottom = `${window.innerHeight - rect.top + 6}px`
+  document.body.appendChild(tip)
+  chipTipEl = tip
+  // 挂载后下一帧再转正透明度/位移，做出 ~120ms 淡入（同 HoverTip）。
+  requestAnimationFrame(() => {
+    if (chipTipEl !== tip) return
+    tip.classList.remove('opacity-0', '-translate-y-1', 'translate-y-1')
+    tip.classList.add('translate-y-0', 'opacity-100')
+  })
+  window.addEventListener('scroll', hideChipTip, true)
+}
+
 function render(root: HTMLElement, segments: Segment[]): void {
+  // 重排会 replaceChildren 把胶囊换掉，悬停中的气泡先收掉，免得残留在屏上。
+  hideChipTip()
   root.replaceChildren()
   for (const seg of segments) {
     if (seg.kind === 'command') {
@@ -169,7 +211,8 @@ function render(root: HTMLElement, segments: Segment[]): void {
       chip.dataset.raw = seg.text
       chip.contentEditable = 'false'
       chip.className = 'rich-input-chip'
-      chip.title = seg.text
+      chip.addEventListener('mouseenter', () => showChipTip(chip, seg.text))
+      chip.addEventListener('mouseleave', hideChipTip)
       // Codex 式：小立方体图标 + 蓝色文字，裸排版无胶囊底框。
       const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
       icon.setAttribute('viewBox', '0 0 24 24')
@@ -261,6 +304,9 @@ export default function RichInput({
     document.addEventListener('selectionchange', onSel)
     return () => document.removeEventListener('selectionchange', onSel)
   }, [onSelectionChange])
+
+  // 卸载时收掉可能还挂着的气泡（气泡挂在 body 上，不随组件树清理）。
+  useEffect(() => hideChipTip, [])
 
   const emit = (): void => {
     const root = ref.current

@@ -146,6 +146,9 @@ function LinkRenderer({
   href = '',
   children,
   node: _node,
+  // markdown 链接语法的 title（[t](url "title")）也要拦下——原生 title 提示已
+  // 全面禁用，统一走 HoverTip，不能让它从 {...props} 漏到 DOM 上。
+  title: _mdTitle,
   ...props
 }: LinkRendererProps): JSX.Element {
   const title = typeof href === 'string' && href ? href : undefined
@@ -203,31 +206,41 @@ function LinkRenderer({
   }
 
   /** 外链使用主题安全的站点图标；请求失败时仍保留清晰的本地图标。 */
+  // 原生 title= 换 HoverTip（2026-08-26 全库禁令）：悬停气泡显示完整 URL，
+  // 长 URL 用 break-all 折行。无 href 时不包气泡（HoverTip 空 tip 也会渲空气泡）。
+  const link = (
+    <a
+      {...props}
+      href={linkTarget}
+      onClick={handleClick}
+      onContextMenu={(event) => {
+        // 外链右键菜单（2026-08-26 用户：链接整段可点，「没办法复制这个链接里面
+        // 的文字」）。只挂外链；file/路径类链接左键是预览，右键行为需求未提，不动。
+        if (!external || !linkTarget) return
+        const fullHref = normalizeExternalHref(linkTarget)
+        showInlineContextMenu(event, [
+          { label: '复制链接', action: () => void navigator.clipboard.writeText(fullHref).catch(() => {}) },
+          {
+            label: '打开链接',
+            action: () => window.open(fullHref, '_blank', 'noopener,noreferrer')
+          }
+        ])
+      }}
+      className="text-[#3d9bff] no-underline transition hover:brightness-125"
+    >
+      {external && <LinkIcon href={href} />}
+      {bare ? shortenUrlForDisplay(linkTarget) : children}
+    </a>
+  )
   return (
     <>
-      <a
-        {...props}
-        href={linkTarget}
-        onClick={handleClick}
-        onContextMenu={(event) => {
-          // 外链右键菜单（2026-08-26 用户：链接整段可点，「没办法复制这个链接里面
-          // 的文字」）。只挂外链；file/路径类链接左键是预览，右键行为需求未提，不动。
-          if (!external || !linkTarget) return
-          const fullHref = normalizeExternalHref(linkTarget)
-          showInlineContextMenu(event, [
-            { label: '复制链接', action: () => void navigator.clipboard.writeText(fullHref).catch(() => {}) },
-            {
-              label: '打开链接',
-              action: () => window.open(fullHref, '_blank', 'noopener,noreferrer')
-            }
-          ])
-        }}
-        title={title}
-        className="text-[#3d9bff] no-underline transition hover:brightness-125"
-      >
-        {external && <LinkIcon href={href} />}
-        {bare ? shortenUrlForDisplay(linkTarget) : children}
-      </a>
+      {title ? (
+        <HoverTip tip={title} tipClassName="break-all">
+          {link}
+        </HoverTip>
+      ) : (
+        link
+      )}
       {trailing}
     </>
   )

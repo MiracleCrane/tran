@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import McpServerFormModal from './McpServerFormModal'
+import HoverTip from './HoverTip'
 import type { McpServerEntry, McpServerStatusKind, McpScope } from '../../shared/ipc'
 import { RefreshIcon, ToolPanelAlert, ToolPanelButton } from './ToolPanelChrome'
 import { useTransientFlag } from '../hooks/useTransientFlag'
@@ -310,20 +311,24 @@ export default function McpPanel(): JSX.Element {
                     )}
                   </div>
                   {s.status === 'failed' && s.error && (
-                    <div className="mt-1.5 truncate text-[11px] text-red-400/80" title={s.error}>
-                      {s.error}
-                    </div>
+                    <HoverTip tip={s.error} tipClassName="break-words text-left" className="block">
+                      <div className="mt-1.5 truncate text-[11px] text-red-400/80">
+                        {s.error}
+                      </div>
+                    </HoverTip>
                   )}
                   {enabled && s.tools && s.tools.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
                       {s.tools.slice(0, 12).map((t) => (
-                        <span
+                        <HoverTip
                           key={t.name}
-                          title={t.description}
-                          className="rounded bg-bg-elev px-1.5 py-0.5 font-mono text-[10px] text-zinc-400"
+                          tip={t.description ?? t.name}
+                          tipClassName="break-words text-left"
                         >
-                          {t.name}
-                        </span>
+                          <span className="rounded bg-bg-elev px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
+                            {t.name}
+                          </span>
+                        </HoverTip>
                       ))}
                       {s.tools.length > 12 && (
                         <span className="px-1 py-0.5 text-[10px] text-zinc-600">

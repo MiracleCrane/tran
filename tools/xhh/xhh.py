@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 import re
+import secrets
 import sys
 from pathlib import Path
 
@@ -56,6 +57,11 @@ else:
 PORT_FILE = Path.home() / "AppData/Local/Google/Chrome/User Data/DevToolsActivePort"
 HOME_URL = "https://www.xiaoheihe.cn/app/bbs/home"
 POST_URL = "https://www.xiaoheihe.cn/app/bbs/link/{}"
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_PIXELS = 40_000_000
+DAEMON_MESSAGE_LIMIT = 16 * 1024 * 1024
+DAEMON_STATE_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "xhh"
+DAEMON_TOKEN_FILE = DAEMON_STATE_DIR / "daemon-token"
 
 FEED_JS = """JSON.stringify([...document.querySelectorAll('a[href*="/bbs/link/"]')]
   .map(a => ({
@@ -183,8 +189,17 @@ class CDP:
         self._id = 0
         self.ws = None
         self._lock = None
+        self._xhh_session = None
+        self._xhh_target_id = None
 
     async def connect(self):
+        if self.ws:
+            try:
+                await self.ws.close()
+            except Exception:
+                pass
+        self._xhh_session = None
+        self._xhh_target_id = None
         port, path = PORT_FILE.read_text().splitlines()[:2]
         url = f"ws://127.0.0.1:{port}{path}"
         last_err = None
@@ -247,10 +262,20 @@ async def attach_xhh_tab(cdp):
     )
     if page is None:
         page = await cdp.call("Target.createTarget", {"url": HOME_URL, "active": False})
+    target_id = page["targetId"]
+    if cdp._xhh_session and cdp._xhh_target_id == target_id:
+        return cdp._xhh_session
+    if cdp._xhh_session:
+        try:
+            await cdp.call("Target.detachFromTarget", {"sessionId": cdp._xhh_session})
+        except Exception:
+            pass
     r = await cdp.call(
-        "Target.attachToTarget", {"targetId": page["targetId"], "flatten": True}
+        "Target.attachToTarget", {"targetId": target_id, "flatten": True}
     )
-    return r["sessionId"]
+    cdp._xhh_session = r["sessionId"]
+    cdp._xhh_target_id = target_id
+    return cdp._xhh_session
 
 
 async def goto_and_wait(cdp, session, url, ready_js, timeout=25):
@@ -280,18 +305,41 @@ def _download(url, timeout=15):
     import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+        declared = r.headers.get("Content-Length")
+        if declared and int(declared) > MAX_IMAGE_BYTES:
+            raise ValueError(f"图片超过 {MAX_IMAGE_BYTES // 1024 // 1024}MB 上限")
+        chunks = []
+        total = 0
+        while True:
+            chunk = r.read(min(64 * 1024, MAX_IMAGE_BYTES + 1 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_IMAGE_BYTES:
+                raise ValueError(f"图片超过 {MAX_IMAGE_BYTES // 1024 // 1024}MB 上限")
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+
+def decode_image(data):
+    """安全解码图片，拒绝会造成过量内存占用的超大像素图。"""
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(data))
+    width, height = im.size
+    if width * height > MAX_IMAGE_PIXELS:
+        raise ValueError(f"图片像素超过 {MAX_IMAGE_PIXELS:,} 上限")
+    return im.convert("RGB")
 
 
 def img_to_ansi(data, max_w=None, max_h=40):
     """每个字符用前景色画上半像素、背景色画下半像素（▀）。
     宽度默认取终端列数（上限 200），LANCZOS 采样保细节。"""
-    import io
     import shutil
     from PIL import Image
     if max_w is None:
         max_w = min(shutil.get_terminal_size((100, 40)).columns - 2, 200)
-    im = Image.open(io.BytesIO(data)).convert("RGB")
+    im = decode_image(data)
     w, h = im.size
     cols = max(1, min(max_w, w))
     rows = max(1, min(max_h, int(h / w * cols * 0.5)))
@@ -430,6 +478,14 @@ async def fetch_post_head(cdp, pid):
 async def fetch_post_comments(cdp, pid):
     """第二阶段：在当前页面展开楼中楼并提取评论。页面应已在目标帖上。"""
     session = await attach_xhh_tab(cdp)
+    current_url = await cdp.eval_js(session, "location.href") or ""
+    if post_id_of(current_url) != pid:
+        await goto_and_wait(
+            cdp,
+            session,
+            POST_URL.format(pid),
+            "document.body && document.body.innerText.includes('全部评论')",
+        )
     expanded = await cdp.eval_await_js(session, EXPAND_JS)
     data = json.loads(await cdp.eval_js(session, COMMENTS_JS) or "{}")
     data["expanded"] = expanded or 0
@@ -460,11 +516,9 @@ def _ocr_png(png_path):
 
 def _ocr_image_data(data):
     """OCR 一张图，返回 {text, chars, words, confidence}。"""
-    import io
     import os
     import tempfile
-    from PIL import Image
-    im = Image.open(io.BytesIO(data)).convert("RGB")
+    im = decode_image(data)
     fd, tmp = tempfile.mkstemp(suffix=".png")
     try:
         with os.fdopen(fd, "wb") as f:
@@ -569,15 +623,41 @@ DAEMON_PORT = 19812
 DAEMON_SCRIPT = Path(__file__).with_name("xhh_daemon.py")
 
 
-async def daemon_call(payload, timeout=180):
-    reader, writer = await asyncio.open_connection("127.0.0.1", DAEMON_PORT)
+def daemon_token():
+    """取得仅当前用户可读的本地守护进程令牌；并发首建时保持原子性。"""
+    DAEMON_STATE_DIR.mkdir(parents=True, exist_ok=True)
     try:
-        writer.write((json.dumps(payload) + "\n").encode())
+        token = DAEMON_TOKEN_FILE.read_text(encoding="ascii").strip()
+        if len(token) >= 32:
+            return token
+    except OSError:
+        pass
+    candidate = secrets.token_urlsafe(32)
+    try:
+        fd = os.open(DAEMON_TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return DAEMON_TOKEN_FILE.read_text(encoding="ascii").strip()
+    with os.fdopen(fd, "w", encoding="ascii") as f:
+        f.write(candidate)
+    return candidate
+
+
+async def daemon_call(payload, timeout=180):
+    reader, writer = await asyncio.open_connection(
+        "127.0.0.1", DAEMON_PORT, limit=DAEMON_MESSAGE_LIMIT
+    )
+    try:
+        request = {**payload, "token": daemon_token()}
+        writer.write((json.dumps(request) + "\n").encode())
         await writer.drain()
         line = await asyncio.wait_for(reader.readline(), timeout)
         return json.loads(line.decode())
     finally:
         writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
 
 
 def _code_mtime():
@@ -621,7 +701,7 @@ async def run_via_daemon(cmd, **kw):
     resp = await daemon_call({"cmd": cmd, **kw})
     if not resp.get("ok"):
         err = resp.get("error", "未知错误")
-        if err == "CAPTCHA":
+        if resp.get("code") == "CAPTCHA" or err == "CAPTCHA":
             print("!! 触发了网站安全验证：请到 Chrome 的小黑盒标签页手动完成验证，再重新执行命令。")
             sys.exit(2)
         print(f"!! {err}")

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
+import HoverTip from './HoverTip'
 
 /** "模式"按钮 + 上浮现小面板（kimi web 双控件设计的右半）：三个独立开关行
  *  —— 计划（真实，ACP mode='plan'，与权限档互斥、关闭恢复）、Swarm（本地
@@ -125,18 +126,19 @@ export default function ModePanel(): JSX.Element | null {
 
   return (
     <div className="relative shrink-0">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className={`glass-control flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] transition ${
-          anyOn ? 'border-accent/50 text-accent' : 'text-zinc-300'
-        }`}
-        title="模式：计划 / Swarm / 目标"
-      >
-        {anyOn ? `模式·${activeModes.join('/')}` : '模式'}
-        {anyOn && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
-      </button>
+      <HoverTip tip="模式：计划 / Swarm / 目标">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className={`glass-control flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] transition ${
+            anyOn ? 'border-accent/50 text-accent' : 'text-zinc-300'
+          }`}
+        >
+          {anyOn ? `模式·${activeModes.join('/')}` : '模式'}
+          {anyOn && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
+        </button>
+      </HoverTip>
       {open && (
         <>
           {/* click-outside 捕获层（无 backdrop 变暗，非模态） */}

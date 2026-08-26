@@ -4,6 +4,7 @@ import type { PlanEntry, ToolBlock, ToolStatus } from '../types'
 import type { KimiTaskInfo } from '../../shared/ipc'
 import { AGENT_TOOL_NAMES, BASH_TOOL_NAMES, backgroundTaskInfo, withServerTaskStatus } from '../utils/toolStats'
 import ToolCallCard, { parseSubagentInput, summaryForTool } from './ToolCallCard'
+import HoverTip from './HoverTip'
 
 /** 任务行组件（chips 独立浮层共用；原 TaskPanel 合并面板拆出）。 */
 
@@ -88,12 +89,11 @@ export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
               子代理
             </span>
             {bg?.isBackground && (
-              <span
-                className="shrink-0 rounded bg-blue-950/50 px-1 py-0.5 text-[9px] font-medium text-blue-300"
-                title="后台任务：派出后不阻塞对话"
-              >
-                后台
-              </span>
+              <HoverTip tip="后台任务：派出后不阻塞对话" tipClassName="text-left" className="inline-flex shrink-0">
+                <span className="rounded bg-blue-950/50 px-1 py-0.5 text-[9px] font-medium text-blue-300">
+                  后台
+                </span>
+              </HoverTip>
             )}
             {sub?.subagentType && (
               <span className="shrink-0 rounded bg-white/[0.06] px-1 py-0.5 text-[9px] text-zinc-400">
@@ -105,12 +105,11 @@ export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
           <>
             <span className="shrink-0 font-mono text-[11px] text-zinc-300">{block.name}</span>
             {bg?.isBackground && (
-              <span
-                className="shrink-0 rounded bg-blue-950/50 px-1 py-0.5 text-[9px] font-medium text-blue-300"
-                title="后台任务：发起后不阻塞对话"
-              >
-                后台
-              </span>
+              <HoverTip tip="后台任务：发起后不阻塞对话" tipClassName="text-left" className="inline-flex shrink-0">
+                <span className="rounded bg-blue-950/50 px-1 py-0.5 text-[9px] font-medium text-blue-300">
+                  后台
+                </span>
+              </HoverTip>
             )}
           </>
         )}
@@ -118,46 +117,51 @@ export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
          *  完整输入/命令收进下方展开区（ToolCallCard）。
          *  #28 两行 clamp（配合浮层加宽）：描述能预览到大意，不再一刀切省略。 */}
         {isAgent ? (
-          <span
-            className="line-clamp-2 min-w-0 flex-1 text-[11px] leading-snug text-zinc-300"
-            title={sub?.prompt || summary}
-          >
-            {sub?.description || sub?.prompt || summary || ''}
-          </span>
+          <HoverTip tip={sub?.prompt || summary} tipClassName="break-words text-left" className="min-w-0 flex-1">
+            <span className="line-clamp-2 text-[11px] leading-snug text-zinc-300">
+              {sub?.description || sub?.prompt || summary || ''}
+            </span>
+          </HoverTip>
         ) : (
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500">
             {summary}
           </span>
         )}
         {bgRunning && bg?.taskId && (
-          <button
-            type="button"
-            title="软停：让 agent 用 TaskStop 停掉该后台任务（不中断整轮）"
-            onClick={(e) => {
-              e.stopPropagation()
-              void sendMessage(`请使用 TaskStop 停止任务 ${bg.taskId}`)
-            }}
-            className="shrink-0 rounded px-1 text-[10px] text-red-400 transition hover:bg-red-950/40"
-          >
-            停止
-          </button>
+          <HoverTip tip="软停：让 agent 用 TaskStop 停掉该后台任务（不中断整轮）" tipClassName="break-words text-left" className="inline-flex shrink-0">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                void sendMessage(`请使用 TaskStop 停止任务 ${bg.taskId}`)
+              }}
+              className="rounded px-1 text-[10px] text-red-400 transition hover:bg-red-950/40"
+            >
+              停止
+            </button>
+          </HoverTip>
         )}
         {running && (
-          <button
-            type="button"
-            title={
+          <HoverTip
+            tip={
               isAgent
                 ? '中断当前整轮执行（停该子代理所在轮）；ACP 不支持单任务停止'
                 : '中断当前整轮执行；ACP 不支持单任务停止（web 的单独停止走 server 协议）'
             }
-            onClick={(e) => {
-              e.stopPropagation()
-              void interrupt()
-            }}
-            className="shrink-0 rounded px-1 text-[10px] text-red-400 transition hover:bg-red-950/40"
+            tipClassName="break-words text-left"
+            className="inline-flex shrink-0"
           >
-            {isAgent ? '中断（停该子代理所在轮）' : '中断'}
-          </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                void interrupt()
+              }}
+              className="rounded px-1 text-[10px] text-red-400 transition hover:bg-red-950/40"
+            >
+              {isAgent ? '中断（停该子代理所在轮）' : '中断'}
+            </button>
+          </HoverTip>
         )}
         <span className="shrink-0 text-[10px] tabular-nums text-zinc-600">
           {duration}

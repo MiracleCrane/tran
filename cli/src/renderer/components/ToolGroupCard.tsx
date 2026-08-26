@@ -1,6 +1,7 @@
 import { memo, useState } from 'react'
 import type { ToolBlock } from '../types'
 import Collapse from './Collapse'
+import HoverTip from './HoverTip'
 import ToolCallCard from './ToolCallCard'
 
 const WrenchGlyph = (): JSX.Element => (
@@ -48,9 +49,11 @@ const ToolGroupCard = memo(function ToolGroupCard({
         {/* 与单行工具同一约定：完成态什么都不显示；含失败 → 行首小红叉（不出
             文字），进行中 → 行尾「进行中」。 */}
         {hasError && !running && (
-          <span className="shrink-0 text-[10px] leading-none text-red-400" title="含失败的调用">
-            ✗
-          </span>
+          <HoverTip tip="含失败的调用" className="inline-flex shrink-0">
+            <span className="text-[10px] leading-none text-red-400">
+              ✗
+            </span>
+          </HoverTip>
         )}
         <span className="shrink-0 text-zinc-400">
           <WrenchGlyph />

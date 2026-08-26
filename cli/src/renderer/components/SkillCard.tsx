@@ -1,4 +1,5 @@
 import type { SkillInfo } from '../../shared/ipc'
+import HoverTip from './HoverTip'
 
 /** 斜杠命令（skill）调用的专属卡片 —— 用户消息以 `/name` 开头且命中 kimi
  *  推送的可用命令列表时，用它替代普通用户气泡：图标 + 命令名 + Skill 徽章 +
@@ -66,18 +67,19 @@ export default function SkillCard({
           <div className="flex items-center gap-2">
             <span className="truncate font-mono text-[13px] font-semibold text-zinc-100">/{name}</span>
             {cutIn && (
-              <span
-                className="shrink-0 rounded bg-white/[0.08] px-1.5 py-0.5 text-[9px] font-medium text-zinc-300"
-                title="Ctrl+S 打断并发送（插队）"
-              >
-                插队
-              </span>
+              <HoverTip tip="Ctrl+S 打断并发送（插队）" tipClassName="text-left" className="inline-flex shrink-0">
+                <span className="rounded bg-white/[0.08] px-1.5 py-0.5 text-[9px] font-medium text-zinc-300">
+                  插队
+                </span>
+              </HoverTip>
             )}
           </div>
           {skill.description && (
-            <div className="truncate text-[11px] text-zinc-500" title={skill.description}>
-              {skill.description}
-            </div>
+            <HoverTip tip={skill.description} tipClassName="break-words text-left" className="block min-w-0">
+              <div className="truncate text-[11px] text-zinc-500">
+                {skill.description}
+              </div>
+            </HoverTip>
           )}
         </div>
         <span className="shrink-0 rounded-md border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-accent">

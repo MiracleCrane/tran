@@ -11,6 +11,7 @@ Chrome 连接断开（如浏览器重启）时自动退出，由下个命令重�
 """
 import asyncio
 import json
+import secrets
 import sys
 from pathlib import Path
 
@@ -29,57 +30,113 @@ CODE_MTIME = max(
 )
 
 
-async def handle(reader, writer, cdp):
+async def dispatch(req, cdp):
+    """执行一个完整浏览器事务；调用方负责串行化。"""
+    cmd = req.get("cmd")
+    if cmd == "feed":
+        count = max(1, min(int(req.get("count", 20)), 100))
+        return {"ok": True, "data": await fetch_feed(cdp, count)}
+    if cmd in ("post_head", "post_comments"):
+        pid = xhh.post_id_of(str(req.get("pid", "")))
+        if not pid:
+            return {"ok": False, "code": "BAD_REQUEST", "error": "帖子 id 无效"}
+        fetch = fetch_post_head if cmd == "post_head" else fetch_post_comments
+        return {"ok": True, "data": await fetch(cdp, pid)}
+    return {"ok": False, "code": "BAD_REQUEST", "error": f"未知命令: {cmd}"}
+
+
+async def dispatch_with_reconnect(req, cdp):
+    """Chrome 重启导致断链时，在同一条用户命令中重连并重放一次。"""
+    for attempt in range(2):
+        try:
+            return await dispatch(req, cdp)
+        except ConnectionClosed:
+            if attempt:
+                raise
+            await cdp.connect()
+
+
+async def handle(reader, writer, cdp, operation_lock, token, stop_event):
+    should_stop = False
     try:
         line = await asyncio.wait_for(reader.readline(), 30)
         req = json.loads(line.decode())
         cmd = req.get("cmd")
-        if cmd == "ping":
+        supplied = str(req.get("token", ""))
+        if not secrets.compare_digest(supplied, token):
+            resp = {"ok": False, "code": "UNAUTHORIZED", "error": "未授权"}
+        elif cmd == "ping":
             resp = {"ok": True, "mtime": CODE_MTIME}
-        elif cmd == "feed":
-            resp = {"ok": True, "data": await fetch_feed(cdp, int(req.get("count", 20)))}
-        elif cmd == "post_head":
-            resp = {"ok": True, "data": await fetch_post_head(cdp, str(req["pid"]))}
-        elif cmd == "post_comments":
-            resp = {"ok": True, "data": await fetch_post_comments(cdp, str(req["pid"]))}
         elif cmd == "stop":
             resp = {"ok": True}
-            writer.write((json.dumps(resp) + "\n").encode())
-            await writer.drain()
-            writer.close()
-            asyncio.get_running_loop().call_later(0.2, sys.exit, 0)
-            return
+            should_stop = True
         else:
-            resp = {"ok": False, "error": f"未知命令: {cmd}"}
+            async with operation_lock:
+                resp = await dispatch_with_reconnect(req, cdp)
+    except RuntimeError as error:
+        if str(error) == "CAPTCHA":
+            resp = {"ok": False, "code": "CAPTCHA", "error": "CAPTCHA"}
+        else:
+            resp = {"ok": False, "code": "RUNTIME_ERROR", "error": f"RuntimeError: {error}"}
     except ConnectionClosed:
-        # Chrome 重启/调试端口失效：退出，让客户端下次重新拉起
-        resp = {"ok": False, "error": "Chrome 调试连接已断开，请重试（会自动重连）"}
-        try:
-            writer.write((json.dumps(resp) + "\n").encode())
-            await writer.drain()
-        except Exception:
-            pass
-        writer.close()
-        asyncio.get_running_loop().call_later(0.2, sys.exit, 0)
-        return
-    except Exception as e:
-        resp = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        resp = {
+            "ok": False,
+            "code": "CDP_DISCONNECTED",
+            "error": "Chrome 调试连接已断开，自动重连失败",
+        }
+    except Exception as error:
+        resp = {"ok": False, "code": "INTERNAL_ERROR", "error": f"{type(error).__name__}: {error}"}
     try:
         writer.write((json.dumps(resp, ensure_ascii=False) + "\n").encode())
         await writer.drain()
     except Exception:
         pass
-    writer.close()
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+    if should_stop:
+        stop_event.set()
 
 
 async def main():
-    cdp = CDP()
-    await cdp.connect()  # Chrome 的调试确认只在这里弹一次
+    token = xhh.daemon_token()
+    operation_lock = asyncio.Lock()
+    stop_event = asyncio.Event()
+    ready = asyncio.Event()
+    state = {}
+
+    async def on_client(reader, writer):
+        await ready.wait()
+        await handle(reader, writer, state["cdp"], operation_lock, token, stop_event)
+
+    # 先绑定端口再申请 CDP：并发首启时只有端口赢家会触发 Chrome 授权。
     server = await asyncio.start_server(
-        lambda r, w: handle(r, w, cdp), "127.0.0.1", PORT
+        on_client,
+        "127.0.0.1",
+        PORT,
+        limit=xhh.DAEMON_MESSAGE_LIMIT,
     )
-    async with server:
-        await server.serve_forever()
+    cdp = CDP()
+    try:
+        await cdp.connect()
+    except Exception:
+        server.close()
+        await server.wait_closed()
+        raise
+    state["cdp"] = cdp
+    ready.set()
+
+    serve_task = asyncio.create_task(server.serve_forever())
+    try:
+        await stop_event.wait()
+    finally:
+        server.close()
+        await server.wait_closed()
+        serve_task.cancel()
+        await cdp.close()
 
 
 if __name__ == "__main__":

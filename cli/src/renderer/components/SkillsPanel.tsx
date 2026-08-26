@@ -3,6 +3,7 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import type { AgentBackendId, SkillInfo, MarketplacePlugin } from '../../shared/ipc'
 import DisclosureSelect from './DisclosureSelect'
+import HoverTip from './HoverTip'
 import { onForgeEvent } from '../events'
 
 type Tab = 'skills' | 'store'
@@ -160,18 +161,19 @@ export default function SkillsPanel(): JSX.Element {
             ← 返回对话
           </button>
           <h1 className="text-lg font-semibold text-zinc-100">技能</h1>
-          <button
-            onClick={() => setTranslate((v) => !v)}
-            className={`ml-1 inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs transition ${
-              translate
-                ? 'border-accent/50 bg-accent/15 text-accent'
-                : 'border-border-subtle bg-bg-elev text-zinc-400 hover:text-zinc-200'
-            }`}
-            title="用模型把看得见的描述翻译成中文(滚动到才翻译)"
-          >
-            译
-            {translate && <span className="text-[10px]">中</span>}
-          </button>
+          <HoverTip tip="用模型把看得见的描述翻译成中文（滚动到才翻译）">
+            <button
+              onClick={() => setTranslate((v) => !v)}
+              className={`ml-1 inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs transition ${
+                translate
+                  ? 'border-accent/50 bg-accent/15 text-accent'
+                  : 'border-border-subtle bg-bg-elev text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              译
+              {translate && <span className="text-[10px]">中</span>}
+            </button>
+          </HoverTip>
           <div className="ml-auto inline-flex rounded-lg border border-border-subtle bg-bg-elev p-0.5 text-xs">
             <button
               onClick={() => setTab('skills')}
@@ -454,12 +456,13 @@ function StoreTab({
               )}
             </div>
             {p.author && <div className="mt-0.5 text-[11px] text-zinc-600">{p.author}</div>}
-            <p
-              className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-zinc-400"
-              title={p.description}
-            >
-              {tr(p.description) || '(无描述)'}
-            </p>
+            {/* 卡片里只显示 3 行裁剪，原文全文收进 HoverTip（原生 title= 全 app
+                禁用）。tip 是英文原文，可能很长：左对齐 + break-words。 */}
+            <HoverTip tip={p.description} className="block" tipClassName="text-left break-words">
+              <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-zinc-400">
+                {tr(p.description) || '(无描述)'}
+              </p>
+            </HoverTip>
             {p.homepage && (
               <a
                 href={p.homepage}

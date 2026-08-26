@@ -6,9 +6,10 @@
 
 import json
 import uuid
-from pathlib import Path
 
-SESSIONS_PATH = Path(__file__).parent / "sessions.json"
+from config import DATA_DIR
+
+SESSIONS_PATH = DATA_DIR / "sessions.json"
 
 
 class SessionStore:

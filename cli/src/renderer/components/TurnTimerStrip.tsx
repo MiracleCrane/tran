@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
+import HoverTip from './HoverTip'
 import swayingCatUrl from '../assets/pet/swaying-cat-repaired.webm'
 
 /** 本轮计时（2026-08-17 用户要求）：悬浮在对话区左下角——输出的左边，不占
@@ -21,24 +22,28 @@ export default function TurnTimerStrip(): JSX.Element | null {
   const ss = String(total % 60).padStart(2, '0')
   return (
     <div className="pointer-events-none absolute bottom-3 left-3 z-20">
-      <span className="tran-turn-timer" title="本轮已运行时长">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <circle cx="12" cy="13" r="8" stroke="currentColor" strokeWidth="1.8" />
-          <path d="M12 8.5v4.5l3 2M9 2.5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        </svg>
-        <span className="tran-shimmer">{mm}:{ss}</span>
-        <video
-          src={swayingCatUrl}
-          draggable={false}
-          className="tran-turn-timer-cat"
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="auto"
-          aria-hidden
-        />
-      </span>
+      {/* 外层 pointer-events-none 会让原生 title 永远不触发；HoverTip 包裹层
+          重新打开指针事件，气泡才悬停得见。 */}
+      <HoverTip tip="本轮已运行时长" className="pointer-events-auto inline-flex">
+        <span className="tran-turn-timer">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <circle cx="12" cy="13" r="8" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M12 8.5v4.5l3 2M9 2.5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+          <span className="tran-shimmer">{mm}:{ss}</span>
+          <video
+            src={swayingCatUrl}
+            draggable={false}
+            className="tran-turn-timer-cat"
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="auto"
+            aria-hidden
+          />
+        </span>
+      </HoverTip>
     </div>
   )
 }

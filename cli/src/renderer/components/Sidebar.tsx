@@ -4,6 +4,7 @@ import { useSessionStore } from '../store/sessionStore'
 import { useUiStore, type View } from '../store/uiStore'
 import Collapse from './Collapse'
 import ConfirmDialog from './ConfirmDialog'
+import HoverTip from './HoverTip'
 import { AppLogo } from './AppLogo'
 import type { ClaudeExecutionBackend, SessionListItem, SessionPreview } from '../../shared/ipc'
 import { normalizeCwdForCompare } from '../../shared/paths'
@@ -128,13 +129,17 @@ function SessionPreviewCard({
         <div className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-100">{preview.summary}</div>
         <div className="shrink-0 text-[10px] text-zinc-600">{relTime(preview.lastModified)}</div>
       </div>
-      {projectName && (
-        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400" title={preview.cwd}>
+      {projectName && preview.cwd && (
+        <HoverTip
+          tip={preview.cwd}
+          tipClassName="break-all text-left"
+          className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-zinc-400"
+        >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" className="shrink-0 text-zinc-500" aria-hidden>
             <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
           </svg>
           <span className="truncate">{projectName}</span>
-        </div>
+        </HoverTip>
       )}
       {preview.firstPrompt ? (
         <div className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-zinc-500">
@@ -152,54 +157,66 @@ function SessionPreviewCard({
           要悬停停留才出现，点这里面的都是有意动作，无需二次确认。输出中的会话
           不支持归档：禁用并说明。 */}
       <div className="mt-2 flex items-center justify-end gap-0.5 border-t border-white/[0.06] pt-2">
-        <button
-          type="button"
-          onClick={() => {
-            onClose()
-            onPin(preview.session)
-          }}
-          className={`flex h-6 w-6 items-center justify-center rounded-lg transition ${
-            preview.pinned ? 'text-accent hover:bg-white/[0.06]' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200'
-          }`}
-          title={preview.pinned ? '取消置顶' : '置顶'}
+        <HoverTip tip={preview.pinned ? '取消置顶' : '置顶'}>
+          <button
+            type="button"
+            aria-label={preview.pinned ? '取消置顶' : '置顶'}
+            onClick={() => {
+              onClose()
+              onPin(preview.session)
+            }}
+            className={`flex h-6 w-6 items-center justify-center rounded-lg transition ${
+              preview.pinned ? 'text-accent hover:bg-white/[0.06]' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200'
+            }`}
+          >
+            <PinIcon active={preview.pinned} />
+          </button>
+        </HoverTip>
+        <HoverTip tip="重命名">
+          <button
+            type="button"
+            aria-label="重命名"
+            onClick={() => {
+              onClose()
+              onRename(preview.key, preview.summary)
+            }}
+            className="flex h-6 w-6 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
+          >
+            <EditIcon />
+          </button>
+        </HoverTip>
+        <HoverTip tip="删除">
+          <button
+            type="button"
+            aria-label="删除"
+            onClick={() => {
+              onClose()
+              onDelete(preview.key)
+            }}
+            className="flex h-6 w-6 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
+          >
+            <TrashIcon />
+          </button>
+        </HoverTip>
+        {/* 禁用态提示：disabled 按钮不触发鼠标事件，悬停目标必须是 HoverTip
+            的外层 span（禁用说明因此仍然可见）。 */}
+        <HoverTip
+          tip={preview.running ? '正在输出中的会话不支持归档' : '归档（从列表收起，归档页可找回）'}
+          tipClassName="text-left"
         >
-          <PinIcon active={preview.pinned} />
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            onClose()
-            onRename(preview.key, preview.summary)
-          }}
-          className="flex h-6 w-6 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
-          title="重命名"
-        >
-          <EditIcon />
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            onClose()
-            onDelete(preview.key)
-          }}
-          className="flex h-6 w-6 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
-          title="删除"
-        >
-          <TrashIcon />
-        </button>
-        <button
-          type="button"
-          disabled={preview.running}
-          onClick={() => {
-            onClose()
-            onArchive(preview.session.sessionId)
-          }}
-          className="flex h-6 items-center gap-1 rounded-lg px-1.5 text-[11px] text-zinc-400 transition enabled:hover:bg-white/[0.06] enabled:hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
-          title={preview.running ? '正在输出中的会话不支持归档' : '归档（从列表收起，归档页可找回）'}
-        >
-          <ArchiveIcon />
-          归档
-        </button>
+          <button
+            type="button"
+            disabled={preview.running}
+            onClick={() => {
+              onClose()
+              onArchive(preview.session.sessionId)
+            }}
+            className="flex h-6 items-center gap-1 rounded-lg px-1.5 text-[11px] text-zinc-400 transition enabled:hover:bg-white/[0.06] enabled:hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ArchiveIcon />
+            归档
+          </button>
+        </HoverTip>
       </div>
     </div>,
     document.body
@@ -1714,18 +1731,20 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         <div className="flex-1 text-sm font-semibold">
           <span className="flow-text flow-text-violet">Tran</span>
         </div>
-        <button
-          onClick={() => useUiStore.getState().toggleSidebarHidden()}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
-          title="隐藏侧边栏（Alt+Q 唤回）"
-        >
-          {/* 侧栏面板图标（VS Code 式：框 + 左侧栏位）——替代原来的 ⟨| 箭头
-              （2026-08-18 用户：「两个箭头太丑了」）。 */}
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-            <rect x="3" y="4.5" width="18" height="15" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
-            <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.7" />
-          </svg>
-        </button>
+        <HoverTip tip="隐藏侧边栏（Alt+Q 唤回）">
+          <button
+            onClick={() => useUiStore.getState().toggleSidebarHidden()}
+            aria-label="隐藏侧边栏"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
+          >
+            {/* 侧栏面板图标（VS Code 式：框 + 左侧栏位）——替代原来的 ⟨| 箭头
+                （2026-08-18 用户：「两个箭头太丑了」）。 */}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="4.5" width="18" height="15" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
+              <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.7" />
+            </svg>
+          </button>
+        </HoverTip>
       </div>
 
       {/* new chat（项目切换 2026-08-26 搬进标题栏 chip，侧栏顶部只留新建对话） */}
@@ -1758,86 +1777,106 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         {multiMode ? (
           <div className="flex w-full items-center gap-1 text-[11px] text-zinc-400">
             <span className="shrink-0 whitespace-nowrap tabular-nums text-zinc-300">已选 {selectedKeys.size} 项</span>
-            <button
-              onClick={selectAllFiltered}
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition hover:bg-white/[0.05] hover:text-zinc-200"
-              title="全选（当前过滤结果）"
-            >
-              <CheckAllIcon />
-            </button>
-            <button
-              onClick={() => setSelectedKeys(new Set())}
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition hover:bg-white/[0.05] hover:text-zinc-200"
-              title="清空选择"
-            >
-              <XIcon />
-            </button>
-            <button
-              onClick={() => setConfirmBatch(true)}
-              disabled={selectedKeys.size === 0 || batchDeleting}
-              className="flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 text-red-400 transition hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-50"
-              title="删除所选会话"
-            >
-              <TrashIcon />
-              {batchDeleting ? '删除中…' : '删除'}
-            </button>
-            <button
-              onClick={exitMultiMode}
-              className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition hover:bg-white/[0.05] hover:text-zinc-200"
-              title="退出多选（Esc）"
-            >
-              <XIcon />
-            </button>
+            <HoverTip tip="全选（当前过滤结果）" tipClassName="text-left">
+              <button
+                onClick={selectAllFiltered}
+                aria-label="全选"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition hover:bg-white/[0.05] hover:text-zinc-200"
+              >
+                <CheckAllIcon />
+              </button>
+            </HoverTip>
+            <HoverTip tip="清空选择">
+              <button
+                onClick={() => setSelectedKeys(new Set())}
+                aria-label="清空选择"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition hover:bg-white/[0.05] hover:text-zinc-200"
+              >
+                <XIcon />
+              </button>
+            </HoverTip>
+            <HoverTip tip="删除所选会话">
+              <button
+                onClick={() => setConfirmBatch(true)}
+                disabled={selectedKeys.size === 0 || batchDeleting}
+                className="flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 text-red-400 transition hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <TrashIcon />
+                {batchDeleting ? '删除中…' : '删除'}
+              </button>
+            </HoverTip>
+            <HoverTip tip="退出多选（Esc）" className="ml-auto">
+              <button
+                onClick={exitMultiMode}
+                aria-label="退出多选"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition hover:bg-white/[0.05] hover:text-zinc-200"
+              >
+                <XIcon />
+              </button>
+            </HoverTip>
           </div>
         ) : (
           <span className="ml-auto flex items-center gap-1">
-            <button
-              onClick={() => emitForgeEvent('openSessionSearch')}
-              className="flex h-5 w-5 items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
-              title="搜索会话（Ctrl+K）"
+            <HoverTip tip="搜索会话（Ctrl+K）">
+              <button
+                onClick={() => emitForgeEvent('openSessionSearch')}
+                aria-label="搜索会话"
+                className="flex h-5 w-5 items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
+              >
+                <SearchIcon />
+              </button>
+            </HoverTip>
+            <HoverTip
+              tip="AI 命名：为列表里还没有 AI 标题的会话逐个生成短标题（串行、有缓存跳过）"
+              tipClassName="text-left"
             >
-              <SearchIcon />
-            </button>
-            <button
-              onClick={() => void handleAiNaming()}
-              disabled={aiNamingBusy}
-              className="flex h-5 items-center justify-center rounded-md px-1 text-[11px] text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200 disabled:opacity-50"
-              title="AI 命名：为列表里还没有 AI 标题的会话逐个生成短标题（串行、有缓存跳过）"
-            >
-              {aiNamingBusy
-                ? aiNamingProgress
-                  ? `命名中 ${aiNamingProgress.done}/${aiNamingProgress.total}`
-                  : '命名中…'
-                : <SparkleIcon />}
-            </button>
-            <button
-              onClick={() => {
-                // 进多选强制收预览卡：多选态悬停不出新卡（schedulePreview 有
-                // multiMode 守卫），已开的也别留着（指针物理停在卡上时
-                // onHoldOpen 会让它一直活着，2026-08-20 实证）。
-                if (!multiMode) hidePreview()
-                if (multiMode) exitMultiMode()
-                else setMultiMode(true)
-              }}
-              className="flex h-5 w-5 items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
-              title="多选管理（批量删除）"
-            >
-              <ChecklistIcon />
-            </button>
-            <button
-              onClick={toggleQaHidden}
-              className={`flex h-5 w-5 items-center justify-center rounded-md transition hover:bg-white/[0.05] hover:text-zinc-200 ${qaHidden ? 'text-zinc-600' : 'text-zinc-400'}`}
-              title={qaHidden ? '显示「问答」分区' : '隐藏「问答」分区'}
-            >
-              <EyeIcon off={qaHidden} />
-            </button>
-            <button
-              onClick={startSessionRefreshTransition}
-              className="flex h-5 w-5 items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
-              title="刷新"
-            >
-              <RefreshIcon />
-            </button>
+              <button
+                onClick={() => void handleAiNaming()}
+                disabled={aiNamingBusy}
+                aria-label="AI 命名"
+                className="flex h-5 items-center justify-center rounded-md px-1 text-[11px] text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200 disabled:opacity-50"
+              >
+                {aiNamingBusy
+                  ? aiNamingProgress
+                    ? `命名中 ${aiNamingProgress.done}/${aiNamingProgress.total}`
+                    : '命名中…'
+                  : <SparkleIcon />}
+              </button>
+            </HoverTip>
+            <HoverTip tip="多选管理（批量删除）">
+              <button
+                onClick={() => {
+                  // 进多选强制收预览卡：多选态悬停不出新卡（schedulePreview 有
+                  // multiMode 守卫），已开的也别留着（指针物理停在卡上时
+                  // onHoldOpen 会让它一直活着，2026-08-20 实证）。
+                  if (!multiMode) hidePreview()
+                  if (multiMode) exitMultiMode()
+                  else setMultiMode(true)
+                }}
+                aria-label="多选管理"
+                className="flex h-5 w-5 items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
+              >
+                <ChecklistIcon />
+              </button>
+            </HoverTip>
+            <HoverTip tip={qaHidden ? '显示「问答」分区' : '隐藏「问答」分区'}>
+              <button
+                onClick={toggleQaHidden}
+                aria-label={qaHidden ? '显示「问答」分区' : '隐藏「问答」分区'}
+                className={`flex h-5 w-5 items-center justify-center rounded-md transition hover:bg-white/[0.05] hover:text-zinc-200 ${qaHidden ? 'text-zinc-600' : 'text-zinc-400'}`}
+              >
+                <EyeIcon off={qaHidden} />
+              </button>
+            </HoverTip>
+            <HoverTip tip="刷新">
+              <button
+                onClick={startSessionRefreshTransition}
+                aria-label="刷新"
+                className="flex h-5 w-5 items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/[0.05] hover:text-zinc-200"
+              >
+                <RefreshIcon />
+              </button>
+            </HoverTip>
           </span>
         )}
       </div>
@@ -1910,39 +1949,42 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                 外层用 div 不用 button：「+」是独立按钮，HTML 不允许按钮套按钮。 */}
             {cwdGroupHeader ? (
               <div className="group/projhead flex w-full items-center gap-1 px-2 py-1">
-                <button
-                  type="button"
-                  onClick={() => toggleGroupCollapsed(g.label)}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm font-normal text-[#c3c3c3] transition hover:text-zinc-100"
-                  title={g.label}
-                >
-                  <span className="text-[8px] text-zinc-500">{groupCollapsed ? '▸' : '▾'}</span>
-                  <span className="shrink-0 text-zinc-400"><FolderIcon /></span>
-                  {/* 当前项目：不要「当前」徽章（2026-08-17 用户：「字太大了，搞个
-                      流光文字就行」）——项目名本身上紫黄流光。 */}
-                  {(() => {
-                    const isCurrent =
-                      meta && normalizeCwdForCompare(g.label) === normalizeCwdForCompare(meta.cwd)
-                    return (
-                      <span className={`truncate ${isCurrent ? 'seg-shimmer seg-shimmer-project' : ''}`}>
-                        {g.label.split(/[\\/]/).pop()}
-                      </span>
-                    )
-                  })()}
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    newChatInProject(g.label)
-                  }}
-                  className="shrink-0 rounded p-0.5 text-zinc-500 opacity-0 transition hover:bg-white/10 hover:text-zinc-200 group-hover/projhead:opacity-100"
-                  title="在此项目下新建对话"
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                    <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
-                </button>
+                <HoverTip tip={g.label} tipClassName="break-all text-left" className="flex min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => toggleGroupCollapsed(g.label)}
+                    className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm font-normal text-[#c3c3c3] transition hover:text-zinc-100"
+                  >
+                    <span className="text-[8px] text-zinc-500">{groupCollapsed ? '▸' : '▾'}</span>
+                    <span className="shrink-0 text-zinc-400"><FolderIcon /></span>
+                    {/* 当前项目：不要「当前」徽章（2026-08-17 用户：「字太大了，搞个
+                        流光文字就行」）——项目名本身上紫黄流光。 */}
+                    {(() => {
+                      const isCurrent =
+                        meta && normalizeCwdForCompare(g.label) === normalizeCwdForCompare(meta.cwd)
+                      return (
+                        <span className={`truncate ${isCurrent ? 'seg-shimmer seg-shimmer-project' : ''}`}>
+                          {g.label.split(/[\\/]/).pop()}
+                        </span>
+                      )
+                    })()}
+                  </button>
+                </HoverTip>
+                <HoverTip tip="在此项目下新建对话">
+                  <button
+                    type="button"
+                    aria-label="在此项目下新建对话"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      newChatInProject(g.label)
+                    }}
+                    className="shrink-0 rounded p-0.5 text-zinc-500 opacity-0 transition hover:bg-white/10 hover:text-zinc-200 group-hover/projhead:opacity-100"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </HoverTip>
               </div>
             ) : qaSectionHeader ? (
               <div className="flex w-full items-center gap-1 px-2 py-1">
@@ -1954,17 +1996,19 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                   <span className="text-[8px] text-zinc-500">{groupCollapsed ? '▸' : '▾'}</span>
                   <span className={`truncate ${SECTION_LABEL_SHIMMER[g.label] ?? ''}`}>{g.label}</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void window.api.launchScreenAssist()
-                  }}
-                  className="shrink-0 rounded p-0.5 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
-                  title="启动 screen-assist 问答工具"
-                >
-                  <PlayIcon />
-                </button>
+                <HoverTip tip="启动 screen-assist 问答工具">
+                  <button
+                    type="button"
+                    aria-label="启动 screen-assist 问答工具"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void window.api.launchScreenAssist()
+                    }}
+                    className="shrink-0 rounded p-0.5 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+                  >
+                    <PlayIcon />
+                  </button>
+                </HoverTip>
               </div>
             ) : (
               <div className="flex items-center gap-1.5 px-2 py-1 text-[13px] font-semibold text-zinc-400">
@@ -2122,11 +2166,11 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         onMouseLeave={() => setNavHover(false)}
       >
         <div>
-          <button
-            onClick={toggleNav}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[10px] font-medium uppercase tracking-wide text-zinc-600 transition hover:text-zinc-400"
-            title={navCollapsed ? '展开工具栏（点击钉住）' : '收起工具栏'}
-          >
+          <HoverTip tip={navCollapsed ? '展开工具栏（点击钉住）' : '收起工具栏'} className="block">
+            <button
+              onClick={toggleNav}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[10px] font-medium uppercase tracking-wide text-zinc-600 transition hover:text-zinc-400"
+            >
             <span className="flex-1">工具</span>
             <svg
               width="13"
@@ -2137,7 +2181,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             >
               <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-          </button>
+            </button>
+          </HoverTip>
           {/* grid-rows 0fr↔1fr animates height without guessing a max-height;
               the inner overflow-hidden clips the rows mid-tween. The spring
               curve + per-item stagger give the non-linear pop.

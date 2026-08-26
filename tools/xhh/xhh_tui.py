@@ -7,7 +7,6 @@
     0 刷新热榜  q 退出（帖子里 q 先返回）
 """
 import asyncio
-import io
 import sys
 from pathlib import Path
 
@@ -21,7 +20,7 @@ from textual.screen import Screen
 from textual.widgets import Collapsible, Footer, Label, ListItem, ListView, Static
 
 sys.path.insert(0, str(Path(__file__).parent))
-from xhh import _download, daemon_call, ensure_daemon, post_id_of  # noqa: E402
+from xhh import _download, daemon_call, decode_image, ensure_daemon, post_id_of  # noqa: E402
 
 # ---- 盲文渲染：每字符 2x4 像素，密度是半块字符的 4 倍 ----
 _BRAILLE_BASE = 0x2800
@@ -33,7 +32,7 @@ _DOTS = {
 
 def img_to_braille(data, cols=100, max_rows=50):
     """图片 → list[rich.Text]，墨点取与背景差异大的像素并着平均色。"""
-    im = Image.open(io.BytesIO(data)).convert("RGB")
+    im = decode_image(data)
     w, h = im.size
     cols = max(10, min(cols, (w + 1) // 2))
     rows = max(1, min(max_rows, int(h / (w / (cols * 2)) / 4)))
@@ -92,6 +91,14 @@ class ImageBlock(Collapsible):
             self._body.update(text)
         except Exception as e:
             self._body.update(f"[图片加载失败: {e}]")
+
+
+async def mount_comment_images(content, comment, image_no, width):
+    """把评论图片作为可折叠图片块挂到评论正文后，返回更新后的编号。"""
+    for src in comment.get("images", []):
+        image_no += 1
+        await content.mount(ImageBlock(src, image_no, width=width))
+    return image_no
 
 
 class PostScreen(Screen):
@@ -167,6 +174,9 @@ class PostScreen(Screen):
                 if c.get("more"):
                     t.append(f"\n  （{c['more']}）", style="dim")
                 await content.mount(Static(t, classes="comment"))
+                img_no = await mount_comment_images(
+                    content, c, img_no, max(60, self.app.size.width - 8)
+                )
         except Exception as e:
             status.update(f"!! {type(e).__name__}: {e}")
 

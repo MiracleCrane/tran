@@ -11,7 +11,7 @@
 （直到小黑盒自己的过期策略要求重新登录）。
 
 一个常驻守护进程（`xhh_daemon.py`）持有唯一的 CDP 连接，
-所有命令通过本地 TCP（127.0.0.1:19812）转发给它，
+所有命令通过用户令牌保护的本地 TCP（127.0.0.1:19812）转发给它，
 因此 Chrome 的调试确认一天只弹一次。
 
 ## 运行
@@ -26,7 +26,8 @@ uv run xhh.py            # 等同 xhh tui
 xhh
 ```
 
-首次运行 uv 自动解析依赖（websockets / pillow / winsdk / textual）。
+首次运行 uv 自动解析依赖（websockets / pillow / winsdk / textual）。启动器优先使用
+PATH 中的 `uv`，兼容本机旧安装路径；虚拟环境放在 `%LOCALAPPDATA%\xhh\venv`。
 
 ## 用法
 
@@ -87,7 +88,7 @@ xhh
 
 ```
 xhh.py            客户端 + 抓取/排版/渲染（OCR、字符画、OSC8 链接）
-xhh_daemon.py     常驻守护进程（持有 CDP 连接，监听 127.0.0.1:19812）
+xhh_daemon.py     常驻守护进程（持有 CDP 连接，令牌保护 127.0.0.1:19812）
 xhh_tui.py        TUI 全屏界面（textual，含盲文渲染）
 ocr.ps1           Windows OCR（PowerShell 调 WinRT，中文）
 xhh.cmd           PATH 入口（uv run 自举）

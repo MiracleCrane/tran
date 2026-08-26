@@ -9,6 +9,7 @@ import {
   type ShortcutAction
 } from '../shortcuts'
 import SettingText from './SettingText'
+import HoverTip from './HoverTip'
 
 /**
  * 快捷键设置：列出全部动作、就地录制新键位、冲突检测、恢复默认。
@@ -96,27 +97,31 @@ export default function ShortcutSettings(): JSX.Element {
                   恢复默认
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  setConflict(null)
-                  setRecordingId(recording ? null : action.id)
-                }}
-                className={`shrink-0 rounded-lg px-2 py-1 transition ${
-                  recording ? 'bg-accent/20 text-accent' : 'hover:bg-white/[0.06]'
-                }`}
-                title={recording ? '按下新的组合键，Esc 取消' : '点击重新绑定'}
+              <HoverTip
+                tip={recording ? '按下新的组合键，Esc 取消' : '点击重新绑定'}
+                className="inline-flex shrink-0"
               >
-                {recording ? (
-                  <span className="text-[10px]">按下组合键…</span>
-                ) : (
-                  <span className="flex items-center gap-1">
-                    {action.keys.map((k) => (
-                      <KeyCap key={k} combo={k} />
-                    ))}
-                  </span>
-                )}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConflict(null)
+                    setRecordingId(recording ? null : action.id)
+                  }}
+                  className={`rounded-lg px-2 py-1 transition ${
+                    recording ? 'bg-accent/20 text-accent' : 'hover:bg-white/[0.06]'
+                  }`}
+                >
+                  {recording ? (
+                    <span className="text-[10px]">按下组合键…</span>
+                  ) : (
+                    <span className="flex items-center gap-1">
+                      {action.keys.map((k) => (
+                        <KeyCap key={k} combo={k} />
+                      ))}
+                    </span>
+                  )}
+                </button>
+              </HoverTip>
             </div>
           )
         })}

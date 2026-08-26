@@ -1,10 +1,24 @@
 """config.toml 读写（扁平键值；含密钥，勿提交 git）。"""
 
 import json
+import os
 import tomllib
 from pathlib import Path
 
-CONFIG_PATH = Path(__file__).parent / "config.toml"
+
+def _resolve_data_dir() -> Path:
+    """运行期数据目录：代码目录可写就用代码目录；打包后代码在 Program Files
+    （只读），落到 %APPDATA%\\screen-assist。"""
+    here = Path(__file__).parent
+    if os.access(here, os.W_OK):
+        return here
+    fallback = Path(os.environ.get("APPDATA", str(here))) / "screen-assist"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
+
+
+DATA_DIR = _resolve_data_dir()
+CONFIG_PATH = DATA_DIR / "config.toml"
 
 DEFAULTS = {
     "backend": "acp",        # acp=挂 Kimi 会话（可用知识库）；api=直连 OpenAI 兼容接口

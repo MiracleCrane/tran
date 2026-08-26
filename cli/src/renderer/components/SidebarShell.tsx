@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Sidebar from './Sidebar'
+import HoverTip from './HoverTip'
 import { useUiStore, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_DEFAULT } from '../store/uiStore'
 
 /**
@@ -56,21 +57,24 @@ function ResizeHandle(): JSX.Element {
   }, [dragging, setSidebarWidth, toggleSidebarHidden])
 
   return (
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      title="拖动调节侧栏宽度"
-      onPointerDown={(e) => {
-        if (e.button !== 0) return // 只认主键
-        startXRef.current = e.clientX
-        startWidthRef.current = useUiStore.getState().sidebarWidth
-        collapsedRef.current = false
-        setDragging(true)
-      }}
-      // 双击恢复默认宽度——调乱了不用一点点往回拖。
-      onDoubleClick={() => setSidebarWidth(SIDEBAR_WIDTH_DEFAULT)}
-      className={`sidebar-resize-handle ${dragging ? 'is-dragging' : ''}`}
-    />
+    // 定位类挪到 HoverTip 包裹层（气泡要量触发元素的位置），内层 div 撑满。
+    <HoverTip tip="拖动调节侧栏宽度" className={`sidebar-resize-handle ${dragging ? 'is-dragging' : ''}`}>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="拖动调节侧栏宽度"
+        onPointerDown={(e) => {
+          if (e.button !== 0) return // 只认主键
+          startXRef.current = e.clientX
+          startWidthRef.current = useUiStore.getState().sidebarWidth
+          collapsedRef.current = false
+          setDragging(true)
+        }}
+        // 双击恢复默认宽度——调乱了不用一点点往回拖。
+        onDoubleClick={() => setSidebarWidth(SIDEBAR_WIDTH_DEFAULT)}
+        className="h-full w-full"
+      />
+    </HoverTip>
   )
 }
 
@@ -158,12 +162,14 @@ export default function SidebarShell(): JSX.Element {
   if (hidden) {
     return (
       <div className="sidebar-dock relative w-0 shrink-0">
-        <div
-          className="absolute inset-y-0 left-0 z-[110] w-2.5"
-          title="悬停展开侧栏"
-          onPointerEnter={() => schedulePeek(true)}
-          onPointerLeave={() => schedulePeek(false)}
-        />
+        {/* 定位类挪到 HoverTip 包裹层（气泡要量触发元素的位置），内层撑满。 */}
+        <HoverTip tip="悬停展开侧栏" className="absolute inset-y-0 left-0 z-[110] block w-2.5">
+          <div
+            className="h-full w-full"
+            onPointerEnter={() => schedulePeek(true)}
+            onPointerLeave={() => schedulePeek(false)}
+          />
+        </HoverTip>
         {peeking && (
           <div
             className={`sidebar-peek ${leaving ? 'is-leaving' : ''}`}

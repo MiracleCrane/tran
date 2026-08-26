@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.52 - 2026-08-26
+
+### 中文
+
+- 优化：全库悬停提示统一——约 105 处浏览器原生 `title` 提示（白色线框默认样式）全部替换为 Tran 深色玻璃气泡（HoverTip，左对齐、长文/路径自动换行），覆盖侧栏、输入框、消息区、Git 工具条、设置、MCP、用量环等全部界面；图标按钮同步补齐 aria-label。此后 Tran 里不再出现原生悬停提示。
+- 修复：打包版 screen-assist 首跑 Access Denied——Program Files 下 resources 只读，uv 的 .venv 改到用户数据目录（UV_PROJECT_ENVIRONMENT）。
+- 优化：tools 的 test_*.py 一律不打进安装包。
+
+### English
+
+- Improvement: all hover hints unified — about 105 native browser `title` tooltips (the default white-wireframe look) replaced with Tran's dark glass bubble (HoverTip, left-aligned, long text/paths wrapped), covering the sidebar, composer, transcript, Git toolbar, settings, MCP, usage rings, and every other surface; icon buttons gained aria-labels. No native tooltips remain anywhere in Tran.
+- Fix: packaged screen-assist failed its first run with Access Denied — resources under Program Files are read-only, so uv's .venv now lives in the user data directory (UV_PROJECT_ENVIRONMENT).
+- Improvement: tools' test_*.py files are no longer included in the installer.
+
 ## v1.1.51 - 2026-08-26
 
 ### 中文

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { PromptDiagnosis, SummaryModelProbe, SummaryProfile } from '../../shared/ipc'
 import SettingText from './SettingText'
+import HoverTip from './HoverTip'
 
 /** 新建配置时的预设，省得用户去翻文档抄 URL。 */
 const PRESETS: Array<{ name: string; baseUrl: string; model: string; note: string }> = [
@@ -150,34 +151,38 @@ export default function SummaryApiSettings(): JSX.Element {
         )}
         {profiles.map((p) => (
           <div key={p.id} className="flex items-center gap-2 px-3 py-2">
-            <button
-              type="button"
-              onClick={() => void activate(p.id)}
-              className="flex min-w-0 flex-1 items-center gap-2 text-left"
-              title={p.id === activeId ? '当前使用中' : '点击启用这套配置'}
+            <HoverTip
+              tip={p.id === activeId ? '当前使用中' : '点击启用这套配置'}
+              className="min-w-0 flex-1"
             >
-              <span
-                className={`h-2 w-2 shrink-0 rounded-full ${p.id === activeId ? 'bg-accent' : 'bg-zinc-700'}`}
-              />
-              <span className="min-w-0">
-                <span className="flex items-baseline gap-2">
-                  <span className="truncate text-xs text-zinc-200">{p.name}</span>
-                  {p.id === activeId && (
-                    <span className="shrink-0 rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-medium text-accent">
-                      使用中
-                    </span>
-                  )}
-                  {!p.keyMasked && (
-                    <span className="shrink-0 text-[10px] text-amber-500/80">未填 Key</span>
-                  )}
+              <button
+                type="button"
+                onClick={() => void activate(p.id)}
+                className="flex w-full min-w-0 items-center gap-2 text-left"
+              >
+                <span
+                  className={`h-2 w-2 shrink-0 rounded-full ${p.id === activeId ? 'bg-accent' : 'bg-zinc-700'}`}
+                />
+                <span className="min-w-0">
+                  <span className="flex items-baseline gap-2">
+                    <span className="truncate text-xs text-zinc-200">{p.name}</span>
+                    {p.id === activeId && (
+                      <span className="shrink-0 rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                        使用中
+                      </span>
+                    )}
+                    {!p.keyMasked && (
+                      <span className="shrink-0 text-[10px] text-amber-500/80">未填 Key</span>
+                    )}
+                  </span>
+                  <span className="mt-0.5 block truncate font-mono text-[10px] text-zinc-600">
+                    {p.baseUrl}
+                    {p.model ? ` · ${p.model}` : ''}
+                    {p.keyMasked ? ` · ${p.keyMasked}` : ''}
+                  </span>
                 </span>
-                <span className="mt-0.5 block truncate font-mono text-[10px] text-zinc-600">
-                  {p.baseUrl}
-                  {p.model ? ` · ${p.model}` : ''}
-                  {p.keyMasked ? ` · ${p.keyMasked}` : ''}
-                </span>
-              </span>
-            </button>
+              </button>
+            </HoverTip>
             <button
               type="button"
               className="shrink-0 text-[10px] text-zinc-600 transition hover:text-zinc-300"
@@ -202,18 +207,18 @@ export default function SummaryApiSettings(): JSX.Element {
       {!draft && (
         <div className="flex flex-wrap gap-2">
           {PRESETS.map((preset) => (
-            <button
-              key={preset.name}
-              type="button"
-              className={btnCls}
-              title={preset.note}
-              onClick={() => {
-                setDraft({ id: '', name: preset.name, baseUrl: preset.baseUrl, model: preset.model })
-                setKeyInput('')
-              }}
-            >
-              + {preset.name}
-            </button>
+            <HoverTip key={preset.name} tip={preset.note} tipClassName="text-left">
+              <button
+                type="button"
+                className={btnCls}
+                onClick={() => {
+                  setDraft({ id: '', name: preset.name, baseUrl: preset.baseUrl, model: preset.model })
+                  setKeyInput('')
+                }}
+              >
+                + {preset.name}
+              </button>
+            </HoverTip>
           ))}
           <button
             type="button"
@@ -317,25 +322,29 @@ export default function SummaryApiSettings(): JSX.Element {
 
       {probes && (
         <div className="space-y-1 rounded-lg border border-white/[0.06] bg-bg-elev/60 p-2">
-          {probes.map((p) => (
-            <div key={p.model} className="flex items-baseline gap-2 text-[11px]">
-              <span className={p.ok && p.known ? 'text-emerald-400' : p.ok ? 'text-amber-400' : 'text-zinc-600'}>
-                {p.ok && p.known ? '✓' : p.ok ? '⚠' : '✕'}
-              </span>
+          {probes.map((p) => {
+            const modelButton = (
               <button
                 type="button"
                 disabled={!p.ok || !p.known}
                 onClick={() => void useProbedModel(p.model)}
                 className="font-mono text-zinc-300 enabled:hover:text-accent enabled:hover:underline disabled:cursor-default disabled:text-zinc-600"
-                title={p.ok && p.known ? '点击选用该型号' : undefined}
               >
                 {p.model}
               </button>
+            )
+            return (
+            <div key={p.model} className="flex items-baseline gap-2 text-[11px]">
+              <span className={p.ok && p.known ? 'text-emerald-400' : p.ok ? 'text-amber-400' : 'text-zinc-600'}>
+                {p.ok && p.known ? '✓' : p.ok ? '⚠' : '✕'}
+              </span>
+              {p.ok && p.known ? <HoverTip tip="点击选用该型号">{modelButton}</HoverTip> : modelButton}
               {p.displayName && <span className="text-zinc-500">{p.displayName}</span>}
               {p.contextLength && <span className="text-zinc-600">{Math.round(p.contextLength / 1024)}k</span>}
               {p.error && <span className="truncate text-zinc-600">{p.error}</span>}
             </div>
-          ))}
+            )
+          })}
           <SettingText className="pt-1 text-[10px] text-zinc-600">
             Tran 会先通过 `/models` 检查模型是否存在，再发送最小请求验证可用性。部分兼容服务不提供模型目录；此时只能确认接口可访问，不能确认模型 ID 有效。
           </SettingText>

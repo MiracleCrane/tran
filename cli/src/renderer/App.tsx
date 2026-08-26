@@ -20,6 +20,7 @@ import PermissionModal from './components/PermissionModal'
 import ImageContextMenuHost from './components/ImageContextMenu'
 import InlineContextMenuHost from './components/InlineContextMenu'
 import TooltipHost from './components/TooltipHost'
+import HoverTip from './components/HoverTip'
 /**
  * 全屏工具面板一律懒加载：它们只有点进去才用得上，却占了首屏 bundle 相当一块
  * （设置页一个就一千多行）。聊天主链路的组件保持静态导入——那些是首屏就要画的。
@@ -142,18 +143,20 @@ function WindowTitlebar(): JSX.Element {
             标题栏保持纯拖拽区。侧栏完全隐藏时这里给一个回来的入口（Codex 风：
             隐藏后顶部留一个迷你按钮）。 */}
         {sidebarHidden && (
-          <button
-            type="button"
-            onClick={toggleSidebarHidden}
-            title="显示侧边栏（Alt+Q）"
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-500 transition hover:bg-white/[0.08] hover:text-zinc-200"
-            style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
-              <path d="M9.5 4v16" stroke="currentColor" strokeWidth="1.7" />
-            </svg>
-          </button>
+          <HoverTip tip="显示侧边栏（Alt+Q）">
+            <button
+              type="button"
+              onClick={toggleSidebarHidden}
+              aria-label="显示侧边栏"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-500 transition hover:bg-white/[0.08] hover:text-zinc-200"
+              style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
+                <path d="M9.5 4v16" stroke="currentColor" strokeWidth="1.7" />
+              </svg>
+            </button>
+          </HoverTip>
         )}
         {/* 项目切换 chip（2026-08-26 从侧栏顶部搬进标题栏，替代原先纯展示的
             项目名 span）：位置沿袭 2026-08-17「会话属于哪个项目一眼可见」，
@@ -243,18 +246,19 @@ function DockButtons(): JSX.Element {
   return (
     <>
       {items.map((item) => (
-        <button
-          key={item.key}
-          type="button"
-          onClick={() => setRightDock(dock === item.key ? null : item.key)}
-          title={item.title}
-          className={`relative flex h-7 w-7 items-center justify-center rounded-lg transition hover:bg-white/[0.07] ${
-            dock === item.key ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
-          }`}
-        >
-          {item.icon}
-          {item.dot && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-accent" />}
-        </button>
+        <HoverTip key={item.key} tip={item.title}>
+          <button
+            type="button"
+            onClick={() => setRightDock(dock === item.key ? null : item.key)}
+            aria-label={item.title}
+            className={`relative flex h-7 w-7 items-center justify-center rounded-lg transition hover:bg-white/[0.07] ${
+              dock === item.key ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            {item.icon}
+            {item.dot && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-accent" />}
+          </button>
+        </HoverTip>
       ))}
     </>
   )

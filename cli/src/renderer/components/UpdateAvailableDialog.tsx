@@ -7,6 +7,7 @@ import {
   formatSpeed,
   progressPercent
 } from '../utils/downloadFormat'
+import HoverTip from './HoverTip'
 
 interface UpdateAvailableDialogProps {
   info: UpdateCheckResult | null
@@ -108,9 +109,11 @@ export default function UpdateAvailableDialog({
               {progress && progress.totalBytes && <span>{formatSpeed(progress.bytesPerSecond)}</span>}
             </div>
             {downloadPath && (
-              <p className="mt-2 truncate text-[11px] text-zinc-500" title={downloadPath}>
-                已保存并打开：{downloadPath}
-              </p>
+              <HoverTip tip={downloadPath} className="block min-w-0" tipClassName="text-left break-all">
+                <p className="mt-2 truncate text-[11px] text-zinc-500">
+                  已保存并打开：{downloadPath}
+                </p>
+              </HoverTip>
             )}
           </div>
         )}
