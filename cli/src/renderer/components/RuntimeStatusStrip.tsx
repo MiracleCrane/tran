@@ -13,6 +13,7 @@ function shortVersion(version: string | undefined): string {
 export default function RuntimeStatusStrip(): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
   const setView = useUiStore((s) => s.setView)
+  const openSettings = useUiStore((s) => s.openSettings)
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   /** 摘要 API 的不可自愈故障（额度耗尽/凭证失效）。静默回退是这条链路的常态，
@@ -113,13 +114,14 @@ export default function RuntimeStatusStrip(): JSX.Element {
         </HoverTip>
         {summaryIssue && (
           <HoverTip
-            tip={`${summaryIssue.detail}\n\n点击前往「AI 辅助」检查配置；点掉即忽略本次提示。`}
+            tip={`${summaryIssue.detail}\n\n点击前往 设置 → AI 功能 检查配置；点掉即忽略本次提示。`}
             tipClassName="whitespace-pre-line break-words text-left"
           >
             <button
               type="button"
               onClick={() => {
-                setView('translate')
+                // 「AI 辅助」页 2026-08-27 并入 设置 → AI 功能，这里跟着改指向。
+                openSettings('assistant')
                 setSummaryIssue(null)
               }}
               className={`${chip} shrink-0 text-amber-400/90 hover:text-amber-300`}

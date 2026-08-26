@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.53 - 2026-08-27
+
+### 中文
+
+- 新增：宠物总开关进入「设置 → AI 功能」页（与 AI 自动命名等开关并列），与宠物页、快捷键共用同一偏好，三处同步。
+- 新增：宠物开关快捷键（默认 Alt+P），设置 → 快捷键中可改绑、带冲突检测。
+- 优化：侧栏「AI 辅助」页并入「设置 → AI 功能」（摘要/命名 API 与翻译引擎配置移入，DeepSeek 余额之下），侧栏入口移除；「前往 AI 辅助」类提示改为深链到设置对应页。
+
+### English
+
+- New: the pet master switch now also lives in Settings → AI 功能 (alongside the other AI toggles), sharing one preference with the Pet page and the shortcut — all three stay in sync.
+- New: pet toggle keyboard shortcut (default Alt+P), rebindable in Settings → Shortcuts with conflict detection.
+- Improvement: the sidebar "AI 辅助" page is merged into Settings → AI 功能 (summary/naming API and translation engine config moved under the DeepSeek section); the sidebar entry is removed, and "go to AI 辅助" hints now deep-link to the right settings page.
+
 ## v1.1.52 - 2026-08-26
 
 ### 中文

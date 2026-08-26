@@ -538,18 +538,6 @@ const HelpIcon = (): JSX.Element => (
   </svg>
 )
 
-const LanguageIcon = (): JSX.Element => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
-    <path d="M3 12h18" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    <path
-      d="M12 3c-3 3-4.5 6-4.5 9s1.5 6 4.5 9c3-3 4.5-6 4.5-9s-1.5-6-4.5-9z"
-      stroke="currentColor"
-      strokeWidth="1.4"
-    />
-  </svg>
-)
-
 /** The footer tool tabs, in display order. Drives both the icon rail
  *  (collapsed sidebar) and the collapsible nav (expanded sidebar).
  *  TODO(legacy): providers(运营商) 深度绑定旧 Claude 后端、wslHealth 与 MCP
@@ -557,7 +545,7 @@ const LanguageIcon = (): JSX.Element => (
  *  接入 kimi 对应能力后再恢复。 */
 const NAV_ITEMS: { view: View; label: string; icon: () => JSX.Element }[] = [
   { view: 'skills', label: '技能', icon: SkillsIcon },
-  { view: 'translate', label: 'AI 辅助', icon: LanguageIcon },
+  // 「AI 辅助」入口 2026-08-27 撤掉：内容（摘要 / 命名 API）并入 设置 → AI 功能。
   { view: 'archived', label: '归档', icon: ArchiveIcon },
   { view: 'settings', label: '设置', icon: GearIcon },
   { view: 'help', label: '说明', icon: HelpIcon }

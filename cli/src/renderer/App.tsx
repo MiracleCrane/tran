@@ -29,7 +29,6 @@ const McpPanel = lazy(() => import('./components/McpPanel'))
 const ProvidersPanel = lazy(() => import('./components/ProvidersPanel'))
 const SkillsPanel = lazy(() => import('./components/SkillsPanel'))
 const SettingsPanel = lazy(() => import('./components/SettingsPanel'))
-const TranslatePanel = lazy(() => import('./components/TranslatePanel'))
 const HelpPanel = lazy(() => import('./components/HelpPanel'))
 const ArchivePanel = lazy(() => import('./components/ArchivePanel'))
 const WslHealthPanel = lazy(() => import('./components/WslHealthPanel'))
@@ -39,7 +38,6 @@ const LAZY_PANELS = {
   providers: ProvidersPanel,
   skills: SkillsPanel,
   settings: SettingsPanel,
-  translate: TranslatePanel,
   help: HelpPanel,
   wslHealth: WslHealthPanel,
   archived: ArchivePanel

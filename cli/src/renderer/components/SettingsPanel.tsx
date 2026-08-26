@@ -32,6 +32,8 @@ import DisclosureSelect from './DisclosureSelect'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
 import PetSettings from '../pet/PetSettings'
+import SummaryApiSettings from './SummaryApiSettings'
+import { usePetStore } from '../store/petStore'
 import {
   createDownloadRequestId,
   formatProgressText,
@@ -219,6 +221,10 @@ export default function SettingsPanel(): JSX.Element {
   const resetAppearance = useAppearanceStore((s) => s.reset)
   const currentCwd = useSessionStore((s) => s.meta?.cwd)
   const reloadForBackendSwitch = useSessionStore((s) => s.reloadForBackendSwitch)
+  // 宠物总开关直接订阅渲染层镜像（petStore.masterEnabled）：本页开关、宠物页
+  // 开关、快捷键 Alt+P 拨的都是同一个 desktopPetEnabled 偏好，镜像由 App 经
+  // preferences-changed 推送保持同步，三处自然不会打架（2026-08-27）。
+  const desktopPet = usePetStore((s) => s.masterEnabled)
 
   // 初始加载：任何一步失败都不能让页面永久停在「加载中」——
   // catch 记录错误（页面顶部给出重试入口），finally 一律 setLoaded。
@@ -268,6 +274,22 @@ export default function SettingsPanel(): JSX.Element {
   useEffect(() => {
     loadInitial()
   }, [loadInitial])
+
+  // 设置页 deep-link（2026-08-27）：外部入口（如运行状态条的摘要故障提示）
+  // 经 uiStore.openSettings('assistant') 指定分类。设置页是懒加载的，挂载晚于
+  // 跳转动作，所以走 store 而不是事件——挂载时先消费一次存量，之后靠订阅
+  // 响应「设置已开着、再点一次跳转」的情况。
+  useEffect(() => {
+    const consume = (target: string | null): void => {
+      if (!target) return
+      useUiStore.getState().clearSettingsCategory()
+      if (SETTINGS_CATEGORIES.some((c) => c.id === target)) {
+        setCategory(target as SettingsCategory)
+      }
+    }
+    consume(useUiStore.getState().settingsCategory)
+    return useUiStore.subscribe((s) => consume(s.settingsCategory))
+  }, [])
 
   useEffect(() => {
     return window.api.onUpdateDownloadProgress((next) => {
@@ -340,6 +362,18 @@ export default function SettingsPanel(): JSX.Element {
       flashSaved()
     } catch {
       setAiNaming(!next)
+    }
+  }
+
+  /** 宠物总开关（2026-08-27 用户要求放进「AI 功能」页）：与宠物页那颗是同一个
+   *  desktopPetEnabled 偏好，先改镜像让界面立刻响应，保存失败再拨回。 */
+  const toggleDesktopPet = async (next: boolean): Promise<void> => {
+    usePetStore.getState().setMasterEnabled(next)
+    try {
+      await window.api.savePreferences({ desktopPetEnabled: next })
+      flashSaved()
+    } catch {
+      usePetStore.getState().setMasterEnabled(!next)
     }
   }
 
@@ -1165,9 +1199,14 @@ export default function SettingsPanel(): JSX.Element {
               checked={autoTodoNudge}
               onChange={(checked) => void toggleAutoTodoNudge(checked)}
             />
-            {/* 摘要 / 命名 API 已搬到「AI 辅助」页与翻译引擎合并配置：
-                翻译的「模型翻译」通道走的就是那份 baseUrl + Key，
-                分在两页配用户根本连不起来。见 SummaryApiSettings.tsx。 */}
+            {/* 宠物总开关（2026-08-27 用户：「可以和这几个放在一起」）：与
+                「宠物」页那颗开关同源（desktopPetEnabled），这里只是再放一颗。 */}
+            <ToggleControl
+              label="显示宠物"
+              description="在 Tran 界面内显示动态宠物，并根据 Agent 状态切换干活、等待、完成和错误动画。与「宠物」页的总开关是同一个。"
+              checked={desktopPet}
+              onChange={(checked) => void toggleDesktopPet(checked)}
+            />
             {/* DeepSeek 余额：官方 GET /user/balance，用量卡里展示一行。
                 与上面的摘要 API 相互独立——那边可以是任何 OpenAI 兼容服务。 */}
             <div className="space-y-2">
@@ -1200,6 +1239,12 @@ export default function SettingsPanel(): JSX.Element {
                   </button>
                 )}
               </div>
+            </div>
+            {/* 摘要 / 命名 API（2026-08-27 从侧栏「AI 辅助」页并回本页，AI 辅助
+                入口随之撤掉）：会话命名、命令说明、思考摘要和模型翻译共用这套
+                配置，自成组件（自己拉取/保存偏好），见 SummaryApiSettings.tsx。 */}
+            <div className="border-t border-white/[0.06] pt-4">
+              <SummaryApiSettings />
             </div>
           </div>
         </section>
