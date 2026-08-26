@@ -1,0 +1,15 @@
+# OpenAI 兼容接口配置，复制为 config.toml 后填写（config.toml 已在 .gitignore 中排除）
+# 程序运行后在“设置”页改动会写回 config.toml；这里只是首份模板
+base_url = "https://api.kimi.com/coding/v1"
+api_key  = "sk-填你的key"
+model    = "k3"
+
+# 以下为可选项，不写则用程序内置默认值（见 config.py 的 DEFAULTS）
+# prompt = "自定义系统提示词，留空用内置默认"
+# opacity = 0.9            # 窗口不透明度 0.3~1.0
+# topmost = true           # 窗口置顶
+# exclude_capture = false  # 从截图/录屏中排除本窗口
+# ask_scan = 78            # 截图提问热键扫描码，默认小键盘 +
+# ask_mode = "double"      # double=双击 / single=单击
+# hide_scan = 74           # 一键隐藏热键扫描码，默认小键盘 -
+# hide_mode = "single"

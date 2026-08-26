@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.51 - 2026-08-26
+
+### 中文
+
+- 优化：markdown 预览开关从底部工具栏挪到输入框内右上角（icon-only 小眼睛，有草稿才出现，预览中 accent 亮显），工具栏恢复原样。
+- 新增：screen-assist 与 xhh 两个小工具迁入本仓库（`tools/`）并随安装包内置——打包版从 `resources/tools/` 读取、开发版读仓库目录；个人配置/会话/日志/.venv 不入库也不打包；screen-assist 的「问答」分区目录同步指向新位置。
+- 修复：xhh 终端启动命令修正（start 空标题 + .cmd 外壳关联）。
+
+### English
+
+- Improvement: the markdown preview toggle moved from the bottom toolbar to the input frame's top-right corner (icon-only eye, appears only when there's a draft, accent-lit while previewing); the toolbar is back to its previous look.
+- New: the screen-assist and xhh companion tools now live in this repo (`tools/`) and ship inside the installer — packaged builds read them from `resources/tools/`, dev builds from the repo directory; personal config/sessions/logs/.venv are neither committed nor packaged; the "问答" sidebar section points at the new location.
+- Fix: xhh terminal launch command corrected (explicit empty `start` title + shell-association via .cmd).
+
 ## v1.1.50 - 2026-08-26
 
 ### 中文

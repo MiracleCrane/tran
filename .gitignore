@@ -11,3 +11,10 @@ logs
 *.log
 .scratch
 .DS_Store
+
+# tools 运行时产物（不入库）
+tools/*/.venv/
+tools/**/__pycache__/
+tools/screen-assist/config.toml
+tools/screen-assist/sessions.json
+tools/screen-assist/kb_test/

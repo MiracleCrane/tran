@@ -20,6 +20,25 @@ extraResources:
     to: mcp-browser.js
   - from: out/mcp/mcp-desktop.js
     to: mcp-desktop.js
+  # 内置小工具：源码随包，运行环境由 uv 在首跑时自动解析（不打 .venv）。
+  # screen-assist 的个人配置/会话/日志不打进安装包。
+  - from: ../tools/xhh
+    to: tools/xhh
+    filter:
+      - '**/*'
+      - '!.venv'
+      - '!**/__pycache__'
+      - '!test_tui.py'
+  - from: ../tools/screen-assist
+    to: tools/screen-assist
+    filter:
+      - '**/*'
+      - '!.venv'
+      - '!**/__pycache__'
+      - '!config.toml'
+      - '!sessions.json'
+      - '!gui.log'
+      - '!kb_test'
 asar: true
 compression: maximum
 electronLanguages:

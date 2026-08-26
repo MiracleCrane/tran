@@ -1373,6 +1373,39 @@ export default function Composer(): JSX.Element {
               恢复自动高度
             </button>
           )}
+          {/* 草稿预览开关（2026-08-26 改版：原在底部工具栏，用户嫌「太丑」挪进
+              输入框右上角）。icon-only 小眼睛，z-[5] 压过顶边拖高手柄（z3）和
+              「恢复自动高度」（z4）：手柄带在它上方 1px 处就收边、恢复按钮挂在
+              面板顶缘上方，正常互不重叠；恢复按钮出现时眼睛再往下让一档（top-3）
+              防贴边。HoverTip 的定位锚是它的包裹 span，所以 absolute 类要传给
+              HoverTip 而不是里面的 button。有草稿或预览中才出现——空草稿不摆
+              一个禁用态占位。 */}
+          {(previewing || text.trim().length > 0) && (
+            <HoverTip
+              tip={previewing ? '返回编辑（Esc）' : '预览 markdown'}
+              className={`absolute right-2.5 z-[5] ${manualTextareaHeight !== null ? 'top-3' : 'top-2'}`}
+            >
+              <button
+                type="button"
+                onClick={() => (previewing ? exitPreview() : setPreviewing(true))}
+                aria-pressed={previewing}
+                aria-label="预览草稿"
+                className={`flex h-5 w-5 items-center justify-center rounded transition hover:bg-white/[0.08] ${
+                  previewing ? 'text-accent' : 'text-zinc-500 hover:text-zinc-200'
+                }`}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M1.5 12S5 4.5 12 4.5 22.5 12 22.5 12 19 19.5 12 19.5 1.5 12 1.5 12z"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinejoin="round"
+                  />
+                  <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+                </svg>
+              </button>
+            </HoverTip>
+          )}
           <div
             className={`slash-command-reveal ${slashMenuOpen ? 'is-open' : ''}`}
             style={{ height: slashPanelHeight, '--composer-chip-clearance': `${chipRowHeight}px` } as CSSProperties}
@@ -1609,7 +1642,8 @@ export default function Composer(): JSX.Element {
               >
                 <MessageText>{text}</MessageText>
               </div>
-              <span className="pointer-events-none absolute right-1.5 top-0.5 text-[10px] text-zinc-600">
+              {/* 右上角被预览开关眼睛占位，提示文字左让一档（right-9）。 */}
+              <span className="pointer-events-none absolute right-9 top-0.5 text-[10px] text-zinc-600">
                 预览 · Esc 返回编辑
               </span>
             </div>
@@ -1704,47 +1738,10 @@ export default function Composer(): JSX.Element {
               )}
             </button>
             <span className="composer-shortcut-hint px-2 text-[11px] text-zinc-500">
-              {previewing ? (
-                <>
-                  <kbd className="font-sans text-zinc-400">Esc</kbd> /{' '}
-                  <kbd className="font-sans text-zinc-400">Enter</kbd> 返回编辑
-                </>
-              ) : (
-                <>
-                  <kbd className="font-sans text-zinc-400">Enter</kbd> 发送 ·{' '}
-                  <kbd className="font-sans text-zinc-400">Shift+Enter</kbd> 换行 ·{' '}
-                  <kbd className="font-sans text-zinc-400">Ctrl+S</kbd> 打断并发送
-                </>
-              )}
+              <kbd className="font-sans text-zinc-400">Enter</kbd> 发送 ·{' '}
+              <kbd className="font-sans text-zinc-400">Shift+Enter</kbd> 换行 ·{' '}
+              <kbd className="font-sans text-zinc-400">Ctrl+S</kbd> 打断并发送
             </span>
-            {/* 草稿预览开关：有草稿才可用，空草稿禁用并在悬停里说明。
-                放工具栏左侧提示区而不是输入框右上角——右上角已被顶边拖高手柄
-                与「恢复自动高度」按钮占用，再叠一个图标只会互相打架。 */}
-            <HoverTip
-              tip={text.trim() ? (previewing ? '返回编辑（Esc）' : '预览 Markdown 渲染效果') : '先输入内容再预览'}
-            >
-              <button
-                type="button"
-                onClick={() => (previewing ? exitPreview() : setPreviewing(true))}
-                disabled={!previewing && !text.trim()}
-                aria-pressed={previewing}
-                aria-label="预览草稿"
-                className={`flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                  previewing ? 'bg-white/[0.07] text-accent' : 'text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200'
-                }`}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M1.5 12S5 4.5 12 4.5 22.5 12 22.5 12 19 19.5 12 19.5 1.5 12 1.5 12z"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinejoin="round"
-                  />
-                  <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
-                </svg>
-                预览
-              </button>
-            </HoverTip>
             <div className="composer-actions ml-auto flex items-center gap-1.5">
               {meta && <ModePanel />}
               {/* Swarm 状态徽章：检测到本会话有进行中的 AgentSwarm（server tasks

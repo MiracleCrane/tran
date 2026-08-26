@@ -348,9 +348,9 @@ const SECTION_LABEL_SHIMMER: Record<string, string> = {
 }
 
 // 「问答」分区：固定收 screen-assist 悬浮问答工具的会话（demo 期硬编码，
-// 值即 normalizeCwdForCompare('C:\\LegacyD\\projects\\screen-assist') 的结果）。
+// 值即 normalizeCwdForCompare('C:\\LegacyD\\project\\tran\\tools\\screen-assist') 的结果）。
 const QA_SECTION_LABEL = '问答'
-const QA_SESSION_CWD = 'c:/legacyd/projects/screen-assist'
+const QA_SESSION_CWD = 'c:/legacyd/project/tran/tools/screen-assist'
 
 const PlayIcon = (): JSX.Element => (
   <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">

@@ -1,0 +1,11 @@
+[project]
+name = "xhh"
+version = "0.1.0"
+description = "终端刷小黑盒：TUI 全屏界面，借日常 Chrome 登录态出数据"
+requires-python = ">=3.12"
+dependencies = [
+    "websockets>=17.0",
+    "pillow>=10.0",
+    "winsdk>=1.0.0b10",
+    "textual>=0.86",
+]
