@@ -1,8 +1,16 @@
-import { memo, useState } from 'react'
+import { memo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ToolBlock } from '../types'
 import Collapse from './Collapse'
 import HoverTip from './HoverTip'
 import ToolCallCard from './ToolCallCard'
+
+// 2026-08-27 用户定夺：折叠 bar 只允许鼠标点击开合，不接受键盘激活（鼠标点过后
+// 焦点留在 button 上，Enter/Space 会被原生 button 行为当成再次点击而误开合）。
+// 拦掉这两个键的默认激活，焦点（tab 可达）与 onClick 都不动。
+// 与 Transcript.tsx 的同名 helper 各持一份（跨文件引会有循环依赖）。
+const blockBarKeyboardActivation = (event: ReactKeyboardEvent): void => {
+  if (event.key === 'Enter' || event.key === ' ') event.preventDefault()
+}
 
 const WrenchGlyph = (): JSX.Element => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
@@ -44,6 +52,7 @@ const ToolGroupCard = memo(function ToolGroupCard({
         type="button"
         aria-expanded={!collapsed}
         onClick={() => setUserToggled(!collapsed)}
+        onKeyDown={blockBarKeyboardActivation}
         className="flex w-full items-center gap-2 rounded-lg px-1.5 py-0.5 text-left transition-colors hover:bg-white/[0.04]"
       >
         {/* 与单行工具同一约定：完成态什么都不显示；含失败 → 行首小红叉（不出

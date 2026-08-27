@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso'
 import { useSessionStore } from '../store/sessionStore'
@@ -36,6 +36,13 @@ const FOLLOW_RESUME_AT_BOTTOM_THRESHOLD_PX = 40
 const BAR_HOVER_INTENT_WINDOW_MS = 600
 // 参与悬停/聚焦意图判定的 bar 元素。
 const TRANSCRIPT_BAR_SELECTOR = '.thinking-block, .tool-call-card'
+// 2026-08-27 用户定夺：折叠 bar（思考块/活动组/系统信封等）只允许鼠标点击开合，
+// 不接受键盘激活——鼠标点过后焦点留在 button 上，再按 Enter/Space 会被原生
+// button 行为当成又一次点击而误开合。preventDefault 拦住这两个键的默认激活，
+// 焦点（tab 可达）与 onClick 都不动。各文件各持一份（跨文件引会有循环依赖）。
+const blockBarKeyboardActivation = (event: ReactKeyboardEvent): void => {
+  if (event.key === 'Enter' || event.key === ' ') event.preventDefault()
+}
 // #48 用户消息导航条：摘要截取长度与条目上限（超出只留最近若干条）。
 const USER_NAV_SUMMARY_CHARS = 24
 // 短于这个长度的思考块不送去总结：折叠态本来就把前 60 字显示全了，再花一次
@@ -569,6 +576,7 @@ function SystemEnvelope({ text }: { text: string }): JSX.Element {
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
+          onKeyDown={blockBarKeyboardActivation}
           className="w-full rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-1.5 text-left transition hover:bg-white/[0.04]"
         >
           <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
@@ -610,6 +618,7 @@ function EnvelopeGroupRow({ entries }: { entries: Array<{ id: string; text: stri
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
+            onKeyDown={blockBarKeyboardActivation}
             className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] text-zinc-600 transition hover:bg-white/[0.04] hover:text-zinc-500"
           >
             <span aria-hidden>⚙</span>
@@ -975,6 +984,7 @@ const ThinkingBlock = memo(function ThinkingBlock({
         type="button"
         aria-expanded={open}
         onClick={() => setUserToggled(!open)}
+        onKeyDown={blockBarKeyboardActivation}
         className="flex w-full cursor-pointer select-none items-center gap-1.5 text-left text-xs font-medium text-zinc-500 hover:text-zinc-400"
       >
         {/* 火花图标 + 微光（2026-08 用户点名"思考也要有图标和流光"）：
@@ -1248,6 +1258,7 @@ const ActivityGroupRow = memo(function ActivityGroupRow({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={blockBarKeyboardActivation}
         className="flex w-fit max-w-full cursor-pointer select-none items-center gap-1.5 overflow-hidden rounded-lg bg-white/[0.03] px-2 py-1 text-left text-xs text-zinc-500 transition hover:bg-white/[0.055] hover:text-zinc-400"
       >
         <ActivitySummary segments={summarizeActivity(entries.map((e) => e.block))} />
@@ -1374,6 +1385,7 @@ const ActivityGroupCard = memo(function ActivityGroupCard({
         type="button"
         aria-expanded={open}
         onClick={() => setUserToggled(!open)}
+        onKeyDown={blockBarKeyboardActivation}
         className="flex w-fit max-w-full cursor-pointer select-none items-center gap-1.5 overflow-hidden rounded-lg bg-white/[0.03] px-2 py-1 text-left text-xs text-zinc-500 transition hover:bg-white/[0.055] hover:text-zinc-400"
       >
         <ActivitySummary segments={summarizeActivity(blocks)} />

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.56 - 2026-08-27
+
+### 中文
+
+- 优化：所有折叠 bar（思考块、活动组、系统信封、工具卡、Swarm 卡、压缩摘要等）只认鼠标点击展开/收起——Enter/Space 不再触发（此前点过的 bar 留着焦点，回车会误展开）。
+- 优化：项目切换下拉去重——主目录若被注册成了项目（「12517 / C:\Users\…」），项目行不再显示，只保留「不在项目中工作」一行（两者本就同一个目录）。
+
+### English
+
+- Improvement: all collapsible bars (thinking blocks, activity groups, system envelopes, tool cards, Swarm cards, compaction details, etc.) now toggle only via mouse click — Enter/Space no longer activates them (previously a clicked bar kept focus and Enter would re-toggle it).
+- Improvement: project switcher dedup — if the home directory was registered as a project ("12517 / C:\Users\…"), that row is hidden and only "不在项目中工作" remains (they're the same directory).
+
 ## v1.1.55 - 2026-08-27
 
 ### 中文

@@ -1,4 +1,4 @@
-import { memo, useState } from 'react'
+import { memo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ToolBlock } from '../types'
 import { backgroundTaskInfo } from '../utils/toolStats'
 import Collapse from './Collapse'
@@ -8,6 +8,14 @@ import SwarmCard from './SwarmCard'
 import { useCheapNote } from '../hooks/useCheapNote'
 import { ToolGlyph, FRIENDLY_TOOL_NAMES } from './toolIcons'
 import HoverTip from './HoverTip'
+
+// 2026-08-27 用户定夺：折叠 bar 只允许鼠标点击开合，不接受键盘激活（鼠标点过后
+// 焦点留在 button 上，Enter/Space 会被原生 button 行为当成再次点击而误开合）。
+// 拦掉这两个键的默认激活，焦点（tab 可达）与 onClick 都不动。
+// 与 Transcript.tsx 的同名 helper 各持一份（跨文件引会有循环依赖）。
+const blockBarKeyboardActivation = (event: ReactKeyboardEvent): void => {
+  if (event.key === 'Enter' || event.key === ' ') event.preventDefault()
+}
 
 function normalizeResult(result: unknown): string {
   if (result == null) return ''
@@ -383,6 +391,7 @@ const ToolCallCard = memo(function ToolCallCard({
         type="button"
         aria-expanded={!collapsed}
         onClick={() => setUserToggled(!collapsed)}
+        onKeyDown={blockBarKeyboardActivation}
         className="flex w-full items-center gap-2 rounded-lg px-1.5 py-0.5 text-left transition-colors hover:bg-white/[0.04]"
       >
         {/* 状态圆点已删（2026-08 用户：和右侧状态重复）；运行中的信号由

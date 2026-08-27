@@ -122,6 +122,19 @@ export default function ProjectSwitcher(): JSX.Element | null {
     }
   }, [])
 
+  // 主目录路径（合并「12517 / C:\Users\xxx」注册项目行与「不在项目中工作」
+  // 行用，2026-08-27 用户：两者是同一个 cwd，下拉里只留后者一行）。
+  const [homeDir, setHomeDir] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    void window.api.getHomeDir().then((h) => {
+      if (alive) setHomeDir(h)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
   const refreshWslSupport = useCallback(async (): Promise<void> => {
     try {
       const prefs = await window.api.getPreferences()
@@ -288,7 +301,11 @@ export default function ProjectSwitcher(): JSX.Element | null {
         {projects.length === 0 && (
           <div className="px-3 py-2 text-xs text-zinc-600">还没有项目</div>
         )}
-        {projects.map((p) => {
+        {/* 主目录若被注册成了项目，这里滤掉——它和下面的「不在项目中工作」
+            是同一个 cwd，只留那一行（2026-08-27 用户拍板合并）。 */}
+        {projects
+          .filter((p) => !homeDir || normalizeCwdForCompare(p.path) !== normalizeCwdForCompare(homeDir))
+          .map((p) => {
           const isCurrent = currentCwd !== null && normalizeCwdForCompare(p.path) === currentCwd
           const editing = editingPath === p.path
           const confirming = confirmPath === p.path

@@ -1,7 +1,15 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { CompactionItem } from '../types'
 import { fmtK } from '../utils/format'
+
+// 2026-08-27 用户定夺：折叠 bar 只允许鼠标点击开合，不接受键盘激活（鼠标点过后
+// 焦点留在 button 上，Enter/Space 会被原生 button 行为当成再次点击而误开合）。
+// 拦掉这两个键的默认激活，焦点（tab 可达）与 onClick 都不动。
+// 与 Transcript.tsx 的同名 helper 各持一份（跨文件引会有循环依赖）。
+const blockBarKeyboardActivation = (event: ReactKeyboardEvent): void => {
+  if (event.key === 'Enter' || event.key === ' ') event.preventDefault()
+}
 
 /** 上下文压缩分界线（kimi web 式）：左右渐变细线 + 中间统计 + 右侧"查看摘要"
  *  链接，点击弹非模态详情卡（portal）。摘要正文 live 与历史通道都有（都源自
@@ -59,6 +67,7 @@ const CompactionDivider = memo(function CompactionDivider({
         ref={linkRef}
         type="button"
         onClick={() => (cardOpen ? setCardOpen(false) : openCard())}
+        onKeyDown={blockBarKeyboardActivation}
         className="shrink-0 text-accent transition hover:brightness-125"
       >
         查看摘要

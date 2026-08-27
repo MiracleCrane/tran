@@ -1,7 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { ToolBlock } from '../types'
 import type { KimiTaskInfo } from '../../shared/ipc'
+
+// 2026-08-27 用户定夺：折叠 bar 只允许鼠标点击开合，不接受键盘激活（鼠标点过后
+// 焦点留在 button 上，Enter/Space 会被原生 button 行为当成再次点击而误开合）。
+// 拦掉这两个键的默认激活，焦点（tab 可达）与 onClick 都不动。
+// 与 Transcript.tsx 的同名 helper 各持一份（跨文件引会有循环依赖）。
+const blockBarKeyboardActivation = (event: ReactKeyboardEvent): void => {
+  if (event.key === 'Enter' || event.key === ' ') event.preventDefault()
+}
 
 /** AgentSwarm 工具调用的专门卡片：标题 = rawInput.description、子任务数、
  *  总进度条、逐个子代理一行（序号 + 状态点 + 状态文本/描述）。
@@ -112,6 +120,7 @@ export default function SwarmCard({ block }: { block: ToolBlock }): JSX.Element 
         type="button"
         aria-expanded={!collapsed}
         onClick={() => setCollapsed((c) => !c)}
+        onKeyDown={blockBarKeyboardActivation}
         className="flex w-full items-center gap-2 bg-[#14151b] px-3 py-2 text-left transition-colors hover:bg-[#1b1c23]"
       >
         <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent">
