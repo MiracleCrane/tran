@@ -213,7 +213,7 @@ export function buildShortcuts(): ShortcutAction[] {
       id: 'togglePet',
       label: '宠物开关',
       // Alt+P（2026-08-27）：注册表里 Alt 系只占了 Q/W，Chromium 也不占 P。
-      // 拨的是 desktopPetEnabled 这一个偏好——与「AI 功能」/「宠物」页的两颗
+      // 拨的是 desktopPetEnabled 这一个偏好——与侧栏头部爪印开关、「宠物」页的
       // 开关同源；先改渲染层镜像让宠物立刻显隐，主进程保存后会推
       // preferences-changed 重新对齐（窗口外悬浮宠物也靠这一推）。
       keys: ['Alt+P'],

@@ -32,8 +32,12 @@ const SettingsPanel = lazy(() => import('./components/SettingsPanel'))
 const HelpPanel = lazy(() => import('./components/HelpPanel'))
 const ArchivePanel = lazy(() => import('./components/ArchivePanel'))
 const WslHealthPanel = lazy(() => import('./components/WslHealthPanel'))
+const AssistantPanel = lazy(() => import('./components/AssistantPanel'))
+const PetPanel = lazy(() => import('./pet/PetPanel'))
 
 const LAZY_PANELS = {
+  assistant: AssistantPanel,
+  pet: PetPanel,
   mcp: McpPanel,
   providers: ProvidersPanel,
   skills: SkillsPanel,

@@ -10,6 +10,7 @@ import type { ClaudeExecutionBackend, SessionListItem, SessionPreview } from '..
 import { normalizeCwdForCompare } from '../../shared/paths'
 import { relTime } from '../utils/format'
 import { useArchiveStore } from '../store/archiveStore'
+import { usePetStore } from '../store/petStore'
 import { onForgeEvent, emitForgeEvent } from '../events'
 
 type SessionGroupMode = 'time' | 'project'
@@ -456,6 +457,40 @@ const ChecklistIcon = (): JSX.Element => (
     <path d="M11 6h9M11 12.5h9M11 19h9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
   </svg>
 )
+/** 「AI 功能」nav 图标（2026-08-27 AI 功能从设置搬回侧栏）：魔法棒造型——
+ *  不用四角星是为了和「技能」的 SparkleIcon 拉开辨识度。 */
+const AiWandIcon = (): JSX.Element => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <path d="M4 20l8.5-8.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    <path
+      d="M16.5 3l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6z"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M7 4l.6 1.6 1.6.6-1.6.6L7 8.4l-.6-1.6-1.6-.6 1.6-.6L7 4z"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+/** 宠物爪印图标（2026-08-27）：nav「宠物」入口（16px）与头部宠物开关（12px）
+ *  共用，size 参数化。 */
+const PetIcon = ({ size = 16 }: { size?: number } = {}): JSX.Element => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <circle cx="6.5" cy="9" r="2" stroke="currentColor" strokeWidth="1.5" />
+    <circle cx="12" cy="6.5" r="2" stroke="currentColor" strokeWidth="1.5" />
+    <circle cx="17.5" cy="9" r="2" stroke="currentColor" strokeWidth="1.5" />
+    <path
+      d="M12 11.5c-2.9 0-5.3 2.4-5.3 4.8 0 1.7 1.3 2.7 2.8 2.7 1 0 1.6-.5 2.5-.5s1.5.5 2.5.5c1.5 0 2.8-1 2.8-2.7 0-2.4-2.4-4.8-5.3-4.8z"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
 const RefreshIcon = (): JSX.Element => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
     <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -545,8 +580,11 @@ const HelpIcon = (): JSX.Element => (
  *  接入 kimi 对应能力后再恢复。 */
 const NAV_ITEMS: { view: View; label: string; icon: () => JSX.Element }[] = [
   { view: 'skills', label: '技能', icon: SkillsIcon },
-  // 「AI 辅助」入口 2026-08-27 撤掉：内容（摘要 / 命名 API）并入 设置 → AI 功能。
+  // 「AI 功能」2026-08-27 搬回侧栏：上一次并入设置是错的方向，用户改口恢复
+  // 一级入口（内容 = 原设置「AI 功能」分类整段，见 AssistantPanel）。
+  { view: 'assistant', label: 'AI 功能', icon: AiWandIcon },
   { view: 'archived', label: '归档', icon: ArchiveIcon },
+  { view: 'pet', label: '宠物', icon: PetIcon },
   { view: 'settings', label: '设置', icon: GearIcon },
   { view: 'help', label: '说明', icon: HelpIcon }
 ]
@@ -587,6 +625,17 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const deleteSession = useSessionStore((s) => s.deleteSession)
   const view = useUiStore((s) => s.view)
   const setView = useUiStore((s) => s.setView)
+  // 宠物总开关（头部图标排最左那颗，2026-08-27 用户：「宠物开关就放在这儿…靠左
+  // 显示」）：订阅渲染层镜像 masterEnabled，与 Alt+P、宠物页开关同源——拨的都是
+  // desktopPetEnabled 这一个偏好，镜像由 App 经 preferences-changed 推送对齐。
+  const desktopPet = usePetStore((s) => s.masterEnabled)
+  const toggleDesktopPet = (): void => {
+    const next = !desktopPet
+    usePetStore.getState().setMasterEnabled(next)
+    void window.api.savePreferences({ desktopPetEnabled: next }).catch(() => {
+      usePetStore.getState().setMasterEnabled(!next)
+    })
+  }
   const navCollapsed = useUiStore((s) => s.navCollapsed)
   const toggleNav = useUiStore((s) => s.toggleNav)
   /** 鼠标停在底部工具区上——临时浮出，移开即收，不写进 store。 */
@@ -1741,17 +1790,20 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
           这里收紧间距、按钮矮一档，并把「按时间/按项目」并进标题行——省掉
           一整行只放一个小按钮的浪费。 */}
       <div className="sidebar-deferred-content is-ready relative z-[70] space-y-2 px-4 pb-2 pt-2">
-        {/* 新建对话：Codex 式排布（2026-08-26）——左侧铅笔图标 + 文案，
-            右缘圆圈加号（ml-auto 推到边），安静的 zinc 色调。 */}
+        {/* 新对话：Codex 式排布（2026-08-26）——左侧铅笔图标 + 文案，
+            右缘圆圈加号（ml-auto 推到边），安静的 zinc 色调。
+            文案 2026-08-27 改「新对话」对齐 Codex；px-1 让图标+文案从 20px
+            起排，与下方「置顶/项目」段标（列表 px-3 + 段标 px-2）同一根左线
+            （2026-08-27 用户：「要和项目那些字对齐」）。 */}
         <button
           onClick={() => {
             void newChat()
             setView('chat')
           }}
-          className="flex h-9 w-full items-center gap-2 rounded-full px-3.5 text-[13px] font-medium text-zinc-300 transition hover:bg-white/[0.09]"
+          className="flex h-9 w-full items-center gap-2 rounded-full px-1 text-[13px] font-medium text-zinc-300 transition hover:bg-white/[0.09]"
         >
           <EditIcon />
-          新建对话
+          新对话
           <span className="ml-auto text-zinc-500">
             <CircledPlusIcon />
           </span>
@@ -1804,6 +1856,19 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
             </HoverTip>
           </div>
         ) : (
+          <>
+          {/* 宠物开关（2026-08-27 用户：「宠物开关就放在这儿…靠左显示」）：行内
+              最左，开=正常色、关=变暗（与问答显隐那颗 EyeIcon 同一套明暗约定）。 */}
+          <HoverTip tip="显示/隐藏宠物（Alt+P）">
+            <button
+              onClick={toggleDesktopPet}
+              aria-label="显示/隐藏宠物"
+              aria-pressed={desktopPet}
+              className={`flex h-5 w-5 items-center justify-center rounded-md transition hover:bg-white/[0.05] hover:text-zinc-200 ${desktopPet ? 'text-zinc-400' : 'text-zinc-600'}`}
+            >
+              <PetIcon size={12} />
+            </button>
+          </HoverTip>
           <span className="ml-auto flex items-center gap-1">
             <HoverTip tip="搜索会话（Ctrl+K）">
               <button
@@ -1866,6 +1931,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               </button>
             </HoverTip>
           </span>
+          </>
         )}
       </div>
 

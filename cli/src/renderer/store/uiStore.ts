@@ -6,6 +6,8 @@ import type { UserAttachment } from '../types'
  *  here as the app grows. */
 export type View =
   | 'chat'
+  | 'assistant'
+  | 'pet'
   | 'mcp'
   | 'providers'
   | 'skills'
@@ -22,12 +24,6 @@ export interface BlockingOverlayState {
 interface UiStore {
   view: View
   setView: (view: View) => void
-  /** 设置页 deep-link（2026-08-27）：打开设置时顺带指定分类（如运行状态条的
-   *  摘要故障提示 → 'assistant'）。设置页懒加载、挂载晚于跳转，走 store 而
-   *  不是事件；SettingsPanel 消费后调 clearSettingsCategory 清掉。 */
-  settingsCategory: string | null
-  openSettings: (category?: string) => void
-  clearSettingsCategory: () => void
   /** 隐藏侧栏（Codex 风开/关两态）。Alt+Q / Ctrl+B 都绑这档；图标条模式
    *  2026-08-18 用户拍板整体砍掉。 */
   sidebarHidden: boolean
@@ -83,9 +79,6 @@ function readSidebarWidth(): number {
 export const useUiStore = create<UiStore>((set) => ({
   view: 'chat',
   setView: (view) => set({ view }),
-  settingsCategory: null,
-  openSettings: (category) => set({ view: 'settings', settingsCategory: category ?? null }),
-  clearSettingsCategory: () => set({ settingsCategory: null }),
   // 启动一律可见（2026-08-12 用户改口：打开默认不要收起侧边栏——Codex 同款）。
   // 隐藏改为会话内动作，不再跨启动持久化：持久化的隐藏态会让"上次随手隐藏"
   // 的人每次启动都找不到会话列表。

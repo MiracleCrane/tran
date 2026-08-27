@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.54 - 2026-08-27
+
+### 中文
+
+- 调整：「AI 功能」从设置挪到侧栏——侧栏导航新增「AI 功能」页（AI 自动命名/云端套餐额度/后台任务更新待办/DeepSeek 余额 + 摘要与翻译配置），设置里的「AI 功能」分类撤除。
+- 新增：宠物爪印开关固定在侧栏头部图标排最左侧（开=亮、关=暗，Alt+P 同样有效）；「宠物」设置页也移到侧栏导航，设置里的「宠物」分类撤除。
+- 优化：「新建对话」更名「新对话」，行内图标与文字左缘对齐到与下方「置顶/项目」段标同一根线（对齐 Codex）。
+
+### English
+
+- Change: "AI 功能" moved out of Settings into the sidebar — a new sidebar page hosts the AI toggles (auto-naming / cloud quota / background-task todo refresh / DeepSeek balance) plus the summary & translation config; the Settings "AI 功能" category is removed.
+- New: a paw toggle pinned at the left of the sidebar header icon row (lit = on, dim = off; Alt+P works too); the Pet settings page also moved to the sidebar nav, removing the Settings "宠物" category.
+- Improvement: "新建对话" renamed to "新对话", with the row's icon and text left-aligned to the same vertical line as the section labels below (matching Codex).
+
 ## v1.1.53 - 2026-08-27
 
 ### 中文

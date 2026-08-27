@@ -31,9 +31,6 @@ import {
 import DisclosureSelect from './DisclosureSelect'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore } from '../store/uiStore'
-import PetSettings from '../pet/PetSettings'
-import SummaryApiSettings from './SummaryApiSettings'
-import { usePetStore } from '../store/petStore'
 import {
   createDownloadRequestId,
   formatProgressText,
@@ -133,14 +130,14 @@ function ToggleControl({
   )
 }
 
-/** 设置分类。顺序即用户从「最常改」到「最少改」的直觉顺序。 */
+/** 设置分类。顺序即用户从「最常改」到「最少改」的直觉顺序。
+ *  「AI 功能」「宠物」2026-08-27 搬出设置、回侧栏一级入口（用户改口：
+ *  上一次并入设置是错的方向），见 AssistantPanel / PetPanel。 */
 const SETTINGS_CATEGORIES = [
   { id: 'session', label: '会话' },
-  { id: 'assistant', label: 'AI 功能' },
   { id: 'tools', label: '工具' },
   { id: 'shortcuts', label: '快捷键' },
   { id: 'appearance', label: '外观' },
-  { id: 'pet', label: '宠物' },
   { id: 'system', label: '系统' },
   { id: 'backup', label: '备份' }
 ] as const
@@ -171,17 +168,11 @@ export default function SettingsPanel(): JSX.Element {
   const [startMaximized, setStartMaximized] = useState(false)
   const [richComposer, setRichComposer] = useState(false)
   const [nativeNotifications, setNativeNotifications] = useState(true)
-  const [aiNaming, setAiNaming] = useState(true)
   const [summaryApiBaseUrl, setSummaryApiBaseUrl] = useState('https://api.deepseek.com')
   // API Key 不再回显明文：输入框只承载「本次新输入」，已配置状态用主进程回的掩码提示。
   const [summaryApiKey, setSummaryApiKey] = useState('')
   const [summaryKeyMasked, setSummaryKeyMasked] = useState<string | null>(null)
-  // DeepSeek 余额（用量卡里那行）的 key，掩码回显模式同摘要 Key。
-  const [deepseekApiKey, setDeepseekApiKey] = useState('')
-  const [deepseekKeyMasked, setDeepseekKeyMasked] = useState<string | null>(null)
   const [summaryModel, setSummaryModel] = useState('')
-  const [autoTodoNudge, setAutoTodoNudge] = useState(false)
-  const [cloudUsage, setCloudUsage] = useState(false)
   const [probing, setProbing] = useState(false)
   const [probes, setProbes] = useState<SummaryModelProbe[] | null>(null)
   const [diagnosing, setDiagnosing] = useState(false)
@@ -221,10 +212,6 @@ export default function SettingsPanel(): JSX.Element {
   const resetAppearance = useAppearanceStore((s) => s.reset)
   const currentCwd = useSessionStore((s) => s.meta?.cwd)
   const reloadForBackendSwitch = useSessionStore((s) => s.reloadForBackendSwitch)
-  // 宠物总开关直接订阅渲染层镜像（petStore.masterEnabled）：本页开关、宠物页
-  // 开关、快捷键 Alt+P 拨的都是同一个 desktopPetEnabled 偏好，镜像由 App 经
-  // preferences-changed 推送保持同步，三处自然不会打架（2026-08-27）。
-  const desktopPet = usePetStore((s) => s.masterEnabled)
 
   // 初始加载：任何一步失败都不能让页面永久停在「加载中」——
   // catch 记录错误（页面顶部给出重试入口），finally 一律 setLoaded。
@@ -249,21 +236,11 @@ export default function SettingsPanel(): JSX.Element {
         setStartMaximized(!!p.startMaximized)
         setRichComposer(p.richComposer === true)
         setNativeNotifications(p.nativeNotifications !== false)
-        setAiNaming(p.aiNamingEnabled !== false)
         setSummaryApiBaseUrl(p.summaryApiBaseUrl ?? 'https://api.deepseek.com')
         // getApiKey 只回 { configured, masked }，不再下发明文。
         setSummaryKeyMasked(apiKey?.masked ?? null)
         setSummaryModel(p.summaryModel ?? '')
-        setAutoTodoNudge(p.autoTodoNudge === true)
-        // opt-in：只有显式 true 才算开（与 usageService 的闸门一致）。
-        setCloudUsage(p.cloudUsageEnabled === true)
         setAskOnClose(!p.closePromptDismissed)
-        // DeepSeek key 状态独立拉（同样是只回掩码），不进上面的 Promise.all
-        // 是怕它失败拖垮整个初始化——这一个字段不值得。
-        void window.api
-          .getDeepseekApiKeyStatus()
-          .then((info) => setDeepseekKeyMasked(info.masked))
-          .catch(() => {})
       })
       .catch((e: unknown) => {
         setLoadError(e instanceof Error ? e.message : String(e))
@@ -274,22 +251,6 @@ export default function SettingsPanel(): JSX.Element {
   useEffect(() => {
     loadInitial()
   }, [loadInitial])
-
-  // 设置页 deep-link（2026-08-27）：外部入口（如运行状态条的摘要故障提示）
-  // 经 uiStore.openSettings('assistant') 指定分类。设置页是懒加载的，挂载晚于
-  // 跳转动作，所以走 store 而不是事件——挂载时先消费一次存量，之后靠订阅
-  // 响应「设置已开着、再点一次跳转」的情况。
-  useEffect(() => {
-    const consume = (target: string | null): void => {
-      if (!target) return
-      useUiStore.getState().clearSettingsCategory()
-      if (SETTINGS_CATEGORIES.some((c) => c.id === target)) {
-        setCategory(target as SettingsCategory)
-      }
-    }
-    consume(useUiStore.getState().settingsCategory)
-    return useUiStore.subscribe((s) => consume(s.settingsCategory))
-  }, [])
 
   useEffect(() => {
     return window.api.onUpdateDownloadProgress((next) => {
@@ -354,29 +315,6 @@ export default function SettingsPanel(): JSX.Element {
     }
   }
 
-  /** AI 自动命名开关（默认开）：立即生效；关闭后主进程任何路径都不调命名 API。 */
-  const toggleAiNaming = async (next: boolean): Promise<void> => {
-    setAiNaming(next)
-    try {
-      await window.api.savePreferences({ aiNamingEnabled: next })
-      flashSaved()
-    } catch {
-      setAiNaming(!next)
-    }
-  }
-
-  /** 宠物总开关（2026-08-27 用户要求放进「AI 功能」页）：与宠物页那颗是同一个
-   *  desktopPetEnabled 偏好，先改镜像让界面立刻响应，保存失败再拨回。 */
-  const toggleDesktopPet = async (next: boolean): Promise<void> => {
-    usePetStore.getState().setMasterEnabled(next)
-    try {
-      await window.api.savePreferences({ desktopPetEnabled: next })
-      flashSaved()
-    } catch {
-      usePetStore.getState().setMasterEnabled(!next)
-    }
-  }
-
   const saveSummaryApiBaseUrl = async (next: string): Promise<void> => {
     setSummaryApiBaseUrl(next)
     try {
@@ -412,57 +350,6 @@ export default function SettingsPanel(): JSX.Element {
       flashSaved()
     } catch {
       /* 清除失败保持原状 */
-    }
-  }
-
-  /** DeepSeek 余额 key：保存逻辑与摘要 Key 同款——空输入忽略，清除走按钮，
-   *  保存成功清空输入框并刷新掩码。主进程侧保存后会让余额缓存作废。 */
-  const saveDeepseekKey = async (next: string): Promise<void> => {
-    const trimmed = next.trim()
-    if (!trimmed) return
-    try {
-      const info = await window.api.saveDeepseekApiKey(trimmed)
-      setDeepseekKeyMasked(info.masked)
-      setDeepseekApiKey('')
-      flashSaved()
-    } catch {
-      /* 保留输入，方便用户修正后重试 */
-    }
-  }
-
-  const clearDeepseekKey = async (): Promise<void> => {
-    try {
-      await window.api.saveDeepseekApiKey('')
-      setDeepseekKeyMasked(null)
-      setDeepseekApiKey('')
-      flashSaved()
-    } catch {
-      /* 清除失败保持原状 */
-    }
-  }
-
-  /** 后台任务收尾后自动催 AI 更新待办。与命名那类小请求**不是一个量级**：
-   *  那是一次真实对话轮，所以单独一个开关，不跟 AI 命名共用。 */
-  const toggleAutoTodoNudge = async (next: boolean): Promise<void> => {
-    setAutoTodoNudge(next)
-    try {
-      await window.api.savePreferences({ autoTodoNudge: next })
-      flashSaved()
-    } catch {
-      setAutoTodoNudge(!next)
-    }
-  }
-
-  /** 云端额度查询开关（**默认关**）。它复用 Kimi CLI 的登录凭证直连
-   *  api.kimi.com 的**私有接口**，不是公开 API——用它查额度有账号被封的实际
-   *  先例，所以改成必须用户显式打开（2026-08）。 */
-  const toggleCloudUsage = async (next: boolean): Promise<void> => {
-    setCloudUsage(next)
-    try {
-      await window.api.savePreferences({ cloudUsageEnabled: next })
-      flashSaved()
-    } catch {
-      setCloudUsage(!next)
     }
   }
 
@@ -1165,98 +1052,11 @@ export default function SettingsPanel(): JSX.Element {
 
         {category === 'tools' && <XhhCard />}
 
-        {category === 'assistant' && (
-        <section className="glass-panel-soft rounded-2xl p-4">
-          <div className="mb-4">
-            <h2 className="text-sm font-semibold text-zinc-200">AI 功能</h2>
-          </div>
-          <div className="space-y-4">
-            <ToggleControl
-              label="AI 自动命名"
-              description={
-                '在新会话发送第一条消息后生成简短标题，也可用于补全历史会话标题。\n\n' +
-                '每次命名约消耗 **120 token**。关闭后，Tran 不再发起自动命名请求。'
-              }
-              checked={aiNaming}
-              onChange={(checked) => void toggleAiNaming(checked)}
-            />
-            <ToggleControl
-              label="云端套餐额度显示"
-              description={
-                '在用量卡中显示 **5 小时额度**和**每周额度**。\n\n' +
-                '> **风险提示：** 此功能调用 `api.kimi.com` 的非公开接口，并复用 Kimi Code CLI 的登录凭据。该接口可能变更，也可能带来账号风险，因此默认关闭。\n\n' +
-                '关闭后仅隐藏云端额度；本地 `/usage` 提供的上下文占用信息不受影响。'
-              }
-              checked={cloudUsage}
-              onChange={(checked) => void toggleCloudUsage(checked)}
-            />
-            <ToggleControl
-              label="后台任务结束后自动更新待办"
-              description={
-                '当后台任务结束且待办仍有未完成项时，自动发起一轮请求以刷新待办状态。\n\n' +
-                '> **用量提示：** 该请求需要重新读取当前会话上下文，长会话可能产生较高用量，因此默认关闭。关闭后，Agent 会在下一次正常对话时收到任务完成通知。'
-              }
-              checked={autoTodoNudge}
-              onChange={(checked) => void toggleAutoTodoNudge(checked)}
-            />
-            {/* 宠物总开关（2026-08-27 用户：「可以和这几个放在一起」）：与
-                「宠物」页那颗开关同源（desktopPetEnabled），这里只是再放一颗。 */}
-            <ToggleControl
-              label="显示宠物"
-              description="在 Tran 界面内显示动态宠物，并根据 Agent 状态切换干活、等待、完成和错误动画。与「宠物」页的总开关是同一个。"
-              checked={desktopPet}
-              onChange={(checked) => void toggleDesktopPet(checked)}
-            />
-            {/* DeepSeek 余额：官方 GET /user/balance，用量卡里展示一行。
-                与上面的摘要 API 相互独立——那边可以是任何 OpenAI 兼容服务。 */}
-            <div className="space-y-2">
-              <div>
-                <div className="text-xs font-medium text-zinc-200">DeepSeek 余额</div>
-                <SettingText className="mt-1">
-                  {'通过 DeepSeek 官方 `/user/balance` 接口，在用量卡中显示账户总额、充值余额和赠送余额。\n\n' +
-                    '如果当前 AI 服务配置使用 DeepSeek，Tran 会优先复用该 API Key；只有在使用其他服务商且仍需查询 DeepSeek 余额时，才需要单独填写。\n\n' +
-                    'API Key 使用系统安全存储保存。'}
-                </SettingText>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="password"
-                  value={deepseekApiKey}
-                  spellCheck={false}
-                  autoComplete="off"
-                  placeholder={deepseekKeyMasked ? `已配置 ${deepseekKeyMasked} · 输入新 Key 覆盖` : 'sk-...'}
-                  onChange={(e) => setDeepseekApiKey(e.target.value)}
-                  onBlur={(e) => void saveDeepseekKey(e.target.value)}
-                  className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-elev/60 px-2.5 py-1.5 font-mono text-[11px] text-zinc-200 outline-none focus:border-accent/50"
-                />
-                {deepseekKeyMasked && (
-                  <button
-                    type="button"
-                    onClick={() => void clearDeepseekKey()}
-                    className="shrink-0 rounded-lg border border-border-subtle px-2.5 py-1.5 text-[11px] text-zinc-400 transition hover:bg-red-950/40 hover:text-red-300"
-                  >
-                    清除
-                  </button>
-                )}
-              </div>
-            </div>
-            {/* 摘要 / 命名 API（2026-08-27 从侧栏「AI 辅助」页并回本页，AI 辅助
-                入口随之撤掉）：会话命名、命令说明、思考摘要和模型翻译共用这套
-                配置，自成组件（自己拉取/保存偏好），见 SummaryApiSettings.tsx。 */}
-            <div className="border-t border-white/[0.06] pt-4">
-              <SummaryApiSettings />
-            </div>
-          </div>
-        </section>
-        )}
-
         {category === 'shortcuts' && (
         <section className="glass-panel-soft rounded-2xl p-4">
           <ShortcutSettings />
         </section>
         )}
-
-        {category === 'pet' && <PetSettings />}
 
         {category === 'system' && (
         <section className="glass-panel-soft rounded-2xl p-4">
