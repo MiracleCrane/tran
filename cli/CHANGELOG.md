@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.58 - 2026-08-27
+
+### 中文
+
+- 修复：切换项目不再立即产生空壳会话——切项目改懒创建（与新建对话同一机制），发出第一条消息才在 Kimi 层面创建会话；此前侧栏会多出一条从未发言的 "New Session"。
+- 修复：输入框 markdown 预览真正可用——此前预览面板高度引用了隐藏 textarea 的无效测量值，被压成一行（约 34px）看似无效；现按内容自适应 + 上下限钳制。
+- 新增：侧栏一级「工具 ▸」统一入口，二级菜单收 RP 酒馆 / xhh 终端 / 问答（screen-assist）；「说明」并入设置（最后一个分类）。
+- 优化：用量环悬停只保留大预览卡（圆环级小气泡与卡内容重复且遮挡，已移除）。
+
+### English
+
+- Fix: switching projects no longer spawns an empty backend session — project switch is now lazy (same mechanism as New Chat); the kimi-side session is created only when the first message is sent. Previously a never-used "New Session" appeared in the sidebar.
+- Fix: the composer markdown preview actually works now — the preview pane previously read its height from the hidden textarea's invalid measurement and collapsed to one line (~34px); it now sizes to content within the min/max bounds.
+- New: a first-level "工具 ▸" sidebar entry with a second-level menu holding RP 酒馆 / xhh 终端 / 问答 (screen-assist); "说明" moved into Settings as the last category.
+- Improvement: hovering the usage rings shows only the big preview card (the ring-level mini tooltips duplicated and covered the card content — removed).
+
 ## v1.1.57 - 2026-08-27
 
 ### 中文

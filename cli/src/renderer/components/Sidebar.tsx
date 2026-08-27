@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore, type View } from '../store/uiStore'
@@ -603,6 +603,17 @@ const TavernIcon = (): JSX.Element => (
     <path d="M10 14h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
   </svg>
 )
+/** 「工具」组图标（2026-08-27 工具入口合并为一级 nav + 二级菜单）：扳手造型。 */
+const WrenchIcon = (): JSX.Element => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <path
+      d="M14.7 6.3a4 4 0 0 0-5.4 4.9L4 16.5V20h3.5l5.3-5.3a4 4 0 0 0 4.9-5.4l-2.6 2.6-2.5-.6-.6-2.5 2.7-2.5z"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
 const RefreshIcon = (): JSX.Element => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
     <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -695,11 +706,13 @@ const NAV_ITEMS: { view: View; label: string; icon: () => JSX.Element }[] = [
   // 「AI 功能」2026-08-27 搬回侧栏：上一次并入设置是错的方向，用户改口恢复
   // 一级入口（内容 = 原设置「AI 功能」分类整段，见 AssistantPanel）。
   { view: 'assistant', label: 'AI 功能', icon: AiWandIcon },
-  { view: 'rpTavern', label: 'RP 酒馆', icon: TavernIcon },
+  // 「工具」组（RP 酒馆 / xhh 终端 / 问答）不是普通 view 条目：2026-08-27
+  // 用户拍板收进一个带二级菜单的一级入口，渲染时插在「AI 功能」之后
+  // （见 renderToolsNavGroup）。RP 酒馆与「说明」的一级入口同次移除——
+  // 说明并入设置的「说明」分类。
   { view: 'archived', label: '归档', icon: ArchiveIcon },
   { view: 'pet', label: '宠物', icon: PetIcon },
-  { view: 'settings', label: '设置', icon: GearIcon },
-  { view: 'help', label: '说明', icon: HelpIcon }
+  { view: 'settings', label: '设置', icon: GearIcon }
 ]
 
 /**
@@ -760,6 +773,20 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const toggleNav = useUiStore((s) => s.toggleNav)
   /** 鼠标停在底部工具区上——临时浮出，移开即收，不写进 store。 */
   const [navHover, setNavHover] = useState(false)
+  // 「工具」二级菜单（2026-08-27 用户拍板）：RP 酒馆 / xhh 终端 / 问答 收进一个
+  // 一级入口。xhh 与问答是「启动动作」不是页面——点了直接拉外部窗口，失败要
+  // 当场给提示（原先只有设置页 XhhCard 里能看到启动错误）。
+  const [toolsOpen, setToolsOpen] = useState(true)
+  const [toolLaunchError, setToolLaunchError] = useState<string | null>(null)
+  const launchTool = async (launch: () => Promise<{ ok: boolean; error?: string }>): Promise<void> => {
+    setToolLaunchError(null)
+    try {
+      const result = await launch()
+      if (!result.ok) setToolLaunchError(result.error ?? '启动失败')
+    } catch (e) {
+      setToolLaunchError(e instanceof Error ? e.message : String(e))
+    }
+  }
   // forceExpanded（收起态侧栏的悬停浮层）永远展开工具区：浮层的意义就是快速
   // 触达这几个入口，再要求用户在浮层里二次悬停就多此一举。
   const navOpen = forceExpanded || !navCollapsed || navHover
@@ -1910,6 +1937,89 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     event.currentTarget.style.setProperty('--tab-y', `${event.clientY - rect.top}px`)
   }
 
+  /** 「工具」一级入口 + 二级菜单（2026-08-27 用户拍板）：渲染时插在 NAV_ITEMS
+   *  的「AI 功能」之后。二级项缩进 + chevron 展开/收起，Collapse 动画与工具区
+   *  整体同一套；RP 酒馆是页面（切 view），xhh/问答是启动动作（见 launchTool）。 */
+  const renderToolsNavGroup = (staggerIndex: number, navHidden: boolean): JSX.Element => {
+    const subItems: { key: string; label: string; icon: () => JSX.Element; active: boolean; onClick: () => void }[] = [
+      {
+        key: 'rpTavern',
+        label: 'RP 酒馆',
+        icon: TavernIcon,
+        active: view === 'rpTavern',
+        onClick: () => setView(view === 'rpTavern' ? 'chat' : 'rpTavern')
+      },
+      {
+        key: 'xhh',
+        label: 'xhh 终端',
+        icon: TerminalIcon,
+        active: false,
+        onClick: () => void launchTool(window.api.launchXhh)
+      },
+      {
+        key: 'screenAssist',
+        label: '问答',
+        icon: HelpIcon,
+        active: false,
+        onClick: () => void launchTool(window.api.launchScreenAssist)
+      }
+    ]
+    return (
+      <div
+        className="mt-1"
+        style={{
+          '--sidebar-tab-stagger': navHidden ? '0ms' : `${staggerIndex * 55}ms`,
+          opacity: navHidden ? 0 : 1,
+          transform: navHidden ? 'translateY(-6px)' : 'translateY(0)'
+        } as CSSProperties}
+      >
+        {/* 子视图（RP 酒馆）打开时父级同步高亮，否则用户找不到自己在哪。 */}
+        <button
+          onClick={() => setToolsOpen((o) => !o)}
+          onPointerEnter={handleSidebarPointerGlow}
+          onPointerMove={handleSidebarPointerGlow}
+          className={navCls(view === 'rpTavern')}
+          aria-expanded={toolsOpen}
+        >
+          <span className="flex w-[18px] shrink-0 items-center justify-center">
+            <WrenchIcon />
+          </span>
+          <span className="flex-1">工具</span>
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            className={`shrink-0 transition-transform duration-300 ease-spring ${toolsOpen ? '' : '-rotate-90'}`}
+          >
+            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <Collapse open={toolsOpen}>
+          <div className="ml-[13px] mt-0.5 border-l border-white/[0.06] pl-1.5">
+            {subItems.map((sub, i) => (
+              <button
+                key={sub.key}
+                onClick={sub.onClick}
+                onPointerEnter={handleSidebarPointerGlow}
+                onPointerMove={handleSidebarPointerGlow}
+                className={`${navCls(sub.active)} ${i > 0 ? 'mt-0.5' : ''}`}
+              >
+                <span className="flex w-[18px] shrink-0 items-center justify-center">
+                  <sub.icon />
+                </span>
+                {sub.label}
+              </button>
+            ))}
+          </div>
+        </Collapse>
+        {toolLaunchError && (
+          <div className="mt-1 px-2.5 text-[11px] leading-relaxed text-amber-300">{`启动失败：${toolLaunchError}`}</div>
+        )}
+      </div>
+    )
+  }
+
   const renderSessionSnapshot = (snapshot: SessionListSnapshot): JSX.Element[] =>
     snapshot.groups.map((g) => (
       <div key={g.label} className="mb-2">
@@ -2426,12 +2536,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         onMouseLeave={() => setNavHover(false)}
       >
         <div>
-          <HoverTip tip={navCollapsed ? '展开工具栏（点击钉住）' : '收起工具栏'} className="block">
+          <HoverTip tip={navCollapsed ? '展开导航（点击钉住）' : '收起导航'} className="block">
             <button
               onClick={toggleNav}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[10px] font-medium uppercase tracking-wide text-zinc-600 transition hover:text-zinc-400"
             >
-            <span className="flex-1">工具</span>
+            <span className="flex-1">导航</span>
             <svg
               width="13"
               height="13"
@@ -2506,7 +2616,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                   )
                 }
                 return (
-                  button
+                  // Fragment 只为挂 key：「工具」组插在「AI 功能」条目之后
+                  //（2026-08-27 工具入口合并，见 renderToolsNavGroup）。
+                  <Fragment key={item.view}>
+                    {button}
+                    {item.view === 'assistant' && renderToolsNavGroup(i + 1, navHidden)}
+                  </Fragment>
                 )
               })}
             </div>

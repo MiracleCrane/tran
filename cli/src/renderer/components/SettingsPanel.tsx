@@ -4,6 +4,7 @@ import SettingText from './SettingText'
 import BrowserBridgeCard from './BrowserBridgeCard'
 import DesktopControlCard from './DesktopControlCard'
 import XhhCard from './XhhCard'
+import HelpPanel from './HelpPanel'
 import ConfirmDialog from './ConfirmDialog'
 import HoverTip from './HoverTip'
 import type {
@@ -139,7 +140,9 @@ const SETTINGS_CATEGORIES = [
   { id: 'shortcuts', label: '快捷键' },
   { id: 'appearance', label: '外观' },
   { id: 'system', label: '系统' },
-  { id: 'backup', label: '备份' }
+  { id: 'backup', label: '备份' },
+  // 「说明」2026-08-27 从侧栏一级入口并入设置（同次用户拍板），内容见 HelpPanel。
+  { id: 'help', label: '说明' }
 ] as const
 type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number]['id']
 
@@ -1051,6 +1054,8 @@ export default function SettingsPanel(): JSX.Element {
         {category === 'tools' && <DesktopControlCard />}
 
         {category === 'tools' && <XhhCard />}
+
+        {category === 'help' && <HelpPanel />}
 
         {category === 'shortcuts' && (
         <section className="glass-panel-soft rounded-2xl p-4">

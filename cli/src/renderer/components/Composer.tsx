@@ -643,14 +643,17 @@ export default function Composer(): JSX.Element {
     const textarea = textareaRef.current
     // 预览期间 textarea 是 hidden 的，scrollHeight 量出来是 0——跳过测量，
     // 退出预览时本 effect 随 previewing 依赖重跑，高度照原样算回来。
-    if (!textarea || manualTextareaHeight !== null || previewing) return
+    // 2026-08-27：富文本模式下 textarea 全程 hidden，量它同样只能得到 0，
+    // 还会把 autoTextareaHeight 压到 min（预览面板一度被带成 34px）——富文本
+    // 模式本就不该测量。
+    if (!textarea || richComposer || manualTextareaHeight !== null || previewing) return
 
     const previousHeight = textarea.style.height
     textarea.style.height = 'auto'
     const measured = clampComposerHeight(textarea.scrollHeight, heightBounds)
     textarea.style.height = previousHeight
     setAutoTextareaHeight((height) => (height === measured ? height : measured))
-  }, [heightBounds, manualTextareaHeight, text, previewing])
+  }, [heightBounds, manualTextareaHeight, text, previewing, richComposer])
 
   // Model options follow the current backend: 用户自定义列表优先，其次后端
   // (ACP configOptions) 上报的模型，最后兜底内置列表。
@@ -1659,7 +1662,6 @@ export default function Composer(): JSX.Element {
               <div
                 className="overflow-y-auto px-1 py-1 text-sm leading-relaxed"
                 style={{
-                  height: textareaHeight,
                   minHeight: heightBounds.min,
                   maxHeight: heightBounds.max
                 }}

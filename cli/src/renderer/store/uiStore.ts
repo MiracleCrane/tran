@@ -14,7 +14,6 @@ export type View =
   | 'skills'
   | 'settings'
   | 'wslHealth'
-  | 'help'
   | 'archived'
 
 export interface BlockingOverlayState {

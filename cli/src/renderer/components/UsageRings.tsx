@@ -76,22 +76,22 @@ function pct2(ratio: number | undefined): string | null {
 }
 
 /** 单个小圆环：pct 为 null 时置灰显示"—"（无数据）。
- *  tip 走 HoverTip 气泡（2026-08-26 起全站禁用原生 title=）。 */
+ *  2026-08-27 用户：悬停小气泡和大预览卡重复还挡内容——Ring 不再带提示，
+ *  信息全部在大卡里。 */
 function Ring({
   pct,
-  label,
-  tip
+  label
 }: {
   pct: number | null
   label: string
-  tip: string
+  tip?: string
 }): JSX.Element {
   const danger = pct !== null && pct >= 80
   const r = 6.5
   const c = 2 * Math.PI * r
   const frac = (pct ?? 0) / 100
   return (
-    <HoverTip tip={tip} className="flex items-center gap-1">
+    <span className="flex items-center gap-1">
       <svg width="18" height="18" viewBox="0 0 20 20" className="shrink-0" aria-hidden>
         <circle cx="10" cy="10" r={r} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="2.4" />
         {pct !== null && (
@@ -114,7 +114,7 @@ function Ring({
         )}
       </svg>
       <span className="text-[9px] text-zinc-500">{label}</span>
-    </HoverTip>
+    </span>
   )
 }
 

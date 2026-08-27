@@ -2604,27 +2604,33 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const oldMeta = get().meta
     const newId = uid()
     const requestSeq = nextSessionNavigationSeq()
-    const startGate = createSessionStartGate(newId)
     const isLatestRequest = (): boolean => isCurrentSessionNavigation(get, requestSeq, newId)
     // #6 切走=后台化：快照当前会话进事件缓冲（事件继续累积，切回可 attach）。
     snapshotActiveSessionIntoBackground(get)
-    // Flip the UI to the new project BEFORE any IPC: the main view clears and
-    // enters its starting state immediately, so the click never stalls on the
-    // setLastProject / getActiveProvider round-trips. Model & permission mode
-    // are carried over from the current session as a transient — the session
+    // Flip the UI to the new project BEFORE any IPC: the main view clears
+    // immediately, so the click never stalls on the setLastProject /
+    // getActiveProvider round-trips below. Model & permission mode are
+    // carried over from the current session as a transient — the session
     // init event overwrites them with the real values once the bridge is up.
+    //
+    // #47 懒创建（与 newChat/openStartupProject 同一套）：此前这里在函数
+    // 体里直接 await startSession()，切一次项目就 `session/new` 一个空壳
+    // 落盘——用户还没说话，kimi 会话列表就多一条 "New Session"
+    //（2026-08-27 报告）。现在只切界面，把「怎么起」记进 pendingSessionStart，
+    // 第一条消息才真正起后端；没说话就没有会话。starting 保持 false：没有
+    // 任何东西在启动，不该显示"正在进入会话"骨架。
     set({
-      starting: true,
+      starting: false,
       items: [],
       tasks: [], pendingQueue: [],
       sessionConfigDirty: false,
       sessionModelDirty: false,
       bridgeEnded: false,
       // 2026-08-26 切项目不再清空 sessions/sessionsHasMore：清空的瞬间侧栏
-      // 整列闪空 → 骨架/空态 → startSession 后 refreshSessions 再填回，表现
-      // 就是"切个项目，左边目录整个收缩重载一次"。与 openSessionCrossProject
-      // 同款修复（见该处注释）：旧列表留到 refreshSessions 拿新数据原地替换
-      //（它连 sessionsHasMore 一起覆盖），只有真正变化的行走进出动画。
+      // 整列闪空 → 骨架/空态 → refreshSessions 再填回，表现就是"切个项目，
+      // 左边目录整个收缩重载一次"。与 openSessionCrossProject 同款修复（见
+      // 该处注释）：旧列表留到 refreshSessions 拿新数据原地替换（它连
+      // sessionsHasMore 一起覆盖），只有真正变化的行走进出动画。
       slashCommands: [],
       planEntries: [],
       planUpdatedAt: null,
@@ -2647,16 +2653,62 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
     })
     // Persist last-project + read the active provider concurrently; neither
-    // blocks the view switch (already done above), they only feed the spawn.
-    const [, provider, prefs] = await Promise.all([
+    // blocks the view switch (already done above). 懒起的闭包等的是同一个
+    // promise——pendingSessionStart 必须紧贴上面的 set 同步登记（之间不能
+    // 有 await），否则窗口期内的首条消息既取不到待起任务、也等不到 gate。
+    const configPromise = Promise.all([
       window.api.setLastProject(path),
       window.api.getActiveProvider(),
       window.api.getPreferences().catch(() => null)
     ])
-    if (!isLatestRequest()) {
-      startGate.resolve()
-      return
+    // 侧栏历史列表要立刻可用：只依赖 meta.cwd，不需要后端会话活着（同
+    // openStartupProject）。用户切完项目很可能直接去点历史会话。
+    void get().refreshSessions()
+    // 后端推迟到第一条消息：sendMessage 会先取走这个任务跑完，再走原本的
+    // sessionStartPromises 等待。gate 也在闭包里才创建——若这个会话最终没
+    // 被使用，就不会在 sessionStartPromises 里留下一个永不落定的 promise。
+    pendingSessionStart = {
+      sessionId: newId,
+      start: async () => {
+        const startGate = createSessionStartGate(newId)
+        try {
+          const [, startProvider, startPrefs] = await configPromise
+          const startBackend = startPrefs?.agentBackend ?? oldMeta?.agentBackend
+          const startModel = displayModelForAgent(startBackend, startProvider?.model ?? oldMeta?.model)
+          await window.api.startSession({
+            cwd: path,
+            ...(modelForAgent(startBackend, startModel) ? { model: modelForAgent(startBackend, startModel) } : {}),
+            ...(startBackend ? { agentBackend: startBackend } : {}),
+            effort: get().effort,
+            // 新项目 = 全新会话：同样应用设置里的默认权限模式（此前漏传，chip 被
+            // init 覆盖回 default）。
+            permissionMode: startPrefs?.defaultPermissionMode ?? 'default',
+            bridgeSessionId: newId
+          })
+          startGate.resolve()
+        } catch (error: unknown) {
+          startGate.reject(error)
+          if (!isLatestRequest()) return
+          set((s) => ({
+            starting: false,
+            status: {
+              ...s.status,
+              error: error instanceof Error ? error.message : String(error)
+            }
+          }))
+          return
+        }
+        if (!isLatestRequest()) {
+          await window.api.destroySession(newId).catch(() => {})
+          return
+        }
+        set({ starting: false })
+        void get().refreshSessions()
+        scheduleInitWatchdog(get, set, newId)
+      }
     }
+    const [, provider, prefs] = await configPromise
+    if (!isLatestRequest()) return
     const agentBackend = prefs?.agentBackend ?? oldMeta?.agentBackend
     const model = displayModelForAgent(agentBackend, provider?.model ?? oldMeta?.model)
     set((s) => (
@@ -2673,38 +2725,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           }
         : {}
     ))
+    // 旧会话是真会话，切走即关闭（热切）。若它是从未懒起的空壳，
+    // closeSession 对不存在的后端会话是无害空操作（同 newChat）。
     if (oldMeta?.sessionId) void window.api.closeSession(oldMeta.sessionId).catch(() => {})
-    try {
-      await window.api.startSession({
-        cwd: path,
-        ...(modelForAgent(agentBackend, model) ? { model: modelForAgent(agentBackend, model) } : {}),
-        ...(agentBackend ? { agentBackend } : {}),
-        effort: get().effort,
-        // 新项目 = 全新会话：同样应用设置里的默认权限模式（此前漏传，chip 被
-        // init 覆盖回 default）。
-        permissionMode: prefs?.defaultPermissionMode ?? 'default',
-        bridgeSessionId: newId
-      })
-      startGate.resolve()
-    } catch (error: unknown) {
-      startGate.reject(error)
-      if (!isLatestRequest()) return
-      set((s) => ({
-        starting: false,
-        status: {
-          ...s.status,
-          error: error instanceof Error ? error.message : String(error)
-        }
-      }))
-      return
-    }
-    if (!isLatestRequest()) {
-      await window.api.destroySession(newId).catch(() => {})
-      return
-    }
-    set({ starting: false })
-    void get().refreshSessions()
-    scheduleInitWatchdog(get, set, newId)
   },
 
   removePendingMessage(id) {
@@ -2866,10 +2889,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // 先切到该会话所属项目，再 resume（不在原项目里跨 cwd load）。
     // #42 打开会话只切换 cwd（setLastProject），绝不 addProject：项目列表只收录
     // 用户显式添加的目录，脏会话的 cwd 不会混进工作区列表。
-    // #47 只换 cwd，绝不走 switchProject：它会 startSession 一个全新空壳，而
-    // 随后的 openSession 只把它后台化（closeSession=background，不置 closed），
-    // discardEmptyShell 在 session/new 在途时拿不到 acpSessionId 直接跳过——
-    // 空壳就此落盘残留在目标项目（侧栏多出 "New Session"）。cwd 以 targetCwd
+    // #47 只换 cwd，绝不走 switchProject：它只懂开全新会话（2026-08-27 起
+    // 也是懒创建，见该处），而这里要 resume 一条已存在的会话——先
+    // switchProject 再 openSession 会把刚切的空会话立刻后台化，平白多一次
+    // 导航。cwd 以 targetCwd
     // 参数传给 openSession 而不提前改 meta：openSession 进去第一件事就是把当前
     // 会话快照进后台缓冲，缓冲的 cwd 必须还是旧项目的，否则跨项目切回时
     // attach 的 cwd 比对永远失配、历史缓存失效键也指错目录。
