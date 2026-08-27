@@ -129,11 +129,12 @@ export interface CompactionItem {
   id: string
   kind: 'compaction'
   parentToolUseId: string | null
+  /** 统计数字：live 通道从 ACP 压缩提示文本解析（2026-08-27 起新版宿主
+   *  会推，见 sessionStore 的 isCompactionNoticeText）；wire 历史通道没有。 */
   messagesCompacted?: number
   tokensBefore?: number
   tokensAfter?: number
-  /** 压缩摘要正文：wire 重建通道与 live 通道都有（都源自 apply_compaction；
-   *  宿主压缩零 ACP 文本输出，2026-08-20 起统计数字不再可得）。 */
+  /** 压缩摘要正文：wire 重建通道与 live 通道都有（都源自 apply_compaction）。 */
   summary?: string
   at: number
   /** 见 UserItem.isHistory（历史重放里不会出现，占位兼容）。 */

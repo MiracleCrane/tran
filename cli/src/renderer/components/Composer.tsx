@@ -1680,7 +1680,7 @@ export default function Composer(): JSX.Element {
           {previewing && (
             <div className="relative">
               <div
-                className="overflow-y-auto px-1 py-1 text-sm leading-relaxed"
+                className="overflow-y-auto px-1 pb-1 pt-5 text-sm leading-relaxed"
                 style={{
                   minHeight: heightBounds.min,
                   maxHeight: heightBounds.max
@@ -1688,7 +1688,9 @@ export default function Composer(): JSX.Element {
               >
                 <MessageText>{text}</MessageText>
               </div>
-              {/* 右上角被预览开关眼睛占位，提示文字左让一档（right-9）。 */}
+              {/* 右上角被预览开关眼睛占位，提示文字左让一档（right-9）。内容区
+                  pt-5 给它让出一条带，滚动时正文不再从提示底下穿过（2026-08-27
+                  用户截图：提示与正文互相遮挡）。 */}
               <span className="pointer-events-none absolute right-9 top-0.5 text-[10px] text-zinc-600">
                 预览 · Esc 返回编辑
               </span>

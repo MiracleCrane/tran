@@ -2952,6 +2952,21 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   animation: tran-fade-in 100ms var(--easing-out) both;
 }
 
+/* 预览卡底色精修（2026-08-27 用户：「底色好难看」）：glass 主题加暖一点的
+   纵向渐变与更立体的投影；flat/charcoal 的实底渐变规则在文件后部（:3799
+   的 flat 浮层统一规则之后，特异度相同拼源码序）。 */
+.session-preview-card {
+  border-color: rgba(255, 255, 255, 0.1);
+  background:
+    radial-gradient(120% 90% at 18% 0%, rgba(139, 92, 246, 0.07), transparent 55%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.012)),
+    rgba(16, 17, 22, 0.96);
+  box-shadow:
+    inset 0 1px 0 rgba(250, 248, 255, 0.16),
+    0 18px 48px rgba(0, 0, 0, 0.42),
+    0 3px 10px rgba(0, 0, 0, 0.3);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tran-preview-enter {
     animation: none;
@@ -3800,6 +3815,19 @@ div:has(textarea:focus) .composer-shortcut-hint {
   :root[data-theme='charcoal'][data-ui='flat'] .glass-panel-soft:where(.fixed, .absolute),
   :root[data-theme='charcoal'][data-ui='flat'] .glass-control:where(.fixed, .absolute) {
     background: #212121;
+  }
+
+  /* 预览卡例外（2026-08-27）：#212121 死实底太呆板，上下渐变 + 细边 + 柔影。
+     放在上面那条统一规则之后（同特异度拼源码序）。 */
+  :root[data-theme='charcoal'][data-ui='flat'] .session-preview-card {
+    border-color: rgba(255, 255, 255, 0.1);
+    background:
+      radial-gradient(120% 90% at 18% 0%, rgba(139, 92, 246, 0.08), transparent 55%),
+      linear-gradient(180deg, #282828, #1f1f1f);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.09),
+      0 18px 48px rgba(0, 0, 0, 0.5),
+      0 3px 10px rgba(0, 0, 0, 0.35);
   }
 
   /* 项目切换器 / 下拉面板的实底（含 ::before 的 !important 填充）。 */

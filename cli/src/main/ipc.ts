@@ -34,6 +34,7 @@ import {
 import { setOverlayTargetDisplay, stopControlOverlay } from './controlOverlay'
 import { launchScreenAssist } from './screenAssist'
 import { launchXhh } from './xhh'
+import { launchXtw } from './xtw'
 import { configureRpTavern, getRpTavernStatus, openRpTavern } from './rpTavern'
 import {
   listProviders,
@@ -1199,6 +1200,8 @@ export function registerIpc(
   ipcMain.handle('forge:launchScreenAssist', async () => launchScreenAssist())
 
   ipcMain.handle('forge:launchXhh', async () => launchXhh())
+
+  ipcMain.handle('forge:launchXtw', async () => launchXtw())
 
   ipcMain.handle('forge:getRpTavernStatus', async () => getRpTavernStatus())
 

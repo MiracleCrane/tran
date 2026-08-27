@@ -133,7 +133,7 @@ function SessionPreviewCard({
       ref={(el) => {
         previewCardEl = el
       }}
-      className={`glass-panel fixed z-[90] w-64 rounded-2xl p-3 shadow-2xl${preview.animate ? ' tran-preview-enter' : ''}`}
+      className={`glass-panel session-preview-card fixed z-[90] w-64 rounded-2xl p-3 shadow-2xl${preview.animate ? ' tran-preview-enter' : ''}`}
       style={{ top: preview.top, left: preview.left }}
       onPointerEnter={onHoldOpen}
       onPointerLeave={onTriangleLeave}

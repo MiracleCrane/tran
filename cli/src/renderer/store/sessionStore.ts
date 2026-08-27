@@ -983,6 +983,108 @@ function isModelSwitchControlOutput(text: string | undefined): boolean {
   return /<local-command-stdout>\s*Set model to [\s\S]*?<\/local-command-stdout>/i.test(text.trim())
 }
 
+/** 2026-08-27 压缩提示文本拦截（用户反馈：压缩结果渲成一条英文原文回复，
+ *  详情卡只有时间「根本没有意义」）。新版宿主压缩完成后会经 ACP 推一条纯
+ *  提示文本（「Compacting conversation context…Compaction completed.
+ *  • Messages compacted: N • Tokens before: X • Tokens after: Y」）；
+ *  wire.jsonl 不落这条（同日 wire 实证），所以只有 live 通道要吞。判定从
+ *  严：整块以标记**开头**才认——旧版 .includes 会把引用标记文本的正常
+ *  回复整条误删（2026-08-20 实证）；流式期间也不做前缀吞（正常回复以
+ *  "Comp…" 开头时前缀吞会吃掉真文首，半截残留由最终 assistant 消息整段
+ *  吞掉，见 ingestAgentEvent 的 assistant 分支）。 */
+const COMPACTION_NOTICE_MARKERS = ['Compacting conversation context', 'Compaction completed']
+
+function isCompactionNoticeText(text: string): boolean {
+  const t = text.trimStart()
+  return COMPACTION_NOTICE_MARKERS.some((m) => t.startsWith(m))
+}
+
+/** 压缩统计三元组（从提示文本解析；宿主不供结构化数据）。 */
+interface CompactionStats {
+  messagesCompacted?: number
+  tokensBefore?: number
+  tokensAfter?: number
+}
+
+/** 解析统计：`Messages compacted: 16` / `Tokens before: 1,906` / `Tokens after: 782`。 */
+function parseCompactionStats(text: string): CompactionStats {
+  const num = (pattern: RegExp): number | undefined => {
+    const match = text.match(pattern)
+    if (!match) return undefined
+    const value = Number(match[1].replace(/,/g, ''))
+    return Number.isFinite(value) ? value : undefined
+  }
+  const stats: CompactionStats = {}
+  const messages = num(/Messages compacted:\s*([\d,]+)/)
+  if (messages !== undefined) stats.messagesCompacted = messages
+  const before = num(/Tokens before:\s*([\d,]+)/)
+  if (before !== undefined) stats.tokensBefore = before
+  const after = num(/Tokens after:\s*([\d,]+)/)
+  if (after !== undefined) stats.tokensAfter = after
+  return stats
+}
+
+/** 合并统计：b 中有值的字段覆盖 a。 */
+function mergeCompactionStatsValues(a: CompactionStats, b: CompactionStats): CompactionStats {
+  const out: CompactionStats = { ...a }
+  if (b.messagesCompacted !== undefined) out.messagesCompacted = b.messagesCompacted
+  if (b.tokensBefore !== undefined) out.tokensBefore = b.tokensBefore
+  if (b.tokensAfter !== undefined) out.tokensAfter = b.tokensAfter
+  return out
+}
+
+/** 把统计并入最近一条 compaction 分界线；一条都没有时 merged=false（调用方暂存）。 */
+function mergeStatsIntoLastCompaction(
+  items: TranscriptItem[],
+  stats: CompactionStats
+): { items: TranscriptItem[]; merged: boolean } {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i]
+    if (it.kind !== 'compaction') continue
+    const next = [...items]
+    next[i] = {
+      ...it,
+      ...(stats.messagesCompacted !== undefined ? { messagesCompacted: stats.messagesCompacted } : {}),
+      ...(stats.tokensBefore !== undefined ? { tokensBefore: stats.tokensBefore } : {}),
+      ...(stats.tokensAfter !== undefined ? { tokensAfter: stats.tokensAfter } : {})
+    }
+    return { items: next, merged: true }
+  }
+  return { items, merged: false }
+}
+
+/** 吞掉已流式进 transcript 的压缩提示文本块：整块以标记开头的 text 块剔除，
+ *  剔空了的 assistant 条目整条移除；剔除块的统计一并解析回收。 */
+function purgeCompactionNotices(items: TranscriptItem[]): { items: TranscriptItem[]; stats: CompactionStats } {
+  let stats: CompactionStats = {}
+  let changed = false
+  const next: TranscriptItem[] = []
+  for (const it of items) {
+    if (it.kind !== 'assistant') {
+      next.push(it)
+      continue
+    }
+    const kept = it.blocks.filter((b) => {
+      if (b.kind === 'text' && isCompactionNoticeText(b.text)) {
+        stats = mergeCompactionStatsValues(stats, parseCompactionStats(b.text))
+        return false
+      }
+      return true
+    })
+    if (kept.length === it.blocks.length) {
+      next.push(it)
+      continue
+    }
+    changed = true
+    if (kept.length > 0) next.push({ ...it, blocks: kept })
+  }
+  return { items: changed ? next : items, stats }
+}
+
+/** 前台会话的压缩统计暂存：ACP 提示文本先于 wire complete 到达时还没有
+ *  分界线可并，先放这里，system/compaction 分支消费。 */
+let pendingCompactionStats: CompactionStats = {}
+
 /** True if the Task tool_use that spawned a task was called with
  *  run_in_background: true — i.e. the model launched it directly in the
  *  background (distinct from a user backgrounding a foreground task later). */
@@ -1120,8 +1222,12 @@ function applyStreamEvent(
       const blocks = [...item.blocks]
       const b = blocks[index]
       if (!b) return item
-      if (delta.type === 'text_delta' && b.kind === 'text')
-        blocks[index] = { ...b, text: b.text + (delta.text ?? '') }
+      if (delta.type === 'text_delta' && b.kind === 'text') {
+        const nextText = b.text + (delta.text ?? '')
+        // 压缩提示吞并（2026-08-27）：已成形为提示文本的块停止追加，半截
+        // 残留由最终 assistant 消息整段吞掉。
+        if (!isCompactionNoticeText(nextText)) blocks[index] = { ...b, text: nextText }
+      }
       else if (delta.type === 'thinking_delta' && b.kind === 'thinking')
         blocks[index] = { ...b, text: b.text + (delta.thinking ?? '') }
       else if (delta.type === 'input_json_delta' && b.kind === 'tool')
@@ -1311,6 +1417,8 @@ interface BackgroundSessionState {
    *  剩余队列接回 pendingQueue。与 recycledQueue 分开存：那边是没送到后端、
    *  等待重发的，这边是后端已知、只等消费的，弹队首绝不能弹错那一边。 */
   queuedMirror?: PendingMessage[]
+  /** 压缩提示统计暂存（前台 pendingCompactionStats 的后台同款；瞬态，不随快照）。 */
+  compactionStats?: CompactionStats
 }
 
 const backgroundSessions = new Map<string, BackgroundSessionState>()
@@ -1479,7 +1587,11 @@ function foldBackgroundDeltaInPlace(bg: BackgroundSessionState, b: StreamDeltaBa
     | undefined
   const blk = item.blocks[index]
   if (!delta || !blk) return
-  if (delta.type === 'text_delta' && blk.kind === 'text') blk.text += delta.text ?? ''
+  // 压缩提示吞并（同前台 applyStreamEvent 的 delta 分支）。
+  if (delta.type === 'text_delta' && blk.kind === 'text') {
+    const nextText = blk.text + (delta.text ?? '')
+    if (!isCompactionNoticeText(nextText)) blk.text = nextText
+  }
   else if (delta.type === 'thinking_delta' && blk.kind === 'thinking') blk.text += delta.thinking ?? ''
   else if (delta.type === 'input_json_delta' && blk.kind === 'tool')
     blk.inputRaw = (blk.inputRaw ?? '') + (delta.partial_json ?? '')
@@ -1594,19 +1706,27 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
         const c = (msg as unknown as { commands?: SkillInfo[] }).commands
         bg.slashCommands = Array.isArray(c) ? c : []
       } else if (subtype === 'compaction') {
-        // 压缩完成分界线：main 从 wire.jsonl 的 full_compaction.complete 推送
-        // （宿主压缩全程零 ACP 文本输出，2026-08-20 wire 实证），摘要正文来自
-        // apply_compaction。不再按文本标记过滤流式条目——那会把引用了标记
-        // 文本的正常回复整条误删（同日实证）。
+        // 压缩完成分界线：main 从 wire.jsonl 的 full_compaction.complete 推送，
+        // 摘要正文来自 apply_compaction。统计数字来自 ACP 压缩提示文本
+        // （2026-08-27：新版宿主压缩后会推一条英文提示，assistant 分支吞并
+        // 时解析）；purge 只删整块以标记开头的 text 块，引用标记的正常回复
+        // 不受影响（2026-08-20 误删教训）。
         const c = (msg as unknown as { compaction?: { summary?: string; at?: number } }).compaction
         if (c) {
+          // 统计合流同前台：purge 已流式的提示文本 + 消费暂存。
+          const purged = purgeCompactionNotices(bg.items)
+          const stats = mergeCompactionStatsValues(bg.compactionStats ?? {}, purged.stats)
+          delete bg.compactionStats
           bg.items = [
-            ...bg.items,
+            ...purged.items,
             {
               id: uid(),
               kind: 'compaction' as const,
               parentToolUseId: null,
               ...(c.summary ? { summary: c.summary } : {}),
+              ...(stats.messagesCompacted !== undefined ? { messagesCompacted: stats.messagesCompacted } : {}),
+              ...(stats.tokensBefore !== undefined ? { tokensBefore: stats.tokensBefore } : {}),
+              ...(stats.tokensAfter !== undefined ? { tokensAfter: stats.tokensAfter } : {}),
               at: c.at ?? Date.now()
             }
           ]
@@ -1816,6 +1936,24 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
             startedAt: Date.now()
           })
         }
+      }
+      // 压缩提示整条吞并（同前台 assistant 分支，2026-08-27）。
+      if (blocks.length > 0 && blocks.every((b) => b.kind === 'text' && isCompactionNoticeText(b.text))) {
+        const stats = parseCompactionStats(
+          blocks.map((b) => (b.kind === 'text' ? b.text : '')).join('\n')
+        )
+        const noticeTargetId =
+          bg.currentStreamingMsgId && bg.items.some((i) => i.id === bg.currentStreamingMsgId)
+            ? bg.currentStreamingMsgId
+            : m.message?.id && bg.items.some((i) => i.id === m.message.id)
+              ? m.message.id
+              : null
+        const base = noticeTargetId ? bg.items.filter((i) => i.id !== noticeTargetId) : bg.items
+        const merged = mergeStatsIntoLastCompaction(base, stats)
+        bg.items = merged.items
+        if (!merged.merged) bg.compactionStats = mergeCompactionStatsValues(bg.compactionStats ?? {}, stats)
+        bg.currentStreamingMsgId = null
+        break
       }
       if (blocks.length > 0 && blocks.every((b) => b.kind === 'text' && isModelSwitchControlOutput(b.text))) {
         bg.currentStreamingMsgId = null
@@ -3754,25 +3892,36 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             }))
           }
         } else if (subtype === 'compaction') {
-          // 压缩完成分界线：main 从 wire.jsonl 的 full_compaction.complete 推送
-          // （宿主压缩全程零 ACP 文本输出，2026-08-20 wire 实证），摘要正文来自
-          // apply_compaction。不再按文本标记过滤流式条目——那会把引用了标记
-          // 文本的正常回复整条误删（同日实证）。
+          // 压缩完成分界线：main 从 wire.jsonl 的 full_compaction.complete 推送，
+          // 摘要正文来自 apply_compaction。统计数字来自 ACP 压缩提示文本
+          // （2026-08-27：新版宿主压缩后会推一条英文提示，assistant 分支吞并
+          // 时解析）；purge 只删整块以标记开头的 text 块，引用标记的正常回复
+          // 不受影响（2026-08-20 误删教训）。
           const c = (msg as unknown as { compaction?: { summary?: string; at?: number } }).compaction
           if (c) {
-            set((s) => ({
-              items: [
-                ...s.items,
-                {
-                  id: uid(),
-                  kind: 'compaction' as const,
-                  parentToolUseId: null,
-                  ...(c.summary ? { summary: c.summary } : {}),
-                  at: c.at ?? Date.now()
-                }
-              ],
-              status: { ...s.status, compacting: false }
-            }))
+            set((s) => {
+              // 统计两个来源合流：purge 回收已流式进 transcript 的提示文本；
+              // pendingCompactionStats 是提示先于本消息到达时的暂存（assistant 分支）。
+              const purged = purgeCompactionNotices(s.items)
+              const stats = mergeCompactionStatsValues(pendingCompactionStats, purged.stats)
+              pendingCompactionStats = {}
+              return {
+                items: [
+                  ...purged.items,
+                  {
+                    id: uid(),
+                    kind: 'compaction' as const,
+                    parentToolUseId: null,
+                    ...(c.summary ? { summary: c.summary } : {}),
+                    ...(stats.messagesCompacted !== undefined ? { messagesCompacted: stats.messagesCompacted } : {}),
+                    ...(stats.tokensBefore !== undefined ? { tokensBefore: stats.tokensBefore } : {}),
+                    ...(stats.tokensAfter !== undefined ? { tokensAfter: stats.tokensAfter } : {}),
+                    at: c.at ?? Date.now()
+                  }
+                ],
+                status: { ...s.status, compacting: false }
+              }
+            })
           }
         } else if (subtype === 'history') {
           // session/load 重放的历史：整批转换成 items 前置拼接（不走流式管道，
@@ -4035,6 +4184,27 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               startedAt: Date.now()
             })
           }
+        }
+        // 压缩提示整条吞并（2026-08-27 用户反馈：英文原文别当回复渲染）：
+        // 统计并入最近一条分界线；分界线还没推（wire complete 与 ACP 提示
+        // 到达顺序不定）则暂存 pendingCompactionStats，compaction 分支消费。
+        if (blocks.length > 0 && blocks.every((b) => b.kind === 'text' && isCompactionNoticeText(b.text))) {
+          const stats = parseCompactionStats(
+            blocks.map((b) => (b.kind === 'text' ? b.text : '')).join('\n')
+          )
+          set((s) => {
+            const noticeTargetId =
+              s.currentStreamingMsgId && s.items.some((i) => i.id === s.currentStreamingMsgId)
+                ? s.currentStreamingMsgId
+                : m.message?.id && s.items.some((i) => i.id === m.message.id)
+                  ? m.message.id
+                  : null
+            const base = noticeTargetId ? s.items.filter((i) => i.id !== noticeTargetId) : s.items
+            const merged = mergeStatsIntoLastCompaction(base, stats)
+            if (!merged.merged) pendingCompactionStats = mergeCompactionStatsValues(pendingCompactionStats, stats)
+            return { items: merged.items, currentStreamingMsgId: null }
+          })
+          break
         }
         if (blocks.length > 0 && blocks.every((b) => b.kind === 'text' && isModelSwitchControlOutput(b.text))) {
           set((s) => ({ status: { ...s.status, running: false }, currentStreamingMsgId: null }))

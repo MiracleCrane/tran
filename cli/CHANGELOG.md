@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.61 - 2026-08-27
+
+### 中文
+
+- 重做：上下文压缩提示——英文原文不再裸显示；默认折叠为一行中文摘要「⚡ 上下文已压缩 · 327,164 → 15,203 tokens · 1,213 条消息 · 16:07」，展开看详情（前后 tokens、消息数、压缩比例、时间、当前上下文实时占用、摘要二级开关）。
+- 优化：会话悬停预览卡底色精修——紫色微光 + 纵向渐变 + 细边柔影，flat 主题不再是死板的 #212121 实底。
+- 修复：预览态「Esc 返回编辑」提示与正文互相遮挡——内容区顶部留出提示带。
+
+### English
+
+- Redesign: the compaction notice — the raw English text no longer renders bare; it collapses into a single Chinese summary line ("⚡ 上下文已压缩 · 327,164 → 15,203 tokens · 1,213 条消息 · 16:07"), expandable to details (before/after tokens, message count, ratio, time, live current-context usage, summary behind a second toggle).
+- Improvement: session hover preview card restyled — purple glow + vertical gradient + refined border and shadow; no longer a flat #212121 slab in the flat theme.
+- Fix: the preview mode's "Esc 返回编辑" hint no longer overlaps the content (reserved strip at the top).
+
 ## v1.1.60 - 2026-08-27
 
 ### 中文

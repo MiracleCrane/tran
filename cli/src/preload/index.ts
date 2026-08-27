@@ -44,6 +44,7 @@ const api: ForgeApi = {
   listSessions: (cwd, opts) => ipcRenderer.invoke('forge:listSessions', cwd, opts),
   launchScreenAssist: () => ipcRenderer.invoke('forge:launchScreenAssist'),
   launchXhh: () => ipcRenderer.invoke('forge:launchXhh'),
+  launchXtw: () => ipcRenderer.invoke('forge:launchXtw'),
   getRpTavernStatus: () => ipcRenderer.invoke('forge:getRpTavernStatus'),
   configureRpTavern: (installPath) => ipcRenderer.invoke('forge:configureRpTavern', installPath),
   openRpTavern: () => ipcRenderer.invoke('forge:openRpTavern'),

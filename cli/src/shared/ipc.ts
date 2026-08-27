@@ -846,6 +846,8 @@ export interface ForgeApi {
   launchScreenAssist(): Promise<{ ok: boolean; already?: boolean; error?: string }>
   /** 弹出 xhh 终端窗口（独立进程，不随 Tran 退出回收）。 */
   launchXhh(): Promise<{ ok: boolean; error?: string }>
+  /** 弹出 xtw 终端窗口（独立进程，不随 Tran 退出回收）。 */
+  launchXtw(): Promise<{ ok: boolean; error?: string }>
   /** 检测外置 SillyTavern、Node.js 与自动路由服务。 */
   getRpTavernStatus(): Promise<RpTavernStatus>
   /** 保存外置 SillyTavern 安装目录；无效目录不会落盘。 */
