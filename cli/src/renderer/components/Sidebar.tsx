@@ -1869,7 +1869,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               <PetIcon size={12} />
             </button>
           </HoverTip>
-          <span className="ml-auto flex items-center gap-1">
+          {/* 整排靠左（2026-08-27 用户：「这块都要靠左」）：宠物爪印与搜索等
+              图标同一簇左对齐，不再右端分散。 */}
+          <span className="ml-1 flex items-center gap-1">
             <HoverTip tip="搜索会话（Ctrl+K）">
               <button
                 onClick={() => emitForgeEvent('openSessionSearch')}

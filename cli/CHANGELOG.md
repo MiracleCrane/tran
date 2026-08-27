@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.55 - 2026-08-27
+
+### 中文
+
+- 修复：项目切换下拉被正文压在下面（合体布局里标题栏与正文同列，面板 z 层级不够——看着像"透明"、点击全落空，「不在项目中工作」根本点不中）。下拉改为 portal 到 body、fixed 定位 z-100，不透明底色本就已实。
+- 修复：「用量」按钮级悬停气泡挡住大预览卡里的输入/输出标签——已移除（它与大卡重复），圆环级提示保留。
+- 优化：侧栏头部图标整排靠左（宠物爪印与搜索/AI 命名/多选/显隐/刷新同一簇左对齐，不再左右分散）。
+
+### English
+
+- Fix: the project switcher dropdown was painted under the chat content (in the merged layout the titlebar shares a column with the transcript, and the panel's z-level lost) — it looked "transparent" and clicks fell through, so "不在项目中工作" was unclickable. The dropdown now portals to body with fixed positioning at z-100; its background was already opaque.
+- Fix: the "用量" button-level hover bubble covered the input/output labels of the big usage card — removed (it duplicated the card); ring-level hints stay.
+- Improvement: the sidebar header icons are all left-aligned now (pet paw, search, AI naming, multi-select, section visibility, refresh in one left cluster instead of split left/right).
+
 ## v1.1.54 - 2026-08-27
 
 ### 中文

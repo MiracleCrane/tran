@@ -267,14 +267,15 @@ export default function UsageRings(): JSX.Element {
       onPointerEnter={() => setHover(true)}
       onPointerLeave={() => setHover(false)}
     >
-      <HoverTip tip="用量（点击钉住）">
-        <button
-          type="button"
-          onClick={() => setPinned(!pinned)}
-          className="flex items-center gap-2.5 rounded px-1.5 py-0.5 transition hover:bg-white/[0.06]"
-          aria-expanded={open}
-          aria-label="用量（点击钉住）"
-        >
+      {/* 按钮级气泡已删（2026-08-27 用户：「悬停挡住了真正的用量」）——它和大
+          预览卡重复，还正好盖住卡里的输入/输出标签；提示只在圆环级保留。 */}
+      <button
+        type="button"
+        onClick={() => setPinned(!pinned)}
+        className="flex items-center gap-2.5 rounded px-1.5 py-0.5 transition hover:bg-white/[0.06]"
+        aria-expanded={open}
+        aria-label="用量（点击钉住）"
+      >
           <Ring
             pct={rollingRatio !== undefined ? rollingRatio * 100 : null}
             label={rollingLabel}
@@ -291,7 +292,6 @@ export default function UsageRings(): JSX.Element {
             tip={`上下文 ${contextPct === null ? '—' : `${Math.round(contextPct)}%`}`}
           />
         </button>
-      </HoverTip>
 
       {open && anchor && createPortal(
         // 宽度自适应：原先写死 w-80(320px)。窗口窄到 320px 上下时整张卡会顶出

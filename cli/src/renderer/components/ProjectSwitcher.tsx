@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { useSessionStore } from '../store/sessionStore'
 import type { ClaudeExecutionBackend, Project } from '../../shared/ipc'
 import Collapse from './Collapse'
@@ -80,6 +81,30 @@ export default function ProjectSwitcher(): JSX.Element | null {
   const [projects, setProjects] = useState<Project[]>([])
   const [open, setOpen] = useState(false)
   const [elevated, setElevated] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  /** portal 面板的 fixed 坐标（开时按 chip 现位置算一次，滚动/缩放即收）。 */
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null)
+
+  useEffect(() => {
+    if (!open) {
+      setPanelPos(null)
+      return
+    }
+    const rect = rootRef.current?.getBoundingClientRect()
+    if (rect) {
+      setPanelPos({
+        top: rect.bottom + 6,
+        left: Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - 256 - 8))
+      })
+    }
+    const close = (): void => setOpen(false)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
   const [editingPath, setEditingPath] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [confirmPath, setConfirmPath] = useState<string | null>(null)
@@ -412,25 +437,34 @@ export default function ProjectSwitcher(): JSX.Element | null {
   // 不标的话 chip 和面板都点不动（同标题栏「显示侧边栏」按钮的处理）。
   return (
     <div
+      ref={rootRef}
       className={`project-switcher-root relative ${elevated ? 'is-elevated' : ''}`}
       style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
     >
       {trigger}
-      {open && <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />}
-      <Collapse
-        open={open}
-        className={`absolute left-0 top-full mt-1.5 w-64 ${
-          elevated ? 'z-[70]' : 'z-50'
-        } ${open ? '' : 'pointer-events-none'}`}
-      >
-        <div
-          className="glass-panel-soft project-switcher-panel rounded-2xl p-1.5"
-          onClick={(event) => event.stopPropagation()}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          {listContent}
-        </div>
-      </Collapse>
+      {/* 2026-08-27 下拉 portal 到 body：合体布局里标题栏与正文同列，absolute
+          面板 z-50/70 会被正文（virtuoso 定位行等）压在下面——看着像"透明"，
+          点击也全落在正文上（用户实测「根本没办法改变项目」）。portal + fixed
+          + z-[100] 与 GroupNoteText/InlineContextMenu 同一层。 */}
+      {open && panelPos && (
+        <div className="fixed inset-0 z-[95]" onClick={() => setOpen(false)} />
+      )}
+      {open &&
+        panelPos &&
+        createPortal(
+          <div className="fixed z-[100] w-64" style={{ top: panelPos.top, left: panelPos.left }}>
+            <Collapse open={open}>
+              <div
+                className="glass-panel-soft project-switcher-panel rounded-2xl p-1.5"
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                {listContent}
+              </div>
+            </Collapse>
+          </div>,
+          document.body
+        )}
     </div>
   )
 }
