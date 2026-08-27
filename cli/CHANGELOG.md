@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.59 - 2026-08-27
+
+### 中文
+
+- 优化：星标会话的行特效改为彗星环绕——暖琥珀光点拖着短彗尾沿行边框循环跑（替代此前的斜向扫光），reduced-motion 下关闭。
+
+### English
+
+- Improvement: the starred-session row effect is now an orbiting comet — a warm amber light bead with a short tail traveling around the row border (replacing the diagonal sheen sweep); disabled under reduced-motion.
+
 ## v1.1.58 - 2026-08-27
 
 ### 中文

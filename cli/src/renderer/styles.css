@@ -1481,10 +1481,16 @@ textarea:focus-visible {
     transform 170ms cubic-bezier(0.18, 1.18, 0.24, 1);
 }
 
-/* 星标会话行的环境微光（2026-08-27 星标特性）：整条行背景一道暖琥珀斜向
-   渐变 8s 慢扫——barely-there 的光泽，不抢眼。用 ::after 画：::before 已被
-   悬停指针光斑占用。与标题文字的 seg-shimmer-running（运行中多色流光）
-   互不冲突：那是文字色，这是行背景，两者可同时生效。 */
+/* 星标会话行的彗星环绕（2026-08-27 用户：扫光不行，要彗星绕圈）：一颗暖琥珀
+   光点拖着短彗尾沿行边框循环跑。锥形渐变旋转出光斑，两层 mask 只留边框
+   那一圈。用 ::after 画：::before 已被悬停指针光斑占用。与标题文字的
+   seg-shimmer-running（运行中多色流光）互不冲突：那是文字色，这是边框。 */
+@property --session-starred-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
 .sidebar-session-row.session-starred-glow::after {
   content: '';
   position: absolute;
@@ -1492,24 +1498,33 @@ textarea:focus-visible {
   z-index: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: linear-gradient(
-    115deg,
-    transparent 38%,
-    rgba(245, 201, 123, 0.05) 47%,
-    rgba(245, 201, 123, 0.085) 50%,
-    rgba(245, 201, 123, 0.05) 53%,
-    transparent 62%
+  background: conic-gradient(
+    from var(--session-starred-angle),
+    transparent 0deg,
+    rgba(245, 201, 123, 0.1) 28deg,
+    rgba(245, 201, 123, 0.55) 42deg,
+    rgba(245, 201, 123, 0.9) 48deg,
+    rgba(245, 201, 123, 0.55) 54deg,
+    rgba(245, 201, 123, 0.1) 68deg,
+    transparent 96deg
   );
-  background-size: 280% 280%;
-  animation: session-starred-sweep 8s linear infinite;
+  /* 只留边框一圈：内容区挖掉。 */
+  -webkit-mask:
+    linear-gradient(#fff, #fff) content-box,
+    linear-gradient(#fff, #fff);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  /* 边框圈的厚度（光点直径）。 */
+  padding: 1.5px;
+  animation: session-starred-orbit 6s linear infinite;
 }
 
-@keyframes session-starred-sweep {
+@keyframes session-starred-orbit {
   from {
-    background-position: 130% 0;
+    --session-starred-angle: 0deg;
   }
   to {
-    background-position: -130% 0;
+    --session-starred-angle: 360deg;
   }
 }
 
