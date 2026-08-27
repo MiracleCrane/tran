@@ -34,7 +34,11 @@ export interface AgentBackendHandlers {
 interface AgentBackendAdapter {
   readonly id: AgentBackendId
   start(opts: StartSessionOptions): Promise<string>
-  send(sessionId: string, content: string | unknown[]): void
+  send(sessionId: string, content: string | unknown[], queueId?: string): void
+  /** 可选：丢弃后端队列里尚未开始的排队消息（queueId 指定单条，缺省清全部
+   *  用户消息）。后端不支持撤回已写入的输入时（Claude SDK 内部排队）不实现，
+   *  渲染层的删除/取回/重发对它就只是镜像操作。 */
+  discardQueued?(sessionId: string, queueId?: string): void
   interrupt(sessionId: string): Promise<void>
   setModel(sessionId: string, model: string): Promise<void>
   setPermissionMode(sessionId: string, mode: string): Promise<void>
@@ -107,8 +111,12 @@ export class AgentBridge {
     return sessionId
   }
 
-  send(sessionId: string, content: string | unknown[]): void {
-    this.backendForSession(sessionId).send(sessionId, content)
+  send(sessionId: string, content: string | unknown[], queueId?: string): void {
+    this.backendForSession(sessionId).send(sessionId, content, queueId)
+  }
+
+  discardQueued(sessionId: string, queueId?: string): void {
+    this.maybeBackendForSession(sessionId)?.discardQueued?.(sessionId, queueId)
   }
 
   interrupt(sessionId: string): Promise<void> {

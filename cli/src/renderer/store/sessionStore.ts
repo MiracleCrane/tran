@@ -263,6 +263,12 @@ interface SessionStore {
    *  切视图/切会话/重启不丢，发送成功后清空。 */
   composerDrafts: Record<string, string>
   setComposerDraft: (sessionKey: string, text: string) => void
+  /** Composer 未发送附件暂存（按会话；键同草稿）。仅内存、不落盘：图片 dataUrl
+   *  可达 20MB，localStorage（~5-10MB）放不下；重启丢附件可接受（草稿文本仍在），
+   *  跨重启需走 IndexedDB（utils/sentImages.ts 有先例），暂不引入。 */
+  composerAttachments: Record<string, PickedFile[]>
+  /** 空数组即删除该会话条目（同 setComposerDraft 的空文本语义）。 */
+  setComposerAttachments: (sessionKey: string, files: PickedFile[]) => void
   /** 未读回复计数（键见 UNREAD_REPLIES_STORAGE_KEY 注释）：后台/未打开会话
    *  turn 完成 +1，打开即清；侧栏行右缘气泡用。 */
   unreadReplies: Record<string, number>
@@ -2042,6 +2048,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   elicitationQueue: [],
   runningSdkSessionIds: [],
   composerDrafts: readStoredComposerDrafts(),
+  composerAttachments: {},
   unreadReplies: readStoredUnreadReplies(),
   todoOverrides: {},
 
@@ -2103,6 +2110,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     else delete drafts[sessionKey]
     storeComposerDrafts(drafts)
     set({ composerDrafts: drafts })
+  },
+
+  setComposerAttachments(sessionKey, files) {
+    const stash = { ...get().composerAttachments }
+    if (files.length) stash[sessionKey] = files
+    else delete stash[sessionKey]
+    set({ composerAttachments: stash })
   },
 
   noteReplyCompleted(sessionKey) {
@@ -2347,8 +2361,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // #29：直达消息入未确认台账（数组：连发多条各占一席，互不覆盖）——turn
     // 错误收尾时靠它全部回收（见 result 分支）；本条 IPC 失败只回收本条。
     let unackedEntry: UnackedDirectMessage | null = null
+    // 排队镜像条目与后端队列条目共用同一 id：删除/取回/清空/重发时按它把
+    // 后端队列里的原件一并撤掉（discardQueued），否则镜像操作只在渲染层
+    // 生效，原件仍会被 drain 成一轮——同一条消息被处理两次。
+    let queuedId: string | undefined
     if (busy) {
-      set((s) => ({ pendingQueue: [...s.pendingQueue, { id: uid(), text: value, ...attProps, ...swarmProps, ...cutInProps }] }))
+      const qid = uid()
+      queuedId = qid
+      set((s) => ({ pendingQueue: [...s.pendingQueue, { id: qid, text: value, ...attProps, ...swarmProps, ...cutInProps }] }))
     } else {
       unackedEntry = { sessionId: meta.sessionId, text: value, ...attProps, ...swarmProps, ...cutInProps }
       unackedDirectMessages = [...unackedDirectMessages, unackedEntry]
@@ -2368,7 +2388,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       // 懒起 await 期间切走会话：消息已进转录（随快照进了后台缓冲），这里
       // 照发——桥接 id 明确指向原会话，不发才是把消息吞掉（原实现在此直接
       // return，转录里躺着一条从未送达的消息）。
-      await window.api.sendMessage(meta.sessionId, content)
+      await window.api.sendMessage(meta.sessionId, content, queuedId)
     } catch (error: unknown) {
       if (get().meta?.sessionId !== meta.sessionId) return
       // #29：直达发送在 IPC 层就失败（消息没到后端）：立即回收到 pendingQueue
@@ -2731,16 +2751,26 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   removePendingMessage(id) {
+    // 镜像与后端队列同步删：只删镜像的话后端仍会把本条 drain 成一轮（鬼影处理）。
+    const meta = get().meta
+    if (meta) void window.api.discardQueued(meta.sessionId, id).catch(() => {})
     set((s) => ({ pendingQueue: s.pendingQueue.filter((p) => p.id !== id) }))
   },
 
   takePendingMessage(id) {
     const msg = get().pendingQueue.find((p) => p.id === id) ?? null
-    if (msg) set((s) => ({ pendingQueue: s.pendingQueue.filter((p) => p.id !== id) }))
+    if (msg) {
+      // 取回编辑同时撤掉后端队列原件：否则编辑后再发 = 原件+新件各跑一轮。
+      const meta = get().meta
+      if (meta) void window.api.discardQueued(meta.sessionId, id).catch(() => {})
+      set((s) => ({ pendingQueue: s.pendingQueue.filter((p) => p.id !== id) }))
+    }
     return msg
   },
 
   clearPendingQueue() {
+    const meta = get().meta
+    if (meta && get().pendingQueue.length) void window.api.discardQueued(meta.sessionId).catch(() => {})
     set((s) => (s.pendingQueue.length ? { pendingQueue: [] } : {}))
   },
 
@@ -2749,6 +2779,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (!meta || get().status.running) return
     const queued = get().pendingQueue
     if (queued.length === 0) return
+    // 先撤后端队列里的原件（busy 发送时消息已送达后端排队，见 sendMessage），
+    // 否则逐条重发会让同一条消息在后端队列占两席、被 drain 处理两次。
+    await window.api.discardQueued(meta.sessionId).catch(() => {})
     set({ pendingQueue: [] })
     // 逐条重发：首条直达（sendMessage 会顺带清掉 error，bridgeEnded 时先重建
     // 会话），后续消息按原 busy 语义重新进入队列。
@@ -3343,6 +3376,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     deleteSessionHistoryCache(meta.cwd, sessionId, backend)
     forgetSessionLocalState(sessionId)
     get().setComposerDraft(sessionId, '')
+    get().setComposerAttachments(sessionId, [])
     // 未读计数同样按会话清（同 forgetSessionLocalState 的死键理由，2026-08-25）。
     get().clearUnread(unreadSessionKey(sessionId, backend))
     set((s) => ({ sessions: s.sessions.filter((x) => x.sessionId !== sessionId) }))
@@ -3383,6 +3417,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         deleteSessionHistoryCache(meta.cwd, target.sessionId, target.backend)
         forgetSessionLocalState(target.sessionId)
         get().setComposerDraft(target.sessionId, '')
+        get().setComposerAttachments(target.sessionId, [])
         // 同单删：未读计数按会话清，防死键滞留（2026-08-25）。
         get().clearUnread(unreadSessionKey(target.sessionId, target.backend))
       } catch {

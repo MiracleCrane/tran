@@ -25,7 +25,8 @@ function getPathForFile(file: File): string {
 
 const api: ForgeApi = {
   startSession: (opts) => ipcRenderer.invoke('forge:startSession', opts),
-  sendMessage: (sessionId, content) => ipcRenderer.invoke('forge:sendMessage', sessionId, content),
+  sendMessage: (sessionId, content, queueId) => ipcRenderer.invoke('forge:sendMessage', sessionId, content, queueId),
+  discardQueued: (sessionId, queueId) => ipcRenderer.invoke('forge:discardQueued', sessionId, queueId),
   interrupt: (sessionId) => ipcRenderer.invoke('forge:interrupt', sessionId),
   setModel: (sessionId, model) => ipcRenderer.invoke('forge:setModel', sessionId, model),
   setPermissionMode: (sessionId, mode) =>

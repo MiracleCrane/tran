@@ -1481,17 +1481,138 @@ textarea:focus-visible {
     transform 170ms cubic-bezier(0.18, 1.18, 0.24, 1);
 }
 
-/* 星标会话行的彗星环绕（2026-08-27 用户：扫光不行，要彗星绕圈）：一颗暖琥珀
-   光点拖着短彗尾沿行边框循环跑。锥形渐变旋转出光斑，两层 mask 只留边框
-   那一圈。用 ::after 画：::before 已被悬停指针光斑占用。与标题文字的
-   seg-shimmer-running（运行中多色流光）互不冲突：那是文字色，这是边框。 */
-@property --session-starred-angle {
+/* 星标标题的彗星环绕（2026-08-27 v2 用户：「斜着绕…围着文字去绕，不要超出
+   会话名称文字的范围」；v1 的行边框彗星同日被否，整体拆除、无替代行级效果）。
+   轨道 = -15° 倾斜参照框里的椭圆：在旋转坐标系里算 cos/sin，画出来就是斜
+   椭圆，不用手算旋转。rx=50%+4px / ry=50%+3px（百分比相对文字盒），贴字
+   外沿 ±3~4px；长标题截断后绕的是可见那截（star-orbit 收缩包裹文字）。
+   环绕感 = 前后两层同款斜框夹住文字（back z-index:-1 / front z-index:1 /
+   文字 0）：同一趟动画，前半程（下弧 --sa 0→180°）front 层可见、后半程
+   （上弧）back 层可见——两层 opacity 在 50% 处瞬时互换，视觉上就是同一颗
+   彗星从文字背后穿了过去。相位翻转窗口压到 0.001%（≈0.05ms）：0% 与 50%
+   直接写两个 opacity 值会在中间插出半透明、两层彗星同时显影。
+   为什么不在一个框里用 z-index 动画：transform 让参照框自己成堆叠上下文，
+   框内 z-index:-1 逃不出框外，彗星会永远压在文字上面——前后分层是可靠
+   做法。--sa 在框上动画、彗星经继承读取（inherits: true）；两颗彗尾用
+   角度偏移（-14deg/-28deg）沿轨道拖尾、缩小变淡。 */
+@property --sa {
+  syntax: '<angle>';
+  inherits: true;
+  initial-value: 0deg;
+}
+
+.star-orbit {
+  display: inline-block;
+  position: relative;
+  max-width: 100%;
+}
+
+/* 文字自己占一个层（z-index:0）：back 框的彗星沉到它后面、front 框浮到
+   它前面，环绕感就靠这个三明治。省略号截断也在这里：外层 inline-block
+   shrink-to-fit 被 max-width:100% 夹住后，这里 overflow 出省略号。 */
+.star-orbit-text {
+  display: block;
+  position: relative;
+  z-index: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.star-orbit-frame {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform: rotate(-15deg);
+}
+
+.star-orbit-back {
+  z-index: -1;
+  animation: star-orbit-spin 5s linear infinite, star-orbit-phase-back 5s linear infinite;
+}
+
+.star-orbit-front {
+  z-index: 1;
+  animation: star-orbit-spin 5s linear infinite, star-orbit-phase-front 5s linear infinite;
+}
+
+@keyframes star-orbit-spin {
+  from {
+    --sa: 0deg;
+  }
+  to {
+    --sa: 360deg;
+  }
+}
+
+@keyframes star-orbit-phase-front {
+  0%, 49.999% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0;
+  }
+}
+
+@keyframes star-orbit-phase-back {
+  0%, 49.999% {
+    opacity: 0;
+  }
+  50%, 100% {
+    opacity: 1;
+  }
+}
+
+.star-comet {
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.star-comet-main {
+  width: 5px;
+  height: 5px;
+  left: calc(50% + cos(var(--sa)) * (50% + 4px));
+  top: calc(50% + sin(var(--sa)) * (50% + 3px));
+  background: radial-gradient(circle, #ffedc9 0%, #f5c97b 45%, rgba(245, 201, 123, 0) 78%);
+  box-shadow: 0 0 6px rgba(245, 201, 123, 0.55);
+}
+
+.star-comet-tail1 {
+  width: 3.5px;
+  height: 3.5px;
+  left: calc(50% + cos(var(--sa) - 14deg) * (50% + 4px));
+  top: calc(50% + sin(var(--sa) - 14deg) * (50% + 3px));
+  background: radial-gradient(circle, rgba(245, 201, 123, 0.8) 0%, rgba(245, 201, 123, 0) 75%);
+  opacity: 0.55;
+}
+
+.star-comet-tail2 {
+  width: 2.5px;
+  height: 2.5px;
+  left: calc(50% + cos(var(--sa) - 28deg) * (50% + 4px));
+  top: calc(50% + sin(var(--sa) - 28deg) * (50% + 3px));
+  background: radial-gradient(circle, rgba(245, 201, 123, 0.7) 0%, rgba(245, 201, 123, 0) 75%);
+  opacity: 0.3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .star-orbit-frame {
+    animation: none;
+    display: none;
+  }
+}
+
+/* 正在输出的会话行：边框彗星（2026-08-27 用户拍板——星标彗星 v1 的行边框
+   光点移植给运行态，与标题文字 seg-shimmer-running 流光并存）。青绿色珠子
+   沿行边框转圈，比星标款（6s）快半档。 ::before 已被悬停光斑占用，用 ::after。 */
+@property --session-run-angle {
   syntax: '<angle>';
   inherits: false;
   initial-value: 0deg;
 }
 
-.sidebar-session-row.session-starred-glow::after {
+.sidebar-session-row.session-running-orbit::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -1499,37 +1620,36 @@ textarea:focus-visible {
   border-radius: inherit;
   pointer-events: none;
   background: conic-gradient(
-    from var(--session-starred-angle),
+    from var(--session-run-angle),
     transparent 0deg,
-    rgba(245, 201, 123, 0.1) 28deg,
-    rgba(245, 201, 123, 0.55) 42deg,
-    rgba(245, 201, 123, 0.9) 48deg,
-    rgba(245, 201, 123, 0.55) 54deg,
-    rgba(245, 201, 123, 0.1) 68deg,
+    rgba(94, 234, 212, 0.08) 28deg,
+    rgba(94, 234, 212, 0.45) 42deg,
+    rgba(163, 230, 53, 0.75) 48deg,
+    rgba(94, 234, 212, 0.45) 54deg,
+    rgba(94, 234, 212, 0.08) 68deg,
     transparent 96deg
   );
-  /* 只留边框一圈：内容区挖掉。 */
+  /* 只留边框一圈：内容区挖掉；padding 即环厚（光点直径）。 */
   -webkit-mask:
     linear-gradient(#fff, #fff) content-box,
     linear-gradient(#fff, #fff);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  /* 边框圈的厚度（光点直径）。 */
   padding: 1.5px;
-  animation: session-starred-orbit 6s linear infinite;
+  animation: session-run-orbit 4s linear infinite;
 }
 
-@keyframes session-starred-orbit {
+@keyframes session-run-orbit {
   from {
-    --session-starred-angle: 0deg;
+    --session-run-angle: 0deg;
   }
   to {
-    --session-starred-angle: 360deg;
+    --session-run-angle: 360deg;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-session-row.session-starred-glow::after {
+  .sidebar-session-row.session-running-orbit::after {
     animation: none;
   }
 }
@@ -1952,10 +2072,11 @@ textarea:focus-visible {
 /* #38 手动高度锁定期间的可见恢复入口（双击手柄太隐蔽，手动高度又持久化）。
  *  浮在顶边手柄带上，z-index 高于 resize-zone 以免被拖拽命中。 */
 .composer-height-reset {
-  position: absolute;
-  top: -0.4rem;
-  right: 0.75rem;
-  z-index: 4;
+  /* 定位已挪到外层 HoverTip 包裹 span（2026-08-26 title 清扫）；按钮自己再
+     absolute 会落在零尺寸包裹层上、宽度塌成 min-content——CJK 逐字断行，
+     「恢复自动高度」竖成一排（2026-08-27 用户截图）。static + nowrap。 */
+  position: static;
+  white-space: nowrap;
   padding: 0 6px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;

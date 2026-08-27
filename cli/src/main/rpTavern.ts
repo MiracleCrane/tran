@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
+import { log } from './logger'
 import {
   RP_TAVERN_URL,
   RpTavernHost,
@@ -15,6 +16,9 @@ import {
 const execFileAsync = promisify(execFile)
 const DEFAULT_INSTALL_PATH = 'C:\\LegacyD\\project\\SillyTavern'
 const DEFAULT_BRIDGE_LAUNCHER = 'C:\\LegacyD\\Programs\\SillyTavernBridge\\Start-RPTavern.ps1'
+const SYSTEM_ROOT = process.env['SystemRoot'] || 'C:\\Windows'
+const POWERSHELL_PATH = join(SYSTEM_ROOT, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+const COMMAND_PROMPT_PATH = process.env['ComSpec'] || join(SYSTEM_ROOT, 'System32', 'cmd.exe')
 
 let tavernWindow: BrowserWindow | null = null
 
@@ -77,6 +81,8 @@ const adapter: RpTavernAdapter = {
   ],
   bridgeLauncherPath: existsSync(DEFAULT_BRIDGE_LAUNCHER) ? DEFAULT_BRIDGE_LAUNCHER : null,
   bridgeInstallPath: DEFAULT_INSTALL_PATH,
+  powershellPath: POWERSHELL_PATH,
+  commandPromptPath: COMMAND_PROMPT_PATH,
   exists: existsSync,
   readText: (path) => readFileSync(path, 'utf8'),
   writeText: (path, content) => writeFileSync(path, content, 'utf8'),
@@ -85,15 +91,30 @@ const adapter: RpTavernAdapter = {
     const result = await execFileAsync(command, args, { windowsHide: true })
     return result.stdout
   },
-  spawnDetached: (command, args, cwd) => {
-    const child = spawn(command, args, {
-      cwd,
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true
-    })
-    child.unref()
-  },
+  spawnDetached: (command, args, cwd) =>
+    new Promise<void>((resolve, reject) => {
+      let child
+      try {
+        child = spawn(command, args, {
+          cwd,
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true
+        })
+      } catch (error) {
+        reject(error)
+        return
+      }
+      child.once('error', (error) => {
+        log('rp-tavern', `spawn failed command=${command}: ${error.message}`)
+        reject(new Error(`无法启动 RP 服务进程：${error.message}`))
+      })
+      child.once('spawn', () => {
+        child.unref()
+        log('rp-tavern', `spawned command=${command} cwd=${cwd}`)
+        resolve()
+      })
+    }),
   checkUrl: async (url) => {
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(1500) })

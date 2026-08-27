@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.1.60 - 2026-08-27
+
+### 中文
+
+- 修复：切换会话不再丢输入框里的附件——按会话暂存（内存态，重启不保留），切回即恢复；此前切走就清空。
+- 修复：排队消息被处理两次——渲染层队列此前是后端队列的「只写镜像」，取回编辑/删除/重发不同步后端，原件照跑。新增 discardQueued IPC 同步撤单（Claude 后端的 SDK 队列撤不了，为已知限制）。
+- 修复：「恢复自动高度」按钮竖排成一行一字且遮挡其他元素——按钮自身 absolute 落在零尺寸包裹层上导致宽度塌缩，改 static + nowrap。
+- 新增：正在输出的会话行有边框彗星特效（青绿光点沿边框转圈），与标题文字流光并存。
+- 优化：星标特效改为围绕会话名的斜椭圆彗星（光点 + 渐隐拖尾，后半程绕到文字背面）；行边框光束移除。
+- 修复：「以上为历史消息」分隔线与上一条消息的悬停复制图标互相遮挡——分隔线让位。
+- 优化：预览卡动作排统一纯图标（归档去掉文字，与星标/置顶/重命名/移动/删除一致）。
+
+### English
+
+- Fix: composer attachments no longer vanish when switching sessions — they're stashed per session (in-memory, not kept across restarts) and restored on return; previously they were wiped on switch.
+- Fix: queued messages being processed twice — the renderer queue was a write-only mirror of the backend queue, so restore/delete/resend never reached the backend and the originals still ran. A new discardQueued IPC keeps them in sync (Claude backend's SDK queue can't be revoked — known limitation).
+- Fix: the "恢复自动高度" button rendering as a vertical one-char-per-line strip and overlapping neighbors — its own absolute positioning collapsed against a zero-size wrapper; now static + nowrap.
+- New: running sessions get a border comet effect (teal bead orbiting the row border) alongside the title text shimmer.
+- Improvement: the star effect is now a tilted-ellipse comet orbiting the session title (bright bead + fading tail, passing behind the text for half the orbit); the row-border beam was removed.
+- Fix: the "以上为历史消息" divider no longer collides with the previous message's hover copy icons.
+- Improvement: the preview card action row is uniformly icon-only (archive loses its text label, matching star/pin/rename/move/delete).
+
 ## v1.1.59 - 2026-08-27
 
 ### 中文

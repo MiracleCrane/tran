@@ -2512,7 +2512,9 @@ export default function Transcript({
               style={isNew ? { animationDelay: `${Math.min(relIndex * 24, 280)}ms` } : undefined}
             >
               {showHistoryDivider && (
-                <div className="mb-2 flex items-center gap-2 text-[10px] text-zinc-600">
+                // mt-4：上一条消息的悬停复制图标挂在消息底边外侧（top:100%），
+                // 不留这段距正好压到这条分隔线（2026-08-27 用户截图：互相遮挡）。
+                <div className="mb-2 mt-4 flex items-center gap-2 text-[10px] text-zinc-600">
                   <span className="h-px flex-1 bg-white/[0.06]" />
                   以上为历史消息
                   <span className="h-px flex-1 bg-white/[0.06]" />

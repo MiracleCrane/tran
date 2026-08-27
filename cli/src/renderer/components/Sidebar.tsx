@@ -249,15 +249,15 @@ function SessionPreviewCard({
         >
           <button
             type="button"
+            aria-label="归档"
             disabled={preview.running}
             onClick={() => {
               onClose()
               onArchive(preview.session.sessionId)
             }}
-            className="flex h-6 items-center gap-1 rounded-lg px-1.5 text-[11px] text-zinc-400 transition enabled:hover:bg-white/[0.06] enabled:hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-6 w-6 items-center justify-center rounded-lg text-zinc-500 transition enabled:hover:bg-white/[0.06] enabled:hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <ArchiveIcon />
-            归档
           </button>
         </HoverTip>
       </div>
@@ -518,6 +518,27 @@ const StarIcon = ({ active = false, size = 13 }: { active?: boolean; size?: numb
 const RowStarIcon = (): JSX.Element => (
   <span className="shrink-0 text-[#f5c97b]" aria-hidden>
     <StarIcon active size={10.5} />
+  </span>
+)
+/** 星标标题 + 环绕彗星（2026-08-27 v2 用户：「斜着绕…围着文字去绕，不要超出
+ *  会话名称文字的范围」）：彗星贴标题文字跑斜椭圆。前后两层 -15° 斜框
+ * （back/front）夹住文字——同一趟动画后半程换到文字背后的那层显示，看
+ *  起来就是绕到字后面去了（为什么不用 z-index 动画：见 styles.css
+ *  .star-orbit 注释）。running 时文字保留 seg-shimmer-running 流光：那是
+ *  文字色、彗星是独立圆点，两者可同时生效。 */
+const StarOrbitTitle = ({ text, running = false }: { text: string; running?: boolean }): JSX.Element => (
+  <span className="star-orbit">
+    <span className="star-orbit-frame star-orbit-back" aria-hidden>
+      <span className="star-comet star-comet-main" />
+      <span className="star-comet star-comet-tail1" />
+      <span className="star-comet star-comet-tail2" />
+    </span>
+    <span className={`star-orbit-text${running ? ' seg-shimmer seg-shimmer-running' : ''}`}>{text}</span>
+    <span className="star-orbit-frame star-orbit-front" aria-hidden>
+      <span className="star-comet star-comet-main" />
+      <span className="star-comet star-comet-tail1" />
+      <span className="star-comet star-comet-tail2" />
+    </span>
   </span>
 )
 /** 文件夹 + 右箭头（「移动到项目」，2026-08-27）：与行内其它图标同款 13px 描边。 */
@@ -2038,6 +2059,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         {g.items.map((s) => {
           const active = s.sessionId === snapshot.activeSessionId && view === 'chat'
           const starred = starredSessionKeys.has(sessionKey(s))
+          const running = s.running || runningSdkSessionIds.includes(s.sessionId)
           return (
             <div
               key={sessionKey(s)}
@@ -2046,13 +2068,19 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               <div
                 className={`sidebar-session-row relative w-full rounded-md border px-2 py-[5px] text-left ${
                   active ? 'is-active border-transparent bg-[#313131] text-zinc-100' : 'border-transparent text-[#c3c3c3]'
-                }${starred ? ' session-starred-glow' : ''}`}
+                }${starred ? ' session-starred-glow' : ''}${running ? ' session-running-orbit' : ''}`}
               >
                 {/* 单行标题（2026-08 用户定稿）：一行尽量放长，时间不占第二行，
                     由悬停预览卡展示（原生 title 提示会与预览卡重复，2026-08-25 去掉）。 */}
                 <div className="flex items-center gap-1.5 text-sm">
                   {starred && <RowStarIcon />}
-                  <span className="min-w-0 flex-1 truncate">{s.summary || '(未命名)'}</span>
+                  {starred ? (
+                    <span className="min-w-0 flex-1 truncate">
+                      <StarOrbitTitle text={s.summary || '(未命名)'} />
+                    </span>
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate">{s.summary || '(未命名)'}</span>
+                  )}
                   <span className={`session-runtime-badge ${snapshot.showRuntimeBadges ? 'is-visible' : ''}`}>
                     {backendLabel(s.runtimeBackend)}
                   </span>
@@ -2395,9 +2423,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               const editing = editingId === key
               const inserting = newlyInsertedSessionKeys.has(key)
               const exiting = item.exiting
-              // 星标（2026-08-27）：行首小星 + 行底微光（.session-starred-glow），
-              // 纯展示，不影响排序/分组。
+              // 星标（2026-08-27）：行首小星 + 标题文字彗星环绕（.star-orbit，
+              // 2026-08-27 v2）。session-starred-glow 仅作星标行标记（v1 行边框
+              // 彗星已拆，无替代行级效果）。纯展示，不影响排序/分组。
               const starred = starredSessionKeys.has(key)
+              // 正在输出（2026-08-27 用户）：边框彗星转圈，与标题文字流光并存。
+              const running = s.running || runningSdkSessionIds.includes(s.sessionId)
               return (
                 <div
                   key={key}
@@ -2459,7 +2490,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                           : multiMode && selectedKeys.has(key)
                             ? 'border-accent/40 bg-accent/[0.08] text-zinc-200'
                             : 'border-transparent text-[#c3c3c3]'
-                      }${starred ? ' session-starred-glow' : ''}`}
+                      }${starred ? ' session-starred-glow' : ''}${running ? ' session-running-orbit' : ''}`}
                       disabled={exiting}
                     >
                       <span className="flex items-start">
@@ -2481,15 +2512,26 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                               会话的流光花哨点」）。 */}
                           <div className="flex items-center gap-1.5 text-sm">
                             {starred && <RowStarIcon />}
-                            <span
-                              className={`min-w-0 flex-1 truncate ${
-                                s.running || runningSdkSessionIds.includes(s.sessionId)
-                                  ? 'seg-shimmer seg-shimmer-running'
-                                  : ''
-                              }`}
-                            >
-                              {s.summary || '(未命名)'}
-                            </span>
+                            {starred ? (
+                              // 彗星轨道包在 truncate 里：wrapper 收缩包住文字，
+                              // 极点处的 ±4px 外沿被裁掉一点是可接受的（2026-08-27 v2）。
+                              <span className="min-w-0 flex-1 truncate">
+                                <StarOrbitTitle
+                                  text={s.summary || '(未命名)'}
+                                  running={s.running || runningSdkSessionIds.includes(s.sessionId)}
+                                />
+                              </span>
+                            ) : (
+                              <span
+                                className={`min-w-0 flex-1 truncate ${
+                                  s.running || runningSdkSessionIds.includes(s.sessionId)
+                                    ? 'seg-shimmer seg-shimmer-running'
+                                    : ''
+                                }`}
+                              >
+                                {s.summary || '(未命名)'}
+                              </span>
+                            )}
                             <span className={`session-runtime-badge transition-opacity ${wslSupportEnabled ? 'is-visible' : ''}`}>
                               {backendLabel(s.runtimeBackend)}
                             </span>

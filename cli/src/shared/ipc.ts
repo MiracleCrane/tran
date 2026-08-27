@@ -822,8 +822,14 @@ export interface RpTavernOpenResult {
 export interface ForgeApi {
   startSession(opts: StartSessionOptions): Promise<StartSessionResult>
   /** Send a user message. `content` is either a text string or an array of
-   *  content blocks (text + image) when attachments are present. */
-  sendMessage(sessionId: string, content: string | unknown[]): Promise<void>
+   *  content blocks (text + image) when attachments are present. `queueId`
+   *  identifies the renderer pendingQueue entry this message mirrors, so a
+   *  later discardQueued can pull it back out of the backend queue. */
+  sendMessage(sessionId: string, content: string | unknown[], queueId?: string): Promise<void>
+  /** 从后端队列丢弃未开始的排队消息（渲染层 删除/取回/清空/重发 时同步）。
+   *  传 queueId 只丢对应那条；不传则清空该会话全部排队的用户消息。
+   *  已在跑的 turn 与 goal 续跑轮不受影响。 */
+  discardQueued(sessionId: string, queueId?: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
   setModel(sessionId: string, model: string): Promise<void>
   setPermissionMode(sessionId: string, mode: PermissionMode): Promise<void>

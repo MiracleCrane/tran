@@ -17,6 +17,8 @@ class FakeAdapter implements RpTavernAdapter {
   installCandidates = [INSTALL]
   bridgeLauncherPath: string | null = BRIDGE
   bridgeInstallPath: string | null = INSTALL
+  powershellPath = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+  commandPromptPath = 'C:\\Windows\\System32\\cmd.exe'
   files = new Map<string, string>([
     [join(INSTALL, 'server.js'), ''],
     [join(INSTALL, 'Start.bat'), ''],
@@ -27,13 +29,15 @@ class FakeAdapter implements RpTavernAdapter {
   spawns: Array<{ command: string; args: string[]; cwd: string }> = []
   opened: string[] = []
   makeReadyOnDelay = false
+  spawnError: Error | null = null
 
   exists(path: string): boolean { return this.files.has(path) }
   readText(path: string): string { return this.files.get(path) ?? '' }
   writeText(path: string, content: string): void { this.files.set(path, content) }
   ensureDirectory(): void {}
   async commandOutput(): Promise<string> { return 'v22.14.0\n' }
-  spawnDetached(command: string, args: string[], cwd: string): void {
+  async spawnDetached(command: string, args: string[], cwd: string): Promise<void> {
+    if (this.spawnError) throw this.spawnError
     this.spawns.push({ command, args, cwd })
   }
   async checkUrl(url: string): Promise<boolean> { return this.urls.has(url) }
@@ -72,7 +76,7 @@ test('starts the companion launcher and waits until the tavern is ready', async 
     readinessIntervalMs: 0
   }).open()
   assert.equal(result.ok, true)
-  assert.equal(adapter.spawns[0]?.command, 'powershell.exe')
+  assert.equal(adapter.spawns[0]?.command, adapter.powershellPath)
   assert.equal(adapter.spawns[0]?.args.includes('-NoBrowser'), true)
   assert.deepEqual(adapter.opened, [RP_TAVERN_URL])
 })
@@ -90,4 +94,18 @@ test('reports an invalid installation without persisting it', async () => {
   assert.equal(status.installed, false)
   assert.equal(adapter.files.has(CONFIG), false)
   assert.equal(status.issues.length > 0, true)
+})
+
+test('returns the process creation error instead of waiting for a timeout', async () => {
+  const adapter = new FakeAdapter()
+  adapter.spawnError = new Error('spawn denied')
+
+  const result = await new RpTavernHost(adapter, {
+    readinessAttempts: 2,
+    readinessIntervalMs: 0
+  }).open()
+
+  assert.equal(result.ok, false)
+  assert.match(result.error ?? '', /spawn denied/)
+  assert.deepEqual(adapter.opened, [])
 })

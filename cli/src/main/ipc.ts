@@ -546,9 +546,14 @@ export function registerIpc(
     return { sessionId }
   })
 
-  ipcMain.handle('forge:sendMessage', async (_e, sessionId: string, content: string | unknown[]): Promise<void> => {
+  ipcMain.handle('forge:sendMessage', async (_e, sessionId: string, content: string | unknown[], queueId?: string): Promise<void> => {
     log('ipc', `sendMessage session=${sessionId}`)
-    bridge.send(sessionId, content)
+    bridge.send(sessionId, content, queueId)
+  })
+
+  ipcMain.handle('forge:discardQueued', async (_e, sessionId: string, queueId?: string): Promise<void> => {
+    log('ipc', `discardQueued session=${sessionId} queueId=${queueId ?? 'all'}`)
+    bridge.discardQueued(sessionId, queueId)
   })
 
   ipcMain.handle('forge:interrupt', async (_e, sessionId: string): Promise<void> => {

@@ -48,6 +48,10 @@ interface QueuedMessage {
   content: string | unknown[]
   /** 目标续跑轮（goal 循环注入的提醒 prompt）：结束后不再触发隐藏 /usage 轮。 */
   goal?: boolean
+  /** 渲染层 pendingQueue 镜像条目的 id：删除/取回/清空/重发时按它把本条从
+   *  队列里撤掉（discardQueued），否则镜像操作与后端队列脱节——重发/取回后
+   *  原件仍会跑一轮，同一条消息被处理两次。 */
+  queueId?: string
 }
 
 interface ActiveKimiSession {
@@ -422,12 +426,28 @@ export class KimiBackend {
     return sessionId
   }
 
-  send(sessionId: string, content: string | unknown[]): void {
+  send(sessionId: string, content: string | unknown[], queueId?: string): void {
     const session = this.requireSession(sessionId)
     // 真实用户 prompt 标记（空壳治理用；隐藏 /usage 轮不走这里，不会误标）。
     session.gotRealPrompt = true
-    session.queue.push({ content })
+    session.queue.push({ content, ...(queueId ? { queueId } : {}) })
     void this.drain(session)
+  }
+
+  /** 渲染层排队镜像的删除/取回/清空/重发同步到后端队列：只在消息还没被
+   *  drain 取出（turn 未开始）时撤得掉；已进入 turn 的按原生命周期走。
+   *  缺省清空时保留 goal 续跑轮（它不是用户消息，不在渲染层镜像里）。 */
+  discardQueued(sessionId: string, queueId?: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    const before = session.queue.length
+    if (queueId) {
+      session.queue = session.queue.filter((q) => q.queueId !== queueId)
+    } else {
+      session.queue = session.queue.filter((q) => q.goal)
+    }
+    const dropped = before - session.queue.length
+    if (dropped > 0) log('kimi', `discardQueued session=${sessionId} queueId=${queueId ?? 'all'} dropped=${dropped}`)
   }
 
   async interrupt(sessionId: string): Promise<void> {
