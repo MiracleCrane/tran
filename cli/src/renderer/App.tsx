@@ -344,13 +344,13 @@ export default function App(): JSX.Element {
   // 宠物总开关灌入渲染层镜像；之后靠 preferences-changed 推送保持同步
   // （设置面板拨开关、宠物右键菜单「隐藏宠物」都会推）。
   useEffect(() => {
-    void window.api
-      .getPreferences()
-      .then((p) => usePetStore.getState().setMasterEnabled(p.desktopPetEnabled !== false))
-      .catch(() => {})
-    return window.api.onPreferencesChanged((p) => {
-      usePetStore.getState().setMasterEnabled(p.desktopPetEnabled !== false)
-    })
+    const syncPetPrefs = (p: { desktopPetEnabled?: boolean; petOutsideEnabled?: boolean }): void => {
+      const pet = usePetStore.getState()
+      pet.setMasterEnabled(p.desktopPetEnabled !== false)
+      pet.setOutsideEnabled(p.petOutsideEnabled !== false)
+    }
+    void window.api.getPreferences().then(syncPetPrefs).catch(() => {})
+    return window.api.onPreferencesChanged(syncPetPrefs)
   }, [])
 
   const meta = useSessionStore((s) => s.meta)

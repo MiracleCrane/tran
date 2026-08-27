@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import type { PlanEntry, ToolBlock, ToolStatus } from '../types'
 import type { KimiTaskInfo } from '../../shared/ipc'
@@ -67,6 +67,15 @@ export function ToolRow({ block }: { block: ToolBlock }): JSX.Element {
     ]
   const sub = isAgent ? parseSubagentInput(block.input) : null
   const summary = summaryForTool(block.name, block.input)
+  // 运行中的行走时秒跳：时长由 startedAt 现算（非自增计数），行随浮层卸载
+  // 自动清表；完成/停止的行不开定时器，时长冻结在终态（TurnTimerStrip 同款套路）。
+  const ticking = bgRunning || running
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (!ticking) return
+    const t = window.setInterval(() => tick((n) => n + 1), 1000)
+    return () => window.clearInterval(t)
+  }, [ticking])
   // #32 后台任务时长以 server task 的 started_at/completed_at 为准（block 的
   //  endedAt 只是 launch ack 时间）；仍在跑则计到当前。
   const duration = bg?.isBackground

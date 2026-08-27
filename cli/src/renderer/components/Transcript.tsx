@@ -718,22 +718,22 @@ const MessageCopyControls = memo(function MessageCopyControls({
 
   return (
     <div className={`tran-msg-copy tran-msg-copy-${placement}`}>
-      <HoverTip tip="复制（渲染后的排版）">
+      <HoverTip tip="复制渲染后的排版（富文本；粘到纯文本处为 Markdown 原文）">
         <button
           type="button"
           className="tran-msg-copy-btn"
           onClick={() => void copyRich()}
-          aria-label="复制（渲染后的排版）"
+          aria-label="复制渲染后的排版（富文本）"
         >
           {copiedRich ? '✓' : <CopyIcon />}
         </button>
       </HoverTip>
-      <HoverTip tip="复制 Markdown（源文）">
+      <HoverTip tip="复制 Markdown 原文">
         <button
           type="button"
           className="tran-msg-copy-btn"
           onClick={() => void copyText()}
-          aria-label="复制 Markdown（源文）"
+          aria-label="复制 Markdown 原文"
         >
           {copiedText ? '✓' : <span className="tran-msg-copy-md">MD</span>}
         </button>
@@ -1603,9 +1603,9 @@ export default function Transcript({
   const lastPendingQueueLengthRef = useRef(0)
   // Footer 的 context：只在 bottomReserve 变化时换引用，不影响组件类型。
   const footerContext = useMemo(() => ({ bottomReserve }), [bottomReserve])
-  // "stick to bottom": Virtuoso reports this via atBottomStateChange. While at
-  // the bottom, followOutput pins to the newest content; scroll up to read and
-  // it stops following until the ↓ button returns you.
+  // "stick to bottom"：贴底状态由 Virtuoso 的 atBottomStateChange 上报；钉住期间
+  // 由 glueToBottom（行变化/尺寸变化后的手动补滚，2026-08-27 起替代 followOutput
+  // prop）把视图钉在最新内容上。上滚阅读即解除钉住，滚回底部阈值内或点 ↓ 恢复。
   const [atBottom, setAtBottom] = useState(true)
   /**
    * 「回到最新」按钮的显示状态——与 atBottom（钉住/跟随）**刻意分开**。
@@ -2092,6 +2092,7 @@ export default function Transcript({
       cancelBottomReserveScrollFrame()
       cancelBottomReserveRestoreFrame()
       cancelNavHighlightFrame()
+      cancelFollowGlueFrame()
     }
   }, [])
 
@@ -2229,22 +2230,71 @@ export default function Transcript({
     followOutputLockedUntilRef.current = window.performance.now() + FOLLOW_OUTPUT_LOCK_MS
   }
 
-  const shouldFollowOutput = (isAtBottom: boolean): 'auto' | false => {
-    // atBottomRef 是本地 pin 状态：用户在 bar 上点击/悬停解除跟随后，Virtuoso
-    // 内部可能仍认为 atBottom——必须以本地状态为准，否则会继续强制下拽（#8b）。
-    if (!isAtBottom || !atBottomRef.current) return false
-    if (layoutTransitioningRef.current) return false
-    if (window.performance.now() < followOutputLockedUntilRef.current) return false
-    return 'auto'
+  /**
+   * 手动贴底跟随（2026-08-27 重做，替代 Virtuoso 的 followOutput prop）。
+   *
+   * 为什么不再用 followOutput：Virtuoso 内部有一条「SIZE_INCREASED 强制回底」
+   * （任何行撑高导致离开底部时 scrollToIndex LAST，4.18.7 实测）——它只看
+   * followOutput **prop 本身**是不是 false，从不调用我们的函数、完全绕开本地
+   * 钉住状态（atBottomRef）与跟随锁。而函数 prop 每次渲染都是新引用，prop 变化
+   * 即重新武装这个一次性订阅，流式期间它常备不懈——于是点「查看指令」展开撑高
+   * 的瞬间，即便 #8b 已正确解除跟随，仍被它硬拽回底（用户看到的"回弹"）。
+   *
+   * 改为 followOutput={false}（内部强制回底全部关闭）+ 自己补滚：行变化与内容/
+   * 视口尺寸变化后调本函数，rAF 合帧；只在本地钉住、非布局过渡、跟随锁外时贴底。
+   */
+  const followGlueFrameRef = useRef<number | null>(null)
+  const glueToBottom = (): void => {
+    if (followGlueFrameRef.current !== null) return
+    followGlueFrameRef.current = window.requestAnimationFrame(() => {
+      followGlueFrameRef.current = null
+      if (!atBottomRef.current) return
+      if (layoutTransitioningRef.current) return
+      if (window.performance.now() < followOutputLockedUntilRef.current) return
+      virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' })
+    })
+  }
+  const cancelFollowGlueFrame = (): void => {
+    if (followGlueFrameRef.current !== null) {
+      window.cancelAnimationFrame(followGlueFrameRef.current)
+      followGlueFrameRef.current = null
+    }
   }
 
+  // 跟随补滚入口一：行变化（流式追加/活动组边输出边折/注水 prepend）后贴底。
+  // 未钉住时 glueToBottom 直接返回，不会挪动阅读位置。
+  useEffect(() => {
+    glueToBottom()
+  }, [displayRows])
+
+  // 跟随补滚入口二：内容/视口尺寸变化（展开撑高、图片解码换宽高比、折叠动画、
+  // 窗口改高）后贴底——原来这类增长靠 Virtuoso 的 SIZE_INCREASED 强制回底，
+  // 正是"回弹"的根因（见 glueToBottom 注释）。
+  useEffect(() => {
+    if (!scrollElement) return
+    const observer = new ResizeObserver(() => glueToBottom())
+    observer.observe(scrollElement)
+    if (scrollElement.firstElementChild) observer.observe(scrollElement.firstElementChild)
+    return () => observer.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollElement])
+
   const prevScrollTopRef = useRef(0)
-  /** 最近一次滚动是不是"向上"（用户上滚 = true；内容增长/跟随下滚 = false）。 */
+  const prevScrollHeightRef = useRef(0)
+  /** 最近一次滚动是不是"用户向上"（内容变矮被浏览器钳制的不算，见 handleScrollerScroll）。 */
   const scrollWentUpRef = useRef(false)
   const handleScrollerScroll = (event: React.UIEvent<HTMLElement>): void => {
-    const st = event.currentTarget.scrollTop
-    scrollWentUpRef.current = st < prevScrollTopRef.current - 2
+    const element = event.currentTarget
+    const st = element.scrollTop
+    const sh = element.scrollHeight
+    // 2026-08-27 Bug A 修：scrollTop 变小有两个来源——用户上滚，或内容变矮后
+    // 浏览器把超出新最大值的 scrollTop 钳回去（流式中上一个块自动收起时高发）。
+    // 后者 scrollHeight 同步变小，排除掉——否则钳制留下的"向上"假象叠加滚轮
+    // 标记的滚动意图，会在下一次 atBottomStateChange(false) 被误判成"用户上滚"
+    // 而误解除跟随，随即又在底部附近重新钉住，来回振荡就是滚轮下滚时的"闪"。
+    scrollWentUpRef.current = st < prevScrollTopRef.current - 2 && sh >= prevScrollHeightRef.current - 1
     prevScrollTopRef.current = st
+    prevScrollHeightRef.current = sh
   }
 
   const handleAtBottomStateChange = (nextAtBottom: boolean): void => {
@@ -2257,15 +2307,16 @@ export default function Transcript({
     // 1. 补滚只在**仍钉住**时做——点击/悬停 bar 主动解除跟随（#8b）后内容一
     //    增长就强拉回底，等于展开了也白展开，正在读的东西被抽走；
     // 2. "用户上滚"必须有真实输入佐证（scrollIntentActive：滚轮/指针/触摸都会
-    //    标记）——流式中上一个块自动收起时内容变矮，浏览器钳制 scrollTop 也表现
+    //    标记）且 scrollHeight 没有同步变矮（钳制不算，见 handleScrollerScroll）
+    //    ——流式中上一个块自动收起时内容变矮，浏览器钳制 scrollTop 也表现
     //    为"scrollTop 变小"，光看方向会把自动收起误判成上滚，跟随莫名断掉；
     // 3. 跟随锁生效期间不补滚（点击选中文本被拽走就是锁防的场景），锁过期后
-    //    followOutput 会在下一次内容变化时自己接上。
+    //    glueToBottom 会在下一次内容/尺寸变化时自己接上。
     if (!nextAtBottom && atBottomRef.current) {
       const userScrolledUp = scrollWentUpRef.current && scrollIntentActiveRef.current
       if (!userScrolledUp) {
         // 2026-08 再修：不补滚。展开/自动收起造成的增长不该挪动用户的视图
-        // （补滚就是"展开思考往上展开"的体感来源）；跟随由 followOutput 在
+        // （补滚就是"展开思考往上展开"的体感来源）；跟随由 glueToBottom 在
         // 下一次内容变化时自己接上。
         return
       }
@@ -2277,6 +2328,7 @@ export default function Transcript({
   useEffect(() => {
     cancelBottomReserveScrollFrame()
     cancelBottomReserveRestoreFrame()
+    cancelFollowGlueFrame()
     restoreBottomAfterLayoutRef.current = false
     restoreBottomAfterReserveRef.current = false
     virtuosoScrollingRef.current = false
@@ -2458,9 +2510,28 @@ export default function Transcript({
       onWheelCapture={(event) => {
         // #48 导航条内部的滚轮（滚动摘要列表）不算转录区的滚动意图，不误解除跟随。
         if ((event.target as HTMLElement).closest?.('[data-user-msg-nav]')) return
-        lockFollowOutput()
         markScrollIntent()
-        if (event.deltaY < 0) setPinnedAtBottom(false)
+        if (event.deltaY < 0) {
+          // 上滚 = 离开底部去阅读，立即解除跟随；滚回底部阈值内（或点「回到最新」）
+          // 才恢复——engage/disengage 条件分离（迟滞），不在边界来回振荡。
+          setPinnedAtBottom(false)
+          return
+        }
+        // 2026-08-27 Bug A：下滚也要区别对待——钉住跟随期间用户下滚时，跟随补滚
+        // 按 Virtuoso 估计行高换算落点，可能比手滚位置偏上，每个滚轮滴答都被它
+        // 覆盖回去 = 闪烁。所以不在底部附近的下滚同样立即解除跟随（手动导航到底，
+        // 由 atBottomStateChange 在阈值内重新钉住）；已经在底部阈值内的下滚是
+        // "想跟着流走"，保持钉住不动。
+        const element = scrollElement
+        if (!element) return
+        const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
+        if (distanceFromBottom > FOLLOW_RESUME_AT_BOTTOM_THRESHOLD_PX) {
+          setPinnedAtBottom(false)
+        } else if (!atBottomRef.current) {
+          // 死区补偿：解除跟随后又一直在阈值附近滚动（没有 atBottom 状态沿可触发
+          // 恢复）时，主动下滚到底即视为"回到最新"，立即恢复跟随。
+          setPinnedAtBottom(true)
+        }
       }}
       onTouchMoveCapture={markScrollIntent}
     >
@@ -2524,7 +2595,11 @@ export default function Transcript({
             </div>
           )
         }}
-        followOutput={shouldFollowOutput}
+        // followOutput 恒为 false（2026-08-27 Bug B）：跟随完全由 glueToBottom 手动
+        // 实现。Virtuoso 内部的「SIZE_INCREASED 强制回底」只看这个 prop 是否为
+        // false，会绕开本地钉住状态与跟随锁硬拽回底——点「查看指令」等展开撑高时
+        // 的"回弹"就是它（详见 glueToBottom 注释）。
+        followOutput={false}
         atBottomThreshold={FOLLOW_RESUME_AT_BOTTOM_THRESHOLD_PX}
         atBottomStateChange={handleAtBottomStateChange}
         className="transcript-scroll h-full"

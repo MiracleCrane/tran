@@ -67,8 +67,8 @@ export default function AssistantPanel(): JSX.Element {
       .then((p) => {
         setAiNaming(p.aiNamingEnabled !== false)
         setAutoTodoNudge(p.autoTodoNudge === true)
-        // opt-in：只有显式 true 才算开（与 usageService 的闸门一致）。
-        setCloudUsage(p.cloudUsageEnabled === true)
+        // opt-out：显式 false 才算关（与 usageService 的闸门一致）。
+        setCloudUsage(p.cloudUsageEnabled !== false)
       })
       .catch(() => {})
     // DeepSeek key 状态独立拉（同样只回掩码）：它失败不值得拖垮整个初始化。
@@ -89,9 +89,9 @@ export default function AssistantPanel(): JSX.Element {
     }
   }
 
-  /** 云端额度查询开关（**默认关**）。它复用 Kimi CLI 的登录凭证直连
-   *  api.kimi.com 的**私有接口**，不是公开 API——用它查额度有账号被封的实际
-   *  先例，所以改成必须用户显式打开（2026-08）。 */
+  /** 云端额度查询开关（**默认开**，opt-out）。复用 Kimi CLI 的登录凭证查
+   *  api.kimi.com 的用量接口——这是查 5h / 每周额度的正确线路，2026-08-27
+   *  改回默认开启；显式关闭后才不发请求。 */
   const toggleCloudUsage = async (next: boolean): Promise<void> => {
     setCloudUsage(next)
     try {
@@ -175,7 +175,7 @@ export default function AssistantPanel(): JSX.Element {
               label="云端套餐额度显示"
               description={
                 '在用量卡中显示 **5 小时额度**和**每周额度**。\n\n' +
-                '> **风险提示：** 此功能调用 `api.kimi.com` 的非公开接口，并复用 Kimi Code CLI 的登录凭据。该接口可能变更，也可能带来账号风险，因此默认关闭。\n\n' +
+                '数据来自 `api.kimi.com` 的用量接口，复用 Kimi Code CLI 的登录凭据，默认开启。\n\n' +
                 '关闭后仅隐藏云端额度；本地 `/usage` 提供的上下文占用信息不受影响。'
               }
               checked={cloudUsage}

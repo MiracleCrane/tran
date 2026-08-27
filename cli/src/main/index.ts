@@ -13,7 +13,7 @@ import { log, scheduleLogMaintenance } from './logger'
 import { seedDefaultIfNeeded } from './providers'
 import { sweepOrphanSessionDirs } from './sessionDelete'
 import { loadSettings, saveSettings } from './settings'
-import { initPetWindow, shutdownPetWindow } from './petWindow'
+import { initPetWindow, setMainWindowActive, shutdownPetWindow } from './petWindow'
 import { createTray, type ForgeTray } from './tray'
 import { checkForUpdates } from './updater'
 import type { UpdateCheckResult } from '../shared/ipc'
@@ -360,6 +360,21 @@ function createWindow(): void {
       mainWindow.webContents.send('forge:preferences-changed', prefs)
     }
   })
+
+  // 单只宠物跟焦点走：主窗口在前台时桌面悬浮窗让位（界面内形象出场），
+  // 失焦/最小化/藏到托盘时悬浮窗才出场。宠物窗口 focusable:false 不抢焦点，
+  // 它的显隐不会回触发这组事件，不会乒乓。
+  const syncPetFocus = (): void => {
+    const win = mainWindow
+    setMainWindowActive(
+      !!win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused()
+    )
+  }
+  mainWindow.on('focus', syncPetFocus)
+  mainWindow.on('blur', syncPetFocus)
+  mainWindow.on('minimize', syncPetFocus)
+  mainWindow.on('restore', syncPetFocus)
+  mainWindow.on('hide', syncPetFocus)
 }
 
 /** 本机代理地址（Clash 混合端口）。用户机器固定配置，见 AGENTS.md。 */

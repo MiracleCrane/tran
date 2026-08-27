@@ -1339,9 +1339,13 @@ export class KimiBackend {
     session.turn += 1
     session.turnHadToolCall = false
     session.turnStartedAt = Date.now()
-    this.emitRunning(session, true)
     try {
+      // running=true 推送必须在 ready 之后：新会话首轮 acpSessionId 还没拿到，
+      // 提前推会带空 id，渲染层 markSdkSessionRunning 直接丢弃（空 id 忽略），
+      // 侧栏运行标识（边框彗星/标题流光）整轮不亮，收尾的 running=false 又因
+      // 从没点亮过而无可校正。
       await session.ready
+      this.emitRunning(session, true)
       await this.runTurn(session, next)
     } catch (error) {
       session.lastTurnFailed = true

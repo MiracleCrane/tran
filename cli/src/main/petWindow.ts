@@ -8,8 +8,9 @@ import type { PetMood, PetState, Preferences } from '../shared/ipc'
  * 桌面宠物（Codex Pets 的 Tran 版）：透明、无边框、置顶的悬浮小窗，
  * 里面是魔性摇摆猫的动画，气泡跟着 agent 状态走（干活/等你回话/搞定/出错）。
  *
- * 这是「Tran 以外」的展示位（设置里可单独关）；Tran 界面内的舞动形象是
- * 渲染层的 PetMascot 组件，与本窗口互不影响，两边共用同一份状态推送。
+ * 这是「Tran 以外」的展示位（设置里可单独关）。宠物只有一只，跟着焦点走：
+ * 主窗口在前台时本窗口隐藏（界面内的 PetMascot 出场），主窗口失焦/最小化/
+ * 藏到托盘时本窗口才出场（PetMascot 同步隐藏），两处共用同一份状态推送。
  *
  * 实现要点：
  * - 窗口配置照抄 controlOverlay 那套（transparent + skipTaskbar +
@@ -44,6 +45,11 @@ let ipcRegistered = false
 let showMainWindow: (() => void) | null = null
 /** index.ts 注入的偏好变更通知（右键菜单「隐藏宠物」后同步渲染层镜像）。 */
 let notifyPrefsChanged: ((prefs: Preferences) => void) | null = null
+/**
+ * 主窗口是否在前台（聚焦、可见、未最小化）：index.ts 的窗口事件驱动。
+ * 启动时主窗口随即 show + focus，先按前台处理，免得启动瞬间桌面宠物闪一下。
+ */
+let mainWindowActive = true
 
 function sanitizeState(state: unknown): PetState {
   const raw = state && typeof state === 'object' ? (state as Record<string, unknown>) : {}
@@ -59,6 +65,25 @@ function sanitizeState(state: unknown): PetState {
 function shouldFloat(): boolean {
   const s = loadSettings()
   return s.desktopPetEnabled !== false && s.petOutsideEnabled !== false
+}
+
+/** 按主窗口焦点显隐悬浮窗：主窗口在前台时让位给界面内形象，失焦/最小化才出场。 */
+function applyPetWindowVisibility(): void {
+  if (!petWindow || petWindow.isDestroyed()) return
+  if (mainWindowActive) {
+    if (petWindow.isVisible()) petWindow.hide()
+  } else if (!petWindow.isVisible()) {
+    // showInactive 不抢焦点：宠物窗口 focusable:false，加上这条，显隐不会
+    // 反过来触发主窗口的 blur/focus，不会出现显隐乒乓。
+    petWindow.showInactive()
+  }
+}
+
+/** index.ts 在主窗口 focus/blur/minimize/restore/hide 时同步调用。 */
+export function setMainWindowActive(active: boolean): void {
+  if (mainWindowActive === active) return
+  mainWindowActive = active
+  applyPetWindowVisibility()
 }
 
 function defaultPosition(): { x: number; y: number } {
@@ -158,7 +183,8 @@ function createPetWindow(): void {
   })
   win.webContents.on('did-finish-load', () => {
     sendState(win, lastState)
-    win.showInactive()
+    // 不再无条件 show：主窗口在前台时保持隐藏，由焦点同步决定出场时机。
+    applyPetWindowVisibility()
   })
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (devUrl) {

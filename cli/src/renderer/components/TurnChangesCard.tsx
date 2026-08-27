@@ -64,7 +64,11 @@ export default function TurnChangesCard({
   }
 
   return (
-    <div className="tran-ai-col px-6 py-1.5">
+    // mt-3：上一条 AI 消息（本轮末条）的悬停复制图标挂在消息底边外侧（top:100%，
+    // 整条 ~26px），而行间留白只有 12px、卡片 border 盒上缘距消息底边仅 18px——
+    // 不让位的话 MD 钮正好骑在卡片上边框上（与「以上为历史消息」分隔线的 mt-4
+    // 同一类让位，见 Transcript 行包装注释）。
+    <div className="tran-ai-col mt-3 px-6 py-1.5">
       <div className="rounded-xl border border-border-subtle bg-bg-elev/60">
         <div className="flex items-center gap-2.5 px-3 py-2.5">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-zinc-400">

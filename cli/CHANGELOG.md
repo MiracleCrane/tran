@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.1.63 - 2026-08-27
+
+### 中文
+
+- 调整：云端套餐额度查询改回**默认开启**（opt-out）——`api.kimi.com/coding/v1/usages` 复用 CLI OAuth 凭证是查 5h / 每周额度的正确线路，不存在封号风险；此前 opt-in 闸门导致全新安装一律显示「—」。侧栏「AI 功能」页开关初始态与文案同步更新（去掉风险提示），显式关闭后才不发任何相关请求。
+- 修复：子 Agent 面板的耗时不再静止——运行中的行每秒刷新（复用 TurnTimerStrip 的打点模式），结束/中断的行定格在最终耗时，面板关闭即停表。
+- 重做：宠物两个展示位合并为**一只随焦点走的宠物**——「Tran 以外展示」开启时，Tran 失焦/最小化/收托盘后宠物出现在桌面，回到 Tran 焦点即收回界面内；任何时刻不会同时出现两只。宠物窗 `focusable: false` + `showInactive()`，不会因显隐抢焦点造成抖动。
+- 修复：运行中会话行的边框彗星与标题流光——彗星改由 `transform: rotate()` 驱动（200% 渐变层 + 独立静态环遮罩，不再依赖 `@property`），reduced-motion 下整环隐藏；另修复全新会话首轮 running 标记丢失（`emitRunning` 此前在 `session.ready` 前发出，`acpSessionId` 未就绪被静默丢弃）。
+- 修复：复制按钮提示与实际行为不符——复制图标实为「复制渲染后的排版（富文本；粘到纯文本处为 Markdown 原文）」，MD 按钮为「复制 Markdown 原文」，提示文案已改准；另修复 MD 按钮与「本轮编辑」改动卡片顶边重叠（卡片下移让位，与「历史消息分隔线」让位同例）。
+- 修复：**滚到底部自己回弹 + 流式期间滚动闪烁**——回弹根因在 react-virtuoso 内部：内容尺寸增长时它绕过本地钉住状态强拽到底（`followOutput` 函数每次渲染换引用，其一次性订阅被持续武装，点「查看指令」展开即触发拽底+漂移）。改为 `followOutput={false}` + 手动 rAF 粘底（displayRows 变化与 ResizeObserver 双触发，展开/折叠动画/图片加载/视口缩放全覆盖）；滚轮判定重构——上滚立即解除跟随、离底下滚交出控制权、贴底下滚视为「跟上流」；滚动判向区分「用户上滚」与「内容收缩后浏览器钳位」，自动折叠不再被误判为上滚。
+
+### English
+
+- Change: cloud plan-usage query is back to **default-on** (opt-out) — `api.kimi.com/coding/v1/usages` with the CLI OAuth credential is the correct route for the 5-hour / weekly quotas and carries no ban risk; the previous opt-in gate made fresh installs always show "—". The sidebar "AI Features" toggle's initial state and copy were updated (risk warning removed); no related requests are sent only when explicitly turned off.
+- Fix: sub-agent panel durations no longer freeze — running rows re-render every second (same ticking pattern as TurnTimerStrip); finished/interrupted rows keep their final duration; the timer stops when the panel closes.
+- Rework: the two pet display slots are merged into **one focus-following pet** — with "Tran 以外展示" on, the pet appears on the desktop when Tran loses focus / minimizes / hides to tray, and returns in-app when Tran regains focus; never both at once. The pet window is `focusable: false` and shown via `showInactive()`, so visibility switches never steal focus or flap.
+- Fix: the running session row's border comet and title shimmer — the comet is now driven by `transform: rotate()` (200% gradient layer + separate static ring mask, no more `@property` dependency) and hides entirely under reduced-motion; also fixed the first-turn `running` flag being lost for fresh sessions (`emitRunning` fired before `session.ready`, so the empty `acpSessionId` was silently dropped).
+- Fix: copy-button tooltips now match actual behavior — the copy icon copies the rendered layout (rich text; falls back to Markdown source when pasted into plain-text targets) and the MD button copies the Markdown source; also fixed the MD button overlapping the top edge of the "edited files" changes card (card shifted down to yield, same precedent as the history-divider fix).
+- Fix: **bounce-back after scrolling to the bottom + flicker while scrolling during streaming** — the bounce came from react-virtuoso's internal SIZE_INCREASED path force-scrolling to the last item while bypassing the local pin state (the `followOutput` function prop changed identity every render, keeping its one-shot subscription armed; expanding "查看指令" triggered the yank + drift). Replaced with `followOutput={false}` plus manual rAF-coalesced glue-to-bottom (driven by displayRows changes and a ResizeObserver — covers expansions, collapse animations, image loads, viewport resizes); wheel handling reworked — up-wheel disengages follow instantly, down-wheel away from the bottom yields control, down-wheel at the bottom means "keep up with the stream"; scroll-direction tracking now distinguishes user up-scrolls from browser clamping after content shrink, so auto-collapse no longer masquerades as an up-scroll.
+
 ## v1.1.62 - 2026-08-27
 
 ### 中文

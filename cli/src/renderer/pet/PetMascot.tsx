@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { usePetStore } from '../store/petStore'
 import { useUiStore } from '../store/uiStore'
 import swayingCatUrl from '../assets/pet/swaying-cat-repaired.webm'
@@ -17,6 +17,10 @@ import { useDraggablePetPosition } from './useDraggablePetPosition'
  *
  * 仅宠物自身的 90px 区域接收拖动，不占用其余聊天区；位置持久化并在窗口缩放
  * 时自动收回可视范围。
+ *
+ * 宠物只有一只，跟焦点走：「Tran 以外展示」开着时，主窗口失焦/最小化则这里
+ * 让位给桌面悬浮窗（主进程 petWindow 同步出场），回前台再换回来。悬浮窗
+ * focusable:false 不抢焦点，window 的 focus/blur 不会因它乒乓。
  */
 export default function PetMascot(): JSX.Element | null {
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -24,7 +28,9 @@ export default function PetMascot(): JSX.Element | null {
   const previousMoodRef = useRef(mood)
   const label = usePetStore((s) => s.label)
   const masterEnabled = usePetStore((s) => s.masterEnabled)
+  const outsideEnabled = usePetStore((s) => s.outsideEnabled)
   const view = useUiStore((s) => s.view)
+  const [windowFocused, setWindowFocused] = useState(() => document.hasFocus())
   const {
     elementRef,
     position,
@@ -34,7 +40,19 @@ export default function PetMascot(): JSX.Element | null {
     onPointerUp
   } = useDraggablePetPosition()
 
-  const visible = masterEnabled && view === 'chat'
+  useEffect(() => {
+    if (!outsideEnabled) return
+    const onFocus = (): void => setWindowFocused(true)
+    const onBlur = (): void => setWindowFocused(false)
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [outsideEnabled])
+
+  const visible = masterEnabled && view === 'chat' && (!outsideEnabled || windowFocused)
   const animated = mood !== 'waiting' && !dragging
 
   useEffect(() => {

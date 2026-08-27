@@ -1605,22 +1605,43 @@ textarea:focus-visible {
 
 /* 正在输出的会话行：边框彗星（2026-08-27 用户拍板——星标彗星 v1 的行边框
    光点移植给运行态，与标题文字 seg-shimmer-running 流光并存）。青绿色珠子
-   沿行边框转圈，比星标款（6s）快半档。 ::before 已被悬停光斑占用，用 ::after。 */
-@property --session-run-angle {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
-}
-
-.sidebar-session-row.session-running-orbit::after {
-  content: '';
+   沿行边框转圈，比星标款（6s）快半档。 ::before 已被悬停光斑占用——静态
+   环窗放专用 span（.session-run-orbit-ring），旋转层是它的 ::before。
+   旋转为什么用 transform 而不是 v1 的 @property 角度动画（已拆）：
+   @property 机制本身在 Electron 42 没毛病（探针实测伪元素上角度照常插值），
+   但自定义属性动画只能走主线程逐帧重绘，transform 旋转是合成器动画，
+   符合本文件「只动 transform/opacity」的 fps 纪律（见下方「小面积动画渐变」
+   节），也不再依赖 @property 支持。v1 珠子钉死顶边的真凶是系统级
+   prefers-reduced-motion（Windows 关闭「动画效果」即触发）命中下面的
+   reduced-motion 分支把动画掐了，不是注册失败。
+   结构：span 不动，挂静态环窗遮罩（内容区挖掉，只留 1.5px 边框一圈；
+   padding 即环厚/光点直径）；::before 是边长 2 倍行宽的正方形渐变层
+   （≥ 行对角线，任何角度都满铺四个角），translate 居中、transform 旋转，
+   两个变换属性独立复合互不覆盖；溢出由行本体 overflow:hidden 裁掉。 */
+.sidebar-session-row.session-running-orbit > .session-run-orbit-ring {
   position: absolute;
   inset: 0;
   z-index: 0;
   border-radius: inherit;
   pointer-events: none;
+  -webkit-mask:
+    linear-gradient(#fff, #fff) content-box,
+    linear-gradient(#fff, #fff);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  padding: 1.5px;
+}
+
+.sidebar-session-row.session-running-orbit > .session-run-orbit-ring::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 200%;
+  aspect-ratio: 1;
+  translate: -50% -50%;
   background: conic-gradient(
-    from var(--session-run-angle),
+    from 0deg,
     transparent 0deg,
     rgba(94, 234, 212, 0.08) 28deg,
     rgba(94, 234, 212, 0.45) 42deg,
@@ -1629,28 +1650,19 @@ textarea:focus-visible {
     rgba(94, 234, 212, 0.08) 68deg,
     transparent 96deg
   );
-  /* 只留边框一圈：内容区挖掉；padding 即环厚（光点直径）。 */
-  -webkit-mask:
-    linear-gradient(#fff, #fff) content-box,
-    linear-gradient(#fff, #fff);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  padding: 1.5px;
   animation: session-run-orbit 4s linear infinite;
 }
 
 @keyframes session-run-orbit {
-  from {
-    --session-run-angle: 0deg;
-  }
   to {
-    --session-run-angle: 360deg;
+    transform: rotate(360deg);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-session-row.session-running-orbit::after {
+  .sidebar-session-row.session-running-orbit > .session-run-orbit-ring {
     animation: none;
+    display: none;
   }
 }
 
@@ -3366,7 +3378,10 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
 /* 悬停复制控件（MessageCopyControls，2026-08-24 改版为 Kimi Web 风格图标行）：
    与时间戳同一套显隐机制（group/msg 悬停淡入），但不再占侧边留白——AI 挂在
    正文列末尾的左下、用户挂在气泡右下角，都贴在消息块底边外侧（top:100%），
-   不占布局高度。行间留白（行包装 py-1.5，合约 24px）刚好容下这一行。
+   不占布局高度。图标行整条约 26px（6px 悬停桥 + 20px 钮），而行间留白只有
+   12px（行包装 py-1.5 = 上下各 6px）——超出部分压进下一行的内边距区：下一条
+   是用户气泡时左侧本来就空（右对齐），看不见；下一条是占满列宽的卡片时
+   由卡片自己让位（改动卡 mt-3、「以上为历史消息」分隔线 mt-4）。
    默认 pointer-events:none——opacity 0 时按钮虽看不见却还在原地，不关掉
    会在下一条消息顶部埋隐形点击陷阱；悬停淡入的同时恢复点击。
    容器的 padding-top 是悬停桥：图标行与消息块底边之间不留空隙，指针从正文

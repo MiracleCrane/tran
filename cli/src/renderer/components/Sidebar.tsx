@@ -2077,6 +2077,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                   active ? 'is-active border-transparent bg-[#313131] text-zinc-100' : 'border-transparent text-[#c3c3c3]'
                 }${starred ? ' session-starred-glow' : ''}${running ? ' session-running-orbit' : ''}`}
               >
+                {running && <span className="session-run-orbit-ring" aria-hidden="true" />}
                 {/* 单行标题（2026-08 用户定稿）：一行尽量放长，时间不占第二行，
                     由悬停预览卡展示（原生 title 提示会与预览卡重复，2026-08-25 去掉）。 */}
                 <div className="flex items-center gap-1.5 text-sm">
@@ -2500,6 +2501,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                       }${starred ? ' session-starred-glow' : ''}${running ? ' session-running-orbit' : ''}`}
                       disabled={exiting}
                     >
+                      {/* 边框彗星的静态环窗层（样式见 styles.css 的
+                          .session-run-orbit-ring——遮罩挖空只留 1.5px 环，
+                          旋转渐变在它的 ::before 上）。 */}
+                      {running && <span className="session-run-orbit-ring" aria-hidden="true" />}
                       <span className="flex items-start">
                         {multiMode && (
                           <span

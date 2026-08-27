@@ -8,19 +8,25 @@ import type { PetMood } from '../../shared/ipc'
  *
  * masterEnabled 是「总开关」的渲染层镜像：App 启动时从 getPreferences 灌入，
  * 侧栏头部爪印开关 / 宠物页开关 / Alt+P 拨动后同步更新，PetMascot 据此显隐。
+ * outsideEnabled 是「Tran 以外展示」开关的镜像：开时宠物跟焦点走——主窗口
+ * 失焦则界面内形象让位给桌面悬浮窗。
  */
 interface PetStore {
   mood: PetMood
   label: string | null
   masterEnabled: boolean
+  outsideEnabled: boolean
   setMood: (mood: PetMood, label: string | null) => void
   setMasterEnabled: (enabled: boolean) => void
+  setOutsideEnabled: (enabled: boolean) => void
 }
 
 export const usePetStore = create<PetStore>()((set) => ({
   mood: 'idle',
   label: null,
   masterEnabled: true,
+  outsideEnabled: true,
   setMood: (mood, label) => set({ mood, label }),
-  setMasterEnabled: (masterEnabled) => set({ masterEnabled })
+  setMasterEnabled: (masterEnabled) => set({ masterEnabled }),
+  setOutsideEnabled: (outsideEnabled) => set({ outsideEnabled })
 }))

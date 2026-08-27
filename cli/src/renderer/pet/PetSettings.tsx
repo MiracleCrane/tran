@@ -104,7 +104,7 @@ export default function PetSettings(): JSX.Element {
         <div>
           <h2 className="text-sm font-semibold text-zinc-200">宠物</h2>
           <SettingText className="mt-1">
-            管理 Tran 内的动态宠物和窗口外悬浮宠物；Tran 内宠物可直接拖动，位置会自动保存。
+            管理这只动态宠物：Tran 在前台时它在界面内舞动，也可以让它在 Tran 失焦时到桌面上。
           </SettingText>
         </div>
         <span className={`text-[11px] ${status === 'error' ? 'text-red-400' : 'text-zinc-500'}`}>
@@ -122,7 +122,7 @@ export default function PetSettings(): JSX.Element {
         />
         <PetToggle
           label="在 Tran 窗口外显示"
-          description="额外创建透明置顶的桌面悬浮宠物；可以拖动、右键隐藏，并在 Tran 最小化后继续显示。"
+          description="同一只宠物跟着焦点走：Tran 失焦或最小化时，它以透明置顶悬浮窗出现在桌面上（可拖动、右键隐藏）；Tran 回到前台它就回到界面内。"
           checked={petOutside}
           disabled={loading || !desktopPet}
           onChange={(checked) => void togglePetOutside(checked)}
