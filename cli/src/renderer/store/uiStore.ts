@@ -7,6 +7,7 @@ import type { UserAttachment } from '../types'
 export type View =
   | 'chat'
   | 'assistant'
+  | 'rpTavern'
   | 'pet'
   | 'mcp'
   | 'providers'

@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.1.57 - 2026-08-27
+
+### 中文
+
+- 新增：会话「移动到项目…」——预览卡新增操作，可把会话改归到任意项目（或「不在项目中工作」）。实现为 Tran 自建归属元数据层（Codex 模型：归属是元数据，不是存储位置）——不动 kimi 任何文件，会话 resume、agent 工作目录全部不变；分组即时换边，可随时「跟随会话目录（默认）」复位。
+- 新增：会话星标——预览卡动作排加星标按钮；星标会话标题前显示琥珀小星，整行有淡淡的斜向微光扫过（reduced-motion 关闭），不改变位置与分组。
+- 新增：输入框 URL 渲染为链接样式（蓝色文字 + 前置小图标，与消息一致），图标走 CSS 不占 DOM——链接全程保持可编辑正文，光标可逐字修改。
+- 新增：rpTavern（SillyTavern 酒馆）集成——侧栏酒馆页：安装检测、健康检查、一键打开，系统调用集中在 Adapter 层（可测、可替换）。
+- 优化：xhh TUI 图片块改为弹外部无边框查看窗看原图（Esc/点击关闭），替代盲文字符画。
+- 优化：screen-assist 支持一键清除会话的知识库绑定。
+- 文档：新增 Tran↔Codex app-server 架构差距分析、Codex harness 调研与集成笔记（docs/）。
+
+### English
+
+- New: "Move to project…" for sessions — a new preview-card action to reassign any session to a project (or "work outside any project"). Implemented as a Tran-owned assignment metadata layer (the Codex model: assignment is metadata, not storage location) — no kimi files touched; resume and the agent's working directory are unchanged; regrouping is instant and a "follow the session's directory (default)" reset is always available.
+- New: session starring — a star toggle in the preview card; starred sessions show a small amber star before the title with a soft diagonal sheen sweeping the row (off under reduced-motion), without changing position or grouping.
+- New: URLs in the composer render as link-styled text (blue + a small leading icon, matching messages) via CSS-only icons that don't touch the DOM — links stay fully editable text, caret included.
+- New: rpTavern (SillyTavern) integration — a sidebar tavern page with install detection, health checks, and one-click open; system calls isolated behind a testable, replaceable adapter.
+- Improvement: xhh TUI image blocks now open the original image in an external borderless viewer (Esc/click to close) instead of rendering braille art.
+- Improvement: screen-assist can clear a session's knowledge-base binding in one click.
+- Docs: added the Tran↔Codex app-server architecture gap analysis, the Codex harness research notes, and integration notes (docs/).
+
 ## v1.1.56 - 2026-08-27
 
 ### 中文

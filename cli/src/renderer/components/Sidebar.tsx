@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useSessionStore } from '../store/sessionStore'
 import { useUiStore, type View } from '../store/uiStore'
@@ -10,6 +10,8 @@ import type { ClaudeExecutionBackend, SessionListItem, SessionPreview } from '..
 import { normalizeCwdForCompare } from '../../shared/paths'
 import { relTime } from '../utils/format'
 import { useArchiveStore } from '../store/archiveStore'
+import { useSessionProjectStore } from '../store/sessionProjectStore'
+import { showInlineContextMenu, type InlineMenuItem } from './InlineContextMenu'
 import { usePetStore } from '../store/petStore'
 import { onForgeEvent, emitForgeEvent } from '../events'
 
@@ -27,6 +29,9 @@ type SessionListSnapshot = {
 }
 
 const PINNED_SESSIONS_KEY = 'forge.pinnedSessions.v1'
+// 星标（2026-08-27 用户）：纯展示态标记（同置顶，localStorage Set），不动排序/
+// 分组——行首加星 + 行底微光，别走 sessionProjectStore（那是项目归属元数据）。
+const STARRED_SESSIONS_KEY = 'forge.starredSessions.v1'
 const QA_HIDDEN_KEY = 'forge.qaSectionHidden.v1'
 
 const DAY = 86_400_000
@@ -74,6 +79,8 @@ interface SessionPreviewData {
   session: SessionListItem
   /** 置顶态（图钉高亮用，悬停时刻快照即可）。 */
   pinned: boolean
+  /** 星标态（星星填色用，同置顶——悬停时刻快照即可）。 */
+  starred: boolean
   /** 输出中的会话不支持归档（按钮禁用并说明）。 */
   running: boolean
 }
@@ -92,18 +99,23 @@ function SessionPreviewCard({
   onClose,
   onTriangleLeave,
   onPin,
+  onStar,
   onRename,
   onDelete,
-  onArchive
+  onArchive,
+  onMoveToProject
 }: {
   onHoldOpen: () => void
   onClose: () => void
   /** 离卡不立即收：交给安全三角判断（目的地=当前行）。 */
   onTriangleLeave: (e: PointerEvent<HTMLElement>) => void
   onPin: (session: SessionListItem) => void
+  onStar: (session: SessionListItem) => void
   onRename: (key: string, currentSummary: string) => void
   onDelete: (key: string) => void
   onArchive: (sessionId: string) => void
+  /** 「移动到项目」（2026-08-27）：点开项目选择菜单（归属 = 元数据，cwd 不动）。 */
+  onMoveToProject: (session: SessionListItem, e: MouseEvent<HTMLElement>) => void
 }): JSX.Element | null {
   const [preview, setPreview] = useState<SessionPreviewData | null>(null)
   useEffect(() => {
@@ -158,6 +170,23 @@ function SessionPreviewCard({
           要悬停停留才出现，点这里面的都是有意动作，无需二次确认。输出中的会话
           不支持归档：禁用并说明。 */}
       <div className="mt-2 flex items-center justify-end gap-0.5 border-t border-white/[0.06] pt-2">
+        {/* 星标（2026-08-27）：排首、置顶之前——纯展示标记，高亮用暖琥珀
+            #f5c97b（同行首小星/行底微光同色），不抢 accent。 */}
+        <HoverTip tip={preview.starred ? '取消星标' : '星标'}>
+          <button
+            type="button"
+            aria-label={preview.starred ? '取消星标' : '星标'}
+            onClick={() => {
+              onClose()
+              onStar(preview.session)
+            }}
+            className={`flex h-6 w-6 items-center justify-center rounded-lg transition ${
+              preview.starred ? 'text-[#f5c97b] hover:bg-white/[0.06]' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200'
+            }`}
+          >
+            <StarIcon active={preview.starred} />
+          </button>
+        </HoverTip>
         <HoverTip tip={preview.pinned ? '取消置顶' : '置顶'}>
           <button
             type="button"
@@ -184,6 +213,19 @@ function SessionPreviewCard({
             className="flex h-6 w-6 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
           >
             <EditIcon />
+          </button>
+        </HoverTip>
+        <HoverTip tip="移动到项目…">
+          <button
+            type="button"
+            aria-label="移动到项目"
+            onClick={(e) => {
+              onClose()
+              onMoveToProject(preview.session, e)
+            }}
+            className="flex h-6 w-6 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
+          >
+            <FolderArrowIcon />
           </button>
         </HoverTip>
         <HoverTip tip="删除">
@@ -263,6 +305,22 @@ function writePinnedSessions(keys: Set<string>): void {
   window.localStorage.setItem(PINNED_SESSIONS_KEY, JSON.stringify([...keys]))
 }
 
+// 星标读写与置顶同款（2026-08-27）：localStorage JSON 数组 ↔ Set<string>，
+// 键同为 sessionKey(s)（backend:sessionId）。
+function readStarredSessions(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(STARRED_SESSIONS_KEY)
+    const parsed = raw ? (JSON.parse(raw) as unknown) : []
+    return new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeStarredSessions(keys: Set<string>): void {
+  window.localStorage.setItem(STARRED_SESSIONS_KEY, JSON.stringify([...keys]))
+}
+
 function readQaHidden(): boolean {
   try {
     return window.localStorage.getItem(QA_HIDDEN_KEY) === '1'
@@ -290,11 +348,12 @@ function groupSessionsByTime(
 
 function groupSessionsByProject(
   sessions: SessionListItem[],
-  fallbackCwd: string
+  fallbackCwd: string,
+  pathOf: (s: SessionListItem) => string = (s) => s.cwd ?? fallbackCwd
 ): SessionGroup[] {
   const map = new Map<string, SessionListItem[]>()
   for (const session of sessions) {
-    const label = pathName(session.cwd ?? fallbackCwd)
+    const label = pathName(pathOf(session))
     const arr = map.get(label)
     if (arr) arr.push(session)
     else map.set(label, [session])
@@ -306,14 +365,17 @@ function groupSessionsByProject(
 
 /** 「全部」视图：按完整 cwd 分组，组间按组内最新会话倒序（组内已按时间倒序）。
  *  分组键用归一化路径（正反斜杠/盘符大小写殊途同归），label 取首个原始写法——
- *  否则同一项目的会话会按路径拼写拆成两个组（2026-08-14 实测：C:\ 与 C:/ 并存）。 */
+ *  否则同一项目的会话会按路径拼写拆成两个组（2026-08-14 实测：C:\ 与 C:/ 并存）。
+ *  pathOf：分组目录的取值口径——「移动到项目」的归属覆盖传入时按覆盖的项目
+ *  路径分组，会话自身的 cwd 不动（2026-08-27）。 */
 function groupSessionsByCwd(
   sessions: SessionListItem[],
-  fallbackCwd: string
+  fallbackCwd: string,
+  pathOf: (s: SessionListItem) => string = (s) => s.cwd ?? fallbackCwd
 ): SessionGroup[] {
   const map = new Map<string, { label: string; items: SessionListItem[] }>()
   for (const session of sessions) {
-    const raw = session.cwd ?? fallbackCwd
+    const raw = pathOf(session)
     const key = normalizeCwdForCompare(raw)
     const entry = map.get(key)
     if (entry) entry.items.push(session)
@@ -439,6 +501,44 @@ const PinIcon = ({ active = false }: { active?: boolean }): JSX.Element => (
     />
   </svg>
 )
+/** 五角星（星标，2026-08-27）：预览卡切换钮 13px 描边/填色切换；行首小星
+ *  用 size=10.5 恒填色（RowStar 直接用它）。 */
+const StarIcon = ({ active = false, size = 13 }: { active?: boolean; size?: number }): JSX.Element => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'}>
+    <path
+      d="M12 3.2l2.7 5.5 6 .9-4.3 4.2 1 6L12 17l-5.4 2.8 1-6-4.3-4.2 6-.9z"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+/** 行首星标小星（2026-08-27）：暖琥珀 #f5c97b——比置顶段标的金（#c0a05c）
+ *  亮半档、比运行中流光的金（#fbbf24）柔，安静一眼可辨但不刺眼。 */
+const RowStarIcon = (): JSX.Element => (
+  <span className="shrink-0 text-[#f5c97b]" aria-hidden>
+    <StarIcon active size={10.5} />
+  </span>
+)
+/** 文件夹 + 右箭头（「移动到项目」，2026-08-27）：与行内其它图标同款 13px 描边。 */
+const FolderArrowIcon = (): JSX.Element => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+    <path
+      d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v3M3 7v9a2 2 0 0 0 2 2h5"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M13.5 16.5H21m0 0-2.8-2.8M21 16.5l-2.8 2.8"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
 /** 头部/多选工具条图标（2026-08-20 侧栏图标化整理）：与 SearchIcon 同款 12px
  *  描边风格。 */
 const SparkleIcon = (): JSX.Element => (
@@ -489,6 +589,18 @@ const PetIcon = ({ size = 16 }: { size?: number } = {}): JSX.Element => (
       strokeWidth="1.5"
       strokeLinejoin="round"
     />
+  </svg>
+)
+const TavernIcon = (): JSX.Element => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <path
+      d="M4 10h16M6 10l1 10h10l1-10M8 10V6h8v4M9 6V3h6v3"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path d="M10 14h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
   </svg>
 )
 const RefreshIcon = (): JSX.Element => (
@@ -583,6 +695,7 @@ const NAV_ITEMS: { view: View; label: string; icon: () => JSX.Element }[] = [
   // 「AI 功能」2026-08-27 搬回侧栏：上一次并入设置是错的方向，用户改口恢复
   // 一级入口（内容 = 原设置「AI 功能」分类整段，见 AssistantPanel）。
   { view: 'assistant', label: 'AI 功能', icon: AiWandIcon },
+  { view: 'rpTavern', label: 'RP 酒馆', icon: TavernIcon },
   { view: 'archived', label: '归档', icon: ArchiveIcon },
   { view: 'pet', label: '宠物', icon: PetIcon },
   { view: 'settings', label: '设置', icon: GearIcon },
@@ -604,6 +717,13 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   useEffect(() => {
     void loadArchived()
   }, [loadArchived])
+  // 会话→项目归属（2026-08-27「移动到项目」）：分组/移动菜单的数据源，挂载即加载。
+  const projectAssignments = useSessionProjectStore((s) => s.assignments)
+  const loadProjectAssignments = useSessionProjectStore((s) => s.loadAssignments)
+  const setProjectAssignment = useSessionProjectStore((s) => s.setAssignment)
+  useEffect(() => {
+    void loadProjectAssignments()
+  }, [loadProjectAssignments])
   // #5b 运行中会话标识：并行契约新增字段，包含当前正在跑 turn 的 sdkSessionId。
   const runningSdkSessionIds = useSessionStore((s) => s.runningSdkSessionIds)
   // 未读回复计数（2026-08-25）：行右缘气泡，键 = sessionKey(s)。
@@ -857,6 +977,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         lastModified: s.lastModified,
         session: s,
         pinned: pinnedSessionKeys.has(key),
+        starred: starredSessionKeys.has(key),
         running: s.running || runningSdkSessionIds.includes(s.sessionId),
         animate
       }
@@ -932,6 +1053,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     cancelTriangleWatch()
   }
   const [pinnedSessionKeys, setPinnedSessionKeys] = useState<Set<string>>(() => readPinnedSessions())
+  const [starredSessionKeys, setStarredSessionKeys] = useState<Set<string>>(() => readStarredSessions())
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   const [wslNavRevealPhase, setWslNavRevealPhase] = useState<WslNavRevealPhase>('hidden')
   const [sessionListTransitionPhase, setSessionListTransitionPhase] =
@@ -1337,6 +1459,19 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     })
   }
 
+  /** 星标切换（2026-08-27）：与置顶同款的纯展示态——只更新 Set + 持久化，
+      不参与排序/分组（不是置顶）。 */
+  const toggleStarredSession = (session: SessionListItem): void => {
+    const key = sessionKey(session)
+    setStarredSessionKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      writeStarredSessions(next)
+      return next
+    })
+  }
+
   const toggleGroupCollapsed = (label: string): void => {
     setCollapsedGroupLabels((prev) => {
       const next = new Set(prev)
@@ -1356,6 +1491,50 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       void switchProject(cwd)
     }
     setView('chat')
+  }
+
+  /** 「移动到项目…」菜单（2026-08-27）：归属 = Tran 侧元数据，cwd/数据不动，
+   *  resume 仍走真实目录。菜单 = 已注册项目 + 「不在项目中工作」；已有覆盖时
+   *  追加「跟随会话目录（默认）」出口（清除条目）。✓ 标当前生效归属。 */
+  const handleMoveToProject = (session: SessionListItem, e: MouseEvent<HTMLElement>): void => {
+    const key = sessionKey(session)
+    const override = projectAssignments?.[key]
+    // 无覆盖时的生效归属：cwd 是已注册项目（且非主目录）才算，否则 = 不在项目中。
+    const cwdProject =
+      session.cwd &&
+      addedProjectPaths.has(normalizeCwdForCompare(session.cwd)) &&
+      (!homePath || normalizeCwdForCompare(session.cwd) !== homePath)
+        ? session.cwd
+        : null
+    const effective = override !== undefined ? override : cwdProject
+    const isCurrent = (p: string | null): boolean =>
+      p === null
+        ? effective === null
+        : !!effective && normalizeCwdForCompare(p) === normalizeCwdForCompare(effective)
+    // 同名项目（不同路径同 basename）：菜单 key = label，重名会撞 key 也分不清，
+    // 重名的那条直接显示完整路径。
+    const nameCount = new Map<string, number>()
+    for (const p of addedProjectRawPaths) {
+      const name = pathName(p)
+      nameCount.set(name, (nameCount.get(name) ?? 0) + 1)
+    }
+    const items: InlineMenuItem[] = [
+      ...addedProjectRawPaths.map((p) => {
+        const name = pathName(p)
+        return {
+          label: `${isCurrent(p) ? '✓ ' : ''}${(nameCount.get(name) ?? 0) > 1 ? p : name}`,
+          action: () => void setProjectAssignment(key, p)
+        }
+      }),
+      {
+        label: `${isCurrent(null) ? '✓ ' : ''}不在项目中工作`,
+        action: () => void setProjectAssignment(key, null)
+      },
+      ...(override !== undefined
+        ? [{ label: '跟随会话目录（默认）', action: () => void setProjectAssignment(key, undefined) }]
+        : [])
+    ]
+    showInlineContextMenu(e, items)
   }
 
   /** 「全部」视图点其他项目的会话：先切项目再 resume；本项目内直接打开。 */
@@ -1515,21 +1694,40 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     const pinned = orderedSessions.filter((s) => pinnedSessionKeys.has(sessionKey(s)))
     const rest = orderedSessions.filter((s) => !pinnedSessionKeys.has(sessionKey(s)))
     // 主目录不算项目：cwd 为主目录的会话归「最近」，与 Codex 三段完全一致。
-    const isProjectSession = (s: SessionListItem): boolean =>
-      !!s.cwd &&
-      addedProjectPaths.has(normalizeCwdForCompare(s.cwd)) &&
-      (!homePath || normalizeCwdForCompare(s.cwd) !== homePath)
+    // 会话→项目归属覆盖（2026-08-27「移动到项目」，Codex 语义：归属 = Tran 侧
+    // 元数据，cwd 不动）。返回值：string = 归到该项目；null = 显式「不在项目
+    // 中工作」（归「最近」）；undefined = 无覆盖，跟随 cwd。覆盖指向的项目已
+    // 被移除时回退 undefined（跟随 cwd）——只是渲染回退，不清条目：项目可能
+    // 加回来，且这里不是清理归属表的地方。
+    const assignmentOf = (s: SessionListItem): string | null | undefined => {
+      const a = projectAssignments?.[sessionKey(s)]
+      if (a === undefined || a === null) return a
+      return addedProjectPaths.has(normalizeCwdForCompare(a)) ? a : undefined
+    }
+    const isProjectSession = (s: SessionListItem): boolean => {
+      const a = assignmentOf(s)
+      if (a !== undefined) return a !== null
+      return (
+        !!s.cwd &&
+        addedProjectPaths.has(normalizeCwdForCompare(s.cwd)) &&
+        (!homePath || normalizeCwdForCompare(s.cwd) !== homePath)
+      )
+    }
+    // 分组目录的取值口径：有归属覆盖按覆盖的项目路径，否则按真实 cwd。
+    const groupPathOf = (s: SessionListItem): string => assignmentOf(s) ?? s.cwd ?? meta?.cwd ?? ''
     const isQaSession = (s: SessionListItem): boolean =>
       normalizeCwdForCompare(s.cwd ?? '') === QA_SESSION_CWD
     const qa = qaHidden ? [] : rest.filter(isQaSession).sort((a, b) => b.lastModified - a.lastModified)
-    const inProject = rest.filter(isProjectSession)
+    // 项目组排除问答会话：归属覆盖可能把会话指到问答目录所属的项目（反之亦然），
+    // 问答段优先、项目组让位，防同一会话出现两次撞 key（问答段逻辑本身不动）。
+    const inProject = rest.filter((s) => isProjectSession(s) && !isQaSession(s))
     const recent = rest
       .filter((s) => !isProjectSession(s) && !isQaSession(s))
       .sort((a, b) => b.lastModified - a.lastModified)
     const cwdGroups =
       sessionScope === 'all'
-        ? groupSessionsByCwd(inProject, meta?.cwd ?? '')
-        : groupSessionsByProject(inProject, meta?.cwd ?? '')
+        ? groupSessionsByCwd(inProject, meta?.cwd ?? '', groupPathOf)
+        : groupSessionsByProject(inProject, meta?.cwd ?? '', groupPathOf)
     // 空项目保留组头：会话被删光/还没开过会话的项目不消失（2026-08-18 用户
     // 拍板）。追加在有会话的组后面，保持 listProjects 顺序；主目录不算项目。
     const nonEmptyLabels = new Set(cwdGroups.map((g) => normalizeCwdForCompare(g.label)))
@@ -1549,7 +1747,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       ...emptyProjectGroups,
       ...(recent.length ? [{ label: '最近', items: recent, section: true }] : [])
     ]
-  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjectPaths, addedProjectRawPaths, homePath, qaHidden])
+  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjectPaths, addedProjectRawPaths, homePath, qaHidden, projectAssignments])
   sessionGroupsRef.current = sessionGroups
 
   const visibleSessionKeys = useMemo(
@@ -1729,6 +1927,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         <div className={g.section ? '' : 'ml-[31px]'}>
         {g.items.map((s) => {
           const active = s.sessionId === snapshot.activeSessionId && view === 'chat'
+          const starred = starredSessionKeys.has(sessionKey(s))
           return (
             <div
               key={sessionKey(s)}
@@ -1737,11 +1936,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               <div
                 className={`sidebar-session-row relative w-full rounded-md border px-2 py-[5px] text-left ${
                   active ? 'is-active border-transparent bg-[#313131] text-zinc-100' : 'border-transparent text-[#c3c3c3]'
-                }`}
+                }${starred ? ' session-starred-glow' : ''}`}
               >
                 {/* 单行标题（2026-08 用户定稿）：一行尽量放长，时间不占第二行，
                     由悬停预览卡展示（原生 title 提示会与预览卡重复，2026-08-25 去掉）。 */}
                 <div className="flex items-center gap-1.5 text-sm">
+                  {starred && <RowStarIcon />}
                   <span className="min-w-0 flex-1 truncate">{s.summary || '(未命名)'}</span>
                   <span className={`session-runtime-badge ${snapshot.showRuntimeBadges ? 'is-visible' : ''}`}>
                     {backendLabel(s.runtimeBackend)}
@@ -2085,6 +2285,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               const editing = editingId === key
               const inserting = newlyInsertedSessionKeys.has(key)
               const exiting = item.exiting
+              // 星标（2026-08-27）：行首小星 + 行底微光（.session-starred-glow），
+              // 纯展示，不影响排序/分组。
+              const starred = starredSessionKeys.has(key)
               return (
                 <div
                   key={key}
@@ -2146,7 +2349,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                           : multiMode && selectedKeys.has(key)
                             ? 'border-accent/40 bg-accent/[0.08] text-zinc-200'
                             : 'border-transparent text-[#c3c3c3]'
-                      }`}
+                      }${starred ? ' session-starred-glow' : ''}`}
                       disabled={exiting}
                     >
                       <span className="flex items-start">
@@ -2167,6 +2370,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                               多色流光（2026-08-19 用户：「不要紫色的点了，运行中
                               会话的流光花哨点」）。 */}
                           <div className="flex items-center gap-1.5 text-sm">
+                            {starred && <RowStarIcon />}
                             <span
                               className={`min-w-0 flex-1 truncate ${
                                 s.running || runningSdkSessionIds.includes(s.sessionId)
@@ -2355,12 +2559,14 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         onClose={hidePreview}
         onTriangleLeave={beginCardLeaveWatch}
         onPin={togglePinnedSession}
+        onStar={toggleStarredSession}
         onRename={(key, currentSummary) => {
           setEditingId(key)
           setEditText(currentSummary === '(未命名)' ? '' : currentSummary)
         }}
         onDelete={setConfirmDeleteId}
         onArchive={(sessionId) => void archiveSession(sessionId)}
+        onMoveToProject={handleMoveToProject}
       />
     </div>
   )

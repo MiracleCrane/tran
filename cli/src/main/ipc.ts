@@ -34,6 +34,7 @@ import {
 import { setOverlayTargetDisplay, stopControlOverlay } from './controlOverlay'
 import { launchScreenAssist } from './screenAssist'
 import { launchXhh } from './xhh'
+import { configureRpTavern, getRpTavernStatus, openRpTavern } from './rpTavern'
 import {
   listProviders,
   getActiveProvider,
@@ -87,6 +88,12 @@ import {
   getArchivedSessions,
   unarchiveSession
 } from './archivedSessions'
+import {
+  clearSessionProjectAssignment,
+  dropSessionProjectAssignment,
+  getSessionProjectAssignments,
+  setSessionProjectAssignment
+} from './sessionProjects'
 import { allAiTitles, generateAiTitlesBatch, getSessionPreview } from './aiTitles'
 import { getSessionTasks } from './kimiServerApi'
 import type { GoalControlAction, GoalStartOptions } from './goalStore'
@@ -1188,6 +1195,14 @@ export function registerIpc(
 
   ipcMain.handle('forge:launchXhh', async () => launchXhh())
 
+  ipcMain.handle('forge:getRpTavernStatus', async () => getRpTavernStatus())
+
+  ipcMain.handle('forge:configureRpTavern', async (_event, installPath: unknown) =>
+    configureRpTavern(requireString(installPath, 'installPath').trim())
+  )
+
+  ipcMain.handle('forge:openRpTavern', async () => openRpTavern())
+
   ipcMain.handle('forge:getSessionMessages', async (
     _e,
     sessionId: string,
@@ -1402,6 +1417,7 @@ export function registerIpc(
       if (result.ok) {
         removeSessionTitle(sessionId)
         dropArchivedSession(sessionId)
+        dropSessionProjectAssignment(sessionId)
         // 历史查询客户端缓存着 session/list 快照（实测列表冻结，见 kimiHistory
         // 的 TTL 注释）：不丢掉的话删除后第一次刷新会把已删会话带回来——
         // 「删当前会话删不掉、过会儿自己又消失」就是它（2026-08-14 实测复现）。
@@ -1422,6 +1438,22 @@ export function registerIpc(
   ipcMain.handle('forge:unarchiveSession', async (_e, sessionId: string): Promise<void> => {
     unarchiveSession(requireString(sessionId, 'sessionId'))
   })
+
+  // 会话→项目归属（2026-08-27「移动到项目」）：Tran 侧元数据，cwd 不动。
+  // projectPath === undefined = 清除覆盖（回到跟随 cwd 默认）。
+  ipcMain.handle(
+    'forge:getSessionProjectAssignments',
+    async (): Promise<Record<string, string | null>> => getSessionProjectAssignments()
+  )
+  ipcMain.handle(
+    'forge:setSessionProjectAssignment',
+    async (_e, sessionKey: string, projectPath?: string | null): Promise<void> => {
+      const key = requireString(sessionKey, 'sessionKey')
+      if (projectPath === undefined) clearSessionProjectAssignment(key)
+      else if (projectPath === null) setSessionProjectAssignment(key, null)
+      else setSessionProjectAssignment(key, requireString(projectPath, 'projectPath').trim())
+    }
+  )
 
   ipcMain.handle(
     'forge:getSubagentMessages',

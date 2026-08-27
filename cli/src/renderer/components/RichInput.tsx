@@ -42,20 +42,50 @@ export interface RichInputProps {
 /** 只认**行首**的命令：句子中间的 `/` 是路径分隔符，不该被吃掉。 */
 const COMMAND_RE = /^\/([^\s/]+)/
 
+/**
+ * URL 分词（2026-08-27 用户要求：输入框里的链接要画成消息气泡同款——图标 +
+ * 蓝字，但保持普通可编辑文本）。字符类排除空白、引号、尖括和中英文成对括号/
+ * 句读（它们永远属于句子不属于链接）；ASCII 句读尾巴（.,;:!?)）在分词后修剪，
+ * 因为它们也可能合法出现在 URL 中间，不能进排除类。已知局限：不以这些标点
+ * 结尾的怪 URL 照单全收；以 `)` 合法结尾的 URL（维基百科式）会被吃掉尾巴。
+ */
+const URL_RE = /https?:\/\/[^\s<>"'（）【】《》「」『』。，、；：？！…]+/g
+const URL_TAIL_RE = /[.,;:!?)]+$/
+
 interface Segment {
-  kind: 'text' | 'command'
+  kind: 'text' | 'command' | 'link'
   text: string
   label?: string
 }
 
-function tokenize(value: string, resolve: RichInputProps['resolveCommand']): Segment[] {
+/** 把一段纯文本按 URL 拆成 text/link 段（URL 不含空白，所以 link 段永无换行）。 */
+function splitLinks(text: string): Segment[] {
+  const out: Segment[] = []
+  let last = 0
+  URL_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = URL_RE.exec(text)) !== null) {
+    const url = m[0].replace(URL_TAIL_RE, '')
+    if (!url) continue
+    if (m.index > last) out.push({ kind: 'text', text: text.slice(last, m.index) })
+    out.push({ kind: 'link', text: url })
+    last = m.index + url.length
+    // 让被剪掉的句读尾巴重新参与扫描（它们不会是 URL 开头，只是别跳过）。
+    URL_RE.lastIndex = last
+  }
+  if (last < text.length) out.push({ kind: 'text', text: text.slice(last) })
+  return out
+}
+
+export function tokenize(value: string, resolve: RichInputProps['resolveCommand']): Segment[] {
   const m = COMMAND_RE.exec(value)
-  if (!m) return [{ kind: 'text', text: value }]
+  if (!m) return splitLinks(value)
   const hit = resolve(m[1] ?? '')
-  if (!hit) return [{ kind: 'text', text: value }]
+  if (!hit) return splitLinks(value)
   const rest = value.slice(m[0].length)
   const segments: Segment[] = [{ kind: 'command', text: m[0], label: hit.label }]
-  if (rest) segments.push({ kind: 'text', text: rest })
+  // 命令胶囊后面跟的文本照常链接化（行首 URL 走不到这里，天然是 link）。
+  if (rest) segments.push(...splitLinks(rest))
   return segments
 }
 
@@ -231,6 +261,16 @@ function render(root: HTMLElement, segments: Segment[]): void {
       root.appendChild(chip)
       continue
     }
+    if (seg.kind === 'link') {
+      // URL 是普通可编辑文本，只套一个着色 span（图标由 CSS ::before 画，
+      // 不占 DOM 节点，光标进出自如）。不加 data-raw：textContent 即原文，
+      // serialize 的文本节点遍历天然还原。
+      const link = document.createElement('span')
+      link.className = 'rich-input-link'
+      link.appendChild(document.createTextNode(seg.text))
+      root.appendChild(link)
+      continue
+    }
     // 换行拆成文本 + <br>：contenteditable 里直接塞 \n 不会换行。
     const parts = seg.text.split('\n')
     parts.forEach((part, i) => {
@@ -279,7 +319,13 @@ export default function RichInput({
     // 的翻转瞬间发生一次，正常逐字打字不受影响。
     const wantChip = segments[0]?.kind === 'command'
     const hasChip = root.firstElementChild?.classList.contains('rich-input-chip') ?? false
-    if (serialize(root) === value && wantChip === hasChip) return
+    // 链接化沿用同一「翻转才重排」模式（2026-08-27）：只比对 link 段的**个数**，
+    // 不比对文本——在已有链接 span 里继续敲字符，链接个数不变，值又等于 DOM
+    // （自己的回声），于是逐字打字绝不重排；只有「某处新长成/拆散了一个 URL」
+    // （个数翻转）才重排一次完成图标化。
+    const wantLinks = segments.reduce((n, s) => n + (s.kind === 'link' ? 1 : 0), 0)
+    const hasLinks = root.querySelectorAll('.rich-input-link').length
+    if (serialize(root) === value && wantChip === hasChip && wantLinks === hasLinks) return
     const caret = caretOffset(root)
     render(root, segments)
     if (document.activeElement === root) {

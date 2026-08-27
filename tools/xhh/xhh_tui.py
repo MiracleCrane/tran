@@ -67,7 +67,7 @@ def img_to_braille(data, cols=100, max_rows=50):
 
 
 class ImageBlock(Collapsible):
-    """可折叠图片块：展开时下载并渲染盲文字符画。"""
+    """可折叠图片块：展开时下载原图并弹出无边框查看窗（Esc/点击关闭）。"""
 
     def __init__(self, url, no, width=100):
         self._body = Static("（展开加载中…）")
@@ -85,12 +85,37 @@ class ImageBlock(Collapsible):
     @work
     async def _load(self):
         try:
-            data = await asyncio.to_thread(_download, self.url)
-            lines = await asyncio.to_thread(img_to_braille, data, self.width)
-            text = Text("\n").join(lines)
-            self._body.update(text)
+            path = await asyncio.to_thread(_cache_image, self.url, self.no)
+            await asyncio.to_thread(_open_image_viewer, path)
+            self._body.update("（已在外部窗口打开原图，Esc 或点击关闭）")
         except Exception as e:
             self._body.update(f"[图片加载失败: {e}]")
+
+
+def _cache_image(url, no):
+    """下载图片转 PNG 缓存到临时目录（WPF 不支持 webp），返回本地路径。"""
+    import hashlib
+    import io
+    import tempfile
+    from PIL import Image
+    cache_dir = Path(tempfile.gettempdir()) / "xhh_imgs"
+    cache_dir.mkdir(exist_ok=True)
+    path = cache_dir / f"img{no}_{hashlib.md5(url.encode()).hexdigest()[:8]}.png"
+    if not path.exists():
+        im = Image.open(io.BytesIO(_download(url))).convert("RGB")
+        im.save(path, "PNG")
+    return str(path)
+
+
+def _open_image_viewer(path):
+    """用 WPF 小窗显示原图（独立进程，不阻塞终端）。"""
+    import subprocess
+    viewer = Path(__file__).with_name("show-image.ps1")
+    subprocess.Popen(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+         "-WindowStyle", "Hidden", "-File", str(viewer), "-Path", path],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
 
 
 async def mount_comment_images(content, comment, image_no, width):
@@ -187,7 +212,7 @@ class FeedScreen(Screen):
         Binding("q", "quit", "退出"),
     ]
 
-    def __init__(self, count=20):
+    def __init__(self, count=30):
         super().__init__()
         self.count = count
         self.items = []
@@ -222,8 +247,8 @@ class FeedScreen(Screen):
             for it in self.items:
                 t = Text()
                 t.append(f"[{it['num']:>2}] ", style="dim")
-                t.append(it["title"], style="bold")
-                t.append(f"  ·  {it['author']}", style="dim")
+                t.append(it["title"], style="bold cyan")
+                t.append(f"  ·  {it['author']}", style="yellow")
                 if it.get("summary"):
                     t.append(f"\n      {it['summary']}", style="dim")
                 lv.append(ListItem(Label(t)))
@@ -250,7 +275,7 @@ class XhhApp(App):
     #status { color: gray; }
     """
 
-    def __init__(self, count=20):
+    def __init__(self, count=30):
         super().__init__()
         self.count = count
 
@@ -259,5 +284,5 @@ class XhhApp(App):
         self.push_screen(FeedScreen(self.count))
 
 
-def run(count=20):
+def run(count=30):
     XhhApp(count).run()

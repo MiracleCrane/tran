@@ -11,6 +11,7 @@ Chrome 连接断开（如浏览器重启）时自动退出，由下个命令重�
 """
 import asyncio
 import json
+import os
 import secrets
 import sys
 from pathlib import Path
@@ -21,7 +22,7 @@ from websockets.exceptions import ConnectionClosed  # noqa: E402
 import xhh  # noqa: E402
 from xhh import CDP, fetch_feed, fetch_post_head, fetch_post_comments  # noqa: E402
 
-PORT = 19812
+PORT = int(os.environ.get("XHH_DAEMON_PORT", "19812"))
 
 # 启动时记录代码版本，客户端 ping 时对比：不一致说明代码已更新，应重启
 CODE_MTIME = max(

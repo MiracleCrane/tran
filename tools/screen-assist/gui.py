@@ -341,9 +341,14 @@ class MainWindow(QMainWindow):
         new_sess_btn.clicked.connect(self.on_new_session)
         self.kb_btn = QPushButton()
         self.kb_btn.clicked.connect(self.on_pick_kb)
+        self.kb_clear_btn = QPushButton("✕")
+        self.kb_clear_btn.setFixedWidth(28)
+        self.kb_clear_btn.setToolTip("清除本会话的知识库绑定")
+        self.kb_clear_btn.clicked.connect(self.on_clear_kb)
         sess_row.addWidget(self.session_box, 1)
         sess_row.addWidget(new_sess_btn)
         sess_row.addWidget(self.kb_btn)
+        sess_row.addWidget(self.kb_clear_btn)
         chat_layout.addLayout(sess_row)
 
         self.chat = QTextBrowser()
@@ -497,6 +502,7 @@ class MainWindow(QMainWindow):
         kb = self._sess().get("kb_dir", "")
         self.kb_btn.setText(f"知识库：{os.path.basename(kb) if kb else '未设置'}")
         self.kb_btn.setToolTip(kb or "点击选择目录，目录内所有文件作为本会话的知识库")
+        self.kb_clear_btn.setVisible(bool(kb))
 
     def on_session_switched(self) -> None:
         if self._busy():
@@ -541,6 +547,19 @@ class MainWindow(QMainWindow):
         sess["kb_dir"] = chosen
         self.store.save()
         self._refresh_kb_btn()
+
+    def on_clear_kb(self) -> None:
+        sess = self._sess()
+        if not sess.get("kb_dir"):
+            return
+        sess["kb_dir"] = ""
+        if sess["acp_session_id"]:
+            # 知识库路径已随固定指令进入旧会话上下文，解绑要换底层会话才能生效
+            sess["acp_session_id"] = ""
+            sess["instructed"] = False
+        self.store.save()
+        self._refresh_kb_btn()
+        self._status("已清除知识库绑定")
 
     # ---- 样式：界面透明度与文字透明度分离 ----
 

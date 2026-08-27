@@ -43,6 +43,9 @@ const api: ForgeApi = {
   listSessions: (cwd, opts) => ipcRenderer.invoke('forge:listSessions', cwd, opts),
   launchScreenAssist: () => ipcRenderer.invoke('forge:launchScreenAssist'),
   launchXhh: () => ipcRenderer.invoke('forge:launchXhh'),
+  getRpTavernStatus: () => ipcRenderer.invoke('forge:getRpTavernStatus'),
+  configureRpTavern: (installPath) => ipcRenderer.invoke('forge:configureRpTavern', installPath),
+  openRpTavern: () => ipcRenderer.invoke('forge:openRpTavern'),
   getSessionMessages: (sessionId, cwd, backend) =>
     ipcRenderer.invoke('forge:getSessionMessages', sessionId, cwd, backend),
   renameSession: (sessionId, title, cwd, backend) =>
@@ -52,6 +55,9 @@ const api: ForgeApi = {
   getArchivedSessions: () => ipcRenderer.invoke('forge:getArchivedSessions'),
   archiveSession: (sessionId) => ipcRenderer.invoke('forge:archiveSession', sessionId),
   unarchiveSession: (sessionId) => ipcRenderer.invoke('forge:unarchiveSession', sessionId),
+  getSessionProjectAssignments: () => ipcRenderer.invoke('forge:getSessionProjectAssignments'),
+  setSessionProjectAssignment: (sessionKey, projectPath) =>
+    ipcRenderer.invoke('forge:setSessionProjectAssignment', sessionKey, projectPath),
   getSubagentMessages: (sessionId, agentId, cwd) =>
     ipcRenderer.invoke('forge:getSubagentMessages', sessionId, agentId, cwd),
   listMcpServers: (sessionId) => ipcRenderer.invoke('forge:listMcpServers', sessionId),

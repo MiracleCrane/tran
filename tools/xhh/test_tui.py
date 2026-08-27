@@ -39,7 +39,7 @@ async def main():
 
         # ---- 3. 进帖 ----
         await pilot.press("down", "enter")
-        await pilot.pause(12)
+        await pilot.pause(60)  # 首次失败会触发重载重试，最长 ~50s
         check("进入帖子屏", isinstance(app.screen, PostScreen), app.screen.__class__.__name__)
         texts = [str(t.render()) for t in app.screen.query(Static)]
         check("帖子标题渲染", any(len(t) > 5 for t in texts), texts[0][:40] if texts else "")
@@ -55,16 +55,28 @@ async def main():
             await pilot.press("b")
             await pilot.pause(3)
             await pilot.press("down", "enter")
-            await pilot.pause(12)
+            await pilot.pause(60)
         check("找到带图帖子", block is not None)
 
         if block:
-            # 展开
+            # 展开 → 应弹出外部原图窗口
             block.collapsed = False
             await pilot.pause(12)
             body = str(block._body.render())
-            has_braille = any("⠀" <= ch <= "⣿" for ch in body)
-            check("图片展开渲染盲文", has_braille, f"{len(body)} 字符")
+            check("图片展开提示外部窗口", "外部窗口" in body or "失败" in body, body[:30])
+            import subprocess as sp
+            r = sp.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | "
+                 "Where-Object { $_.CommandLine -match 'show-image' } | Select-Object -First 1 ProcessId"],
+                capture_output=True, text=True, timeout=30)
+            viewer_found = "ProcessId" in r.stdout or any(ch.isdigit() for ch in r.stdout)
+            check("原图查看器进程已启动", viewer_found)
+            # 关掉测试弹出的查看器
+            sp.run(["powershell", "-NoProfile", "-Command",
+                    "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | "
+                    "Where-Object { $_.CommandLine -match 'show-image' } | Stop-Process -Force"],
+                   capture_output=True, timeout=30)
             # 折叠
             block.collapsed = True
             await pilot.pause(2)

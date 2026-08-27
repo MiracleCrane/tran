@@ -802,6 +802,23 @@ export interface GitWorkingChanges {
 }
 
 /** Surface exposed on window.api via the preload contextBridge. */
+export interface RpTavernStatus {
+  installPath: string | null
+  installed: boolean
+  running: boolean
+  version: string | null
+  nodeVersion: string | null
+  nodeCompatible: boolean
+  autoRouterReady: boolean
+  issues: string[]
+}
+
+export interface RpTavernOpenResult {
+  ok: boolean
+  status: RpTavernStatus
+  error?: string
+}
+
 export interface ForgeApi {
   startSession(opts: StartSessionOptions): Promise<StartSessionResult>
   /** Send a user message. `content` is either a text string or an array of
@@ -823,6 +840,12 @@ export interface ForgeApi {
   launchScreenAssist(): Promise<{ ok: boolean; already?: boolean; error?: string }>
   /** 弹出 xhh 终端窗口（独立进程，不随 Tran 退出回收）。 */
   launchXhh(): Promise<{ ok: boolean; error?: string }>
+  /** 检测外置 SillyTavern、Node.js 与自动路由服务。 */
+  getRpTavernStatus(): Promise<RpTavernStatus>
+  /** 保存外置 SillyTavern 安装目录；无效目录不会落盘。 */
+  configureRpTavern(installPath: string): Promise<RpTavernStatus>
+  /** 启动服务并在隔离的 Tran 窗口中打开酒馆。 */
+  openRpTavern(): Promise<RpTavernOpenResult>
   getSessionMessages(
     sessionId: string,
     cwd: string,
@@ -845,6 +868,13 @@ export interface ForgeApi {
   getArchivedSessions(): Promise<Record<string, number>>
   archiveSession(sessionId: string): Promise<void>
   unarchiveSession(sessionId: string): Promise<void>
+  /** 会话→项目归属（Tran 侧元数据，cwd 不动；2026-08-27「移动到项目」）。
+   *  键 = `${backend}:${sessionId}`（同侧栏 sessionKey）；值 null = 显式
+   *  「不在项目中工作」，无条目 = 跟随 cwd（默认）。 */
+  getSessionProjectAssignments(): Promise<Record<string, string | null>>
+  /** projectPath：string 归到该项目；null 显式「不在项目中工作」；
+   *  undefined 清除覆盖（回到跟随 cwd 默认）。 */
+  setSessionProjectAssignment(sessionKey: string, projectPath: string | null | undefined): Promise<void>
   /** Read a subagent's own conversation transcript (for the monitor popover). */
   getSubagentMessages(sessionId: string, agentId: string, cwd: string): Promise<HistoryMessage[]>
 

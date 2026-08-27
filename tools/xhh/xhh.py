@@ -4,7 +4,7 @@
 用法:
     xhh                 TUI 全屏界面（默认）：热榜 → 回车看帖 → 回车展开图片
     xhh browse          滚屏浏览模式：热榜 → 编号看帖 → 回车返回
-    xhh feed [N]        刷社区热榜，列出前 N 条（默认 20）
+    xhh feed [N]        刷社区热榜，列出前 N 条（默认 30）
     xhh post <id|url> [--art]   看帖子正文 + 评论（--art 图片用字符画）
 
 原理:
@@ -200,8 +200,18 @@ class CDP:
                 pass
         self._xhh_session = None
         self._xhh_target_id = None
-        port, path = PORT_FILE.read_text().splitlines()[:2]
-        url = f"ws://127.0.0.1:{port}{path}"
+        # 默认读用户日常 Chrome 的 DevToolsActivePort；
+        # 设了 XHH_CDP_PORT（如 9222）则连独立调试浏览器——测试专用
+        debug_port = os.environ.get("XHH_CDP_PORT", "").strip()
+        if debug_port:
+            import urllib.request
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{debug_port}/json/version", timeout=5
+            ) as r:
+                url = json.loads(r.read())["webSocketDebuggerUrl"]
+        else:
+            port, path = PORT_FILE.read_text().splitlines()[:2]
+            url = f"ws://127.0.0.1:{port}{path}"
         last_err = None
         # Chrome 忙时握手偶尔会超时，重试几次即可
         for _ in range(4):
@@ -389,19 +399,8 @@ def post_id_of(s):
     return m.group(1) if m else None
 
 
-async def fetch_feed(cdp, count):
-    """抓热榜，返回 [{num, pid, title, author}]，失败抛 RuntimeError。"""
-    session = await attach_xhh_tab(cdp)
-    ok = await goto_and_wait(
-        cdp, session, HOME_URL, "document.querySelectorAll('a[href*=\"/bbs/link/\"]').length > 0"
-    )
-    if not ok:
-        raise RuntimeError("热榜加载超时")
-    items = json.loads(await cdp.eval_js(session, FEED_JS) or "[]")
-    if not items:
-        raise RuntimeError("没抓到热榜条目，可能页面结构变了")
-
-    seen, listing = set(), []
+def _parse_feed_items(items, seen, listing, count):
+    """解析一批信息流条目并入 listing（按 seen 去重），返回是否已够数。"""
     for it in items:
         pid = post_id_of(it["href"] or "")
         if not pid or pid in seen:
@@ -428,7 +427,35 @@ async def fetch_feed(cdp, count):
         listing.append({"num": len(listing) + 1, "pid": pid, "title": title,
                         "author": author, "summary": summary})
         if len(listing) >= count:
+            return True
+    return len(listing) >= count
+
+
+async def fetch_feed(cdp, count):
+    """抓热榜，返回 [{num, pid, title, author, summary}]，失败抛 RuntimeError。
+
+    网页版信息流一屏只给 10 条且没有分页/滚动加载（实测），
+    但每次刷新返回完全不同的批次——所以多刷几轮合并去重来凑够 count。
+    """
+    session = await attach_xhh_tab(cdp)
+    seen, listing = set(), []
+    rounds = min(5, max(1, (count + 9) // 10))
+    for r in range(rounds):
+        ok = await goto_and_wait(
+            cdp, session, HOME_URL,
+            "document.querySelectorAll('a[href*=\"/bbs/link/\"]').length > 0"
+        )
+        if not ok:
+            if r == 0:
+                raise RuntimeError("热榜加载超时")
             break
+        items = json.loads(await cdp.eval_js(session, FEED_JS) or "[]")
+        if _parse_feed_items(items, seen, listing, count):
+            break
+        if r < rounds - 1:
+            await asyncio.sleep(0.8)  # 间隔像人一点
+    if not listing:
+        raise RuntimeError("没抓到热榜条目，可能页面结构变了")
     return listing
 
 
@@ -619,7 +646,8 @@ def print_comments(data):
 
 
 # ---- 守护进程客户端：一条 CDP 连接常驻，Chrome 只确认一次 ----
-DAEMON_PORT = 19812
+# XHH_DAEMON_PORT：测试时指向独立守护进程，避免和日常使用的守护进程抢端口
+DAEMON_PORT = int(os.environ.get("XHH_DAEMON_PORT", "19812"))
 DAEMON_SCRIPT = Path(__file__).with_name("xhh_daemon.py")
 
 
@@ -721,7 +749,7 @@ async def stream_post(pid, art=False):
         print_comments(comments)
 
 
-async def cmd_browse(count=20):
+async def cmd_browse(count=30):
     """交互浏览：走常驻守护进程，Chrome 只确认一次。
     回车返回当前热榜（不刷新），输入 r 才重新拉取。"""
     print("xhh 浏览模式 —— 编号看帖，回车返回热榜，0 刷新，q 退出\n")
@@ -783,15 +811,15 @@ async def main():
 
     if not args or args[0] == "tui":
         # 裸 xhh 默认进 TUI 全屏界面
-        n = int(args[1]) if len(args) > 1 else 20
+        n = int(args[1]) if len(args) > 1 else 30
         from xhh_tui import XhhApp
         await XhhApp(n).run_async()
         return
     if args[0] in ("browse", "b"):
-        n = int(args[1]) if len(args) > 1 else 20
+        n = int(args[1]) if len(args) > 1 else 30
         await cmd_browse(n)
     elif args[0] == "feed":
-        n = int(args[1]) if len(args) > 1 else 20
+        n = int(args[1]) if len(args) > 1 else 30
         listing = await run_via_daemon("feed", count=n)
         if listing:
             print_feed(listing)
