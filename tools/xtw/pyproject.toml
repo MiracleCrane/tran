@@ -1,0 +1,15 @@
+[project]
+name = "xtw"
+version = "0.1.0"
+description = "终端刷 X(Twitter)：TUI 全屏界面，cookie 一次导出长期免登录"
+requires-python = ">=3.12"
+dependencies = [
+    "twikit",
+    "textual>=0.86",
+    "pillow>=10.0",
+    "websockets>=17.0",
+]
+
+# d60/twikit 上游已停更（X 2026-03 改签名导致 KEY_BYTE 报错），用维护中的 fork
+[tool.uv.sources]
+twikit = { git = "https://github.com/unclecode/twikit.git" }

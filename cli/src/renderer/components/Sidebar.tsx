@@ -1978,6 +1978,13 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         onClick: () => void launchTool(window.api.launchXhh)
       },
       {
+        key: 'xtw',
+        label: 'xtw 终端',
+        icon: TerminalIcon,
+        active: false,
+        onClick: () => void launchTool(window.api.launchXtw)
+      },
+      {
         key: 'screenAssist',
         label: '问答',
         icon: HelpIcon,

@@ -82,6 +82,22 @@ async def main():
             await pilot.pause(2)
             check("图片折叠", block.collapsed)
 
+            # 再次展开 → 应能重新弹出查看窗
+            block.collapsed = False
+            await pilot.pause(10)
+            r2 = sp.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | "
+                 "Where-Object { $_.CommandLine -match 'show-image' } | Select-Object -First 1 ProcessId"],
+                capture_output=True, text=True, timeout=30)
+            check("关闭后再次展开可重开", "ProcessId" in r2.stdout or any(ch.isdigit() for ch in r2.stdout))
+            sp.run(["powershell", "-NoProfile", "-Command",
+                    "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | "
+                    "Where-Object { $_.CommandLine -match 'show-image' } | Stop-Process -Force"],
+                   capture_output=True, timeout=30)
+            block.collapsed = True
+            await pilot.pause(1)
+
         # ---- 5. 返回热榜 ----
         await pilot.press("b")
         await pilot.pause(3)

@@ -80,31 +80,35 @@ HEAD_JS = r"""
     author: txt(qc(head, '.info-box__username')) || txt(qs('.page-header__user-wrapper')),
     level: txt(qc(head, '.info-box__level')),
     meta: txt(qc(head, '.info-box__line-2')),
-    blocks: [
-      // 题图画廊（meme/截图大多在这里）
-      ...[...document.querySelectorAll('.header-image__item-image img')]
-        .map(i => ({ type: 'img', src: i.currentSrc || i.src }))
-        .filter(b => b.src.startsWith('http')),
-      // 正文文字与内嵌图按原顺序
-      ...[...document.querySelectorAll('.image-text__content')].flatMap(e => {
-        const out = [];
-        const walk = (node) => {
-          for (const ch of node.childNodes) {
-            if (ch.nodeType === 3) {
-              const t = ch.textContent.trim();
-              if (t) out.push({ type: 'text', text: t });
-            } else if (ch.nodeType === 1) {
-              if (ch.tagName === 'IMG') {
-                const src = ch.src || ch.dataset.src || '';
-                if (src.startsWith('http')) out.push({ type: 'img', src });
-              } else walk(ch);
-            }
+    blocks: (() => {
+      const out = [];
+      const walk = (node) => {
+        for (const ch of node.childNodes) {
+          if (ch.nodeType === 3) {
+            const t = ch.textContent.trim();
+            if (t) out.push({ type: 'text', text: t });
+          } else if (ch.nodeType === 1) {
+            if (ch.tagName === 'IMG') {
+              const src = ch.src || ch.dataset.src || '';
+              if (src.startsWith('http')) out.push({ type: 'img', src });
+            } else walk(ch);
           }
-        };
-        walk(e);
-        return out;
-      }),
-    ],
+        }
+      };
+      // 题图画廊（meme/截图大多在这里）
+      for (const i of document.querySelectorAll('.header-image__item-image img')) {
+        const src = i.currentSrc || i.src;
+        if (src.startsWith('http')) out.push({ type: 'img', src });
+      }
+      // 普通帖正文容器；长文帖用 .hb-article / .post__content
+      const roots = [...document.querySelectorAll('.image-text__content')];
+      if (!roots.length) {
+        const alt = document.querySelector('.hb-article') || document.querySelector('.post__content');
+        if (alt) roots.push(alt);
+      }
+      for (const e of roots) walk(e);
+      return out;
+    })(),
     page_head: document.body ? document.body.innerText.slice(0, 400) : '',
   };
   // 兜底：等级/时间地点没匹配到时，从头部文本行里解析

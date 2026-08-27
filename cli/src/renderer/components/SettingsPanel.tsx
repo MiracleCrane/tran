@@ -4,6 +4,7 @@ import SettingText from './SettingText'
 import BrowserBridgeCard from './BrowserBridgeCard'
 import DesktopControlCard from './DesktopControlCard'
 import XhhCard from './XhhCard'
+import XtwCard from './XtwCard'
 import HelpPanel from './HelpPanel'
 import ConfirmDialog from './ConfirmDialog'
 import HoverTip from './HoverTip'
@@ -1054,6 +1055,8 @@ export default function SettingsPanel(): JSX.Element {
         {category === 'tools' && <DesktopControlCard />}
 
         {category === 'tools' && <XhhCard />}
+
+        {category === 'tools' && <XtwCard />}
 
         {category === 'help' && <HelpPanel />}
 

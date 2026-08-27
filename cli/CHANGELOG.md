@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.62 - 2026-08-27
+
+### 中文
+
+- 新增：xtw（X/Twitter 终端摸鱼工具）完整接入——`tools/xtw/` 随包内置，设置 → 工具 页新增 xtw 卡片，侧栏「工具 ▸」二级菜单同步加入口；独立终端窗口弹出，不随 Tran 退出回收（v1.1.61 已含主进程部分，本版补齐工具本体与入口）。
+- 优化：xhh 图片查看窗重写（show-image.ps1）与 TUI 若干改进。
+
+### English
+
+- New: xtw (X/Twitter terminal tool) fully integrated — `tools/xtw/` ships in the installer, a new xhh-style card in Settings → Tools, and an entry in the sidebar "工具 ▸" submenu; launches as an independent terminal window that Tran doesn't reap on quit (v1.1.61 carried the main-process part; this release brings the tool itself and its entries).
+- Improvement: xhh's image viewer reworked (show-image.ps1) and assorted TUI improvements.
+
 ## v1.1.61 - 2026-08-27
 
 ### 中文

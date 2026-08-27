@@ -75,12 +75,10 @@ class ImageBlock(Collapsible):
         self.url = url
         self.no = no
         self.width = width
-        self._loaded = False
 
     def on_collapsible_expanded(self, event: Collapsible.Expanded):
-        if not self._loaded:
-            self._loaded = True
-            self._load()
+        # 每次展开都弹查看窗（图片有本地缓存，秒开）
+        self._load()
 
     @work
     async def _load(self):
@@ -108,9 +106,18 @@ def _cache_image(url, no):
 
 
 def _open_image_viewer(path):
-    """用 WPF 小窗显示原图（独立进程，不阻塞终端）。"""
+    """用 WPF 小窗显示原图（独立进程，不阻塞终端）。
+    同一张图重复展开时，先关掉之前的查看窗避免堆叠。"""
     import subprocess
     viewer = Path(__file__).with_name("show-image.ps1")
+    subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | "
+         f"Where-Object {{ $_.CommandLine -match [regex]::Escape('{path}') }} | "
+         "Stop-Process -Force"],
+        capture_output=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
     subprocess.Popen(
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
          "-WindowStyle", "Hidden", "-File", str(viewer), "-Path", path],
@@ -151,6 +158,7 @@ class PostScreen(Screen):
     async def _fetch(self):
         content = self.query_one("#content", VerticalScroll)
         status = self.query_one("#status", Static)
+        status.update("正在打开帖子…（慢的情况最长约 50 秒，会先重载重试一次）")
         try:
             head = await daemon_call({"cmd": "post_head", "pid": self.pid})
             if not head.get("ok"):
@@ -173,8 +181,12 @@ class PostScreen(Screen):
                     await content.mount(Static(block.get("text", ""), classes="post-text"))
 
             # 评论后补
+            loading = Static("加载评论中…（楼中楼较多的帖子会慢一些）", id="comments-status")
+            await content.mount(loading)
             comments = await daemon_call({"cmd": "post_comments", "pid": self.pid})
+            await loading.remove()
             if not comments.get("ok"):
+                await content.mount(Static(f"!! 评论加载失败: {comments.get('error')}", classes="comments-sep"))
                 return
             cdata = comments["data"]
             total = cdata.get("total") or "全部评论"
