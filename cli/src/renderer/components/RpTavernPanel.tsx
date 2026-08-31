@@ -110,11 +110,6 @@ export default function RpTavernPanel(): JSX.Element {
           ok={status?.running ?? false}
           detail={status?.running ? '127.0.0.1:8000' : '未运行'}
         />
-        <StatusRow
-          label="自动模型路由"
-          ok={status?.autoRouterReady ?? false}
-          detail={status?.autoRouterReady ? '已连接' : '未连接（可选）'}
-        />
       </section>
 
       <section className="mb-5 rounded-xl border border-border-subtle bg-bg-panel/70 p-4">
@@ -135,6 +130,9 @@ export default function RpTavernPanel(): JSX.Element {
         </div>
         <p className="mt-2 text-xs leading-5 text-zinc-500">
           Tran 仅保存目录并调用现有安装，不会自动拉取更新，也不会在退出时结束你自行启动的酒馆服务。
+        </p>
+        <p className="mt-1 text-xs leading-5 text-zinc-500">
+          API、模型、Prompt、角色卡和世界书全部由 SillyTavern 自己管理，Tran 不读取或修改这些配置。
         </p>
       </section>
 

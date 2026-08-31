@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { join } from 'node:path'
 import {
-  RP_TAVERN_ROUTER_HEALTH_URL,
   RP_TAVERN_URL,
   RpTavernHost,
   type RpTavernAdapter
@@ -10,22 +9,18 @@ import {
 
 const INSTALL = 'C:\\apps\\SillyTavern'
 const CONFIG = 'C:\\state\\rp-tavern.json'
-const BRIDGE = 'C:\\bridge\\Start-RPTavern.ps1'
 
 class FakeAdapter implements RpTavernAdapter {
   configPath = CONFIG
   installCandidates = [INSTALL]
-  bridgeLauncherPath: string | null = BRIDGE
-  bridgeInstallPath: string | null = INSTALL
-  powershellPath = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
   commandPromptPath = 'C:\\Windows\\System32\\cmd.exe'
   files = new Map<string, string>([
     [join(INSTALL, 'server.js'), ''],
     [join(INSTALL, 'Start.bat'), ''],
-    [join(INSTALL, 'package.json'), JSON.stringify({ version: '1.18.0' })],
-    [BRIDGE, '']
+    [join(INSTALL, 'package.json'), JSON.stringify({ version: '1.18.0' })]
   ])
   urls = new Set<string>()
+  checks: string[] = []
   spawns: Array<{ command: string; args: string[]; cwd: string }> = []
   opened: string[] = []
   makeReadyOnDelay = false
@@ -40,7 +35,10 @@ class FakeAdapter implements RpTavernAdapter {
     if (this.spawnError) throw this.spawnError
     this.spawns.push({ command, args, cwd })
   }
-  async checkUrl(url: string): Promise<boolean> { return this.urls.has(url) }
+  async checkUrl(url: string): Promise<boolean> {
+    this.checks.push(url)
+    return this.urls.has(url)
+  }
   async delay(): Promise<void> {
     if (this.makeReadyOnDelay) this.urls.add(RP_TAVERN_URL)
   }
@@ -50,13 +48,12 @@ class FakeAdapter implements RpTavernAdapter {
 test('detects a valid external installation and runtime', async () => {
   const adapter = new FakeAdapter()
   adapter.urls.add(RP_TAVERN_URL)
-  adapter.urls.add(RP_TAVERN_ROUTER_HEALTH_URL)
   const status = await new RpTavernHost(adapter).getStatus()
   assert.equal(status.installed, true)
   assert.equal(status.version, '1.18.0')
   assert.equal(status.nodeCompatible, true)
   assert.equal(status.running, true)
-  assert.equal(status.autoRouterReady, true)
+  assert.deepEqual(adapter.checks, [RP_TAVERN_URL])
 })
 
 test('opens an already running tavern without spawning services', async () => {
@@ -68,7 +65,7 @@ test('opens an already running tavern without spawning services', async () => {
   assert.deepEqual(adapter.opened, [RP_TAVERN_URL])
 })
 
-test('starts the companion launcher and waits until the tavern is ready', async () => {
+test('starts SillyTavern directly and waits until it is ready', async () => {
   const adapter = new FakeAdapter()
   adapter.makeReadyOnDelay = true
   const result = await new RpTavernHost(adapter, {
@@ -76,8 +73,9 @@ test('starts the companion launcher and waits until the tavern is ready', async 
     readinessIntervalMs: 0
   }).open()
   assert.equal(result.ok, true)
-  assert.equal(adapter.spawns[0]?.command, adapter.powershellPath)
-  assert.equal(adapter.spawns[0]?.args.includes('-NoBrowser'), true)
+  assert.equal(adapter.spawns[0]?.command, adapter.commandPromptPath)
+  assert.match(adapter.spawns[0]?.args.join(' '), /Start\.bat/)
+  assert.match(adapter.spawns[0]?.args.join(' '), /--no-browserLaunchEnabled/)
   assert.deepEqual(adapter.opened, [RP_TAVERN_URL])
 })
 

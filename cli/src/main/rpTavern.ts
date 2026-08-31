@@ -1,6 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
@@ -15,10 +15,10 @@ import {
 
 const execFileAsync = promisify(execFile)
 const DEFAULT_INSTALL_PATH = 'C:\\LegacyD\\project\\SillyTavern'
-const DEFAULT_BRIDGE_LAUNCHER = 'C:\\LegacyD\\Programs\\SillyTavernBridge\\Start-RPTavern.ps1'
 const SYSTEM_ROOT = process.env['SystemRoot'] || 'C:\\Windows'
-const POWERSHELL_PATH = join(SYSTEM_ROOT, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
 const COMMAND_PROMPT_PATH = process.env['ComSpec'] || join(SYSTEM_ROOT, 'System32', 'cmd.exe')
+const RP_TAVERN_STDOUT_LOG = join(app.getPath('userData'), 'logs', 'rp-tavern.stdout.log')
+const RP_TAVERN_STDERR_LOG = join(app.getPath('userData'), 'logs', 'rp-tavern.stderr.log')
 
 let tavernWindow: BrowserWindow | null = null
 
@@ -79,9 +79,6 @@ const adapter: RpTavernAdapter = {
     join(homedir(), 'SillyTavern'),
     join(homedir(), 'Documents', 'GitHub', 'SillyTavern')
   ],
-  bridgeLauncherPath: existsSync(DEFAULT_BRIDGE_LAUNCHER) ? DEFAULT_BRIDGE_LAUNCHER : null,
-  bridgeInstallPath: DEFAULT_INSTALL_PATH,
-  powershellPath: POWERSHELL_PATH,
   commandPromptPath: COMMAND_PROMPT_PATH,
   exists: existsSync,
   readText: (path) => readFileSync(path, 'utf8'),
@@ -93,25 +90,38 @@ const adapter: RpTavernAdapter = {
   },
   spawnDetached: (command, args, cwd) =>
     new Promise<void>((resolve, reject) => {
+      mkdirSync(dirname(RP_TAVERN_STDOUT_LOG), { recursive: true })
+      const stdoutFd = openSync(RP_TAVERN_STDOUT_LOG, 'a')
+      const stderrFd = openSync(RP_TAVERN_STDERR_LOG, 'a')
+      const closeParentLogHandles = (): void => {
+        closeSync(stdoutFd)
+        closeSync(stderrFd)
+      }
       let child
       try {
         child = spawn(command, args, {
           cwd,
           detached: true,
-          stdio: 'ignore',
+          stdio: ['ignore', stdoutFd, stderrFd],
           windowsHide: true
         })
       } catch (error) {
+        closeParentLogHandles()
         reject(error)
         return
       }
       child.once('error', (error) => {
+        closeParentLogHandles()
         log('rp-tavern', `spawn failed command=${command}: ${error.message}`)
         reject(new Error(`无法启动 RP 服务进程：${error.message}`))
       })
       child.once('spawn', () => {
+        closeParentLogHandles()
         child.unref()
-        log('rp-tavern', `spawned command=${command} cwd=${cwd}`)
+        log(
+          'rp-tavern',
+          `spawned command=${command} cwd=${cwd} stdout=${RP_TAVERN_STDOUT_LOG} stderr=${RP_TAVERN_STDERR_LOG}`
+        )
         resolve()
       })
     }),

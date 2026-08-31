@@ -809,7 +809,6 @@ export interface RpTavernStatus {
   version: string | null
   nodeVersion: string | null
   nodeCompatible: boolean
-  autoRouterReady: boolean
   issues: string[]
 }
 

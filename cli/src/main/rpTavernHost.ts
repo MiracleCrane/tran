@@ -1,7 +1,6 @@
 import { dirname, join, normalize } from 'node:path'
 
 export const RP_TAVERN_URL = 'http://127.0.0.1:8000/'
-export const RP_TAVERN_ROUTER_HEALTH_URL = 'http://127.0.0.1:4001/health/readiness'
 
 export interface RpTavernStatus {
   installPath: string | null
@@ -10,7 +9,6 @@ export interface RpTavernStatus {
   version: string | null
   nodeVersion: string | null
   nodeCompatible: boolean
-  autoRouterReady: boolean
   issues: string[]
 }
 
@@ -26,9 +24,6 @@ export interface RpTavernOpenResult {
 export interface RpTavernAdapter {
   configPath: string
   installCandidates: string[]
-  bridgeLauncherPath: string | null
-  bridgeInstallPath: string | null
-  powershellPath: string
   commandPromptPath: string
   exists(path: string): boolean
   readText(path: string): string
@@ -83,7 +78,7 @@ export class RpTavernHost {
     private readonly adapter: RpTavernAdapter,
     options: RpTavernHostOptions = {}
   ) {
-    this.readinessAttempts = options.readinessAttempts ?? 90
+    this.readinessAttempts = options.readinessAttempts ?? 180
     this.readinessIntervalMs = options.readinessIntervalMs ?? 1000
   }
 
@@ -115,10 +110,7 @@ export class RpTavernHost {
     const nodeCompatible = (majorVersion(nodeVersion) ?? 0) >= 20
     if (nodeVersion && !nodeCompatible) issues.push('SillyTavern 需要 Node.js 20 或更高版本。')
 
-    const [running, autoRouterReady] = await Promise.all([
-      this.adapter.checkUrl(RP_TAVERN_URL),
-      this.adapter.checkUrl(RP_TAVERN_ROUTER_HEALTH_URL)
-    ])
+    const running = await this.adapter.checkUrl(RP_TAVERN_URL)
 
     return {
       installPath,
@@ -127,7 +119,6 @@ export class RpTavernHost {
       version,
       nodeVersion,
       nodeCompatible,
-      autoRouterReady,
       issues
     }
   }
@@ -208,25 +199,10 @@ export class RpTavernHost {
   }
 
   private async startServices(installPath: string): Promise<void> {
-    const bridgeLauncher = this.adapter.bridgeLauncherPath
-    const bridgeInstallPath = this.adapter.bridgeInstallPath
-    if (
-      bridgeLauncher &&
-      bridgeInstallPath &&
-      normalizeInstallPath(bridgeInstallPath).toLocaleLowerCase() ===
-        normalizeInstallPath(installPath).toLocaleLowerCase() &&
-      this.adapter.exists(bridgeLauncher)
-    ) {
-      await this.adapter.spawnDetached(
-        this.adapter.powershellPath,
-        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', bridgeLauncher, '-NoBrowser'],
-        dirname(bridgeLauncher)
-      )
-      return
-    }
+    const startBat = join(installPath, 'Start.bat')
     await this.adapter.spawnDetached(
       this.adapter.commandPromptPath,
-      ['/d', '/s', '/c', `"${join(installPath, 'Start.bat')}" --no-browserLaunchEnabled`],
+      ['/d', '/s', '/c', `call "${startBat}" --no-browserLaunchEnabled`],
       installPath
     )
   }
