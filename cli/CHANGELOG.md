@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.64 - 2026-08-31
+
+### 中文
+
+- 修复：RP 酒馆冷启动不再依赖外置 `SillyTavernBridge`、AWS/LiteLLM 桥、Python 自动路由器或 PowerShell 脚本；Tran 直接调用所选 SillyTavern 安装目录下的 `Start.bat`，最多等待三分钟并在就绪后打开独立窗口。
+- 改进：SillyTavern 启动 stdout/stderr 写入 Tran userData 的 `logs/rp-tavern.stdout.log` 与 `logs/rp-tavern.stderr.log`，启动失败不再只有笼统超时。
+- 边界调整：API Key、连接配置、模型、Prompt、角色卡、世界书与聊天记录完全由 SillyTavern 管理，Tran 不读取、不注入也不修改这些配置。
+
+### English
+
+- Fix: RP Tavern cold start no longer depends on the external `SillyTavernBridge`, AWS/LiteLLM bridge, Python auto-router, or PowerShell scripts. Tran launches the selected SillyTavern installation's `Start.bat` directly, waits up to three minutes, and opens its dedicated window after readiness.
+- Improvement: SillyTavern stdout/stderr is captured under Tran userData as `logs/rp-tavern.stdout.log` and `logs/rp-tavern.stderr.log`, replacing opaque startup timeouts with actionable evidence.
+- Ownership change: API keys, connection profiles, models, prompts, character cards, lorebooks, and chats are fully owned by SillyTavern; Tran neither reads, injects, nor modifies them.
+
 ## v1.1.63 - 2026-08-27
 
 ### 中文
