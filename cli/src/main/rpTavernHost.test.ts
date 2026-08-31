@@ -13,7 +13,7 @@ const CONFIG = 'C:\\state\\rp-tavern.json'
 class FakeAdapter implements RpTavernAdapter {
   configPath = CONFIG
   installCandidates = [INSTALL]
-  commandPromptPath = 'C:\\Windows\\System32\\cmd.exe'
+  nodePath = 'C:\\Program Files\\nodejs\\node.exe'
   files = new Map<string, string>([
     [join(INSTALL, 'server.js'), ''],
     [join(INSTALL, 'Start.bat'), ''],
@@ -21,9 +21,11 @@ class FakeAdapter implements RpTavernAdapter {
   ])
   urls = new Set<string>()
   checks: string[] = []
+  preparations: string[] = []
   spawns: Array<{ command: string; args: string[]; cwd: string }> = []
   opened: string[] = []
   makeReadyOnDelay = false
+  preparationError: Error | null = null
   spawnError: Error | null = null
 
   exists(path: string): boolean { return this.files.has(path) }
@@ -31,6 +33,10 @@ class FakeAdapter implements RpTavernAdapter {
   writeText(path: string, content: string): void { this.files.set(path, content) }
   ensureDirectory(): void {}
   async commandOutput(): Promise<string> { return 'v22.14.0\n' }
+  async prepareInstallation(installPath: string): Promise<void> {
+    if (this.preparationError) throw this.preparationError
+    this.preparations.push(installPath)
+  }
   async spawnDetached(command: string, args: string[], cwd: string): Promise<void> {
     if (this.spawnError) throw this.spawnError
     this.spawns.push({ command, args, cwd })
@@ -73,8 +79,9 @@ test('starts SillyTavern directly and waits until it is ready', async () => {
     readinessIntervalMs: 0
   }).open()
   assert.equal(result.ok, true)
-  assert.equal(adapter.spawns[0]?.command, adapter.commandPromptPath)
-  assert.match(adapter.spawns[0]?.args.join(' '), /Start\.bat/)
+  assert.deepEqual(adapter.preparations, [INSTALL])
+  assert.equal(adapter.spawns[0]?.command, adapter.nodePath)
+  assert.match(adapter.spawns[0]?.args.join(' '), /server\.js/)
   assert.match(adapter.spawns[0]?.args.join(' '), /--no-browserLaunchEnabled/)
   assert.deepEqual(adapter.opened, [RP_TAVERN_URL])
 })
@@ -106,4 +113,18 @@ test('returns the process creation error instead of waiting for a timeout', asyn
   assert.equal(result.ok, false)
   assert.match(result.error ?? '', /spawn denied/)
   assert.deepEqual(adapter.opened, [])
+})
+
+test('returns the dependency preparation error without spawning the server', async () => {
+  const adapter = new FakeAdapter()
+  adapter.preparationError = new Error('npm install failed')
+
+  const result = await new RpTavernHost(adapter, {
+    readinessAttempts: 2,
+    readinessIntervalMs: 0
+  }).open()
+
+  assert.equal(result.ok, false)
+  assert.match(result.error ?? '', /npm install failed/)
+  assert.deepEqual(adapter.spawns, [])
 })

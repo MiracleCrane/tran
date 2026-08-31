@@ -17,6 +17,7 @@ const execFileAsync = promisify(execFile)
 const DEFAULT_INSTALL_PATH = 'C:\\LegacyD\\project\\SillyTavern'
 const SYSTEM_ROOT = process.env['SystemRoot'] || 'C:\\Windows'
 const COMMAND_PROMPT_PATH = process.env['ComSpec'] || join(SYSTEM_ROOT, 'System32', 'cmd.exe')
+const NODE_COMMAND = 'node.exe'
 const RP_TAVERN_STDOUT_LOG = join(app.getPath('userData'), 'logs', 'rp-tavern.stdout.log')
 const RP_TAVERN_STDERR_LOG = join(app.getPath('userData'), 'logs', 'rp-tavern.stderr.log')
 
@@ -79,7 +80,7 @@ const adapter: RpTavernAdapter = {
     join(homedir(), 'SillyTavern'),
     join(homedir(), 'Documents', 'GitHub', 'SillyTavern')
   ],
-  commandPromptPath: COMMAND_PROMPT_PATH,
+  nodePath: NODE_COMMAND,
   exists: existsSync,
   readText: (path) => readFileSync(path, 'utf8'),
   writeText: (path, content) => writeFileSync(path, content, 'utf8'),
@@ -87,6 +88,26 @@ const adapter: RpTavernAdapter = {
   commandOutput: async (command, args) => {
     const result = await execFileAsync(command, args, { windowsHide: true })
     return result.stdout
+  },
+  prepareInstallation: async (installPath) => {
+    log('rp-tavern', `preparing dependencies cwd=${installPath}`)
+    try {
+      await execFileAsync(
+        COMMAND_PROMPT_PATH,
+        [
+          '/d',
+          '/s',
+          '/c',
+          'npm install --no-audit --no-fund --loglevel=error --no-progress'
+        ],
+        { cwd: installPath, windowsHide: true }
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      log('rp-tavern', `dependency preparation failed: ${message}`)
+      throw new Error(`SillyTavern 依赖准备失败：${message}`)
+    }
+    log('rp-tavern', `dependencies ready cwd=${installPath}`)
   },
   spawnDetached: (command, args, cwd) =>
     new Promise<void>((resolve, reject) => {

@@ -24,12 +24,13 @@ export interface RpTavernOpenResult {
 export interface RpTavernAdapter {
   configPath: string
   installCandidates: string[]
-  commandPromptPath: string
+  nodePath: string
   exists(path: string): boolean
   readText(path: string): string
   writeText(path: string, content: string): void
   ensureDirectory(path: string): void
   commandOutput(command: string, args: string[]): Promise<string>
+  prepareInstallation(installPath: string): Promise<void>
   spawnDetached(command: string, args: string[], cwd: string): Promise<void>
   checkUrl(url: string): Promise<boolean>
   delay(ms: number): Promise<void>
@@ -199,10 +200,10 @@ export class RpTavernHost {
   }
 
   private async startServices(installPath: string): Promise<void> {
-    const startBat = join(installPath, 'Start.bat')
+    await this.adapter.prepareInstallation(installPath)
     await this.adapter.spawnDetached(
-      this.adapter.commandPromptPath,
-      ['/d', '/s', '/c', `call "${startBat}" --no-browserLaunchEnabled`],
+      this.adapter.nodePath,
+      ['server.js', '--no-browserLaunchEnabled'],
       installPath
     )
   }
