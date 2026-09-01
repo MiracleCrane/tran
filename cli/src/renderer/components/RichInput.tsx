@@ -48,8 +48,11 @@ const COMMAND_RE = /^\/([^\s/]+)/
  * 句读（它们永远属于句子不属于链接）；ASCII 句读尾巴（.,;:!?)）在分词后修剪，
  * 因为它们也可能合法出现在 URL 中间，不能进排除类。已知局限：不以这些标点
  * 结尾的怪 URL 照单全收；以 `)` 合法结尾的 URL（维基百科式）会被吃掉尾巴。
+ * 2026-09-01 加排 CJK 表意/全角/和文谚文字符（\u3000 起的大段）：它们合法出现
+ * 在 URL 里只能靠百分号编码，原样出现必是紧跟网址的中文/日文正文——不排除的
+ * 话「粘贴网址后接着打中文」整段被吞进链接，文字全变蓝（用户实测抓包）。
  */
-const URL_RE = /https?:\/\/[^\s<>"'（）【】《》「」『』。，、；：？！…]+/g
+const URL_RE = /https?:\/\/[^\s<>"'（）【】《》「」『』。，、；：？！…\u3000-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]+/g
 const URL_TAIL_RE = /[.,;:!?)]+$/
 
 interface Segment {
@@ -331,8 +334,8 @@ export default function RichInput({
     const wantLinkText = segments
       .filter((s) => s.kind === 'link')
       .map((s) => s.text)
-      .join(' ')
-    const hasLinkText = [...root.querySelectorAll('.rich-input-link')].map((el) => el.textContent ?? '').join(' ')
+      .join('\u0000')
+    const hasLinkText = [...root.querySelectorAll('.rich-input-link')].map((el) => el.textContent ?? '').join('\u0000')
     if (serialize(root) === value && wantChip === hasChip && wantLinkText === hasLinkText) return
     const caret = caretOffset(root)
     render(root, segments)

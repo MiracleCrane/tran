@@ -743,10 +743,12 @@ export default function Composer(): JSX.Element {
     const query = (slashContext?.query ?? '').trim().toLowerCase()
     if (!query) return slashCommands
     return slashCommands.filter((command) => {
+      // 描述全文不参与匹配（2026-09-01 用户：「/综测 为什么能联想到隔离环境」——
+      // 隔离环境 skill 的 SKILL.md 描述里有两处「综测」字样，子串撞车。
+      // 描述只用于展示；检索只认名称/标签/别名/改名）。
       const targets = [
         command.name,
         command.label,
-        command.description,
         displayName(command.name, agentBackend, aliases),
         ...(command.aliases ?? [])
       ].map((value) => value.toLowerCase())

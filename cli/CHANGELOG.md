@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.70 - 2026-09-01
+
+### 中文
+
+- 修复：网址后面直接接中文（不打空格）时中文不再被吞进链接变蓝——URL 分词正则现在排除 CJK/全角/假名字符（此前只挡空白和中英文标点），百分号编码的 URL 不受影响。
+- 斜杠菜单的匹配范围与 Codex 对齐：只匹配名称/标签/别名/改名，描述全文不再参与匹配（实测 Codex 同样不匹配 description），避免「/综测」因描述里的字眼误命中无关 skill。
+- 新增：AI 提问或等待授权的会话，在侧栏会话行显示琥珀色「?」气泡（与紫色未读数字气泡并排、一眼区分），悬停显示待处理数量，回答后自动消失；配合 66 版的任务栏角标+闪烁，窗口内外的等待提醒齐了。
+
+### English
+
+- Fix: CJK text typed right after a URL (no space) is no longer swallowed into the link and turned blue—the URL tokenizer now excludes CJK/fullwidth/kana characters (previously only whitespace and punctuation were excluded); percent-encoded URLs are unaffected.
+- Slash menu matching now aligns with Codex: only name/label/alias/rename are matched; descriptions are display-only (verified Codex also excludes descriptions), so queries like "/综测" no longer hit unrelated skills via description text.
+- New: sessions with a pending question or permission request show an amber "?" badge on their sidebar row (next to the purple unread-count badge, visually distinct), with a hover tip showing the count; it disappears once answered. Together with v66's taskbar badge and flashing, waiting reminders now cover both focused and unfocused states.
+
 ## v1.1.69 - 2026-09-01
 
 ### 中文

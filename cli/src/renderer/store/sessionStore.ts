@@ -266,6 +266,11 @@ interface SessionStore {
    *  任务栏等待角标（useTaskbarBadge）需要响应式总数，故在 backgroundSessions
    *  的每个增删/入队处同步维护（setBgWaiting），0 删键。 */
   bgWaitingCounts: Record<string, number>
+  /** 2026-09-01 侧栏「等待回答」气泡镜像：与 bgWaitingCounts 同源、同在
+   *  setBgWaiting 里维护，但键换成侧栏行键（backend:sdkSessionId，与 unreadReplies
+   *  同规则）——侧栏行只有 sdkSessionId，拿不到桥接 id，无法直接消费
+   *  bgWaitingCounts。0 删键；sdkSessionId 未知（init 未达）时侧栏尚无对应行，跳过。 */
+  waitingCounts: Record<string, number>
   /** #5（对外契约，字段名不可改）正在跑 turn 的会话 sdkSessionId 去重数组：
    *  任何会话（前台/后台）turn 开始加入、结束（result/error/close）移除，
    *  sdkSessionId 未知（init 未到）的会话忽略。侧栏用
@@ -1449,13 +1454,25 @@ const BACKGROUND_SESSION_CAP = 12
 /** 2026-09-01 bgWaitingCounts 镜像写入（字段语义见 state 声明处注释）。
  *  快照/attach 里前台队列与镜像会在同一次同步执行内短暂「两头各算一份」，
  *  React 批处理下界面看不到中间值，总数对外保持连续（不 double、不跌到 0）。 */
-function setBgWaiting(bridgeSessionId: string, count: number): void {
+function setBgWaiting(bridgeSessionId: string, count: number, sdkSessionId?: string): void {
   useSessionStore.setState((s) => {
-    if (count <= 0 && !(bridgeSessionId in s.bgWaitingCounts)) return s
+    // 行键镜像的键：backend 从会话列表现查（与 noteReplyCompleted 同款，
+    // kimi-only 下恒 'windows'），查不到走 unreadSessionKey 的默认。
+    const rowKey = sdkSessionId
+      ? unreadSessionKey(sdkSessionId, s.sessions.find((it) => it.sessionId === sdkSessionId)?.runtimeBackend)
+      : null
+    const bgUnchanged = count <= 0 && !(bridgeSessionId in s.bgWaitingCounts)
+    const rowUnchanged = !rowKey || (count <= 0 && !(rowKey in s.waitingCounts))
+    if (bgUnchanged && rowUnchanged) return s
     const next = { ...s.bgWaitingCounts }
     if (count > 0) next[bridgeSessionId] = count
     else delete next[bridgeSessionId]
-    return { bgWaitingCounts: next }
+    const nextRow = { ...s.waitingCounts }
+    if (rowKey) {
+      if (count > 0) nextRow[rowKey] = count
+      else delete nextRow[rowKey]
+    }
+    return { bgWaitingCounts: next, waitingCounts: nextRow }
   })
 }
 
@@ -1576,7 +1593,7 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
   })
   // 等待计数镜像：前台队列随快照进了后台缓冲，紧随其后的导航 set 会把前台
   // elicitationQueue/pendingPermissions 清空——总数靠这条镜像保持连续。
-  setBgWaiting(meta.sessionId, s.elicitationQueue.length + s.pendingPermissions.length)
+  setBgWaiting(meta.sessionId, s.elicitationQueue.length + s.pendingPermissions.length, meta.sdkSessionId)
   // 优先淘汰空闲会话；全都在跑时（长 turn 叠着开）此前直接 break，Map 会
   // 无上限增长——每个缓冲还在持续累积 items，底下的 bridge 会话也不释放。
   // 2026-09-01 第 3 期起淘汰项目感知：
@@ -1595,7 +1612,7 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
     if (idle) {
       backgroundSessions.delete(idle.bridgeSessionId)
       dropThreadPointer(idle.bridgeSessionId)
-      setBgWaiting(idle.bridgeSessionId, 0)
+      setBgWaiting(idle.bridgeSessionId, 0, idle.sdkSessionId)
       void window.api.destroySession(idle.bridgeSessionId).catch(() => {})
       // #5 连后端一起销毁的会话不再运行。
       markSdkSessionRunning(idle.sdkSessionId, false)
@@ -1609,7 +1626,7 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
     // 降级淘汰：只清渲染层缓冲，后端会话保留（destroy 会杀掉还在跑的 turn）。
     backgroundSessions.delete(oldest.bridgeSessionId)
     dropThreadPointer(oldest.bridgeSessionId)
-    setBgWaiting(oldest.bridgeSessionId, 0)
+    setBgWaiting(oldest.bridgeSessionId, 0, oldest.sdkSessionId)
   }
 }
 
@@ -1627,7 +1644,7 @@ function takeBackgroundSession(sdkSessionId: string): BackgroundSessionState | n
     if (bg.sdkSessionId === sdkSessionId) {
       backgroundSessions.delete(bg.bridgeSessionId)
       dropThreadPointer(bg.bridgeSessionId)
-      setBgWaiting(bg.bridgeSessionId, 0)
+      setBgWaiting(bg.bridgeSessionId, 0, bg.sdkSessionId)
       return bg
     }
   }
@@ -1659,7 +1676,7 @@ function attachLiveBackgroundSession(
   dropThreadPointer(bg.bridgeSessionId)
   // 等待计数移交前台：下面的大 set 会把 bg.elicitationQueue/pendingPermissions
   // 整体写回前台 state，镜像键先删，同一次同步执行内合计连续（不 double）。
-  setBgWaiting(bg.bridgeSessionId, 0)
+  setBgWaiting(bg.bridgeSessionId, 0, bg.sdkSessionId)
   snapshotActiveSessionIntoBackground(get)
   if (opts.oldSessionId) void window.api.closeSession(opts.oldSessionId).catch(() => {})
   // 桥接早已就绪：sendMessage 的启动门闩直接放行。
@@ -2037,7 +2054,7 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
           bg.elicitationQueue = [...bg.elicitationQueue, req]
           // 2026-09-01 任务栏等待提醒：后台缓冲不可订阅，计数镜像进 store；
           // 重复事件被上面的 toolUseID 判断挡掉，不会重复计数。
-          setBgWaiting(bg.bridgeSessionId, bg.elicitationQueue.length + bg.pendingPermissions.length)
+          setBgWaiting(bg.bridgeSessionId, bg.elicitationQueue.length + bg.pendingPermissions.length, bg.sdkSessionId)
         }
       } else if (subtype === 'turn_stall') {
         // #41 疑似无响应：提示随缓冲走，attach 切回后照常显示；recovered 撤掉。
@@ -2432,6 +2449,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   goal: null,
   elicitationQueue: [],
   bgWaitingCounts: {},
+  waitingCounts: {},
   runningSdkSessionIds: [],
   composerDrafts: readStoredComposerDrafts(),
   composerAttachments: {},
@@ -2666,7 +2684,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             backgroundSessions.set(oldSessionId, bg)
             // 缓冲改挂回旧桥接：等待计数镜像跟着换键。
             setBgWaiting(newId, 0)
-            setBgWaiting(oldSessionId, bg.elicitationQueue.length + bg.pendingPermissions.length)
+            setBgWaiting(oldSessionId, bg.elicitationQueue.length + bg.pendingPermissions.length, bg.sdkSessionId)
           }
         }
         return

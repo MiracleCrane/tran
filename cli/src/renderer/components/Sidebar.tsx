@@ -765,6 +765,12 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const runningSdkSessionIds = useSessionStore((s) => s.runningSdkSessionIds)
   // 未读回复计数（2026-08-25）：行右缘气泡，键 = sessionKey(s)。
   const unreadReplies = useSessionStore((s) => s.unreadReplies)
+  // 等待回答计数（2026-09-01 用户：「AI 问我问题也要有气泡提醒」）：后台
+  // 会话走行键镜像 waitingCounts（与 unreadReplies 同键规则）；当前前台会话的
+  // elicitation/待授权不进镜像（attach 时镜像已清零），直接读前台队列长度，
+  // 切到非 chat 视图时该会话行不算「激活」，等待条数仍要在气泡上显示。
+  const waitingCounts = useSessionStore((s) => s.waitingCounts)
+  const fgWaitingCount = useSessionStore((s) => s.elicitationQueue.length + s.pendingPermissions.length)
   const loading = useSessionStore((s) => s.sessionsLoading)
   const sessionsHasMore = useSessionStore((s) => s.sessionsHasMore)
   const refresh = useSessionStore((s) => s.refreshSessions)
@@ -2479,6 +2485,11 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               const active = s.sessionId === meta.sdkSessionId && view === 'chat'
               // 当前打开的会话永不显示未读气泡（store 侧也不计，这里是双保险）。
               const unreadCount = active ? 0 : (unreadReplies[key] ?? 0)
+              // 等待回答气泡：激活会话不显示（与未读同惯例——用户正看着卡片本身）。
+              // 前台部分只在「该行 = 前台会话但视图不在 chat」时非零；后台镜像按行键取。
+              const waitingCount = active
+                ? 0
+                : (waitingCounts[key] ?? 0) + (s.sessionId === meta.sdkSessionId ? fgWaitingCount : 0)
               const editing = editingId === key
               const inserting = newlyInsertedSessionKeys.has(key)
               const exiting = item.exiting
@@ -2615,6 +2626,11 @@ ${worktree.path}
                             {/* 未读气泡（2026-08-25）：shrink-0 占 flex 行一席，标题
                                 truncate 自动让位，不撑行高、不扰布局。计数变化不重复
                                 播 pop 动画（元素不重建，仅首次挂载播一次）。 */}
+                            {/* 等待回答气泡（2026-09-01）：琥珀底「?」与紫色数字未读
+                                气泡并排在左，一眼区分「AI 在等你」与「有未读回复」。 */}
+                            {waitingCount > 0 && (
+                              <HoverTip tip={`${waitingCount} 个问题/授权等待你处理`}><span className="session-waiting-badge">?</span></HoverTip>
+                            )}
                             {unreadCount > 0 && (
                               <span className="session-unread-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>
                             )}
