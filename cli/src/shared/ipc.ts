@@ -995,6 +995,10 @@ export interface ForgeApi {
   /** 无项目会话的独立工作目录（2026-09-01 Codex 化第 2 期）：创建并返回
    *  Documents/Tran/YYYY-MM-DD/session-HHmmss-xxxx/，失败回退 userData/scratch。 */
   ensureScratchDir(): Promise<string>
+  /** 两个 scratch 根（Documents/Tran 与回退 userData/scratch）：渲染层匹配层
+   *  豁免用（2026-09-01：主目录被注册为项目后前缀匹配会罩住 scratch 目录，
+   *  见 projectMatch.isScratchCwd）。 */
+  getScratchRoots(): Promise<string[]>
   /** Add a directory (idempotent) and mark it last-used. Returns the list. */
   addProject(path: string, name?: string): Promise<Project[]>
   removeProject(id: string): Promise<Project[]>

@@ -53,6 +53,13 @@ async function createScratchDir(base: string): Promise<string> {
   return dir
 }
 
+/** 两个 scratch 根（Documents/Tran 与回退 userData/scratch），原样返回未归一化。
+ *  2026-09-01：主目录被注册为项目后，cwd 前缀匹配会罩住 scratch 目录；渲染层
+ *  在匹配层豁免需要拿到根列表（forge:getScratchRoots → projectMatch.isScratchCwd）。 */
+export function getScratchRoots(): string[] {
+  return [join(app.getPath('documents'), 'Tran'), join(app.getPath('userData'), 'scratch')]
+}
+
 /** 创建并返回一个新的无项目工作目录；Documents 失败回退 userData/scratch。 */
 export async function ensureScratchDir(): Promise<string> {
   try {

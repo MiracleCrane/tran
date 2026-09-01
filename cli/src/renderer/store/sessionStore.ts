@@ -37,7 +37,7 @@ import type {
 import { pickedFileToUserAttachment, userAttachmentToPickedFile } from '../utils/attachments'
 import { DEFAULT_KIMI_MODEL_ID } from '../../shared/models'
 import { normalizeCwdForCompare } from '../../shared/paths'
-import { matchProjectByCwd } from '../../shared/projectMatch'
+import { isScratchCwd, matchProjectByCwd } from '../../shared/projectMatch'
 import { emitForgeEvent } from '../events'
 import { backgroundTaskInfo, taskTerminalFromEnvelope } from '../utils/toolStats'
 import { useSessionProjectStore } from './sessionProjectStore'
@@ -201,6 +201,9 @@ interface SessionStore {
   /** True once the startup check (auto-enter last project) has finished. The App
    *  waits on this before showing Onboarding vs the main UI, to avoid a flash. */
   bootstrapped: boolean
+  /** 无项目 scratch 根列表（bootstrap 拉取；Sidebar 分组豁免订阅用，
+   *  模块级 scratchRootsCache 的响应式镜像）。 */
+  scratchRoots: string[]
   meta: SessionMeta | null
   items: TranscriptItem[]
   /** 历史渐进注水（头部 prepend）事件号：每实际前置一批旧条目 +1。
@@ -1477,6 +1480,15 @@ function noteProjectsV2Parallel(prefs: { projectsV2Parallel?: boolean } | null):
   }
 }
 
+/** 无项目 scratch 根（主进程 forge:getScratchRoots）的渲染层缓存，bootstrap 时拉一次
+ *  （与 projectsV2Parallel flag 同款拉法），store state 里的 scratchRoots 是它的
+ *  响应式镜像（Sidebar 分组订阅用）。
+ *  2026-09-01：用户主目录被注册为项目后，第 1.5 期的 cwd 前缀匹配会罩住
+ *  Documents/Tran 下的 scratch 目录，scratch 会话被当成该项目会话（侧栏冒出
+ *  session-xxx 组头）。改为匹配层豁免，不再依赖 init 事件写「归属覆盖=null」
+ *  那条脆弱路径（只有从「不在项目中工作」入口且 init 在前台到达才写上）。 */
+let scratchRootsCache: string[] = []
+
 /** 归属镜像还没加载过时先拉一次；读不到按「无覆盖」处理（不阻塞切换）。 */
 async function ensureSessionProjectAssignments(): Promise<Record<string, string | null> | null> {
   const store = useSessionProjectStore.getState()
@@ -1495,6 +1507,9 @@ function resolveThreadScope(
   projects: Project[],
   assignments: Record<string, string | null> | null
 ): string | null {
+  // 2026-09-01：scratch cwd 一律归无项目槽位——主目录被注册为项目后，cwd 前缀
+  // 匹配会罩住 scratch 目录；匹配层先豁免，不再依赖归属覆盖有没有写上。
+  if (isScratchCwd(cwd, scratchRootsCache)) return SCRATCH_THREAD_KEY
   if (sdkSessionId) {
     // 归属表的键 = Sidebar.sessionKey（kimi-only 下 runtimeBackend 恒 'windows'，
     // 与 switchToScratch 写覆盖处一致）。
@@ -2372,6 +2387,9 @@ function createSessionStartGate(sessionId: string): {
 // 时保持 lastProjectId 不动——不能把启动回退指到一个不存在的项目上。
 async function rememberLastProjectForCwd(cwd: string): Promise<void> {
   try {
+    // 2026-09-01：scratch cwd 不动 lastProjectId（主目录注册为项目后会被前缀
+    // 匹配罩住，与 resolveThreadScope 同款豁免）。
+    if (isScratchCwd(cwd, scratchRootsCache)) return
     const projects = await window.api.listProjects()
     // 2026-09-01 第 1.5 期：归属匹配统一走共享 matchProjectByCwd（rootPaths
     // 前缀、最长匹配），与侧栏/主进程 listSessions 同一语义。
@@ -2385,6 +2403,7 @@ async function rememberLastProjectForCwd(cwd: string): Promise<void> {
 export const useSessionStore = create<SessionStore>((set, get) => ({
   starting: false,
   bootstrapped: false,
+  scratchRoots: [],
   meta: null,
   effort: 'high',
   items: [],
@@ -2878,6 +2897,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // 2026-09-01 第 3 期：启动时拉取 projectsV2Parallel flag（默认开）；此后
     // switchProject 每次读 prefs 顺手刷新（noteProjectsV2Parallel）。
     void window.api.getPreferences().then(noteProjectsV2Parallel).catch(() => {})
+    // 同款拉法：启动时缓存 scratch 根列表（resolveThreadScope / rememberLastProjectForCwd
+    // / Sidebar 分组的匹配层豁免用）；拉不到留空数组，退化为无豁免（不阻塞启动）。
+    void window.api.getScratchRoots().then((roots) => {
+      scratchRootsCache = roots
+      set({ scratchRoots: roots })
+    }).catch(() => {})
     if (get().bootstrapped || get().meta) return
     if (startupBootstrapPromise) return startupBootstrapPromise
 

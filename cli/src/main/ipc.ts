@@ -99,7 +99,7 @@ import {
   setSessionProjectAssignment
 } from './sessionProjects'
 import { allAiTitles, generateAiTitlesBatch, getSessionPreview } from './aiTitles'
-import { ensureScratchDir } from './scratchDirs'
+import { ensureScratchDir, getScratchRoots } from './scratchDirs'
 import {
   bindWorktreeSession,
   createWorktreeRecord,
@@ -1168,6 +1168,9 @@ export function registerIpc(
   // 无项目会话独立工作目录（2026-09-01 Codex 化第 2 期）：Documents/Tran/<日期>/session-…，
   // mkdir 失败回退 userData/scratch（见 scratchDirs.ts）。
   ipcMain.handle('forge:ensureScratchDir', async (): Promise<string> => ensureScratchDir())
+  // 渲染层匹配层豁免用的 scratch 根列表（2026-09-01：主目录被注册为项目后前缀
+  // 匹配会罩住 scratch 目录；见 scratchDirs.getScratchRoots / projectMatch.isScratchCwd）。
+  ipcMain.handle('forge:getScratchRoots', async (): Promise<string[]> => getScratchRoots())
   ipcMain.handle('forge:addProject', async (_e, path: string, name?: string): Promise<Project[]> =>
     addProject(requireString(path, 'path').trim(), name)
   )

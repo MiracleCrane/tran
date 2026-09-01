@@ -180,6 +180,7 @@ const api: ForgeApi = {
   listProjects: () => ipcRenderer.invoke('forge:listProjects'),
   getHomeDir: () => ipcRenderer.invoke('forge:getHomeDir'),
   ensureScratchDir: () => ipcRenderer.invoke('forge:ensureScratchDir'),
+  getScratchRoots: () => ipcRenderer.invoke('forge:getScratchRoots'),
   addProject: (path, name) => ipcRenderer.invoke('forge:addProject', path, name),
   removeProject: (id) => ipcRenderer.invoke('forge:removeProject', id),
   renameProject: (id, name) => ipcRenderer.invoke('forge:renameProject', id, name),

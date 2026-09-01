@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.67 - 2026-09-01
+
+### 中文
+
+- 修复：主目录被注册为项目后，「不在项目中工作」的独立目录会话被前缀匹配误归到该项目（组头显示 session-时间 目录名）。scratch 目录现在在归属匹配层整体豁免，一律归「最近」，不再依赖会话建立时写入的覆盖标记。
+
+### English
+
+- Fix: when the home directory is registered as a project, scratch sessions ("work outside projects") were wrongly assigned to it by prefix matching, showing an ugly `session-time` group header. Scratch roots are now exempt at the matching layer and always fall under "Recent", no longer relying on the assignment marker written at session init.
+
 ## v1.1.66 - 2026-09-01
 
 ### 中文

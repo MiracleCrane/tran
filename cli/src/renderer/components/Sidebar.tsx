@@ -8,7 +8,7 @@ import HoverTip from './HoverTip'
 import { AppLogo } from './AppLogo'
 import type { ClaudeExecutionBackend, Project, SessionListItem, SessionPreview, WorktreeRecord } from '../../shared/ipc'
 import { normalizeCwdForCompare } from '../../shared/paths'
-import { matchProjectByCwd } from '../../shared/projectMatch'
+import { isScratchCwd, matchProjectByCwd } from '../../shared/projectMatch'
 import { relTime } from '../utils/format'
 import { useArchiveStore } from '../store/archiveStore'
 import { useSessionProjectStore } from '../store/sessionProjectStore'
@@ -745,6 +745,8 @@ const NAV_ITEMS: { view: View; label: string; icon: () => JSX.Element }[] = [
 export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boolean } = {}): JSX.Element {
   const meta = useSessionStore((s) => s.meta)
   const sessions = useSessionStore((s) => s.sessions)
+  // scratch 根列表（sessionStore bootstrap 拉取）：scratch cwd 分组豁免用。
+  const scratchRoots = useSessionStore((s) => s.scratchRoots)
   // 归档（2026-08）：侧栏过滤 + 行内归档按钮的数据源；挂载即加载一次。
   const archivedIds = useArchiveStore((s) => s.archivedIds)
   const loadArchived = useArchiveStore((s) => s.loadArchived)
@@ -1795,6 +1797,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       return projectById.get(a) ?? matchProjectByCwd(a, addedProjects) ?? undefined
     }
     const isProjectSession = (s: SessionListItem): boolean => {
+      // 2026-09-01：scratch cwd 一律归「最近」——用户主目录被注册为项目后，
+      // 前缀匹配会把 Documents/Tran 下的 scratch 目录罩进该项目（侧栏冒出
+      // session-xxx 组头）；匹配层豁免，不看归属覆盖有没有写上。
+      if (s.cwd && isScratchCwd(s.cwd, scratchRoots)) return false
       const a = assignmentOf(s)
       if (a !== undefined) return a !== null
       return (
@@ -1840,7 +1846,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       ...emptyProjectGroups,
       ...(recent.length ? [{ label: '最近', items: recent, section: true }] : [])
     ]
-  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjects, projectById, homePath, qaHidden, projectAssignments])
+  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjects, projectById, homePath, qaHidden, projectAssignments, scratchRoots])
   sessionGroupsRef.current = sessionGroups
 
   const visibleSessionKeys = useMemo(
