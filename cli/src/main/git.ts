@@ -401,6 +401,10 @@ async function readChangeEntries(
     else if (x === 'A' || y === 'A') status = 'added'
     else if (x === 'D' || y === 'D') status = 'deleted'
     else status = 'modified'
+    // 未跟踪目录（形如 `.temp/`）不进面板：目录条目点开没有 diff 可看，
+    // 只会吃一条「加载失败」（2026-09-01 用户截图）。文件删除后目录条目
+    // 自然消失，无需进一步处理。
+    if (status === 'untracked' && path.endsWith('/')) continue
     entries.push({ path, ...(oldPath ? { oldPath } : {}), status })
   }
   return entries

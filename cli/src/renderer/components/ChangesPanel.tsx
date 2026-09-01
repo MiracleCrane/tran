@@ -116,22 +116,35 @@ export default function ChangesPanel({ cwd, refreshKey, initialPath, initialRequ
   useEffect(() => {
     if (!initialPath || initialRequestKey === undefined || !changes) return
     if (appliedRequestRef.current === initialRequestKey) return
-    const file = changes.files.find((entry) => entry.path === initialPath)
+    // 轮次卡/pill 带进来的可能是绝对路径（agent 工具调用里的原始写法），
+    // 而 gitFileDiff 只接受仓库内相对路径——先折算；在仓库外的直接给提示，
+    // 不走 IPC 吃「只接受仓库内的相对路径」报错（2026-09-01 用户截图抓包：
+    // .scratch/release-v1.1.67.sh 以绝对路径传进来，diff 加载失败）。
+    const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '')
+    let rel = norm(initialPath)
+    let outside = false
+    if (/^[A-Za-z]:\//.test(rel) || rel.startsWith('//')) {
+      const root = norm(cwd) + '/'
+      if (rel.toLowerCase().startsWith(root.toLowerCase())) rel = rel.slice(root.length)
+      else outside = true
+    }
+    const file = changes.files.find((entry) => entry.path === rel)
     appliedRequestRef.current = initialRequestKey
     // 不在工作区改动里（gitignored / 已提交）：不能静默放弃——那是轮次卡/pill
     // 点进来"什么都不跳"的根源（2026-08-19 用户抓包）。合成一条未跟踪条目进
     // 列表展开它；diff 由 getFileDiff 兜底合成（tracked 空 → 未跟踪合成）。
     if (!file) {
       const synthetic: GitFileChange = {
-        path: initialPath,
+        path: rel,
         status: 'untracked',
         additions: null,
         deletions: null,
         binary: false
       }
-      setExtraFiles((prev) => (prev.some((f) => f.path === initialPath) ? prev : [synthetic, ...prev]))
-      setExpanded(initialPath)
-      ensureFileDiff(synthetic)
+      setExtraFiles((prev) => (prev.some((f) => f.path === rel) ? prev : [synthetic, ...prev]))
+      setExpanded(rel)
+      if (outside) setDiffs((d) => ({ ...d, [rel]: '[该文件不在当前项目目录内，无法展示 diff]' }))
+      else ensureFileDiff(synthetic)
       return
     }
     setExpanded(file.path)

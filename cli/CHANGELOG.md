@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.68 - 2026-09-01
+
+### 中文
+
+- 修复：从轮次卡/改动入口打开变更面板时，若工具调用记录的是绝对路径，diff 不再报「只接受仓库内的相对路径」——仓库内的绝对路径自动折算为相对路径，仓库外的文件给出明确提示。
+- 修复：变更面板不再列出未跟踪目录条目（如 `.temp/`），目录没有 diff 可看，点开只会报错。
+
+### English
+
+- Fix: opening the changes panel from a turn card with an absolute path no longer fails with "only repo-relative paths accepted"—absolute paths inside the repo are converted, and files outside the repo get a clear notice.
+- Fix: untracked directory entries (e.g. `.temp/`) no longer appear in the changes panel; directories have no diff to show.
+
 ## v1.1.67 - 2026-09-01
 
 ### 中文
