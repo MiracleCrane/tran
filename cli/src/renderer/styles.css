@@ -3546,10 +3546,11 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
   }
 
   /* 2. 侧栏贴边，与主区不画线——明度台阶分区。
-     2026-08-17 色值改为 Codex 桌面端实测采样（拆包 + 截图像素）：侧栏 #202020、
-     主区 #181818（注意 Codex 是侧栏比主区**亮**一档，跟直觉相反）。 */
+     2026-08-17 色值曾按拆包采样定为纯灰 #202020；2026-09-01 按用户新截图
+     重新逐像素采样，Codex 侧栏实为蓝灰 #1E2027、主区 #181818（侧栏亮一档），
+     改回蓝灰。peek 浮层（下方 3936 行）同步同色，两态不再两截。 */
   :root[data-ui='flat'] .glass-sidebar {
-    background: #202020;
+    background: #1e2027;
   }
   /* 主区与卡片：实色台阶，不再靠半透明叠加。 */
   :root[data-ui='flat'] .main-surface {
@@ -3934,7 +3935,7 @@ div:has(textarea:focus) .composer-shortcut-hint {
    纯拼优先级——:root 前缀抬到 (0,3,1) 才压得住 flat 那条 (0,3,0)。
    实底后图标条不再需要隐形——浮层从左缘完整盖住它，衔接不再跳。 */
 :root .app-shell-merged .sidebar-peek > * {
-  background: #14151b;
+  background: #1e2027;
 }
 :root[data-theme='charcoal'] .app-shell-merged .sidebar-peek > * {
   background: #1b1b1b;

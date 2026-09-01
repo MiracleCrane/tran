@@ -7,6 +7,8 @@ export const FORGE_RENDERER_EVENTS = {
   wslSupportChanged: 'forge:wsl-support-changed',
   /** 项目列表增删改（ProjectSwitcher → Sidebar 分组口径刷新）。 */
   projectsChanged: 'forge:projects-changed',
+  /** worktree 台账增删（2026-09-01 第 4 期：侧栏 wt 徽章/删除联动刷新）。 */
+  worktreesChanged: 'forge:worktrees-changed',
   /** 打开会话搜索面板（侧栏搜索图标 / Ctrl+K → SessionSearchPalette）。 */
   openSessionSearch: 'forge:open-session-search',
   /** 打开改动面板（轮次改动卡的「审核」→ GitToolbar 的 ChangesPanel）。 */

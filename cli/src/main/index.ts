@@ -12,6 +12,8 @@ import type { AgentBridge } from './agent/AgentBridge'
 import { log, scheduleLogMaintenance } from './logger'
 import { seedDefaultIfNeeded } from './providers'
 import { sweepOrphanSessionDirs } from './sessionDelete'
+import { pruneSessionProjectAssignments } from './sessionProjects'
+import { pruneWorktreeRecords } from './worktreeStore'
 import { loadSettings, saveSettings } from './settings'
 import { initPetWindow, setMainWindowActive, shutdownPetWindow } from './petWindow'
 import { createTray, type ForgeTray } from './tray'
@@ -221,9 +223,11 @@ function createWindow(): void {
 
   // 任务栏角标（轮末提醒）：窗口重新聚焦即清。打标在渲染层（轮结束且无焦点
   // 时），清除放主进程——即使渲染层正忙，用户切回来图标也一定复位。
+  // 2026-09-01 同处理等待提醒的任务栏闪烁：聚焦即停（兜底，渲染层另有一路）。
   mainWindow.on('focus', () => {
     if (process.platform === 'win32' && !mainWindow?.isDestroyed()) {
       mainWindow?.setOverlayIcon(null, '')
+      mainWindow?.flashFrame(false)
     }
   })
 
@@ -451,6 +455,12 @@ if (!hasSingleInstanceLock) {
       void sweepOrphanSessionDirs().catch((error) => {
         log('startup', `孤儿会话目录清理失败：${error instanceof Error ? error.message : String(error)}`)
       })
+      // 2026-09-01 第 1.5 期：顺带清「指向已不存在项目」的归属覆盖死条目
+      //（同步读写一个小 JSON，成本可忽略；函数内部全捕获）。
+      pruneSessionProjectAssignments()
+      // 2026-09-01 第 4 期：顺带清「台账有、git worktree list 没有」的僵尸
+      // worktree 条目（异步，按仓库分组各跑一次 git；函数内部全捕获）。
+      void pruneWorktreeRecords().catch(() => {})
     })
     forgeTray = buildForgeTray()
 

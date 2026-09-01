@@ -44,6 +44,9 @@ class FakeClient:
     async def health(self) -> bool:
         return True
 
+    async def prepare_generation(self) -> None:
+        return None
+
     async def list_characters(self):
         return [self.character]
 
@@ -69,9 +72,22 @@ class FakeClient:
             "retry": "重试回复",
             "continue": "续写段落",
         }
+        updated = copy.deepcopy(_chat)
+        if mode == "normal":
+            updated.extend([
+                {"name": "玩家", "is_user": True, "is_system": False, "mes": _user_text},
+                {"name": "Lana", "is_user": False, "is_system": False, "mes": values[mode], "swipes": [values[mode]], "swipe_id": 0},
+            ])
+        elif mode == "retry":
+            updated[-1]["mes"] = values[mode]
+            updated[-1]["swipes"] = ["普通回复", values[mode]]
+            updated[-1]["swipe_id"] = 1
+        elif mode == "continue":
+            updated[-1]["mes"] = f"{updated[-1]['mes']}\n{values[mode]}"
+            updated[-1]["swipes"][updated[-1].get("swipe_id", 0)] = updated[-1]["mes"]
         if on_chunk:
             await on_chunk("流式片段")
-        return values[mode], "玩家", await self.runtime_config()
+        return values[mode], "玩家", await self.runtime_config(), updated
 
 
 async def wait_until(pilot, predicate, attempts=40):
@@ -129,7 +145,6 @@ class TuiWiringTests(unittest.IsolatedAsyncioTestCase):
 
                     await pilot.press("f2")
                     await wait_until(pilot, lambda: app.query_one("#input", TextArea).text == "帮答草稿")
-                    self.assertEqual(len(fake.saved), 0)
 
                     field = app.query_one("#input", TextArea)
                     field.load_text("第一行")
@@ -139,17 +154,16 @@ class TuiWiringTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("\n", field.text)
                     field.insert("第二行")
                     await pilot.press("enter")
-                    await wait_until(pilot, lambda: len(fake.saved) == 1)
-                    self.assertEqual(fake.saved[-1][-2]["mes"], "第一行\n第二行")
-                    self.assertEqual(fake.saved[-1][-1]["mes"], "普通回复")
+                    await wait_until(pilot, lambda: app.chat[-1].get("mes") == "普通回复")
+                    self.assertEqual(app.chat[-2]["mes"], "第一行\n第二行")
 
                     await pilot.press("f4")
-                    await wait_until(pilot, lambda: len(fake.saved) == 2)
-                    self.assertEqual(fake.saved[-1][-1]["swipes"], ["普通回复", "重试回复"])
+                    await wait_until(pilot, lambda: app.chat[-1].get("mes") == "重试回复")
+                    self.assertEqual(app.chat[-1]["swipes"], ["普通回复", "重试回复"])
 
                     await pilot.press("f3")
-                    await wait_until(pilot, lambda: len(fake.saved) == 3)
-                    self.assertIn("续写段落", fake.saved[-1][-1]["mes"])
+                    await wait_until(pilot, lambda: "续写段落" in app.chat[-1].get("mes", ""))
+                    self.assertEqual(len(fake.saved), 0)
 
                     await pilot.press("f9")
                     open_web.assert_called_once_with("http://127.0.0.1:8000")

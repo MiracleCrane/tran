@@ -25,9 +25,6 @@ from rp_tavern_client import (
     Character,
     ChatRef,
     TavernClient,
-    append_exchange,
-    continue_last_assistant,
-    replace_last_assistant,
 )
 
 DEFAULT_BOSS_KEY = "f12"
@@ -266,6 +263,7 @@ class TavernApp(App):
         try:
             if not await self.client.health():
                 raise RuntimeError("SillyTavern 未运行或 8000 端口不可访问")
+            await self.client.prepare_generation()
             items = await self.client.list_characters()
             if not items:
                 raise RuntimeError("酒馆里还没有角色卡，请按 F9 打开网页导入")
@@ -357,20 +355,14 @@ class TavernApp(App):
                 self.set_status(f"AI {labels[mode]}中... {tail}")
 
             self.set_status(f"AI {labels[mode]}中...")
-            reply, user_name, runtime = await self.client.generate(
+            reply, _user_name, runtime, updated_chat = await self.client.generate(
                 self.character, self.chat, mode, user_text, partial
             )
             if mode == "impersonate":
                 self.query_one("#input", TextArea).load_text(reply)
                 self.set_status("AI 帮答草稿已放入输入框；修改后按 Enter 发送")
             else:
-                if mode == "normal":
-                    append_exchange(self.chat, user_name, self.character.name, user_text, reply)
-                elif mode == "retry":
-                    replace_last_assistant(self.chat, reply)
-                else:
-                    continue_last_assistant(self.chat, reply)
-                await self.client.save_chat(self.character, self.chat_ref, self.chat)
+                self.chat = updated_chat
                 self.render_chat()
                 self.set_status(f"done · {runtime.model}")
         except Exception as error:

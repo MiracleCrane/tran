@@ -6,8 +6,9 @@ import Collapse from './Collapse'
 import ConfirmDialog from './ConfirmDialog'
 import HoverTip from './HoverTip'
 import { AppLogo } from './AppLogo'
-import type { ClaudeExecutionBackend, SessionListItem, SessionPreview } from '../../shared/ipc'
+import type { ClaudeExecutionBackend, Project, SessionListItem, SessionPreview, WorktreeRecord } from '../../shared/ipc'
 import { normalizeCwdForCompare } from '../../shared/paths'
+import { matchProjectByCwd } from '../../shared/projectMatch'
 import { relTime } from '../utils/format'
 import { useArchiveStore } from '../store/archiveStore'
 import { useSessionProjectStore } from '../store/sessionProjectStore'
@@ -817,6 +818,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   /** 删除失败的显式报错（模态）。 */
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  /** worktree 联动删除确认（2026-09-01 第 4 期）：会话删成功后，cwd 命中
+   *  worktree 台账则询问是否一并删 worktree（仅 worktree 干净才删得掉）。 */
+  const [confirmWorktree, setConfirmWorktree] = useState<WorktreeRecord | null>(null)
   // Codex 式三段布局固定用 project 分组（time 分支保留给未来可能的切换）。
   const [groupMode] = useState<SessionGroupMode>('project')
   /** 「全部」视图里被折叠的 cwd 组（label = 完整路径）。 */
@@ -835,24 +839,44 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   /** 批量命名进度（主进程逐条推送）：没进度显示就是用户眼里的"卡住"。 */
   const [aiNamingProgress, setAiNamingProgress] = useState<{ done: number; total: number } | null>(null)
   useEffect(() => window.api.onAiNamingProgress((p) => setAiNamingProgress(p)), [])
-  /** 已添加项目的归一化路径集合：决定会话归「项目」段还是「最近」段。 */
-  const [addedProjectPaths, setAddedProjectPaths] = useState<Set<string>>(() => new Set())
-  /** 已添加项目的原始路径（listProjects 顺序）：会话被删光的项目也要保留
-   *  空组头（2026-08-18 用户：「项目不能就没了吧？留着，下面不挂会话就行了」）。 */
-  const [addedProjectRawPaths, setAddedProjectRawPaths] = useState<string[]>([])
+  /** 已添加项目列表（listProjects 顺序）：决定会话归「项目」段还是「最近」段；
+   *  会话被删光的项目也要保留空组头（2026-08-18 用户：「项目不能就没了吧？
+   *  留着，下面不挂会话就行了」）。2026-09-01 一等实体化：归属覆盖的值是
+   *  projectId（旧数据可能是路径串），解析统一走下面的两张索引。 */
+  const [addedProjects, setAddedProjects] = useState<Project[]>([])
   useEffect(() => {
     const load = (): void => {
       void window.api
         .listProjects()
-        .then((list) => {
-          setAddedProjectPaths(new Set(list.map((p) => normalizeCwdForCompare(p.path))))
-          setAddedProjectRawPaths(list.map((p) => p.path))
-        })
+        .then((list) => setAddedProjects(list))
         .catch(() => {})
     }
     load()
     return onForgeEvent('projectsChanged', load)
   }, [])
+  /** projectId → 项目。 */
+  const projectById = useMemo(
+    () => new Map(addedProjects.map((p) => [p.id, p])),
+    [addedProjects]
+  )
+  // worktree 台账镜像（2026-09-01 第 4 期）：行内 wt 徽章 + 删除会话联动清理
+  // 的数据源；挂载即加载，worktreesChanged 事件刷新。
+  const [worktreeRecords, setWorktreeRecords] = useState<WorktreeRecord[]>([])
+  useEffect(() => {
+    const load = (): void => {
+      void window.api
+        .listWorktrees()
+        .then((list) => setWorktreeRecords(list))
+        .catch(() => {})
+    }
+    load()
+    return onForgeEvent('worktreesChanged', load)
+  }, [])
+  /** 归一化 worktree 路径 → 台账条目（会话行按 cwd 查）。 */
+  const worktreeByCwd = useMemo(
+    () => new Map(worktreeRecords.map((r) => [normalizeCwdForCompare(r.path), r])),
+    [worktreeRecords]
+  )
   /** 主目录（归一化）：主目录不是项目——落在主目录的会话一律归「最近」
    *  （Codex 语义，2026-08-17 用户：「最近就是用来放无项目会话的」「三行字
    *  和 Codex 完全一致」），即使主目录当初被加进了项目列表。 */
@@ -1543,39 +1567,36 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
 
   /** 「移动到项目…」菜单（2026-08-27）：归属 = Tran 侧元数据，cwd/数据不动，
    *  resume 仍走真实目录。菜单 = 已注册项目 + 「不在项目中工作」；已有覆盖时
-   *  追加「跟随会话目录（默认）」出口（清除条目）。✓ 标当前生效归属。 */
+   *  追加「跟随会话目录（默认）」出口（清除条目）。✓ 标当前生效归属。
+   *  2026-09-01：覆盖值是 projectId（旧数据可能是项目路径串），按 id→路径
+   *  两级解析；解析不到项目的旧覆盖视同「无生效归属」（此类垃圾条目由主进程
+   *  启动时 pruneSessionProjectAssignments 清理，见 sessionProjects.ts）。 */
   const handleMoveToProject = (session: SessionListItem, e: MouseEvent<HTMLElement>): void => {
     const key = sessionKey(session)
     const override = projectAssignments?.[key]
-    // 无覆盖时的生效归属：cwd 是已注册项目（且非主目录）才算，否则 = 不在项目中。
+    // 无覆盖时的生效归属：cwd 命中已注册项目（且非主目录）才算，否则 = 不在项目中。
     const cwdProject =
-      session.cwd &&
-      addedProjectPaths.has(normalizeCwdForCompare(session.cwd)) &&
-      (!homePath || normalizeCwdForCompare(session.cwd) !== homePath)
-        ? session.cwd
+      session.cwd && (!homePath || normalizeCwdForCompare(session.cwd) !== homePath)
+        ? matchProjectByCwd(session.cwd, addedProjects)
         : null
-    const effective = override !== undefined ? override : cwdProject
-    const isCurrent = (p: string | null): boolean =>
-      p === null
-        ? effective === null
-        : !!effective && normalizeCwdForCompare(p) === normalizeCwdForCompare(effective)
-    // 同名项目（不同路径同 basename）：菜单 key = label，重名会撞 key 也分不清，
-    // 重名的那条直接显示完整路径。
+    const effective: Project | null =
+      override === undefined
+        ? cwdProject
+        : override === null
+          ? null
+          : projectById.get(override) ?? matchProjectByCwd(override, addedProjects) ?? null
+    // 同名项目：菜单里附上根路径区分（重命名允许重名）。
     const nameCount = new Map<string, number>()
-    for (const p of addedProjectRawPaths) {
-      const name = pathName(p)
-      nameCount.set(name, (nameCount.get(name) ?? 0) + 1)
-    }
+    for (const p of addedProjects) nameCount.set(p.name, (nameCount.get(p.name) ?? 0) + 1)
     const items: InlineMenuItem[] = [
-      ...addedProjectRawPaths.map((p) => {
-        const name = pathName(p)
-        return {
-          label: `${isCurrent(p) ? '✓ ' : ''}${(nameCount.get(name) ?? 0) > 1 ? p : name}`,
-          action: () => void setProjectAssignment(key, p)
-        }
-      }),
+      ...addedProjects.map((p) => ({
+        label: `${effective?.id === p.id ? '✓ ' : ''}${
+          (nameCount.get(p.name) ?? 0) > 1 ? `${p.name}（${p.rootPaths[0] ?? ''}）` : p.name
+        }`,
+        action: () => void setProjectAssignment(key, p.id)
+      })),
       {
-        label: `${isCurrent(null) ? '✓ ' : ''}不在项目中工作`,
+        label: `${effective === null ? '✓ ' : ''}不在项目中工作`,
         action: () => void setProjectAssignment(key, null)
       },
       ...(override !== undefined
@@ -1619,7 +1640,27 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     if (!target) return
     // 失败必须当面报出来（2026-08-14 用户：「不要删了没反应静默失败」）。
     const error = await deleteSession(target.sessionId, target.runtimeBackend)
-    if (error) setDeleteError(error)
+    if (error) {
+      setDeleteError(error)
+      return
+    }
+    // worktree 联动（2026-09-01 第 4 期）：会话删成功后，cwd 命中台账则再问
+    // 一次「一并删除 worktree？」——取消则 worktree 保留（台账条目也在）。
+    const wt = target.cwd ? worktreeByCwd.get(normalizeCwdForCompare(target.cwd)) : undefined
+    if (wt) setConfirmWorktree(wt)
+  }
+  /** 确认删除 worktree：主进程只在 worktree 干净（无未提交改动）时真的删；
+   *  拒绝原因（含改动计数）抛回来当面报。 */
+  const doRemoveWorktree = async (): Promise<void> => {
+    const wt = confirmWorktree
+    setConfirmWorktree(null)
+    if (!wt) return
+    try {
+      await window.api.removeWorktree(wt.path)
+      emitForgeEvent('worktreesChanged')
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : String(e))
+    }
   }
   const confirmDeleteTarget = confirmDeleteId
     ? sessions.find((session) => sessionKey(session) === confirmDeleteId)
@@ -1743,26 +1784,28 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     const rest = orderedSessions.filter((s) => !pinnedSessionKeys.has(sessionKey(s)))
     // 主目录不算项目：cwd 为主目录的会话归「最近」，与 Codex 三段完全一致。
     // 会话→项目归属覆盖（2026-08-27「移动到项目」，Codex 语义：归属 = Tran 侧
-    // 元数据，cwd 不动）。返回值：string = 归到该项目；null = 显式「不在项目
-    // 中工作」（归「最近」）；undefined = 无覆盖，跟随 cwd。覆盖指向的项目已
-    // 被移除时回退 undefined（跟随 cwd）——只是渲染回退，不清条目：项目可能
-    // 加回来，且这里不是清理归属表的地方。
-    const assignmentOf = (s: SessionListItem): string | null | undefined => {
+    // 元数据，cwd 不动）。返回值：Project = 归到该项目；null = 显式「不在项目
+    // 中工作」（归「最近」）；undefined = 无覆盖，跟随 cwd。2026-09-01 起覆盖
+    // 值是 projectId（旧数据可能是项目路径串，两级解析）；解析不到项目时回退
+    // undefined（跟随 cwd）——只是渲染回退；垃圾条目由主进程启动时清理
+    // （pruneSessionProjectAssignments），渲染层不动归属表。
+    const assignmentOf = (s: SessionListItem): Project | null | undefined => {
       const a = projectAssignments?.[sessionKey(s)]
       if (a === undefined || a === null) return a
-      return addedProjectPaths.has(normalizeCwdForCompare(a)) ? a : undefined
+      return projectById.get(a) ?? matchProjectByCwd(a, addedProjects) ?? undefined
     }
     const isProjectSession = (s: SessionListItem): boolean => {
       const a = assignmentOf(s)
       if (a !== undefined) return a !== null
       return (
         !!s.cwd &&
-        addedProjectPaths.has(normalizeCwdForCompare(s.cwd)) &&
+        !!matchProjectByCwd(s.cwd, addedProjects) &&
         (!homePath || normalizeCwdForCompare(s.cwd) !== homePath)
       )
     }
-    // 分组目录的取值口径：有归属覆盖按覆盖的项目路径，否则按真实 cwd。
-    const groupPathOf = (s: SessionListItem): string => assignmentOf(s) ?? s.cwd ?? meta?.cwd ?? ''
+    // 分组目录的取值口径：有归属覆盖按覆盖项目的根路径，否则按真实 cwd。
+    const groupPathOf = (s: SessionListItem): string =>
+      assignmentOf(s)?.rootPaths[0] ?? s.cwd ?? meta?.cwd ?? ''
     const isQaSession = (s: SessionListItem): boolean =>
       normalizeCwdForCompare(s.cwd ?? '') === QA_SESSION_CWD
     const qa = qaHidden ? [] : rest.filter(isQaSession).sort((a, b) => b.lastModified - a.lastModified)
@@ -1781,12 +1824,14 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     const nonEmptyLabels = new Set(cwdGroups.map((g) => normalizeCwdForCompare(g.label)))
     const emptyProjectGroups =
       sessionScope === 'all'
-        ? addedProjectRawPaths
+        ? addedProjects
             .filter((p) => {
-              const n = normalizeCwdForCompare(p)
+              const root = p.rootPaths[0]
+              if (!root) return false
+              const n = normalizeCwdForCompare(root)
               return !nonEmptyLabels.has(n) && (!homePath || n !== homePath)
             })
-            .map((p) => ({ label: p, items: [] as SessionListItem[], section: false }))
+            .map((p) => ({ label: p.rootPaths[0] ?? '', items: [] as SessionListItem[], section: false }))
         : []
     return [
       ...(pinned.length ? [{ label: '置顶', items: pinned, section: true }] : []),
@@ -1795,7 +1840,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       ...emptyProjectGroups,
       ...(recent.length ? [{ label: '最近', items: recent, section: true }] : [])
     ]
-  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjectPaths, addedProjectRawPaths, homePath, qaHidden, projectAssignments])
+  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjects, projectById, homePath, qaHidden, projectAssignments])
   sessionGroupsRef.current = sessionGroups
 
   const visibleSessionKeys = useMemo(
@@ -2437,6 +2482,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               const starred = starredSessionKeys.has(key)
               // 正在输出（2026-08-27 用户）：边框彗星转圈，与标题文字流光并存。
               const running = s.running || runningSdkSessionIds.includes(s.sessionId)
+              // worktree 徽章（2026-09-01 第 4 期）：cwd 命中台账即视为隔离线程。
+              const worktree = s.cwd ? worktreeByCwd.get(normalizeCwdForCompare(s.cwd)) : undefined
               return (
                 <div
                   key={key}
@@ -2547,6 +2594,18 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                             <span className={`session-runtime-badge transition-opacity ${wslSupportEnabled ? 'is-visible' : ''}`}>
                               {backendLabel(s.runtimeBackend)}
                             </span>
+                            {/* wt 徽章：复用 runtime-badge 的行内小药丸样式；悬停
+                                HoverTip 给 worktree 路径与所属分支。 */}
+                            {worktree && (
+                              <HoverTip
+                                tip={`worktree 隔离运行
+${worktree.path}
+分支：${worktree.branch}`}
+                                tipClassName="whitespace-pre-line break-all text-left"
+                              >
+                                <span className="session-runtime-badge is-visible">wt</span>
+                              </HoverTip>
+                            )}
                             {/* 未读气泡（2026-08-25）：shrink-0 占 flex 行一席，标题
                                 truncate 自动让位，不撑行高、不扰布局。计数变化不重复
                                 播 pop 动画（元素不重建，仅首次挂载播一次）。 */}
@@ -2697,6 +2756,20 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
           if (confirmDeleteId) doDelete(confirmDeleteId)
         }}
         onCancel={() => setConfirmDeleteId(null)}
+      />
+      {/* worktree 联动删除确认（2026-09-01 第 4 期）：分支保留在仓库里，
+          删的只是工作区目录；worktree 不干净时主进程会拒绝并说明。 */}
+      <ConfirmDialog
+        open={confirmWorktree !== null}
+        danger
+        title="一并删除 worktree？"
+        message={`该会话在 worktree 中隔离运行：
+${confirmWorktree?.path ?? ''}
+仅当 worktree 没有未提交改动时才能删除；分支 ${confirmWorktree?.branch ?? ''} 保留在仓库中，提交不丢。`}
+        confirmLabel="删除 worktree"
+        cancelLabel="保留"
+        onConfirm={() => void doRemoveWorktree()}
+        onCancel={() => setConfirmWorktree(null)}
       />
 
       {/* 删除失败显式报错（原先只塞进输入框上方的小字，等于静默失败） */}

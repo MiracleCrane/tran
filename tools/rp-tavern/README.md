@@ -3,6 +3,11 @@
 Tran 启动的终端酒馆客户端。它依赖已经运行的本机 SillyTavern 服务，通过
 `http://127.0.0.1:8000` 读取角色、聊天、当前模型配置并请求生成。
 
+生成由不可见的 Chrome/Edge 页面调用 SillyTavern 原版 `Generate()` 完成，因此
+Prompt 顺序、世界书、Persona、角色示例、扩展 Prompt、正则和 token 裁剪与网页
+完全一致。TUI 不再自行拼装简化提示词；关闭 TUI 时隐藏浏览器及其临时 Profile
+会一并回收。
+
 - Enter：发送
 - Shift+Enter：换行；长内容会在输入框内自动软换行
 - F2：AI 帮答，草稿写入输入框但不自动发送

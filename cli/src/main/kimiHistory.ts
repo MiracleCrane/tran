@@ -6,6 +6,7 @@ import { isSessionDeleted } from './deletedSessions'
 import { aiSessionTitle } from './aiTitles'
 import { log } from './logger'
 import type { SessionListItem } from '../shared/ipc'
+import { cwdWithinRootPaths } from '../shared/projectMatch'
 
 /**
  * Kimi session history via ACP.
@@ -164,7 +165,16 @@ function normalizeCwd(value: string): string {
  */
 export async function listKimiSessions(
   cwd: string,
-  opts: { limit: number; offset: number; scope?: 'project' | 'all'; liveIds?: Set<string> }
+  opts: {
+    limit: number
+    offset: number
+    scope?: 'project' | 'all'
+    liveIds?: Set<string>
+    /** 2026-09-01 第 1.5 期：scope 'project' 且调用方（ipc.ts）已把 cwd 解析到
+     *  已注册项目时传入其 rootPaths，过滤升级为「cwd 命中 rootPaths 前缀」；
+     *  不传则回退旧的精确 cwd 相等。 */
+    projectRoots?: string[]
+  }
 ): Promise<SessionListItem[]> {
   try {
     const acp = await ensureClient()
@@ -188,8 +198,14 @@ export async function listKimiSessions(
       // deletedSessions.ts），Tran 侧一律滤掉。
       if (isSessionDeleted(sessionId)) continue
       const entryCwd = asString(entry.cwd)
-      // 「当前项目」只列本目录的会话（条目不带 cwd 时保守放行）；「全部」不过滤。
-      if (!allProjects && entryCwd && normalizeCwd(entryCwd) !== targetCwd) continue
+      // 「当前项目」：命中项目 rootPaths（前缀规则，子目录会话也算本项目）；
+      // 未解析到项目时回退只列本目录的会话（条目不带 cwd 时保守放行）；「全部」不过滤。
+      if (!allProjects && entryCwd) {
+        const inScope = opts.projectRoots
+          ? cwdWithinRootPaths(entryCwd, opts.projectRoots)
+          : normalizeCwd(entryCwd) === targetCwd
+        if (!inScope) continue
+      }
       // 标题优先级：手动重命名 > AI 命名 > kimi 原标题 > 本地首条消息兜底。
       const kimiTitle = asString(entry.title) ?? asString(entry.summary) ?? asString(entry.name) ?? ''
       const kimiTitleValid = kimiTitle && kimiTitle !== 'New Session' ? kimiTitle : undefined

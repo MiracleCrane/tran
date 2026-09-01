@@ -58,8 +58,8 @@ const api: ForgeApi = {
   archiveSession: (sessionId) => ipcRenderer.invoke('forge:archiveSession', sessionId),
   unarchiveSession: (sessionId) => ipcRenderer.invoke('forge:unarchiveSession', sessionId),
   getSessionProjectAssignments: () => ipcRenderer.invoke('forge:getSessionProjectAssignments'),
-  setSessionProjectAssignment: (sessionKey, projectPath) =>
-    ipcRenderer.invoke('forge:setSessionProjectAssignment', sessionKey, projectPath),
+  setSessionProjectAssignment: (sessionKey, projectId) =>
+    ipcRenderer.invoke('forge:setSessionProjectAssignment', sessionKey, projectId),
   getSubagentMessages: (sessionId, agentId, cwd) =>
     ipcRenderer.invoke('forge:getSubagentMessages', sessionId, agentId, cwd),
   listMcpServers: (sessionId) => ipcRenderer.invoke('forge:listMcpServers', sessionId),
@@ -75,6 +75,7 @@ const api: ForgeApi = {
   revealInExplorer: (cwd, pathStr) => ipcRenderer.invoke('forge:revealInExplorer', cwd, pathStr),
   openImageWindow: (dataUrl, name) => ipcRenderer.invoke('forge:openImageWindow', dataUrl, name),
   setOverlayBadge: (dataUrl, description) => ipcRenderer.invoke('forge:setOverlayBadge', dataUrl, description),
+  flashFrame: (flag) => ipcRenderer.invoke('forge:flashFrame', flag),
   copyImage: (src) => ipcRenderer.invoke('forge:copyImage', src),
   saveImageAs: (src, suggestedName) => ipcRenderer.invoke('forge:saveImageAs', src, suggestedName),
 
@@ -178,10 +179,13 @@ const api: ForgeApi = {
 
   listProjects: () => ipcRenderer.invoke('forge:listProjects'),
   getHomeDir: () => ipcRenderer.invoke('forge:getHomeDir'),
+  ensureScratchDir: () => ipcRenderer.invoke('forge:ensureScratchDir'),
   addProject: (path, name) => ipcRenderer.invoke('forge:addProject', path, name),
-  removeProject: (path) => ipcRenderer.invoke('forge:removeProject', path),
-  renameProject: (path, name) => ipcRenderer.invoke('forge:renameProject', path, name),
-  setLastProject: (path) => ipcRenderer.invoke('forge:setLastProject', path),
+  removeProject: (id) => ipcRenderer.invoke('forge:removeProject', id),
+  renameProject: (id, name) => ipcRenderer.invoke('forge:renameProject', id, name),
+  updateProject: (id, patch) => ipcRenderer.invoke('forge:updateProject', id, patch),
+  reorderProjects: (ids) => ipcRenderer.invoke('forge:reorderProjects', ids),
+  setLastProject: (id) => ipcRenderer.invoke('forge:setLastProject', id),
   getStartupProject: () => ipcRenderer.invoke('forge:getStartupProject'),
 
   pickDirectory: (options) => ipcRenderer.invoke('forge:pickDirectory', options),
@@ -224,6 +228,14 @@ const api: ForgeApi = {
   gitFileDiff: (cwd, path, opts) => ipcRenderer.invoke('forge:gitFileDiff', cwd, path, opts),
   gitRevertFile: (cwd, path, untracked, opts) =>
     ipcRenderer.invoke('forge:gitRevertFile', cwd, path, untracked, opts),
+
+  // --- git worktree 隔离（2026-09-01 第 4 期） ---
+  createWorktree: (repoRoot, projectId, name) =>
+    ipcRenderer.invoke('forge:createWorktree', repoRoot, projectId, name),
+  removeWorktree: (path, opts) => ipcRenderer.invoke('forge:removeWorktree', path, opts),
+  listWorktrees: () => ipcRenderer.invoke('forge:listWorktrees'),
+  worktreeBindSession: (path, sessionKey) =>
+    ipcRenderer.invoke('forge:worktreeBindSession', path, sessionKey),
 
   onAgentEvent: (cb) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: AgentEvent): void => cb(payload)

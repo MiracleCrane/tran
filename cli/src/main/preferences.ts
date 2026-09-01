@@ -65,6 +65,7 @@ export function getPreferences(): Preferences {
     petOutsideEnabled: s.petOutsideEnabled,
     petInAppPosition: s.petInAppPosition,
     richComposer: s.richComposer,
+    projectsV2Parallel: s.projectsV2Parallel,
     nativeNotifications: s.nativeNotifications,
     closePromptDismissed: s.closePromptDismissed,
     aiNamingEnabled: s.aiNamingEnabled,
@@ -111,6 +112,7 @@ export function savePreferences(prefs: Preferences): Preferences {
   if (prefs.petOutsideEnabled !== undefined) s.petOutsideEnabled = prefs.petOutsideEnabled
   if (prefs.petInAppPosition !== undefined) s.petInAppPosition = prefs.petInAppPosition
   if (prefs.richComposer !== undefined) s.richComposer = prefs.richComposer
+  if (prefs.projectsV2Parallel !== undefined) s.projectsV2Parallel = prefs.projectsV2Parallel
   if (prefs.nativeNotifications !== undefined) s.nativeNotifications = prefs.nativeNotifications
   if (prefs.closePromptDismissed !== undefined) s.closePromptDismissed = prefs.closePromptDismissed
   if (prefs.aiNamingEnabled !== undefined) s.aiNamingEnabled = prefs.aiNamingEnabled

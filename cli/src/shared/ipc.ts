@@ -159,14 +159,31 @@ export interface Provider {
   model: string
 }
 
-/** A saved working directory ("project"). The sidebar's top switcher lists these;
- *  each has its own session history (scoped by cwd). */
+/** 项目（2026-09-01 一等实体化，Codex 模型）：id 是唯一键，rootPaths 是该项目
+ *  覆盖的工作目录（当前只有一条，多根留给后续）。侧栏顶部切换器列出这些项目；
+ *  会话归属按 cwd 命中 rootPaths 判定。 */
 export interface Project {
-  /** Absolute path — also the unique key. */
-  path: string
+  /** Stable unique id (crypto.randomUUID). */
+  id: string
   /** Display name (folder name by default, user-renameable). */
   name: string
-  addedAt: number
+  /** Absolute root paths covered by this project (currently exactly one). */
+  rootPaths: string[]
+  /** 外观：预设色 / 图标（均可选，图标暂无 UI）。 */
+  appearance?: { color?: string; icon?: string }
+  /** 置顶：切换器里排在未置顶项目之前。 */
+  pinned?: boolean
+  /** 显式排序权重（reorderProjects 写入）；缺省按 createdAt 排。 */
+  order?: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** updateProject 的可补丁字段（appearance 的 color/icon 传空串 = 清除该字段）。 */
+export interface ProjectPatch {
+  name?: string
+  appearance?: { color?: string; icon?: string }
+  pinned?: boolean
 }
 
 /** A skill available to the session (returned by the SDK's supportedCommands(),
@@ -271,6 +288,10 @@ export interface Preferences {
   /** 实验性：输入框换成富文本（`/命令` 就地渲染成内联胶囊）。默认关——
    *  它把 textarea 换成 contenteditable，中文输入法的表现只有真人打字才验得出来。 */
   richComposer?: boolean
+  /** 2026-09-01 项目模型 Codex 化第 3 期 feature-flag：切项目不杀会话、多项目
+   *  并行（默认开，undefined 按开处理）。显式 false = switchProject 回退旧语义
+   * （不记线程指针、恒懒创建新会话）。无设置页 UI，手改 settings.json 生效。 */
+  projectsV2Parallel?: boolean
   /** Show OS native notifications when a session ends while the window is
    *  inactive (default true). */
   nativeNotifications?: boolean
@@ -801,6 +822,23 @@ export interface GitWorkingChanges {
   totalDeletions: number
 }
 
+/** worktree 台账条目（2026-09-01 Codex 化第 4 期）：主进程 userData/worktrees.json
+ *  的一行，渲染层用于侧栏 wt 徽章与删除会话联动清理。 */
+export interface WorktreeRecord {
+  /** worktree 绝对路径（%LOCALAPPDATA%/Tran/worktrees/<repo-hash>/<name>/）。 */
+  path: string
+  /** 所属 git 仓库的主检出路径。 */
+  repoRoot: string
+  /** 归属项目 id（会话的归属覆盖也写它）。 */
+  projectId: string
+  /** worktree 检出的分支（tran/<name>）；删除 worktree 后分支保留在仓库里。 */
+  branch: string
+  createdAt: number
+  lastUsedAt: number
+  /** 使用该 worktree 的会话（windows:<sdkSessionId> 形态）；懒会话 init 后回填。 */
+  sessionKey?: string
+}
+
 /** Surface exposed on window.api via the preload contextBridge. */
 export interface RpTavernStatus {
   installPath: string | null
@@ -876,12 +914,13 @@ export interface ForgeApi {
   archiveSession(sessionId: string): Promise<void>
   unarchiveSession(sessionId: string): Promise<void>
   /** 会话→项目归属（Tran 侧元数据，cwd 不动；2026-08-27「移动到项目」）。
-   *  键 = `${backend}:${sessionId}`（同侧栏 sessionKey）；值 null = 显式
-   *  「不在项目中工作」，无条目 = 跟随 cwd（默认）。 */
+   *  键 = `${backend}:${sessionId}`（同侧栏 sessionKey）；值 = projectId
+   * （2026-09-01 起；旧数据可能是没换算成 id 的项目路径串，渲染层兼容解析），
+   *  null = 显式「不在项目中工作」，无条目 = 跟随 cwd（默认）。 */
   getSessionProjectAssignments(): Promise<Record<string, string | null>>
-  /** projectPath：string 归到该项目；null 显式「不在项目中工作」；
+  /** projectId：string 归到该项目；null 显式「不在项目中工作」；
    *  undefined 清除覆盖（回到跟随 cwd 默认）。 */
-  setSessionProjectAssignment(sessionKey: string, projectPath: string | null | undefined): Promise<void>
+  setSessionProjectAssignment(sessionKey: string, projectId: string | null | undefined): Promise<void>
   /** Read a subagent's own conversation transcript (for the monitor popover). */
   getSubagentMessages(sessionId: string, agentId: string, cwd: string): Promise<HistoryMessage[]>
 
@@ -912,6 +951,9 @@ export interface ForgeApi {
   /** 任务栏 overlay 角标（Codex 式小标）：传 PNG dataURL 打标，null 清除。
    *  仅 Windows 生效，其它平台主进程直接忽略。 */
   setOverlayBadge(dataUrl: string | null, description: string): Promise<void>
+  /** 任务栏闪烁提醒（2026-09-01：agent 提问/待授权且窗口无焦点时开始闪，
+   *  回答完或窗口聚焦后停止）。仅 Windows 有意义，其它平台主进程忽略。 */
+  flashFrame(flag: boolean): Promise<void>
   /** Copy an image to the system clipboard. `src` may be a data:/file:/http(s):
    *  URL or an absolute filesystem path (blob: URLs must be converted to data:
    *  by the renderer first). */
@@ -945,15 +987,24 @@ export interface ForgeApi {
     models: ComposerModel[]
   ): Promise<ProviderProfile>
 
-  /** --- Projects (saved working directories) --- */
+  /** --- Projects (一等实体：{id, name, rootPaths[]} + 外观/置顶/排序) --- */
   listProjects(): Promise<Project[]>
-  /** 用户主目录：「不在项目中工作」的无项目会话落在这里。 */
+  /** 用户主目录。2026-09-01 第 2 期起新无项目会话改走 ensureScratchDir 的
+   *  scratch 目录；主目录仍用于历史主目录会话的归组判定。 */
   getHomeDir(): Promise<string>
+  /** 无项目会话的独立工作目录（2026-09-01 Codex 化第 2 期）：创建并返回
+   *  Documents/Tran/YYYY-MM-DD/session-HHmmss-xxxx/，失败回退 userData/scratch。 */
+  ensureScratchDir(): Promise<string>
   /** Add a directory (idempotent) and mark it last-used. Returns the list. */
   addProject(path: string, name?: string): Promise<Project[]>
-  removeProject(path: string): Promise<Project[]>
-  renameProject(path: string, name: string): Promise<Project[]>
-  setLastProject(path: string): Promise<void>
+  removeProject(id: string): Promise<Project[]>
+  renameProject(id: string, name: string): Promise<Project[]>
+  /** 更新项目元数据（改名/外观/置顶）。Returns the list. */
+  updateProject(id: string, patch: ProjectPatch): Promise<Project[]>
+  /** 显式排序：按给定 id 顺序写 order，未列出的项目按原相对序排在后面。 */
+  reorderProjects(ids: string[]): Promise<Project[]>
+  /** 记录上次使用的项目 id；id 不属于任何项目时主进程忽略（不动 lastProjectId）。 */
+  setLastProject(id: string): Promise<void>
   /** The project to auto-enter on app start (last-used, else first, else null). */
   getStartupProject(): Promise<Project | null>
 
@@ -1109,6 +1160,19 @@ export interface ForgeApi {
     untracked: boolean,
     opts?: { status?: GitFileChange['status']; oldPath?: string }
   ): Promise<void>
+
+
+  /** --- git worktree 隔离（2026-09-01 第 4 期，逐线程 opt-in） ---
+  /** 为项目仓库新建 worktree 并登记台账；名称冲突自动顺延 -2/-3（不复用），
+   *  非 git 仓库抛错。 */
+  createWorktree(repoRoot: string, projectId: string, name: string): Promise<WorktreeRecord>
+  /** 删除 worktree 并清台账；有未提交改动且非 force 时抛错（消息带原因）。
+   *  只许删 Tran 基目录内的 worktree；分支保留在仓库中。 */
+  removeWorktree(path: string, opts?: { force?: boolean }): Promise<void>
+  /** 台账全量（侧栏 wt 徽章 / 删除会话联动用）。 */
+  listWorktrees(): Promise<WorktreeRecord[]>
+  /** 会话 init 拿到 sdkSessionId 后回填台账的 sessionKey（尽力而为）。 */
+  worktreeBindSession(path: string, sessionKey: string): Promise<void>
 
   onAgentEvent(cb: (e: AgentEvent) => void): () => void
   onPermissionRequest(cb: (r: PermissionRequestPayload) => void): () => void

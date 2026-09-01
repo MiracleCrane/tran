@@ -1,7 +1,10 @@
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { promises as fsp } from 'node:fs'
-import { isAbsolute, resolve, sep } from 'node:path'
+import { homedir } from 'node:os'
+import { isAbsolute, join, resolve, sep } from 'node:path'
 import type { GitBranchInfo, GitCommit, GitFileChange, GitStatus, GitWorkingChanges } from '../shared/ipc'
+import { normalizeCwdForCompare } from '../shared/paths'
 import { log } from './logger'
 
 /**
@@ -600,4 +603,135 @@ export async function reset(cwd: string, paths?: string[]): Promise<void> {
 /** Push the current branch and set upstream (git push -u origin HEAD). */
 export async function pushUpstream(cwd: string): Promise<{ stdout: string; stderr: string }> {
   return runGit(cwd, ['push', '-u', 'origin', 'HEAD'], 30_000)
+}
+
+/* ------------------------------------------------------------------ */
+/* git worktree 隔离（2026-09-01 Codex 化第 4 期，逐线程显式 opt-in）。   */
+/* 台账/落盘登记在 worktreeStore.ts，这里只做纯 git 操作。              */
+/* ------------------------------------------------------------------ */
+
+export interface GitWorktreeInfo {
+  path: string
+  /** 短分支名；detached HEAD 时为 null。 */
+  branch: string | null
+  head: string
+}
+
+/** worktree 落盘根：%LOCALAPPDATA%/Tran/worktrees/<repo-hash>/<name>/——
+ *  放系统目录而不是仓库旁边，不污染用户的项目目录（Codex 同款思路）。
+ *  LOCALAPPDATA 缺失（非 Windows）时回退 home 下的隐藏目录兜底。 */
+function worktreeBaseDir(): string {
+  const local = process.env.LOCALAPPDATA
+  return local ? join(local, 'Tran', 'worktrees') : join(homedir(), '.tran-worktrees')
+}
+
+/** repoRoot 归一化路径的短 hash：同一仓库的 worktree 收进同一层目录，
+ *  路径里又不出现可能很长的仓库全路径。 */
+function repoHash(repoRoot: string): string {
+  return createHash('sha1').update(normalizeCwdForCompare(repoRoot)).digest('hex').slice(0, 10)
+}
+
+/** worktree 名同时是目录末段与分支名（tran/<name>）的一段：只放行 ASCII
+ *  安全字符，杜绝路径分隔符/「..」越出基目录，也保证 refname 合法。 */
+function assertWorktreeName(name: string): string {
+  const n = name.trim()
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(n)) {
+    throw new Error(`worktree 名称不合法（只允许字母/数字/._-，且以字母或数字开头）：${name}`)
+  }
+  return n
+}
+
+/** 在基目录下为 repoRoot 新建 worktree：git worktree add <path> -b tran/<name>（基于
+ *  当前 HEAD）。
+ *
+ *  冲突策略（选定「追加序号」，不复用已有分支/目录）：复用会把新会话塞进
+ *  另一个线程正在用的工作区，直接违背「逐线程隔离」的初衷。分支已存在或
+ *  目录已存在时顺延 <name>-2、-3…，50 个空位都找不到就报错让用户换名。 */
+export async function createWorktree(
+  repoRoot: string,
+  name: string
+): Promise<{ path: string; branch: string }> {
+  const baseName = assertWorktreeName(name)
+  // 先确认真是 git 仓库（渲染层菜单已对非 git 项目隐藏入口，这里兜底）。
+  if (!(await isGitRepo(repoRoot))) {
+    throw new Error(`不是 git 仓库，无法创建 worktree：${repoRoot}`)
+  }
+  const base = join(worktreeBaseDir(), repoHash(repoRoot))
+  for (let i = 1; i <= 50; i++) {
+    const candidate = i === 1 ? baseName : `${baseName}-${i}`
+    const branch = `tran/${candidate}`
+    const target = join(base, candidate)
+    const branchExists = await runGit(repoRoot, [
+      ...READ_ONLY_GIT_FLAGS, 'rev-parse', '--verify', '-q', `refs/heads/${branch}`
+    ]).then(() => true, () => false)
+    const dirExists = await fsp.stat(target).then(() => true, () => false)
+    if (branchExists || dirExists) continue
+    await fsp.mkdir(base, { recursive: true })
+    await runGit(repoRoot, ['worktree', 'add', target, '-b', branch], 30_000)
+    return { path: target, branch }
+  }
+  throw new Error(`worktree 名称冲突过多（${baseName}…${baseName}-50 都被占用），换个名字再试`)
+}
+
+/** 删除 worktree。非 force 且工作区有未提交改动（含未跟踪文件）时拒绝并
+ *  说明原因——用 readStatus（读不出来会抛）而不是 getStatus（吞错回"干净"），
+ *  状态读不出来绝不能当成"干净"放行删除。
+ *
+ *  只许删 Tran 基目录之内的路径：这个入口背后跟着「删会话」联动，传错
+ *  路径也不能伤及用户的普通检出。
+ *
+ *  分支 tran/<name> 刻意保留：worktree 删了提交还在分支上，用户随时能找回。 */
+export async function removeWorktree(
+  repoRoot: string,
+  path: string,
+  opts: { force?: boolean } = {}
+): Promise<void> {
+  const target = resolve(path)
+  const base = resolve(worktreeBaseDir())
+  if (target !== base && !target.startsWith(base + sep)) {
+    throw new Error(`只允许删除 Tran 管理的 worktree（${base} 之内）：${path}`)
+  }
+  if (!opts.force) {
+    let status: Omit<GitStatus, 'ahead' | 'behind'>
+    try {
+      status = await readStatus(target)
+    } catch (error) {
+      throw new Error(`无法读取 worktree 状态，删除已中止：${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (!status.clean) {
+      throw new Error(
+        `worktree 有未提交改动，未删除（暂存 ${status.staged.length}、未暂存 ${status.unstaged.length}` +
+        `、未跟踪 ${status.untracked.length}、冲突 ${status.conflicts.length}）：${target}`
+      )
+    }
+  }
+  await runGit(repoRoot, ['worktree', 'remove', ...(opts.force ? ['--force'] : []), target], 30_000)
+}
+
+/** git worktree list --porcelain：每块 worktree <path> / HEAD <sha> /
+ *  branch refs/heads/<name>（detached 无 branch 行），空行分隔。 */
+export async function listWorktrees(repoRoot: string): Promise<GitWorktreeInfo[]> {
+  const { stdout } = await runGit(repoRoot, [...READ_ONLY_GIT_FLAGS, 'worktree', 'list', '--porcelain'])
+  const out: GitWorktreeInfo[] = []
+  let cur: Partial<GitWorktreeInfo> | null = null
+  const flush = (): void => {
+    if (cur?.path) out.push({ path: cur.path, branch: cur.branch ?? null, head: cur.head ?? '' })
+    cur = null
+  }
+  for (const line of stdout.split('\n')) {
+    if (!line) {
+      flush()
+      continue
+    }
+    if (line.startsWith('worktree ')) {
+      flush()
+      cur = { path: line.slice('worktree '.length) }
+    } else if (cur && line.startsWith('HEAD ')) {
+      cur.head = line.slice('HEAD '.length)
+    } else if (cur && line.startsWith('branch ')) {
+      cur.branch = line.slice('branch '.length).replace(/^refs\/heads\//, '')
+    }
+  }
+  flush()
+  return out
 }

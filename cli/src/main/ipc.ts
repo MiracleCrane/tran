@@ -54,6 +54,8 @@ import {
   addProject,
   removeProject,
   renameProject,
+  updateProject,
+  reorderProjects,
   setLastProject,
   getStartupProject
 } from './projects'
@@ -79,6 +81,7 @@ import { fetchSessionTodos } from './kimiTodos'
 import { getPlanUsageCached } from './usageService'
 import { getDeepseekBalanceCached, invalidateDeepseekBalanceCache } from './deepseekService'
 import { disposeKimiHistoryClient, listKimiSessions } from './kimiHistory'
+import { matchProjectByCwd } from '../shared/projectMatch'
 import { deleteClaudeSession, listClaudeSessions, readClaudeSessionMessages } from './claudeHistory'
 import { deleteKimiSession } from './sessionDelete'
 import { markSessionDeleted } from './deletedSessions'
@@ -96,6 +99,13 @@ import {
   setSessionProjectAssignment
 } from './sessionProjects'
 import { allAiTitles, generateAiTitlesBatch, getSessionPreview } from './aiTitles'
+import { ensureScratchDir } from './scratchDirs'
+import {
+  bindWorktreeSession,
+  createWorktreeRecord,
+  listWorktreeRecords,
+  removeWorktreeRecord
+} from './worktreeStore'
 import { getSessionTasks } from './kimiServerApi'
 import type { GoalControlAction, GoalStartOptions } from './goalStore'
 import * as gitModule from './git'
@@ -114,6 +124,7 @@ import type {
   DeleteMcpServerArgs,
   Provider,
   Project,
+  ProjectPatch,
   SkillInfo,
   MarketplacePlugin,
   Preferences,
@@ -738,6 +749,13 @@ export function registerIpc(
     })
   })
 
+  // 任务栏闪烁（2026-09-01：agent 提问/待授权且窗口无焦点时渲染层开闪；
+  // 回答完渲染层停，聚焦由 index.ts 的 focus 监听兜底停——渲染层忙也能停）。
+  ipcMain.handle('forge:flashFrame', (_e, flag: unknown) => {
+    if (process.platform !== 'win32') return
+    withWindow((win) => win.flashFrame(flag === true))
+  })
+
   // --- 图片右键菜单（#22）：复制到剪贴板 / 另存为。src 支持 data:/file:/http(s):
   //  URL 与绝对路径；blob: 由渲染进程先转成 data: 再传入。 ---
   const loadNativeImage = async (src: string): Promise<Electron.NativeImage> => {
@@ -1144,19 +1162,31 @@ export function registerIpc(
   )
 
   ipcMain.handle('forge:listProjects', async (): Promise<Project[]> => listProjects())
-  // 「不在项目中工作」：无项目会话落在用户主目录（Codex 的 no-project 选项）。
+  // 主目录仍下发：侧栏把 cwd=主目录的历史会话归并到「无项目」组（ProjectSwitcher/Sidebar 用）；
+  // 2026-09-01 第 2 期起新的无项目会话改落 scratch 目录（forge:ensureScratchDir）。
   ipcMain.handle('forge:getHomeDir', async (): Promise<string> => homedir())
+  // 无项目会话独立工作目录（2026-09-01 Codex 化第 2 期）：Documents/Tran/<日期>/session-…，
+  // mkdir 失败回退 userData/scratch（见 scratchDirs.ts）。
+  ipcMain.handle('forge:ensureScratchDir', async (): Promise<string> => ensureScratchDir())
   ipcMain.handle('forge:addProject', async (_e, path: string, name?: string): Promise<Project[]> =>
     addProject(requireString(path, 'path').trim(), name)
   )
-  ipcMain.handle('forge:removeProject', async (_e, path: string): Promise<Project[]> =>
-    removeProject(path)
+  ipcMain.handle('forge:removeProject', async (_e, id: string): Promise<Project[]> =>
+    removeProject(requireString(id, 'id').trim())
   )
-  ipcMain.handle('forge:renameProject', async (_e, path: string, name: string): Promise<Project[]> =>
-    renameProject(path, name)
+  ipcMain.handle('forge:renameProject', async (_e, id: string, name: string): Promise<Project[]> =>
+    renameProject(requireString(id, 'id').trim(), name)
   )
-  ipcMain.handle('forge:setLastProject', async (_e, path: string): Promise<void> => {
-    setLastProject(requireString(path, 'path').trim())
+  ipcMain.handle(
+    'forge:updateProject',
+    async (_e, id: string, patch: ProjectPatch): Promise<Project[]> =>
+      updateProject(requireString(id, 'id').trim(), patch ?? {})
+  )
+  ipcMain.handle('forge:reorderProjects', async (_e, ids: string[]): Promise<Project[]> =>
+    reorderProjects(Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [])
+  )
+  ipcMain.handle('forge:setLastProject', async (_e, id: string): Promise<void> => {
+    setLastProject(requireString(id, 'id').trim())
   })
   ipcMain.handle('forge:getStartupProject', async (): Promise<Project | null> => getStartupProject())
 
@@ -1170,6 +1200,11 @@ export function registerIpc(
     // 错误——用 Kimi 的时候冒出一堆 Claude Code 的对话（反之亦然），既看不懂
     // 也点不进去（点进去要换后端，等于莫名其妙切走了引擎）。
     const backend = normalizeAgentBackend(getPreferences().agentBackend ?? DEFAULT_AGENT_BACKEND_ID)
+    // 2026-09-01 第 1.5 期：scope 'project' 先按 cwd 匹配已注册项目（rootPaths
+    // 前缀、最长匹配），命中则按该项目 rootPaths 过滤（子目录里的会话也算本
+    // 项目）；cwd 不属于任何项目时传 undefined，回退旧的精确 cwd 过滤。
+    // 渲染层调用签名不变（仍只传 cwd），项目解析在主进程内完成。
+    const projectRoots = all ? undefined : matchProjectByCwd(cwd, listProjects())?.rootPaths
     const items =
       backend === 'claude'
         ? await listClaudeSessions(cwd, { limit, offset, scope: all ? 'all' : 'project' }).catch(
@@ -1185,6 +1220,7 @@ export function registerIpc(
             limit,
             offset,
             scope: all ? 'all' : 'project',
+            projectRoots,
             // 无标题会话只豁免"本进程还持有的"那些，见 listKimiSessions 注释。
             liveIds: bridge.liveAcpSessionIds()
           })
@@ -1448,18 +1484,18 @@ export function registerIpc(
   })
 
   // 会话→项目归属（2026-08-27「移动到项目」）：Tran 侧元数据，cwd 不动。
-  // projectPath === undefined = 清除覆盖（回到跟随 cwd 默认）。
+  // 值 = projectId（2026-09-01 起）；undefined = 清除覆盖（回到跟随 cwd 默认）。
   ipcMain.handle(
     'forge:getSessionProjectAssignments',
     async (): Promise<Record<string, string | null>> => getSessionProjectAssignments()
   )
   ipcMain.handle(
     'forge:setSessionProjectAssignment',
-    async (_e, sessionKey: string, projectPath?: string | null): Promise<void> => {
+    async (_e, sessionKey: string, projectId?: string | null): Promise<void> => {
       const key = requireString(sessionKey, 'sessionKey')
-      if (projectPath === undefined) clearSessionProjectAssignment(key)
-      else if (projectPath === null) setSessionProjectAssignment(key, null)
-      else setSessionProjectAssignment(key, requireString(projectPath, 'projectPath').trim())
+      if (projectId === undefined) clearSessionProjectAssignment(key)
+      else if (projectId === null) setSessionProjectAssignment(key, null)
+      else setSessionProjectAssignment(key, requireString(projectId, 'projectId').trim())
     }
   )
 
@@ -1622,6 +1658,26 @@ export function registerIpc(
       )
     }
   )
+
+  // --- git worktree 隔离（2026-09-01 Codex 化第 4 期，逐线程 opt-in） ---
+  // 台账在 worktreeStore.ts；git 操作的失败原因（非 git 仓库/未提交改动等）
+  // 以抛错形式回渲染层，由入口弹窗展示。
+  ipcMain.handle(
+    'forge:createWorktree',
+    async (_e, repoRoot: string, projectId: string, name: string) =>
+      createWorktreeRecord(
+        requireString(repoRoot, 'repoRoot'),
+        requireString(projectId, 'projectId').trim(),
+        requireString(name, 'name').trim()
+      )
+  )
+  ipcMain.handle('forge:removeWorktree', async (_e, path: string, opts?: { force?: boolean }): Promise<void> => {
+    await removeWorktreeRecord(requireString(path, 'path'), { force: !!opts?.force })
+  })
+  ipcMain.handle('forge:listWorktrees', async () => listWorktreeRecords())
+  ipcMain.handle('forge:worktreeBindSession', async (_e, path: string, sessionKey: string): Promise<void> => {
+    bindWorktreeSession(requireString(path, 'path'), requireString(sessionKey, 'sessionKey'))
+  })
 
   return bridge
 }

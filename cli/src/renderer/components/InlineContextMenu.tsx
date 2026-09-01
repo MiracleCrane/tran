@@ -12,6 +12,8 @@ import { createPortal } from 'react-dom'
 export interface InlineMenuItem {
   label: string
   action: () => void
+  /** 可选色点（项目外观选色用）：渲染在 label 前的小圆点。 */
+  swatch?: string
 }
 
 interface InlineMenuState {
@@ -93,6 +95,12 @@ export default function InlineContextMenuHost(): JSX.Element | null {
           }}
           className={itemClass}
         >
+          {item.swatch && (
+            <span
+              className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle"
+              style={{ background: item.swatch }}
+            />
+          )}
           {item.label}
         </button>
       ))}

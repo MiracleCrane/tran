@@ -6,8 +6,8 @@ requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28",
     "textual>=0.86",
+    "websockets>=17.0",
 ]
 
 [tool.pytest.ini_options]
 python_files = ["test_*.py"]
-

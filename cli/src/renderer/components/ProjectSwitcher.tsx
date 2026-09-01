@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useSessionStore } from '../store/sessionStore'
-import type { ClaudeExecutionBackend, Project } from '../../shared/ipc'
+import type { ClaudeExecutionBackend, Project, ProjectPatch } from '../../shared/ipc'
 import Collapse from './Collapse'
 import HoverTip from './HoverTip'
+import { showInlineContextMenu, type InlineMenuItem } from './InlineContextMenu'
 import { isWslProjectPath, normalizeCwdForCompare } from '../../shared/paths'
 import { emitForgeEvent, onForgeEvent } from '../events'
 
@@ -68,6 +69,16 @@ const HomeIcon = (): JSX.Element => (
 
 const PROJECT_SWITCHER_CLOSE_ELEVATION_MS = 560
 
+/** 项目外观预设色（2026-09-01 一等实体化：右键菜单选色，图标先不做）。 */
+const PROJECT_PRESET_COLORS: { label: string; value: string }[] = [
+  { label: '琥珀', value: '#f59e0b' },
+  { label: '红', value: '#ef4444' },
+  { label: '绿', value: '#22c55e' },
+  { label: '蓝', value: '#3b82f6' },
+  { label: '紫', value: '#a855f7' },
+  { label: '粉', value: '#ec4899' }
+]
+
 function normalizePickedProjectPath(path: string, backend: ClaudeExecutionBackend): string {
   if (backend !== 'wsl') return path
   return path.replace(/^\\\\wsl\$\\/i, '\\\\wsl.localhost\\')
@@ -76,6 +87,7 @@ function normalizePickedProjectPath(path: string, backend: ClaudeExecutionBacken
 export default function ProjectSwitcher(): JSX.Element | null {
   const meta = useSessionStore((s) => s.meta)
   const switchProject = useSessionStore((s) => s.switchProject)
+  const switchToScratch = useSessionStore((s) => s.switchToScratch)
   const reset = useSessionStore((s) => s.reset)
 
   const [projects, setProjects] = useState<Project[]>([])
@@ -105,9 +117,9 @@ export default function ProjectSwitcher(): JSX.Element | null {
       window.removeEventListener('resize', close)
     }
   }, [open])
-  const [editingPath, setEditingPath] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
-  const [confirmPath, setConfirmPath] = useState<string | null>(null)
+  const [confirmId, setConfirmId] = useState<string | null>(null)
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   // 文件选择器等待指示（局部小字，替代整屏转圈）。
   const [picking, setPicking] = useState(false)
@@ -179,23 +191,25 @@ export default function ProjectSwitcher(): JSX.Element | null {
 
   // #14 归一化比较：meta.cwd 可能来自 session/list（正斜杠形式），与项目
   // 列表里的反斜杠路径 === 永不匹配，选中高亮/当前项目判定会失效。
+  // 2026-09-01：cwd 命中项目 rootPaths 任一条即算该项目。
   const currentCwd = meta?.cwd ? normalizeCwdForCompare(meta.cwd) : null
   const current = currentCwd
-    ? projects.find((p) => normalizeCwdForCompare(p.path) === currentCwd) ?? null
+    ? projects.find((p) =>
+        p.rootPaths.some((root) => normalizeCwdForCompare(root) === currentCwd)
+      ) ?? null
     : null
   // cwd 不在已添加项目里 = 无项目会话（Codex 的 "no project" 形态），
   // 标签直说，不再拿目录末段冒充项目名；完整路径挂 HoverTip 气泡。
   const currentLabel = current?.name ?? '无项目'
 
-  /** 「不在项目中工作」：会话落在用户主目录，不进项目列表（addProject 只收
-   *  显式添加的目录——switchProject 不会污染项目列表）。 */
+  /** 「不在项目中工作」（2026-09-01 Codex 化第 2 期）：会话落进新建的独立
+   *  scratch 目录（Documents/Tran/<日期>/session-…），不再占主目录，也不进
+   *  项目列表。每次点击都是一个新会话目录（Codex 的 new scratch thread 语义）；
+   *  历史主目录会话不受影响（侧栏仍按 cwd 列出）。 */
   const switchToNoProject = async (): Promise<void> => {
     ++projectActionSeqRef.current
     setOpen(false)
-    const home = await window.api.getHomeDir().catch(() => null)
-    if (!home) return
-    if (currentCwd && normalizeCwdForCompare(home) === currentCwd) return
-    void switchProject(home)
+    void switchToScratch()
   }
 
   const inferBackendFromPath = (
@@ -230,37 +244,85 @@ export default function ProjectSwitcher(): JSX.Element | null {
     setProjects(list)
     emitForgeEvent('projectsChanged')
     const normalizedDir = normalizePickedProjectPath(dir, targetBackend)
-    const savedPath = list.find((p) => p.path === normalizedDir)?.path ?? normalizedDir
-    void switchProject(savedPath)
+    const saved = list.find((p) =>
+      p.rootPaths.some((root) => normalizeCwdForCompare(root) === normalizeCwdForCompare(normalizedDir))
+    )
+    void switchProject(saved?.rootPaths[0] ?? normalizedDir)
   }
 
-  const onSwitch = (path: string): void => {
+  const onSwitch = (p: Project): void => {
     ++projectActionSeqRef.current
     setOpen(false)
-    if (currentCwd && normalizeCwdForCompare(path) === currentCwd) return
-    void switchProject(path)
+    if (current?.id === p.id) return
+    void switchProject(p.rootPaths[0])
   }
 
-  const commitRename = async (path: string): Promise<void> => {
+  const commitRename = async (id: string): Promise<void> => {
     const actionSeq = ++projectActionSeqRef.current
-    const list = await window.api.renameProject(path, editText)
+    const list = await window.api.renameProject(id, editText)
     if (projectActionSeqRef.current !== actionSeq) return
     setProjects(list)
     emitForgeEvent('projectsChanged')
-    setEditingPath(null)
+    setEditingId(null)
   }
 
-  const doRemove = async (path: string): Promise<void> => {
+  const doRemove = async (id: string): Promise<void> => {
     const actionSeq = ++projectActionSeqRef.current
-    setConfirmPath(null)
-    const list = await window.api.removeProject(path)
+    setConfirmId(null)
+    const list = await window.api.removeProject(id)
     if (projectActionSeqRef.current !== actionSeq) return
     setProjects(list)
     emitForgeEvent('projectsChanged')
-    if (currentCwd && normalizeCwdForCompare(path) === currentCwd) {
-      if (list[0]) void switchProject(list[0].path)
+    if (current?.id === id) {
+      if (list[0]?.rootPaths[0]) void switchProject(list[0].rootPaths[0])
       else reset() // removed the last project → back to Onboarding
     }
+  }
+
+  /** 外观/置顶补丁（右键菜单入口）。updateProject 返回最新列表，原地替换。 */
+  const applyPatch = async (id: string, patch: ProjectPatch): Promise<void> => {
+    const actionSeq = ++projectActionSeqRef.current
+    const list = await window.api.updateProject(id, patch)
+    if (projectActionSeqRef.current !== actionSeq) return
+    setProjects(list)
+    emitForgeEvent('projectsChanged')
+  }
+
+  /** 「在 worktree 中隔离运行」（2026-09-01 第 4 期）：建 worktree 起新会话，
+   *  归属覆盖/台账回填由 sessionStore.switchToWorktree 串起。 */
+  const startWorktreeSession = (p: Project): void => {
+    ++projectActionSeqRef.current
+    setOpen(false)
+    void useSessionStore.getState().switchToWorktree(p)
+  }
+
+  /** 项目行右键菜单（2026-09-01）：置顶/取消置顶 + 预设色点（图标先不做）。
+   *  2026-09-01 第 4 期：git 项目追加「在 worktree 中隔离运行」——是否 git
+   *  仓库要异步查，查到才拼菜单（非 git 项目该项不出现）。 */
+  const showProjectMenu = async (p: Project, e: MouseEvent<HTMLElement>): Promise<void> => {
+    // 先挡默认菜单/冒泡：下面的 isGitRepo 是异步的，showInlineContextMenu
+    // 自带的 preventDefault 等不到它回来。
+    e.preventDefault()
+    e.stopPropagation()
+    const isGit = await window.api.isGitRepo(p.rootPaths[0] ?? '').catch(() => false)
+    const items: InlineMenuItem[] = [
+      ...(isGit
+        ? [{ label: '在 worktree 中隔离运行', action: () => startWorktreeSession(p) }]
+        : []),
+      {
+        label: p.pinned ? '取消置顶' : '置顶',
+        action: () => void applyPatch(p.id, { pinned: !p.pinned })
+      },
+      ...PROJECT_PRESET_COLORS.map((c) => ({
+        label: `${p.appearance?.color === c.value ? '✓ ' : ''}${c.label}`,
+        swatch: c.value,
+        action: () => void applyPatch(p.id, { appearance: { color: c.value } })
+      })),
+      ...(p.appearance?.color
+        ? [{ label: '清除颜色', action: () => void applyPatch(p.id, { appearance: { color: '' } }) }]
+        : [])
+    ]
+    showInlineContextMenu(e, items)
   }
 
   // 标题栏项目 chip（2026-08-26 从侧栏顶部搬进 WindowTitlebar，用户要求
@@ -268,7 +330,7 @@ export default function ProjectSwitcher(): JSX.Element | null {
   // 带底色/描边/hover 的按钮态，不再是纯展示文本。
   const trigger = (
     <HoverTip
-      tip={picking ? '正在打开文件选择器…' : (current?.path ?? meta?.cwd ?? '')}
+      tip={picking ? '正在打开文件选择器…' : (current?.rootPaths[0] ?? meta?.cwd ?? '')}
       tipClassName="break-all text-left"
     >
       <button
@@ -293,6 +355,9 @@ export default function ProjectSwitcher(): JSX.Element | null {
     ? ['windows', 'wsl']
     : ['windows']
 
+  // 置顶项目排在前面（组内保持主进程给的 order/createdAt 顺序——sort 稳定）。
+  const orderedProjects = [...projects].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned))
+
   // 共享的项目列表 + 「添加」行：`open` 驱动外层 Collapse 的开合动画，
   // 行内容进来就是定稿（不做逐行 stagger，见下方行内注释）。
   const listContent = (
@@ -303,17 +368,17 @@ export default function ProjectSwitcher(): JSX.Element | null {
         )}
         {/* 主目录若被注册成了项目，这里滤掉——它和下面的「不在项目中工作」
             是同一个 cwd，只留那一行（2026-08-27 用户拍板合并）。 */}
-        {projects
-          .filter((p) => !homeDir || normalizeCwdForCompare(p.path) !== normalizeCwdForCompare(homeDir))
+        {orderedProjects
+          .filter((p) => !homeDir || !p.rootPaths.some((root) => normalizeCwdForCompare(root) === normalizeCwdForCompare(homeDir)))
           .map((p) => {
-          const isCurrent = currentCwd !== null && normalizeCwdForCompare(p.path) === currentCwd
-          const editing = editingPath === p.path
-          const confirming = confirmPath === p.path
+          const isCurrent = current?.id === p.id
+          const editing = editingId === p.id
+          const confirming = confirmId === p.id
           return (
             // 2026-08：删掉逐行 stagger 级联。逐行延迟淡入会让每一项的截断宽度
             // 在动画期间反复变化（用户截图反馈"点开之后内容一直在变"），
             // 开合动画交给外层 Collapse 一次做完，行内容进来就是定稿。
-            <div key={p.path} className="group relative">
+            <div key={p.id} className="group relative">
               {editing ? (
                 <input
                   autoFocus
@@ -322,29 +387,32 @@ export default function ProjectSwitcher(): JSX.Element | null {
                   onKeyDown={(e) => {
                     // 输入法组词中的 Enter 是确认候选，不能当成提交项目重命名。
                     if (e.nativeEvent.isComposing || e.keyCode === 229) return
-                    if (e.key === 'Enter') void commitRename(p.path)
-                    else if (e.key === 'Escape') setEditingPath(null)
+                    if (e.key === 'Enter') void commitRename(p.id)
+                    else if (e.key === 'Escape') setEditingId(null)
                   }}
-                  onBlur={() => void commitRename(p.path)}
+                  onBlur={() => void commitRename(p.id)}
                   className="my-0.5 h-8 w-full rounded-xl border border-accent/70 bg-bg-base/80 px-2.5 text-[11px] text-zinc-100 outline-none"
                 />
               ) : (
                 <button
-                  onClick={() => void onSwitch(p.path)}
+                  onClick={() => void onSwitch(p)}
+                  onContextMenu={(e) => void showProjectMenu(p, e)}
                   className={`flex min-h-8 w-full items-center gap-2 rounded-xl px-2.5 py-1 text-left text-[11px] transition ${
                     isCurrent
                       ? 'glass-active text-zinc-100'
                       : 'text-zinc-400 hover:bg-white/[0.055] hover:text-zinc-200'
                   }`}
                 >
+                  {/* 项目色点（外观设置优先），否则沿用「当前项目」指示点。 */}
                   <span
                     className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                      isCurrent ? 'bg-accent' : 'bg-transparent'
+                      p.appearance?.color ? '' : isCurrent ? 'bg-accent' : 'bg-transparent'
                     }`}
+                    style={p.appearance?.color ? { background: p.appearance.color } : undefined}
                   />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{p.name}</span>
-                    <span className="block truncate text-[10px] text-zinc-600">{p.path}</span>
+                    <span className="block truncate text-[10px] text-zinc-600">{p.rootPaths[0]}</span>
                   </span>
                 </button>
               )}
@@ -360,7 +428,7 @@ export default function ProjectSwitcher(): JSX.Element | null {
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
-                          void doRemove(p.path)
+                          void doRemove(p.id)
                         }}
                         className="rounded bg-red-950/80 px-1.5 py-0.5 text-[10px] text-red-300 hover:bg-red-900/80"
                       >
@@ -369,7 +437,7 @@ export default function ProjectSwitcher(): JSX.Element | null {
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
-                          setConfirmPath(null)
+                          setConfirmId(null)
                         }}
                         className="rounded bg-bg-base/80 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-bg-hover"
                       >
@@ -382,7 +450,7 @@ export default function ProjectSwitcher(): JSX.Element | null {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            setEditingPath(p.path)
+                            setEditingId(p.id)
                             setEditText(p.name)
                           }}
                           aria-label="重命名"
@@ -395,7 +463,7 @@ export default function ProjectSwitcher(): JSX.Element | null {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            setConfirmPath(p.path)
+                            setConfirmId(p.id)
                           }}
                           aria-label="删除"
                           className="rounded-lg p-1 text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
@@ -412,8 +480,8 @@ export default function ProjectSwitcher(): JSX.Element | null {
         })}
       </div>
       <div className="mt-0.5 border-t border-white/[0.06] pt-0.5">
-        {/* 无项目入口（Codex 同款 "work without a project"）：cwd 落到主目录，
-            不进项目列表。当前就是无项目态时禁用显示「当前」。 */}
+        {/* 无项目入口（Codex 同款 "work without a project"）：2026-09-01 第 2 期起
+            cwd 落到新建的独立 scratch 目录（原来是主目录），不进项目列表。 */}
         <button
           type="button"
           onClick={() => void switchToNoProject()}
@@ -422,7 +490,7 @@ export default function ProjectSwitcher(): JSX.Element | null {
           <HomeIcon />
           <span className="min-w-0 flex-1">
             <span className="block truncate">不在项目中工作</span>
-            <span className="block truncate text-[10px] text-zinc-600">会话落在主目录，不占用项目位</span>
+            <span className="block truncate text-[10px] text-zinc-600">新建独立工作目录，不占用项目位</span>
           </span>
         </button>
         <div

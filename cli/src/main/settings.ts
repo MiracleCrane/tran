@@ -1,4 +1,5 @@
 import { app, safeStorage } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
 import { join } from 'node:path'
 import { readJsonSafe, writeJsonAtomic } from './atomicWrite'
@@ -18,7 +19,9 @@ import type {
 import { AGENT_BACKEND_IDS } from '../shared/agentBackends'
 import { normalizeCwdForCompare } from '../shared/paths'
 
-const SETTINGS_SCHEMA_VERSION = 1
+// 2026-09-01 v1→v2：项目一等实体化（projects 条目 path→{id, rootPaths[]}，
+// lastProjectPath→lastProjectId）。迁移在 normalizeSettings 里幂等完成。
+const SETTINGS_SCHEMA_VERSION = 2
 const EFFORT_LEVELS = new Set<EffortLevel>(['low', 'high', 'max'])
 const PERMISSION_MODES = new Set<PermissionMode>([
   'default',
@@ -59,8 +62,13 @@ interface PersistedSettings {
   wslActiveProviderId?: string | null
   /** Saved working directories shown in the sidebar project switcher. */
   projects?: Project[]
-  /** Last-used project path (auto-entered on app start). */
-  lastProjectPath?: string
+  /** 2026-09-01 项目模型 Codex 化第 3 期 feature-flag：切项目不杀会话、多项目
+   *  并行（每项目记「当前线程」指针，切回直接 attach 接管）。默认开（undefined
+   *  按开处理）；显式 false = switchProject 回退旧语义（不记指针、恒懒创建新
+   *  会话）。 */
+  projectsV2Parallel?: boolean
+  /** Last-used project id (auto-entered on app start). */
+  lastProjectId?: string
   /** Preferences managed by the Settings panel. */
   agentBackend?: AgentBackendId
   defaultEffort?: EffortLevel
@@ -255,17 +263,58 @@ function normalizeSummaryProfiles(value: unknown): StoredSummaryProfile[] | unde
   return out
 }
 
+// 2026-09-01 项目一等实体化：新形态 {id, name, rootPaths[], ...}；旧形态
+// {path, name, addedAt} 在这里迁移（path→rootPaths[0]、addedAt→createdAt、
+// 补 randomUUID 的 id）。幂等：已是新形态的条目原样通过，重复规范化不会再
+// 生成新 id。
 function normalizeProject(value: unknown): Project | null {
   const project = asRecord(value)
   if (!project) return null
+  const now = Date.now()
+  const id = optionalString(project.id)?.trim()
+  const rootPaths = Array.isArray(project.rootPaths)
+    ? project.rootPaths.filter((p): p is string => typeof p === 'string' && !!p.trim())
+    : []
+  if (id && rootPaths.length) {
+    const createdAt =
+      typeof project.createdAt === 'number' && Number.isFinite(project.createdAt)
+        ? project.createdAt
+        : now
+    const out: Project = {
+      id,
+      name: optionalString(project.name) ?? rootPaths[0],
+      rootPaths,
+      createdAt,
+      updatedAt:
+        typeof project.updatedAt === 'number' && Number.isFinite(project.updatedAt)
+          ? project.updatedAt
+          : createdAt
+    }
+    const appearance = asRecord(project.appearance)
+    if (appearance) {
+      const color = optionalString(appearance.color)
+      const icon = optionalString(appearance.icon)
+      if (color || icon) {
+        out.appearance = { ...(color ? { color } : {}), ...(icon ? { icon } : {}) }
+      }
+    }
+    if (typeof project.pinned === 'boolean') out.pinned = project.pinned
+    if (typeof project.order === 'number' && Number.isFinite(project.order)) out.order = project.order
+    return out
+  }
+  // 旧形态（schemaVersion 1）：{path, name, addedAt}
   const path = optionalString(project.path)?.trim()
   if (!path) return null
-  return {
-    path,
-    name: optionalString(project.name) ?? path,
-    addedAt: typeof project.addedAt === 'number' && Number.isFinite(project.addedAt)
+  const addedAt =
+    typeof project.addedAt === 'number' && Number.isFinite(project.addedAt)
       ? project.addedAt
-      : Date.now()
+      : now
+  return {
+    id: randomUUID(),
+    name: optionalString(project.name) ?? path,
+    rootPaths: [path],
+    createdAt: addedAt,
+    updatedAt: addedAt
   }
 }
 
@@ -277,7 +326,7 @@ function normalizeProjects(value: unknown): Project[] | undefined {
   for (const item of value) {
     const project = normalizeProject(item)
     if (!project) continue
-    const key = normalizeCwdForCompare(project.path)
+    const key = normalizeCwdForCompare(project.rootPaths[0])
     if (seen.has(key)) continue
     seen.add(key)
     projects.push(project)
@@ -323,13 +372,30 @@ function normalizeSettings(raw: unknown): PersistedSettings {
   settings.baiduSecretPlain = optionalString(source.baiduSecretPlain)
   settings.deepseekApiKeyEnc = optionalString(source.deepseekApiKeyEnc)
   settings.deepseekApiKeyPlain = optionalString(source.deepseekApiKeyPlain)
-  settings.lastProjectPath = optionalString(source.lastProjectPath)
 
   settings.providers = normalizeProviders(source.providers)
   settings.activeProviderId = normalizeActiveProviderId(source.activeProviderId, settings.providers)
   settings.wslProviders = normalizeProviders(source.wslProviders)
   settings.wslActiveProviderId = normalizeActiveProviderId(source.wslActiveProviderId, settings.wslProviders)
   settings.projects = normalizeProjects(source.projects)
+  settings.projectsV2Parallel = optionalBoolean(source.projectsV2Parallel)
+
+  // 2026-09-01 v1→v2：lastProjectPath（路径）→ lastProjectId（按归一化路径反查
+  // 项目 id）。已是 id 的（v2 数据）校验存在性后保留；指不到项目就丢弃——
+  // 启动时 getStartupProject 会回退到列表第一项。旧字段不再回写。
+  delete (settings as Record<string, unknown>).lastProjectPath
+  const lastProjectId = optionalString(source.lastProjectId)
+  if (lastProjectId && settings.projects?.some((p) => p.id === lastProjectId)) {
+    settings.lastProjectId = lastProjectId
+  } else {
+    const legacyPath = optionalString(source.lastProjectPath)
+    const target = legacyPath ? normalizeCwdForCompare(legacyPath) : null
+    settings.lastProjectId = target
+      ? settings.projects?.find((p) =>
+          p.rootPaths.some((r) => normalizeCwdForCompare(r) === target)
+        )?.id
+      : undefined
+  }
 
   settings.agentBackend = AGENT_BACKEND_IDS.includes(source.agentBackend as AgentBackendId)
     ? source.agentBackend as AgentBackendId

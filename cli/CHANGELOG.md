@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.1.66 - 2026-09-01
+
+### 中文
+
+- 项目模型升级（Codex 化）：项目成为一等实体（独立 id、支持多根目录、置顶与颜色标记），设置与会话归属自动迁移，根治路径写法不一致导致的项目识别问题。
+- 「不在项目中工作」的会话改为自动创建 `文档/Tran/日期/session-时间/` 独立工作目录，并告知 AI 把产出写在该目录，不再污染主目录。
+- 切换项目不再关闭会话：各项目的会话并行保活，切回时免重放直接接管；后台会话淘汰策略改为项目感知，运行中或作为项目当前线程的会话不会被静默销毁（可用 settings.json 的 `projectsV2Parallel: false` 回退旧行为）。
+- git 项目支持按线程在独立 worktree 中隔离运行（项目右键菜单「在 worktree 中隔离运行」），改动落在仓库外目录；删除会话时可选择联动清理 worktree，启动时自动清理僵尸台账。
+- 修复：窄 Markdown 表格的外框不再撑满整行（右侧大片空白）；「本会话 N 个文件已更改」pill 的悬停气泡改为朝下，不再遮挡消息末尾文字。
+- 修复：切换会话（或打开面板再回来）后输入框里的图片等附件不再丢失——附件和文字草稿一样按会话持久保存（此前的暂存修复因组件重挂载从未生效）。
+- 新增：AI 发起提问（AskUserQuestion）或等待权限审批时，若窗口没有焦点，任务栏图标叠加数字角标并闪烁提醒，回答或聚焦后自动停止。
+- 侧栏底色改为 Codex 同款蓝灰 `#1e2027`（按截图逐像素采样），停靠与悬停浮层两态颜色统一。
+- 生成路径改为隐藏 Chrome/Edge 中的原版 SillyTavern 前端 `Generate()`；TUI 不再维护简化 Prompt Builder，世界书、Persona、示例对话、Prompt 顺序、正则、扩展和 token 裁剪与网页保持一致。
+- 隐藏浏览器使用临时 Profile，等待酒馆公开上下文初始化完成后才调用前端模块；TUI 退出或初始化失败时按进程树完整回收，避免残留 Chrome。
+
+### English
+
+- Project model overhaul (Codex-style): projects are now first-class entities (stable id, multi-root paths, pinning, and color tags). Settings and session assignments migrate automatically, fixing project recognition issues caused by inconsistent path spellings.
+- Sessions started outside any project now get their own working directory under `Documents/Tran/date/session-time/` and the agent is told to write outputs there, instead of polluting the home directory.
+- Switching projects no longer closes sessions: per-project sessions stay alive in parallel and reattach instantly without replay. Background-session eviction is now project-aware—running or per-project current threads are never silently destroyed (set `projectsV2Parallel: false` in settings.json for the old behavior).
+- Git projects can run a thread inside an isolated worktree (project context menu "Run isolated in a worktree"); changes land outside the repository. Deleting a session can optionally clean up its worktree, and stale records are pruned at startup.
+- Fixes: narrow Markdown tables no longer stretch their frame across the full message width; the "N files changed" pill tooltip now opens downward so it no longer covers the last lines of a message.
+- Fix: image/file attachments in the composer no longer vanish after switching sessions (or opening a panel and returning)—attachments are now persisted per session like text drafts (the earlier stash fix never worked because the component remounts).
+- New: when the agent asks a question (AskUserQuestion) or waits for a permission decision while the window is unfocused, the taskbar icon shows a numeric badge and flashes; it stops once answered or focused.
+- Sidebar background changed to Codex's blue-gray `#1e2027` (pixel-sampled from a screenshot), unified across docked and peek states.
+- Generation now runs through SillyTavern's original frontend `Generate()` inside a hidden Chrome/Edge page. The simplified TUI prompt builder has been removed, keeping lorebooks, personas, examples, prompt order, regex, extensions, and token budgeting identical to the web UI.
+- The hidden browser uses a temporary profile and waits for SillyTavern's public context before importing frontend modules. Its process tree is cleaned on exit or failed initialization.
+
 ## v1.1.65 - 2026-09-01
 
 ### 中文

@@ -14,7 +14,9 @@ import type {
   SkillInfo,
   GoalInfo,
   KimiTaskInfo,
-  SessionRunningChangedPayload
+  Project,
+  SessionRunningChangedPayload,
+  WorktreeRecord
 } from '../../shared/ipc'
 import type {
   TranscriptItem,
@@ -35,8 +37,10 @@ import type {
 import { pickedFileToUserAttachment, userAttachmentToPickedFile } from '../utils/attachments'
 import { DEFAULT_KIMI_MODEL_ID } from '../../shared/models'
 import { normalizeCwdForCompare } from '../../shared/paths'
+import { matchProjectByCwd } from '../../shared/projectMatch'
 import { emitForgeEvent } from '../events'
 import { backgroundTaskInfo, taskTerminalFromEnvelope } from '../utils/toolStats'
+import { useSessionProjectStore } from './sessionProjectStore'
 import {
   clearTodoOverrides,
   pruneVanishedTodoOverrides,
@@ -254,6 +258,11 @@ interface SessionStore {
   goal: GoalInfo | null
   /** AskUserQuestion 队列（system/elicitation；逐条处理，多问题顺序到达）。 */
   elicitationQueue: ElicitationRequest[]
+  /** 2026-09-01 后台会话「等待用户」计数镜像（键 = bridgeSessionId，值 = 该缓冲
+   *  elicitationQueue + pendingPermissions 条数）：后台缓冲是普通 Map 不可订阅，
+   *  任务栏等待角标（useTaskbarBadge）需要响应式总数，故在 backgroundSessions
+   *  的每个增删/入队处同步维护（setBgWaiting），0 删键。 */
+  bgWaitingCounts: Record<string, number>
   /** #5（对外契约，字段名不可改）正在跑 turn 的会话 sdkSessionId 去重数组：
    *  任何会话（前台/后台）turn 开始加入、结束（result/error/close）移除，
    *  sdkSessionId 未知（init 未到）的会话忽略。侧栏用
@@ -302,8 +311,17 @@ interface SessionStore {
    *  与 newChat 同机制）。bootstrap 内部使用，不给 UI 直接调。 */
   openStartupProject: (cwd: string, model?: string) => Promise<void>
   /** Switch the active working directory (project): close the current session and
-   *  start a fresh one in the new cwd (history is per-cwd in the sidebar). */
-  switchProject: (path: string) => Promise<void>
+   *  start a fresh one in the new cwd (history is per-cwd in the sidebar).
+   *  opts.noProject（2026-09-01 Codex 化第 2 期）：本次是 scratch 无项目会话，
+   *  init 拿到 sdkSessionId 后显式写「不在项目中工作」归属覆盖。
+   *  opts.worktree（2026-09-01 第 4 期）：本次会话跑在项目 worktree 里——cwd 不在
+   *  项目 rootPaths 下，归属覆盖与台账回填要等 init 拿 sdkSessionId 后写。 */
+  switchProject: (path: string, opts?: { noProject?: boolean; worktree?: { projectId: string; path: string } }) => Promise<void>
+  /** 「不在项目中工作」入口：ensureScratchDir 建独立目录后复用 switchProject。 */
+  switchToScratch: () => Promise<void>
+  /** 「在 worktree 中隔离运行」（2026-09-01 第 4 期）：为项目建 worktree，
+   *  新会话 cwd 落到 worktree 路径（复用 switchProject 懒创建通路）。 */
+  switchToWorktree: (project: Project) => Promise<void>
 
   /**
    * 从 kimi 本地 server 补拉待办真值（零 token）。
@@ -1425,6 +1443,81 @@ const backgroundSessions = new Map<string, BackgroundSessionState>()
 /** 缓冲上限：超限时淘汰最旧的空闲缓冲（连后端会话一起销毁，防内存/进程泄漏）。 */
 const BACKGROUND_SESSION_CAP = 12
 
+/** 2026-09-01 bgWaitingCounts 镜像写入（字段语义见 state 声明处注释）。
+ *  快照/attach 里前台队列与镜像会在同一次同步执行内短暂「两头各算一份」，
+ *  React 批处理下界面看不到中间值，总数对外保持连续（不 double、不跌到 0）。 */
+function setBgWaiting(bridgeSessionId: string, count: number): void {
+  useSessionStore.setState((s) => {
+    if (count <= 0 && !(bridgeSessionId in s.bgWaitingCounts)) return s
+    const next = { ...s.bgWaitingCounts }
+    if (count > 0) next[bridgeSessionId] = count
+    else delete next[bridgeSessionId]
+    return { bgWaitingCounts: next }
+  })
+}
+
+// ── 2026-09-01 项目模型 Codex 化第 3 期：切项目不杀会话、多项目并行 ──
+
+/** 每个项目（SCRATCH_THREAD_KEY = 无项目会话）「当前线程」的桥接会话 id。
+ *  **不持久化**——持久化会指到渲染层重载后早已不存在的幽灵会话；重载后后台
+ *  缓冲（backgroundSessions）随之清空，指针靠下一次切换从 live 会话重新建立。
+ *  这里只存指针，归属判定永远现算（resolveThreadScope，与侧栏分组同一函数）。 */
+const currentThreadByProject = new Map<string, string>()
+/** currentThreadByProject 里「无项目」槽位的键。 */
+const SCRATCH_THREAD_KEY = 'scratch'
+
+/** 第 3 期 feature-flag（settings.projectsV2Parallel，默认开）的渲染层缓存：
+ *  启动时 bootstrap 拉取，switchProject 每次拿到 prefs 顺手刷新。关闭时
+ *  switchProject 完全走旧语义（不记指针、不接管，恒懒创建新会话）。 */
+let projectsV2ParallelEnabled = true
+
+function noteProjectsV2Parallel(prefs: { projectsV2Parallel?: boolean } | null): void {
+  if (prefs?.projectsV2Parallel !== undefined) {
+    projectsV2ParallelEnabled = prefs.projectsV2Parallel
+  }
+}
+
+/** 归属镜像还没加载过时先拉一次；读不到按「无覆盖」处理（不阻塞切换）。 */
+async function ensureSessionProjectAssignments(): Promise<Record<string, string | null> | null> {
+  const store = useSessionProjectStore.getState()
+  if (!store.assignments) await store.loadAssignments()
+  return useSessionProjectStore.getState().assignments
+}
+
+/** 2026-09-01 第 3 期：会话/目录的归属槽位（项目 id 或 'scratch'），与侧栏分组
+ *  同一语义——显式覆盖（值 projectId；旧数据可能是路径串，按 id→路径两级解析）
+ *  优先，无覆盖/垃圾覆盖落 matchProjectByCwd（rootPaths 前缀、最长匹配）。
+ *  返回 null = 归属不明（脏目录会话）：不记指针、不参与接管，退化为旧行为——
+ *  attach 错线程是本期最大回归面，宁可不接也不能接错。 */
+function resolveThreadScope(
+  cwd: string,
+  sdkSessionId: string | undefined,
+  projects: Project[],
+  assignments: Record<string, string | null> | null
+): string | null {
+  if (sdkSessionId) {
+    // 归属表的键 = Sidebar.sessionKey（kimi-only 下 runtimeBackend 恒 'windows'，
+    // 与 switchToScratch 写覆盖处一致）。
+    const override = assignments?.[`windows:${sdkSessionId}`]
+    if (override === null) return SCRATCH_THREAD_KEY
+    if (override !== undefined) {
+      if (projects.some((proj) => proj.id === override)) return override
+      const byPath = matchProjectByCwd(override, projects)
+      if (byPath) return byPath.id
+      // 垃圾覆盖（指向已删除项目的旧条目）：视同无覆盖，落 cwd 判定（同侧栏）。
+    }
+  }
+  return matchProjectByCwd(cwd, projects)?.id ?? null
+}
+
+/** 会话缓冲被摘除/销毁时顺手清掉指向它的线程指针（防御；取用指针处也会
+ *  惰性清理腐烂项）。 */
+function dropThreadPointer(bridgeSessionId: string): void {
+  for (const [key, id] of currentThreadByProject) {
+    if (id === bridgeSessionId) currentThreadByProject.delete(key)
+  }
+}
+
 /** 导航离开当前会话前调用：把当前会话状态快照进后台缓冲，配合主进程的
  *  后台化语义，事件流由 foldBackgroundAgentEvent 继续往里累积。 */
 function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
@@ -1466,20 +1559,42 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
     // 排队消息随快照走（显示镜像，详见 queuedMirror 注释）。
     ...(s.pendingQueue.length > 0 ? { queuedMirror: s.pendingQueue } : {})
   })
+  // 等待计数镜像：前台队列随快照进了后台缓冲，紧随其后的导航 set 会把前台
+  // elicitationQueue/pendingPermissions 清空——总数靠这条镜像保持连续。
+  setBgWaiting(meta.sessionId, s.elicitationQueue.length + s.pendingPermissions.length)
   // 优先淘汰空闲会话；全都在跑时（长 turn 叠着开）此前直接 break，Map 会
   // 无上限增长——每个缓冲还在持续累积 items，底下的 bridge 会话也不释放。
-  // 超出硬上限后按插入序淘汰最旧的，哪怕它还在跑。
+  // 2026-09-01 第 3 期起淘汰项目感知：
+  //  - currentThreadByProject 指向的「项目当前线程」永不淘汰——用户切回项目
+  //    要接管的就是它，杀了等于偷偷杀掉用户以为还活着的线程；
+  //  - running 的会话永不自动杀（此前超 HARD_CAP 会连后端销毁正在跑的 turn）。
+  //  软上限内找不到「空闲且非指针」的可淘汰项就停手；超 HARD_CAP 且仍有非
+  //  指针缓冲时降级为**只清缓冲、不动后端**（attach 能力丧失、改走历史重放，
+  //  会话本身在后端继续活着）；缓冲全是各项目当前线程时宁可超限也不动。
   const HARD_CAP = BACKGROUND_SESSION_CAP * 2
+  const protectedThreadIds = new Set(currentThreadByProject.values())
   while (backgroundSessions.size > BACKGROUND_SESSION_CAP) {
-    const idle = [...backgroundSessions.values()].find((bg) => !bg.running)
-    const victim = idle ?? (backgroundSessions.size > HARD_CAP
-      ? backgroundSessions.values().next().value
-      : undefined)
-    if (!victim) break
-    backgroundSessions.delete(victim.bridgeSessionId)
-    void window.api.destroySession(victim.bridgeSessionId).catch(() => {})
-    // #5 连后端一起销毁的会话不再运行。
-    markSdkSessionRunning(victim.sdkSessionId, false)
+    const idle = [...backgroundSessions.values()].find(
+      (bg) => !bg.running && !protectedThreadIds.has(bg.bridgeSessionId)
+    )
+    if (idle) {
+      backgroundSessions.delete(idle.bridgeSessionId)
+      dropThreadPointer(idle.bridgeSessionId)
+      setBgWaiting(idle.bridgeSessionId, 0)
+      void window.api.destroySession(idle.bridgeSessionId).catch(() => {})
+      // #5 连后端一起销毁的会话不再运行。
+      markSdkSessionRunning(idle.sdkSessionId, false)
+      continue
+    }
+    if (backgroundSessions.size <= HARD_CAP) break
+    const oldest = [...backgroundSessions.values()].find(
+      (bg) => !protectedThreadIds.has(bg.bridgeSessionId)
+    )
+    if (!oldest) break
+    // 降级淘汰：只清渲染层缓冲，后端会话保留（destroy 会杀掉还在跑的 turn）。
+    backgroundSessions.delete(oldest.bridgeSessionId)
+    dropThreadPointer(oldest.bridgeSessionId)
+    setBgWaiting(oldest.bridgeSessionId, 0)
   }
 }
 
@@ -1496,10 +1611,88 @@ function takeBackgroundSession(sdkSessionId: string): BackgroundSessionState | n
   for (const bg of backgroundSessions.values()) {
     if (bg.sdkSessionId === sdkSessionId) {
       backgroundSessions.delete(bg.bridgeSessionId)
+      dropThreadPointer(bg.bridgeSessionId)
+      setBgWaiting(bg.bridgeSessionId, 0)
       return bg
     }
   }
   return null
+}
+
+/** #6 后台会话 attach 的共用实现（2026-09-01 第 3 期从 openSession 的 attach
+ *  分支抽出，switchProject 的「切回项目接管当前线程」复用同一条路径）：把
+ *  目标缓冲摘出 Map、当前会话快照进后台、旧桥接后台化、接通启动门闩，再把
+ *  缓冲整体克隆进 store。调用方负责身份核验（cwd/归属比对）与未读清理。 */
+function attachLiveBackgroundSession(
+  get: () => SessionStore,
+  set: (partial: Partial<SessionStore> | ((s: SessionStore) => Partial<SessionStore>)) => void,
+  bg: BackgroundSessionState,
+  opts: {
+    sdkSessionId: string
+    cwd: string
+    agentBackend?: AgentBackendId
+    fallbackModel: string
+    fallbackPermissionMode: PermissionMode
+    oldSessionId?: string
+  }
+): void {
+  // #1/#6 先冲刷（nextSessionNavigationSeq 内部会冲 streamBatcher 的前台
+  // pending 与后台聚合队列），**再**把目标缓冲摘出 Map：顺序反了的话，
+  // 该会话仍在聚合队列里的 delta 会因缓冲已摘除而路由落空、内容丢失。
+  nextSessionNavigationSeq()
+  backgroundSessions.delete(bg.bridgeSessionId)
+  dropThreadPointer(bg.bridgeSessionId)
+  // 等待计数移交前台：下面的大 set 会把 bg.elicitationQueue/pendingPermissions
+  // 整体写回前台 state，镜像键先删，同一次同步执行内合计连续（不 double）。
+  setBgWaiting(bg.bridgeSessionId, 0)
+  snapshotActiveSessionIntoBackground(get)
+  if (opts.oldSessionId) void window.api.closeSession(opts.oldSessionId).catch(() => {})
+  // 桥接早已就绪：sendMessage 的启动门闩直接放行。
+  createSessionStartGate(bg.bridgeSessionId).resolve()
+  // #23 swarmTasks 交接给 App 的订阅 effect（防它的切会话清空抹掉恢复值）。
+  attachedSwarmTasks = { sdkSessionId: opts.sdkSessionId, tasks: bg.swarmTasks }
+  set({
+    starting: false,
+    // #6 后台期间 delta 是原地折叠的（条目/块对象被 mutate，数组引用可能
+    // 没变）：整体克隆一份再入 store，保证 memo 化的行组件拿到新引用。
+    items: cloneTranscriptItems(bg.items),
+    tasks: bg.tasks,
+    // 队列恢复：#29 回收的未送达消息在前，切走时带走的排队镜像在后。
+    pendingQueue: [...(bg.recycledQueue ?? []), ...(bg.queuedMirror ?? [])],
+    sessionConfigDirty: false,
+    sessionModelDirty: false,
+    bridgeEnded: false,
+    planEntries: bg.planEntries,
+    // #23 待办陈旧度时钟与待授权弹窗一并恢复（快照链路见
+    // snapshotActiveSessionIntoBackground）。
+    planUpdatedAt: bg.planUpdatedAt,
+    pendingPermissions: bg.pendingPermissions,
+    contextUsage: bg.contextUsage,
+    mcpServers: bg.mcpServers,
+    modePanel: bg.modePanel,
+    goal: bg.goal,
+    elicitationQueue: bg.elicitationQueue,
+    slashCommands: bg.slashCommands,
+    swarmTasks: bg.swarmTasks,
+    status: {
+      running: bg.running,
+      ...(bg.startedAt ? { startedAt: bg.startedAt } : {}),
+      ...(bg.stall ? { stall: bg.stall } : {}),
+      ...(bg.error ? { error: bg.error } : {})
+    },
+    currentStreamingMsgId: bg.currentStreamingMsgId,
+    meta: {
+      sessionId: bg.bridgeSessionId,
+      ...(opts.agentBackend ? { agentBackend: opts.agentBackend } : {}),
+      sdkSessionId: opts.sdkSessionId,
+      cwd: opts.cwd,
+      model: bg.model || opts.fallbackModel,
+      permissionMode:
+        readStoredPermissionMode(opts.sdkSessionId) ?? bg.permissionMode ?? opts.fallbackPermissionMode,
+      tools: bg.tools
+    }
+  })
+  void get().refreshSessions()
 }
 
 /** 后台会话内容变了：失效它的历史缓存。否则 ended 后走 session/load 重放路径
@@ -1827,6 +2020,9 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
         const req = (msg as unknown as { elicitation?: ElicitationRequest }).elicitation
         if (req?.toolUseID && !bg.elicitationQueue.some((q) => q.toolUseID === req.toolUseID)) {
           bg.elicitationQueue = [...bg.elicitationQueue, req]
+          // 2026-09-01 任务栏等待提醒：后台缓冲不可订阅，计数镜像进 store；
+          // 重复事件被上面的 toolUseID 判断挡掉，不会重复计数。
+          setBgWaiting(bg.bridgeSessionId, bg.elicitationQueue.length + bg.pendingPermissions.length)
         }
       } else if (subtype === 'turn_stall') {
         // #41 疑似无响应：提示随缓冲走，attach 切回后照常显示；recovered 撤掉。
@@ -2102,6 +2298,23 @@ function scheduleInitWatchdog(
  */
 let pendingSessionStart: { sessionId: string; start: () => Promise<void> } | null = null
 
+/** 2026-09-01 第 2 期：等待写显式「不在项目中工作」归属覆盖的桥接会话 id
+ * （switchToScratch → switchProject 登记；归属表的键是 sdkSessionId，要等 init
+ * 事件拿到后才能写）。从未发消息的懒会话会留一条垃圾登记，数十字节，无害。 */
+const pendingNoProjectAssignment = new Set<string>()
+
+/** worktree 名取自项目名（2026-09-01 第 4 期）：分支/目录双用，只留 ASCII
+ *  安全字符（中文项目名会被剔空），空则回退 'wt'；冲突由主进程顺延 -2/-3。 */
+function worktreeNameSlug(name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+  return slug || 'wt'
+}
+
+/** 2026-09-01 第 4 期：等待「归属覆盖写项目 id + 台账回填 sessionKey」的桥接
+ *  会话 id（switchToWorktree → switchProject 登记；两者都要等 init 事件拿到
+ *  sdkSessionId）。从未发消息的懒会话会留一条垃圾登记，数十字节，无害。 */
+const pendingWorktreeAssignments = new Map<string, { projectId: string; path: string }>()
+
 /** 取走并清空该会话的待起任务（没有则返回 null）。 */
 function takePendingSessionStart(sessionId: string): (() => Promise<void>) | null {
   if (!pendingSessionStart || pendingSessionStart.sessionId !== sessionId) return null
@@ -2154,6 +2367,21 @@ function createSessionStartGate(sessionId: string): {
   }
 }
 
+// 2026-09-01 项目一等实体化：setLastProject 只收项目 id。cwd 命中某个已注册
+// 项目的 rootPaths 才记录「上次项目」；不属于任何项目（无项目会话/脏目录会话）
+// 时保持 lastProjectId 不动——不能把启动回退指到一个不存在的项目上。
+async function rememberLastProjectForCwd(cwd: string): Promise<void> {
+  try {
+    const projects = await window.api.listProjects()
+    // 2026-09-01 第 1.5 期：归属匹配统一走共享 matchProjectByCwd（rootPaths
+    // 前缀、最长匹配），与侧栏/主进程 listSessions 同一语义。
+    const hit = matchProjectByCwd(cwd, projects)
+    if (hit) await window.api.setLastProject(hit.id)
+  } catch {
+    /* 记不上不阻塞切换 */
+  }
+}
+
 export const useSessionStore = create<SessionStore>((set, get) => ({
   starting: false,
   bootstrapped: false,
@@ -2184,6 +2412,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   modePanel: defaultModePanel(),
   goal: null,
   elicitationQueue: [],
+  bgWaitingCounts: {},
   runningSdkSessionIds: [],
   composerDrafts: readStoredComposerDrafts(),
   composerAttachments: {},
@@ -2416,6 +2645,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             bg.bridgeSessionId = oldSessionId
             bg.error = error instanceof Error ? error.message : String(error)
             backgroundSessions.set(oldSessionId, bg)
+            // 缓冲改挂回旧桥接：等待计数镜像跟着换键。
+            setBgWaiting(newId, 0)
+            setBgWaiting(oldSessionId, bg.elicitationQueue.length + bg.pendingPermissions.length)
           }
         }
         return
@@ -2643,6 +2875,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   async bootstrap() {
+    // 2026-09-01 第 3 期：启动时拉取 projectsV2Parallel flag（默认开）；此后
+    // switchProject 每次读 prefs 顺手刷新（noteProjectsV2Parallel）。
+    void window.api.getPreferences().then(noteProjectsV2Parallel).catch(() => {})
     if (get().bootstrapped || get().meta) return
     if (startupBootstrapPromise) return startupBootstrapPromise
 
@@ -2652,9 +2887,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     startupBootstrapPromise = (async () => {
       try {
         const proj = await window.api.getStartupProject()
-        if (proj) {
+        if (proj?.rootPaths[0]) {
           const provider = await window.api.getActiveProvider()
-          await get().openStartupProject(proj.path, provider?.model)
+          await get().openStartupProject(proj.rootPaths[0], provider?.model)
         }
       } finally {
         set({ bootstrapped: true })
@@ -2757,12 +2992,75 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  async switchProject(path: string) {
+  async switchProject(path: string, opts?: { noProject?: boolean; worktree?: { projectId: string; path: string } }) {
     cancelActiveHistoryHydration()
     const oldMeta = get().meta
     const newId = uid()
+    // scratch 无项目会话：登记「init 后写显式 null 归属覆盖」——防未来某项目根
+    // 恰好前缀命中 scratch 目录时这条会话被错误归组。
+    if (opts?.noProject) pendingNoProjectAssignment.add(newId)
+    // worktree 会话（第 4 期）：cwd 是 worktree 路径、不在项目 rootPaths 下，
+    // 登记「init 后归属覆盖写 projectId + 台账回填 sessionKey」。
+    if (opts?.worktree) pendingWorktreeAssignments.set(newId, opts.worktree)
     const requestSeq = nextSessionNavigationSeq()
     const isLatestRequest = (): boolean => isCurrentSessionNavigation(get, requestSeq, newId)
+
+    // 2026-09-01 第 3 期（flag projectsV2Parallel，默认开；关闭则下面整段跳过、
+    // 完全走旧语义）：切项目不杀会话——切走前把当前会话记为旧归属槽位的「当前
+    // 线程」，切到目标槽位时若它的当前线程还活着就直接 attach 接管（不新建
+    // 空会话）。归属数据要异步拉（项目表 + 覆盖表），await 放在快照/清空
+    // **之前**（那两步之间不许有 await，流式丢失窗口同 newChat 注释）。读失败
+    // = 归属不明，整段退化为旧懒创建行为。
+    let v2Projects: Project[] | null = null
+    let v2Assignments: Record<string, string | null> | null = null
+    if (projectsV2ParallelEnabled) {
+      v2Projects = await window.api.listProjects().catch(() => null)
+      if (v2Projects) v2Assignments = await ensureSessionProjectAssignments()
+      // 等待期间用户又发起了别的导航：本次切换整个作废（序号已被对方推进）。
+      if (sessionNavigationSeq !== requestSeq) return
+    }
+    // 旧会话的归属槽位：只记**已起过后端**的会话（没 sdkSessionId 的懒空壳
+    // 没有可接管的桥接，记了也是幽灵指针）。
+    const oldScope = v2Projects && oldMeta?.sdkSessionId
+      ? resolveThreadScope(oldMeta.cwd, oldMeta.sdkSessionId, v2Projects, v2Assignments)
+      : null
+    if (v2Projects) {
+      // 目标槽位：scratch 入口显式 'scratch'；否则按项目根匹配。脏目录（不属于
+      // 任何项目）不参与接管，保持懒创建。
+      const targetScope = opts?.noProject
+        ? SCRATCH_THREAD_KEY
+        : matchProjectByCwd(path, v2Projects)?.id ?? null
+      if (targetScope) {
+        const bridgeId = currentThreadByProject.get(targetScope)
+        const bg = bridgeId ? backgroundSessions.get(bridgeId) : undefined
+        if (
+          bg && !bg.ended && bg.sdkSessionId &&
+          // 取用前按现状重算归属核验（记指针后用户可能改过「移动到项目」）。
+          resolveThreadScope(bg.cwd, bg.sdkSessionId, v2Projects, v2Assignments) === targetScope
+        ) {
+          // 命中且活着：旧会话先记指针（attach 内部会把它再快照进后台缓冲、
+          // 桥接后台化），然后接管目标槽位的当前线程。meta.cwd 用线程自己的
+          // 真实 cwd（可能是项目子目录），不是项目根 path。
+          if (oldScope && oldMeta) currentThreadByProject.set(oldScope, oldMeta.sessionId)
+          get().clearUnread(unreadSessionKey(bg.sdkSessionId))
+          attachLiveBackgroundSession(get, set, bg, {
+            sdkSessionId: bg.sdkSessionId,
+            cwd: bg.cwd,
+            ...(oldMeta?.agentBackend ? { agentBackend: oldMeta.agentBackend } : {}),
+            fallbackModel: oldMeta?.model ?? DEFAULT_KIMI_MODEL_ID,
+            fallbackPermissionMode: (oldMeta?.permissionMode ?? 'default') as PermissionMode,
+            ...(oldMeta?.sessionId ? { oldSessionId: oldMeta.sessionId } : {})
+          })
+          void rememberLastProjectForCwd(path)
+          return
+        }
+        // 指针腐烂（缓冲被淘汰/会话已结束/归属已被改走）：顺手清掉，走懒创建。
+        if (bridgeId) currentThreadByProject.delete(targetScope)
+      }
+    }
+    // 未命中接管：旧会话记为旧槽位的当前线程（快照进缓冲后它继续活着）。
+    if (oldScope && oldMeta) currentThreadByProject.set(oldScope, oldMeta.sessionId)
+
     // #6 切走=后台化：快照当前会话进事件缓冲（事件继续累积，切回可 attach）。
     snapshotActiveSessionIntoBackground(get)
     // Flip the UI to the new project BEFORE any IPC: the main view clears
@@ -2815,7 +3113,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // promise——pendingSessionStart 必须紧贴上面的 set 同步登记（之间不能
     // 有 await），否则窗口期内的首条消息既取不到待起任务、也等不到 gate。
     const configPromise = Promise.all([
-      window.api.setLastProject(path),
+      rememberLastProjectForCwd(path),
       window.api.getActiveProvider(),
       window.api.getPreferences().catch(() => null)
     ])
@@ -2866,6 +3164,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
     }
     const [, provider, prefs] = await configPromise
+    noteProjectsV2Parallel(prefs)
     if (!isLatestRequest()) return
     const agentBackend = prefs?.agentBackend ?? oldMeta?.agentBackend
     const model = displayModelForAgent(agentBackend, provider?.model ?? oldMeta?.model)
@@ -2886,6 +3185,38 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // 旧会话是真会话，切走即关闭（热切）。若它是从未懒起的空壳，
     // closeSession 对不存在的后端会话是无害空操作（同 newChat）。
     if (oldMeta?.sessionId) void window.api.closeSession(oldMeta.sessionId).catch(() => {})
+  },
+
+  /** 「不在项目中工作」（2026-09-01 Codex 化第 2 期）：主进程新建独立 scratch
+   *  目录（Documents/Tran/<日期>/session-HHmmss-xxxx，失败回退 userData/scratch），
+   *  再复用 switchProject 全套逻辑（快照后台化 + 懒创建，不发消息不起后端）。 */
+  async switchToScratch() {
+    const dir = await window.api.ensureScratchDir().catch(() => null)
+    if (!dir) {
+      set((s) => ({ status: { ...s.status, error: '无法创建无项目工作目录' } }))
+      return
+    }
+    await get().switchProject(dir, { noProject: true })
+  },
+
+  /** 「在 worktree 中隔离运行」（2026-09-01 Codex 化第 4 期）：主进程建 worktree
+   * （%LOCALAPPDATA%/Tran/worktrees/<repo-hash>/<name>，分支 tran/<name>），再走
+   * switchProject 懒创建通路把新会话 cwd 落到 worktree；归属覆盖/台账回填由
+   * pendingWorktreeAssignments 在 init 时完成。 */
+  async switchToWorktree(project: Project) {
+    const repoRoot = project.rootPaths[0]
+    if (!repoRoot) return
+    let record: WorktreeRecord
+    try {
+      record = await window.api.createWorktree(repoRoot, project.id, worktreeNameSlug(project.name))
+    } catch (error) {
+      // 失败要当面报（同 switchToScratch 的 scratch 目录失败处理）。
+      const message = error instanceof Error ? error.message : String(error)
+      set((s) => ({ status: { ...s.status, error: `创建 worktree 失败：${message}` } }))
+      return
+    }
+    emitForgeEvent('worktreesChanged')
+    await get().switchProject(record.path, { worktree: { projectId: project.id, path: record.path } })
   },
 
   removePendingMessage(id) {
@@ -3068,7 +3399,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // 会话快照进后台缓冲，缓冲的 cwd 必须还是旧项目的，否则跨项目切回时
     // attach 的 cwd 比对永远失配、历史缓存失效键也指错目录。
     if (cwd && normalizeCwdForCompare(cwd) !== normalizeCwdForCompare(meta.cwd)) {
-      await window.api.setLastProject(cwd)
+      // 2026-09-01：cwd 不属于任何已注册项目时保持 lastProjectId 不动（脏目录
+      // 会话不是「上次项目」）。
+      await rememberLastProjectForCwd(cwd)
       // 这里原先 set({ sessions: [] })：侧栏当场清空 → 骨架/空态 → 新列表填回，
       // 表现就是"切个会话，左边目录整个收缩重载一次"。而「全部」视图本来就是
       // 跨项目的,清掉的多半还是同一批会话。改成留着旧列表,等下面
@@ -3267,60 +3600,38 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // 缓冲——直接接管其桥接 id 和缓冲内容继续渲染，不走 session/load 全量重放
     // （重放会重复，且空壳已被磁盘删除时 load 直接失败）。
     const bg = findLiveBackgroundSession(sdkSessionId)
-    if (bg && normalizeCwdForCompare(bg.cwd) === normalizeCwdForCompare(cwd)) {
-      // #1/#6 先冲刷（nextSessionNavigationSeq 内部会冲 streamBatcher 的前台
-      // pending 与后台聚合队列），**再**把目标缓冲摘出 Map：顺序反了的话，
-      // 该会话仍在聚合队列里的 delta 会因缓冲已摘除而路由落空、内容丢失。
-      nextSessionNavigationSeq()
-      backgroundSessions.delete(bg.bridgeSessionId)
-      snapshotActiveSessionIntoBackground(get)
-      void window.api.closeSession(oldSessionId).catch(() => {})
-      // 桥接早已就绪：sendMessage 的启动门闩直接放行。
-      createSessionStartGate(bg.bridgeSessionId).resolve()
-      // #23 swarmTasks 交接给 App 的订阅 effect（防它的切会话清空抹掉恢复值）。
-      attachedSwarmTasks = { sdkSessionId, tasks: bg.swarmTasks }
-      set({
-        starting: false,
-        // #6 后台期间 delta 是原地折叠的（条目/块对象被 mutate，数组引用可能
-        // 没变）：整体克隆一份再入 store，保证 memo 化的行组件拿到新引用。
-        items: cloneTranscriptItems(bg.items),
-        tasks: bg.tasks,
-        // 队列恢复：#29 回收的未送达消息在前，切走时带走的排队镜像在后。
-        pendingQueue: [...(bg.recycledQueue ?? []), ...(bg.queuedMirror ?? [])],
-        sessionConfigDirty: false,
-        sessionModelDirty: false,
-        bridgeEnded: false,
-        planEntries: bg.planEntries,
-        // #23 待办陈旧度时钟与待授权弹窗一并恢复（快照链路见
-        // snapshotActiveSessionIntoBackground）。
-        planUpdatedAt: bg.planUpdatedAt,
-        pendingPermissions: bg.pendingPermissions,
-        contextUsage: bg.contextUsage,
-        mcpServers: bg.mcpServers,
-        modePanel: bg.modePanel,
-        goal: bg.goal,
-        elicitationQueue: bg.elicitationQueue,
-        slashCommands: bg.slashCommands,
-        swarmTasks: bg.swarmTasks,
-        status: {
-          running: bg.running,
-          ...(bg.startedAt ? { startedAt: bg.startedAt } : {}),
-          ...(bg.stall ? { stall: bg.stall } : {}),
-          ...(bg.error ? { error: bg.error } : {})
-        },
-        currentStreamingMsgId: bg.currentStreamingMsgId,
-        meta: {
-          sessionId: bg.bridgeSessionId,
-          ...(agentBackend ? { agentBackend } : {}),
+    if (bg) {
+      // 2026-09-01 第 3 期：attach 的 cwd 身份比对从精确相等放宽为两级归属
+      // 判定（与侧栏分组同一函数 resolveThreadScope）：归属覆盖 projectId 相等
+      // → 否则 matchProjectByCwd 前缀命中同一项目。精确比对在多根项目/子目录
+      // 会话下恒失配（后台线程的 cwd 是它的启动目录，不必等于目标 cwd）。
+      // flag 关闭时保持精确比对（旧语义）。
+      let cwdMatches = normalizeCwdForCompare(bg.cwd) === normalizeCwdForCompare(cwd)
+      if (!cwdMatches && projectsV2ParallelEnabled) {
+        // 精确不中才付这一趟 IPC 代价；等待期间用户又点了别处就放弃 attach。
+        const navSeqAtLookup = sessionNavigationSeq
+        const projects = await window.api.listProjects().catch(() => null)
+        const assignments = projects ? await ensureSessionProjectAssignments() : null
+        if (sessionNavigationSeq !== navSeqAtLookup) return
+        if (projects) {
+          const bgScope = resolveThreadScope(bg.cwd, bg.sdkSessionId, projects, assignments)
+          cwdMatches = bgScope !== null
+            && bgScope === resolveThreadScope(cwd, sdkSessionId, projects, assignments)
+        }
+      }
+      // await 窗口内会话可能已被 agent:ended 收掉：死了的桥接 attach 无意义，\r
+      // 落到下面的 session/load 重放路径。\r
+      if (cwdMatches && !bg.ended) {
+        attachLiveBackgroundSession(get, set, bg, {
           sdkSessionId,
           cwd,
-          model: bg.model || model,
-          permissionMode: readStoredPermissionMode(sdkSessionId) ?? bg.permissionMode ?? restoredMode,
-          tools: bg.tools
-        }
-      })
-      void get().refreshSessions()
-      return
+          ...(agentBackend ? { agentBackend } : {}),
+          fallbackModel: model,
+          fallbackPermissionMode: restoredMode,
+          oldSessionId
+        })
+        return
+      }
     }
 
     // #6 切走=后台化：快照当前会话进事件缓冲（turn 继续跑，切回可 attach）。
@@ -3797,6 +4108,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           }))
           // 会话刚 load 完，立刻补拉待办真值（零 token，失败静默）。
           void get().refreshTodos()
+          // 2026-09-01 第 2 期：scratch 会话此刻才拿到 sdkSessionId（归属表的键），
+          // 把 switchToScratch 登记的显式「不在项目中工作」覆盖写下去。
+          const initBridgeId = get().meta?.sessionId
+          if (initBridgeId && pendingNoProjectAssignment.delete(initBridgeId)) {
+            void useSessionProjectStore.getState().setAssignment(`windows:${m.session_id}`, null)
+          }
+          // 2026-09-01 第 4 期：worktree 会话此刻才拿到 sdkSessionId——归属覆盖
+          // 写项目 id（worktree cwd 不在项目 rootPaths 下，不显式写会丢归组），
+          // 台账回填 sessionKey（删除会话联动清理由台账按 cwd 辨认）。
+          const pendingWt = initBridgeId ? pendingWorktreeAssignments.get(initBridgeId) : undefined
+          if (initBridgeId && pendingWt && pendingWorktreeAssignments.delete(initBridgeId)) {
+            const wtSessionKey = `windows:${m.session_id}`
+            void useSessionProjectStore.getState().setAssignment(wtSessionKey, pendingWt.projectId)
+            void window.api.worktreeBindSession(pendingWt.path, wtSessionKey).catch(() => {})
+          }
         } else if (subtype === 'status') {
           const status = (msg as unknown as { status: string | null }).status
           set((s) => ({ status: { ...s.status, compacting: status === 'compacting' } }))

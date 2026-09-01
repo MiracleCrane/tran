@@ -82,6 +82,9 @@ const TEMPLATE_PANEL_MAX_HEIGHT = 232
 const TEMPLATE_PANEL_HEADER_HEIGHT = 34
 const TEMPLATE_PANEL_ROW_HEIGHT = 42
 const COMPOSER_HEIGHT_STORAGE_KEY = 'forge.composerTextareaHeight.v1'
+// 附件列表存 sessionStore.composerAttachments（2026-09-01，与文字草稿同语义）。
+// 空槽兜底用同一引用，避免 useSessionStore 选择器每次返回新数组导致无谓重渲染。
+const EMPTY_ATTACHMENTS: PickedFile[] = []
 
 interface ComposerHeightBounds {
   min: number
@@ -428,7 +431,8 @@ export default function Composer(): JSX.Element {
         : value
     setComposerDraft(draftKey, next)
   }
-  // 新会话 init 到达后，把暂挂 bridge id 键下的草稿迁到稳定的 sdk id 键。
+  // 新会话 init 到达后，把暂挂 bridge id 键下的草稿迁到稳定的 sdk id 键；
+  // 附件同草稿一并迁移（2026-09-01 附件也进 store 后，两边语义保持一致）。
   useEffect(() => {
     if (!meta?.sdkSessionId || !draftKey) return
     const staleKey = meta.sessionId
@@ -439,13 +443,31 @@ export default function Composer(): JSX.Element {
       setComposerDraft(meta.sdkSessionId, stale)
       setComposerDraft(staleKey, '')
     }
-  }, [meta?.sdkSessionId, meta?.sessionId, draftKey, setComposerDraft])
+    const stash = useSessionStore.getState().composerAttachments
+    const staleFiles = stash[staleKey]
+    if (staleFiles?.length && !stash[meta.sdkSessionId]?.length) {
+      setComposerAttachments(meta.sdkSessionId, staleFiles)
+      setComposerAttachments(staleKey, [])
+    }
+  }, [meta?.sdkSessionId, meta?.sessionId, draftKey, setComposerDraft, setComposerAttachments])
   const [models, setModels] = useState(defaultModelsForAgent(undefined))
-  const [attachments, setAttachments] = useState<PickedFile[]>([])
-  // 切会话 effect 的依赖不含 attachments，闭包里可能是旧值；ref 镜像实时值，
-  // 暂存时读它。
-  const attachmentsRef = useRef<PickedFile[]>([])
-  attachmentsRef.current = attachments
+  // 附件全程存 store（2026-09-01）：此前是组件局部 state + 切会话暂存 effect，
+  // 但 App.tsx 的 key={displayChatSessionKey} 每次切会话都会卸载重建整棵 chat
+  // 子树，暂存刚取回就被 remount 抹掉，附件切走再切回必丢。改为与文字草稿
+  // 同语义直读 composerAttachments[draftKey]，remount 也不丢。
+  const attachments = useSessionStore((s) =>
+    draftKey ? (s.composerAttachments[draftKey] ?? EMPTY_ATTACHMENTS) : EMPTY_ATTACHMENTS
+  )
+  const setAttachments = (
+    value: PickedFile[] | ((current: PickedFile[]) => PickedFile[])
+  ): void => {
+    if (!draftKey) return
+    const next =
+      typeof value === 'function'
+        ? value(useSessionStore.getState().composerAttachments[draftKey] ?? EMPTY_ATTACHMENTS)
+        : value
+    setComposerAttachments(draftKey, next)
+  }
   const [showTemplates, setShowTemplates] = useState(false)
   // Kimi ACP 推送的斜杠命令（available_commands_update → sessionStore）。
   const slashSkills = useSessionStore((s) => s.slashCommands)
@@ -592,37 +614,10 @@ export default function Composer(): JSX.Element {
   const heightBoundsRef = useRef(heightBounds)
   const resizeCancelRef = useRef<(() => void) | null>(null)
   const attachmentActionSeqRef = useRef(0)
-  // Composer 常驻挂载，切会话不重建组件。附件与草稿文本一样按会话隔离：切走时
-  // 暂存到 sessionStore.composerAttachments（仅内存，键同 draftKey），切回时
-  // 取回——此前是直接清空，切走再切回附件就丢了。同时递增 seq 作废在途的异步
-  // 读取（readFiles / FileReader），否则切换后才 resolve 的那批会把上一个会话
-  // 的文件追加进来。
-  //
-  // 但只认「bridge sessionId 变化」为真正切会话：新会话首条消息的 init 到达会
-  // 让 draftKey 从 bridge id 迁到 sdk id（同一会话），不能借此动用户在这 1~3s
-  // 窗口里刚加的附件。取回时兜底查 bridge id 键：init 在切走期间到达时，暂存
-  // 还挂在旧 bridge 键下。
-  const prevBridgeSessionRef = useRef(meta?.sessionId)
-  const prevDraftKeyRef = useRef(draftKey)
-  useEffect(() => {
-    const prevKey = prevDraftKeyRef.current
-    prevDraftKeyRef.current = draftKey
-    if (prevBridgeSessionRef.current === meta?.sessionId) return
-    prevBridgeSessionRef.current = meta?.sessionId
-    // 暂存当前附件到旧会话键（空数组即删条目），再取回新会话的暂存（取回即清，
-    // 因此发送成功后只需清本地 state）。draftKey 迁移（bridge→sdk）不会走到这里
-    // ——meta.sessionId 没变，上面的守卫直接返回，仅更新 prevDraftKeyRef。
-    if (prevKey) setComposerAttachments(prevKey, attachmentsRef.current)
-    const stash = useSessionStore.getState().composerAttachments
-    const restored =
-      (draftKey ? stash[draftKey] : undefined) ??
-      (meta?.sessionId ? stash[meta.sessionId] : undefined) ??
-      []
-    if (draftKey) setComposerAttachments(draftKey, [])
-    if (meta?.sessionId && meta.sessionId !== draftKey) setComposerAttachments(meta.sessionId, [])
-    setAttachments(restored)
-    ++attachmentActionSeqRef.current
-  }, [draftKey, meta?.sessionId, setComposerAttachments])
+  // 附件直存 store（见上方 attachments 注释）后，原「切会话暂存/取回」effect
+  // 整段删除：它基于「Composer 常驻挂载」的假设，而 App.tsx 的 key remount 让
+  // 取回值即刻被抹掉，从未生效。attachmentActionSeqRef 保留：选择器/拖拽/粘贴
+  // 的在途异步读取（pickFiles / readFiles / FileReader）仍靠它作废旧批次。
   const dragDepth = useRef(0)
   const [dragActive, setDragActive] = useState(false)
   // 附件添加失败提示（选择器/拖拽/粘贴共用）：超限图片等被主进程跳过的文件

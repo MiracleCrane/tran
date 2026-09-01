@@ -30,6 +30,7 @@ TUI 支持 Enter 发送、Shift+Enter 换行、F2 AI 帮答、F3 续写、F4 重
 - API Key、连接配置、模型和 Prompt 由 SillyTavern 管理。
 - 角色卡、世界书和聊天记录由 SillyTavern 管理。
 - TUI 通过本机 SillyTavern 接口使用同一份角色、聊天和当前连接，不读取或复制明文 API Key。
+- TUI 在不可见的 Chrome/Edge 页面中调用 SillyTavern 原版前端生成函数，提示链与网页一致；它不再自行拼装简化 Prompt。
 - 如果更换全新 SillyTavern 安装，需要在 SillyTavern 中重新配置 API，或迁移原安装的 `data` 目录。
 
 ## 边界与维护
