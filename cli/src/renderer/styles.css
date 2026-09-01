@@ -2784,9 +2784,12 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
 }
 /* 表格（2026-08-26 用户：「搞漂亮点」）：圆角外框 + 表头底色 + 只留行间
    分隔线（去掉竖向网格线，清爽）；separate + border-spacing:0 圆角才生效。
-   display:block + overflow-x 让超宽表在栏内横向滚动而不是顶破版面。 */
+   display:block + overflow-x 让超宽表在栏内横向滚动而不是顶破版面。
+   width:fit-content 让窄表外框收缩到内容宽度（2026-09-01 修：块级盒撑满
+   父宽导致窄表右侧大片空白）；超宽时仍被 max-width 钳住走横向滚动。 */
 .prose-forge table {
   display: block;
+  width: fit-content;
   max-width: 100%;
   overflow-x: auto;
   border-collapse: separate;

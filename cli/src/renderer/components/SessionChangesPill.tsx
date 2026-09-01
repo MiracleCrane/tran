@@ -96,7 +96,7 @@ export default function SessionChangesPill(): JSX.Element | null {
             )}
           </div>
         )}
-        <HoverTip tip="查看本次会话的工作区改动">
+        <HoverTip tip="查看本次会话的工作区改动" preferBelow>
           <button
             type="button"
             onClick={() => review()}
