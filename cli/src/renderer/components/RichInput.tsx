@@ -323,9 +323,17 @@ export default function RichInput({
     // 不比对文本——在已有链接 span 里继续敲字符，链接个数不变，值又等于 DOM
     // （自己的回声），于是逐字打字绝不重排；只有「某处新长成/拆散了一个 URL」
     // （个数翻转）才重排一次完成图标化。
-    const wantLinks = segments.reduce((n, s) => n + (s.kind === 'link' ? 1 : 0), 0)
-    const hasLinks = root.querySelectorAll('.rich-input-link').length
-    if (serialize(root) === value && wantChip === hasChip && wantLinks === hasLinks) return
+    // 2026-09-01 修「粘贴网址后再打字全变蓝」：光标停在链接 span 尾部时浏览器
+    // 把新字符敲进 span 里，个数不变、serialize 又等于值（回声），永不重排，
+    // 非 URL 文字就这么赖在蓝色 span 里。比对升级为 link 段的**文本**（个数是
+    // 文本相等的子集）：敲进去的字符一旦不属于 URL（空格后的中文等），文本
+    // 失配触发一次重排把它拆出去；继续敲 URL 字符则文本同步增长，不重排。
+    const wantLinkText = segments
+      .filter((s) => s.kind === 'link')
+      .map((s) => s.text)
+      .join(' ')
+    const hasLinkText = [...root.querySelectorAll('.rich-input-link')].map((el) => el.textContent ?? '').join(' ')
+    if (serialize(root) === value && wantChip === hasChip && wantLinkText === hasLinkText) return
     const caret = caretOffset(root)
     render(root, segments)
     if (document.activeElement === root) {

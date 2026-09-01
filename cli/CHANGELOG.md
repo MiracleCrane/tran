@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.69 - 2026-09-01
+
+### 中文
+
+- 修复：粘贴/输入网址后继续打字，后续文字不再全部变成蓝色链接样式——光标停在链接末尾时新字符会被浏览器写进链接 span，而重排判断只数链接个数导致永不重排；现改为比对链接文本，非 URL 字符立即被拆出链接。
+
+### English
+
+- Fix: typing after pasting/entering a URL no longer turns all following text into blue link styling. Characters typed at the end of a link were being absorbed into the link span and the re-render guard (link-count only) never fired; the guard now compares link text, so non-URL characters are split out immediately.
+
 ## v1.1.68 - 2026-09-01
 
 ### 中文
