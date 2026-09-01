@@ -34,7 +34,7 @@ export interface RpTavernAdapter {
   spawnDetached(command: string, args: string[], cwd: string): Promise<void>
   checkUrl(url: string): Promise<boolean>
   delay(ms: number): Promise<void>
-  openWindow(url: string): Promise<void>
+  openClient(url: string): Promise<void>
 }
 
 interface RpTavernConfig {
@@ -167,7 +167,7 @@ export class RpTavernHost {
       }
     }
 
-    await this.adapter.openWindow(RP_TAVERN_URL)
+    await this.adapter.openClient(RP_TAVERN_URL)
     return { ok: true, status }
   }
 

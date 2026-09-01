@@ -36,6 +36,13 @@ extraResources:
       - '!.venv'
       - '!**/__pycache__'
       - '!test_*.py'
+  - from: ../tools/rp-tavern
+    to: tools/rp-tavern
+    filter:
+      - '**/*'
+      - '!.venv'
+      - '!**/__pycache__'
+      - '!test_*.py'
   - from: ../tools/screen-assist
     to: tools/screen-assist
     filter:

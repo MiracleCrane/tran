@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app } from 'electron'
 import { execFile, spawn } from 'node:child_process'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -21,56 +21,31 @@ const NODE_COMMAND = 'node.exe'
 const RP_TAVERN_STDOUT_LOG = join(app.getPath('userData'), 'logs', 'rp-tavern.stdout.log')
 const RP_TAVERN_STDERR_LOG = join(app.getPath('userData'), 'logs', 'rp-tavern.stderr.log')
 
-let tavernWindow: BrowserWindow | null = null
-
-function isLocalTavernUrl(value: string): boolean {
-  try {
-    return new URL(value).origin === new URL(RP_TAVERN_URL).origin
-  } catch {
-    return false
-  }
+function resolveRpTavernTerminalCmd(): string | null {
+  const candidates = [
+    join(process.resourcesPath, 'tools', 'rp-tavern', 'rp-tavern-terminal.cmd'),
+    join(__dirname, '..', '..', '..', 'tools', 'rp-tavern', 'rp-tavern-terminal.cmd')
+  ]
+  return candidates.find(existsSync) ?? null
 }
 
-async function openTavernWindow(url: string): Promise<void> {
-  if (tavernWindow && !tavernWindow.isDestroyed()) {
-    if (!tavernWindow.isVisible()) tavernWindow.show()
-    if (tavernWindow.isMinimized()) tavernWindow.restore()
-    tavernWindow.focus()
-    return
-  }
-
-  const win = new BrowserWindow({
-    width: 760,
-    height: 940,
-    minWidth: 600,
-    minHeight: 600,
-    title: 'RP Tavern',
-    autoHideMenuBar: true,
-    backgroundColor: '#0d1117',
-    show: false,
-    webPreferences: {
-      partition: 'persist:rp-tavern',
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-      backgroundThrottling: false
-    }
+async function openTavernTui(url: string): Promise<void> {
+  const script = resolveRpTavernTerminalCmd()
+  if (!script) throw new Error('找不到 RP TUI 启动器；请重新安装最新版 Tran。')
+  await new Promise<void>((resolve, reject) => {
+    // detached 为交互式 TUI 创建独立可见控制台；call 兼容带空格的安装路径，
+    // /c 则保证退出 TUI 后控制台随即关闭，不残留空 cmd。
+    const child = spawn('cmd.exe', ['/d', '/s', '/c', 'call', script, '--url', url], {
+      windowsHide: false,
+      detached: true,
+      stdio: 'ignore'
+    })
+    child.once('error', reject)
+    child.once('spawn', () => {
+      child.unref()
+      resolve()
+    })
   })
-  tavernWindow = win
-  win.once('ready-to-show', () => win.show())
-  win.on('closed', () => {
-    if (tavernWindow === win) tavernWindow = null
-  })
-  win.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
-    if (/^https?:/i.test(targetUrl)) void shell.openExternal(targetUrl)
-    return { action: 'deny' }
-  })
-  win.webContents.on('will-navigate', (event, targetUrl) => {
-    if (isLocalTavernUrl(targetUrl)) return
-    event.preventDefault()
-    if (/^https?:/i.test(targetUrl)) void shell.openExternal(targetUrl)
-  })
-  await win.loadURL(url)
 }
 
 const adapter: RpTavernAdapter = {
@@ -155,7 +130,7 @@ const adapter: RpTavernAdapter = {
     }
   },
   delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  openWindow: openTavernWindow
+  openClient: openTavernTui
 }
 
 const host = new RpTavernHost(adapter)

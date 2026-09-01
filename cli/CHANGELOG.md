@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.1.65 - 2026-09-01
+
+### 中文
+
+- 新增 RP 酒馆终端 TUI：Tran 启动外置 SillyTavern 后端后打开终端界面，支持角色/对话选择、发送消息、F2 AI 帮答、F3 续写、F4 重试和 F9 打开完整网页。
+- TUI 复用 SillyTavern 的角色、聊天、当前连接配置和本机生成接口；API Key 仍只由 SillyTavern 密钥存储管理，TUI 不读取或复制明文 Key。
+- AI 帮答只生成可编辑草稿，不会自动发送；复杂的角色卡、世界书、Prompt 和 API 设置继续由完整网页管理。
+- TUI 改为低调的灰黑调试终端风格，并使用 Rich Markdown 渲染动作、强调和代码，不再把 `*动作*` 原样显示。
+- 新增可改键老板键：默认 F12，可通过 `/bosskey ctrl+b` 持久化修改，也支持 `mouse4`、`mouse5` 和 `middle` 鼠标键；伪装模式显示普通构建/测试日志。F6/F7/F8 可调整经典控制台字体，Windows Terminal 仍支持原生缩放快捷键。
+- 输入区改为自动软换行的多行编辑器：Enter 发送、Shift+Enter 换行；聊天消息使用不同的低饱和角色颜色，并在消息间增加多行 TRACE/DEBUG/INFO/WARN 调试日志。
+
+### English
+
+- New: RP Tavern terminal TUI launched by Tran after the external SillyTavern backend is ready, with character/chat selection, message sending, F2 reply drafting, F3 continuation, F4 retry, and F9 to open the full web UI.
+- The TUI reuses SillyTavern characters, chats, active connection profile, and localhost generation endpoint. API keys remain exclusively managed by SillyTavern and are never read or copied in plaintext by the TUI.
+- AI reply drafting only fills an editable input draft and never sends automatically; advanced card, lorebook, prompt, and connection settings remain in the full web UI.
+- The TUI now uses a subdued gray/black debugging-terminal theme and Rich Markdown rendering, so action emphasis and code no longer show raw Markdown markers.
+- New remappable boss key: F12 by default, persisted with `/bosskey ctrl+b`, with `mouse4`, `mouse5`, and `middle` mouse-button support. Decoy mode shows ordinary build/test logs; F6/F7/F8 adjust classic-console font size.
+- The composer is now a soft-wrapping multiline editor: Enter sends and Shift+Enter inserts a newline. User/character messages use distinct muted colors and are separated by denser TRACE/DEBUG/INFO/WARN log lines.
+
 ## v1.1.64 - 2026-08-31
 
 ### 中文

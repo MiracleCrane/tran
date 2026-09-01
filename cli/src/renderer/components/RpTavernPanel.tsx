@@ -90,7 +90,7 @@ export default function RpTavernPanel(): JSX.Element {
 
       {error ? <ToolPanelAlert tone="error">{error}</ToolPanelAlert> : null}
       {status?.installed && status.nodeCompatible && status.running ? (
-        <ToolPanelAlert tone="success">酒馆已就绪，可以直接打开独立窗口。</ToolPanelAlert>
+        <ToolPanelAlert tone="success">酒馆已就绪，可以直接打开 RP TUI。</ToolPanelAlert>
       ) : null}
 
       <section className="mb-5 rounded-xl border border-border-subtle bg-bg-panel/70 p-4">
@@ -143,7 +143,7 @@ export default function RpTavernPanel(): JSX.Element {
           onClick={() => void openTavern()}
           disabled={busy !== null || !status?.installed || !status.nodeCompatible}
         >
-          {busy === 'open' ? '正在启动…' : '打开酒馆'}
+          {busy === 'open' ? '正在启动…' : '打开 RP TUI'}
         </ToolPanelButton>
       </div>
 

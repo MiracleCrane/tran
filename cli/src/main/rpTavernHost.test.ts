@@ -48,7 +48,7 @@ class FakeAdapter implements RpTavernAdapter {
   async delay(): Promise<void> {
     if (this.makeReadyOnDelay) this.urls.add(RP_TAVERN_URL)
   }
-  async openWindow(url: string): Promise<void> { this.opened.push(url) }
+  async openClient(url: string): Promise<void> { this.opened.push(url) }
 }
 
 test('detects a valid external installation and runtime', async () => {

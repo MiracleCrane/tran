@@ -851,7 +851,7 @@ export interface ForgeApi {
   getRpTavernStatus(): Promise<RpTavernStatus>
   /** 保存外置 SillyTavern 安装目录；无效目录不会落盘。 */
   configureRpTavern(installPath: string): Promise<RpTavernStatus>
-  /** 启动服务并在隔离的 Tran 窗口中打开酒馆。 */
+  /** 启动服务并打开 RP TUI；TUI 内可按 F9 打开完整网页。 */
   openRpTavern(): Promise<RpTavernOpenResult>
   getSessionMessages(
     sessionId: string,
