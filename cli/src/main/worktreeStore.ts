@@ -52,7 +52,8 @@ function load(): Record<string, WorktreeRecord> {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
     const r = entry as Record<string, unknown>
     if (typeof r.path !== 'string' || typeof r.repoRoot !== 'string' || typeof r.branch !== 'string') continue
-    if (typeof r.projectId !== 'string') continue
+    // 2026-09-02：projectId 允许 null（未注册仓库的「改动迁移 worktree」无归属项目）
+    if (r.projectId !== null && typeof r.projectId !== 'string') continue
     out[key] = {
       path: r.path,
       repoRoot: r.repoRoot,
@@ -93,7 +94,7 @@ export function listWorktreeRecords(): WorktreeRecord[] {
  *  仍在 git worktree list 里，不会被误清）。 */
 export async function createWorktreeRecord(
   repoRoot: string,
-  projectId: string,
+  projectId: string | null,
   name: string
 ): Promise<WorktreeRecord> {
   const { path, branch } = await git.createWorktree(repoRoot, name)
@@ -102,7 +103,7 @@ export async function createWorktreeRecord(
   const record: WorktreeRecord = { path, repoRoot, projectId, branch, createdAt: now, lastUsedAt: now }
   load()[keyOf(path)] = record
   save()
-  log('worktrees', `创建 worktree：${path}（${branch}，项目 ${projectId}）`)
+  log('worktrees', `创建 worktree：${path}（${branch}，项目 ${projectId ?? '无项目'}）`)
   return { ...record }
 }
 

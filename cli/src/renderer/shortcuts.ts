@@ -271,6 +271,15 @@ export function buildShortcuts(): ShortcutAction[] {
       run: () => emitForgeEvent('openSessionSearch')
     },
     {
+      id: 'findInTranscript',
+      label: '在对话中搜索',
+      // Ctrl+F（2026-09-02 v1）：全局动作，输入框里打字时也要能开。Transcript
+      // 只在 chat 视图挂载，其它视图没有监听器，事件自然落空 = 不响应。
+      keys: ['Ctrl+F'],
+      allowInInput: true,
+      run: () => emitForgeEvent('openFindInTranscript')
+    },
+    {
       id: 'openSettings',
       label: '打开设置',
       keys: ['Ctrl+,'],

@@ -106,10 +106,23 @@ function isScrollableElement(element: Element): boolean {
   return canScrollY || canScrollX
 }
 
-function eventTargetsScrollableArea(target: EventTarget | null): boolean {
+function eventTargetsScrollableArea(
+  target: EventTarget | null,
+  point?: { x: number; y: number }
+): boolean {
   let element = target instanceof Element ? target : null
   while (element && element !== document.documentElement) {
-    if (isScrollableElement(element)) return true
+    if (isScrollableElement(element)) {
+      // 2026-09-02 用户：「预览/导航时滚动条闪出来过会又没了」——pointermove
+      // 穿越可滚容器（无滚动意图）也触发全局揭示。收窄：pointermove 只有指针
+      // 落在滚动条轨道带（右缘/底缘 16px）内才算命中；wheel/scroll/键盘不变。
+      if (!point) return true
+      const rect = element.getBoundingClientRect()
+      const nearTrack =
+        (point.x >= rect.right - 16 && point.x <= rect.right + 2) ||
+        (point.y >= rect.bottom - 16 && point.y <= rect.bottom + 2)
+      if (nearTrack) return true
+    }
     element = element.parentElement
   }
   return false
@@ -535,6 +548,11 @@ export default function App(): JSX.Element {
       if (eventTargetsScrollableArea(event.target)) revealScrollbars()
     }
 
+    // pointermove 单独走带坐标的判定：只有指针落在滚动条轨道带才揭示。
+    const revealOnPointerMove = (event: PointerEvent): void => {
+      if (eventTargetsScrollableArea(event.target, { x: event.clientX, y: event.clientY })) revealScrollbars()
+    }
+
     const revealForScrollKey = (event: KeyboardEvent): void => {
       if (SCROLL_REVEAL_KEYS.has(event.key)) revealScrollbars()
     }
@@ -542,7 +560,7 @@ export default function App(): JSX.Element {
 
     document.addEventListener('scroll', revealScrollbars, true)
     document.addEventListener('wheel', revealIfScrollable, passiveCapture)
-    document.addEventListener('pointermove', revealIfScrollable, passiveCapture)
+    document.addEventListener('pointermove', revealOnPointerMove, passiveCapture)
     document.addEventListener('pointerdown', revealIfScrollable, passiveCapture)
     document.addEventListener('keydown', revealForScrollKey, true)
 
@@ -551,7 +569,7 @@ export default function App(): JSX.Element {
       root.classList.remove('scrollbars-active')
       document.removeEventListener('scroll', revealScrollbars, true)
       document.removeEventListener('wheel', revealIfScrollable, passiveCapture)
-      document.removeEventListener('pointermove', revealIfScrollable, passiveCapture)
+      document.removeEventListener('pointermove', revealOnPointerMove, passiveCapture)
       document.removeEventListener('pointerdown', revealIfScrollable, passiveCapture)
       document.removeEventListener('keydown', revealForScrollKey, true)
     }

@@ -997,12 +997,15 @@ export default function Composer(): JSX.Element {
   }
 
   /** 剪贴板粘贴图片（截图工具/复制的图片）：与拖拽走同一附件管线，
-   *  无图片时保持默认文本粘贴行为。 */
+   *  无图片时保持默认文本粘贴行为。
+   *  2026-09-02 修「图文混合粘贴文本 100% 丢失」（CDP 实测微信/网页复制）：
+   *  这里不再 preventDefault——RichInput 的 paste 处理会继续把剪贴板里的
+   *  纯文本部分插进输入框，图片走附件管线，两路并行。图片-only 时 text 为
+   *  空，RichInput 的 if (text) 守卫天然跳过。 */
   const onPaste = async (e: ClipboardEvent<HTMLTextAreaElement>): Promise<void> => {
     if (!meta) return
     const images = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'))
     if (!images.length) return
-    e.preventDefault()
     setAttachmentError(null)
     const actionSeq = ++attachmentActionSeqRef.current
     const picked: PickedFile[] = []

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { TurnChangesItem } from '../types'
 import { useSessionStore } from '../store/sessionStore'
+import { relativePathTo, toAbsolutePath } from '../gitTarget'
 import ConfirmDialog from './ConfirmDialog'
 import HoverTip from './HoverTip'
 
@@ -35,6 +36,9 @@ export default function TurnChangesCard({
   // cwd 直接从 store 取：调用点在 Transcript 的行渲染函数里，那儿拿不到组件
   // 作用域的 cwd，与其把它一路透传下来，不如卡片自己订阅。
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
+  // 2026-09-02「改动目标仓库」：还原要跟改动多数派仓库走（cwd 非仓库或异库时
+  // 拿 cwd 调 gitRevertFile 必然失败）。
+  const changesGitRoot = useSessionStore((s) => s.changesGitRoot)
   const [expanded, setExpanded] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [reverting, setReverting] = useState(false)
@@ -53,7 +57,19 @@ export default function TurnChangesCard({
     for (const f of item.files) {
       try {
         // gitRevertFile 失败以抛异常表达（返回 void）。
-        await window.api.gitRevertFile(cwd, f.path, f.untracked === true)
+        // 2026-09-02：f.path 是绝对/相对混杂的原始工具输入（相对基准为会话 cwd），
+        // 而 gitRevertFile 只接受仓库内相对路径——先折算到改动多数派仓库；折不进
+        // 去（少数派/仓库外文件）维持原样传 cwd，失败计入 failed（旧行为）。
+        let targetCwd = cwd
+        let rel = f.path
+        if (changesGitRoot) {
+          const r = relativePathTo(changesGitRoot, toAbsolutePath(f.path, cwd))
+          if (r) {
+            targetCwd = changesGitRoot
+            rel = r
+          }
+        }
+        await window.api.gitRevertFile(targetCwd, rel, f.untracked === true)
       } catch {
         failed.push(f.path)
       }

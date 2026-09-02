@@ -138,7 +138,7 @@ class TuiWiringTests(unittest.IsolatedAsyncioTestCase):
             app = TavernApp("http://127.0.0.1:8000", boss_key="f12", config_path=config_path)
             fake = FakeClient()
             app.client = fake
-            with patch("rp_tavern_tui.webbrowser.open") as open_web:
+            with patch("rp_tavern_tui.webbrowser.open") as open_web, patch("rp_tavern_tui.activate_console_window"):
                 async with app.run_test(size=(120, 36)) as pilot:
                     await wait_until(pilot, lambda: app.chat_ref is not None)
                     self.assertEqual(app.character.name, "Lana")
@@ -156,6 +156,7 @@ class TuiWiringTests(unittest.IsolatedAsyncioTestCase):
                     await pilot.press("enter")
                     await wait_until(pilot, lambda: app.chat[-1].get("mes") == "普通回复")
                     self.assertEqual(app.chat[-2]["mes"], "第一行\n第二行")
+                    self.assertIs(app.focused, field)
 
                     await pilot.press("f4")
                     await wait_until(pilot, lambda: app.chat[-1].get("mes") == "重试回复")

@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { openChangesPanel } from '../events'
+import { normalizePath } from '../gitTarget'
 import HoverTip from './HoverTip'
 
 /**
@@ -53,6 +54,68 @@ export default function SessionChangesPill(): JSX.Element | null {
     [sessionFiles]
   )
   const [open, setOpen] = useState(false)
+  // 2026-09-02 修「预览浮层点不到文件」（用户实测）：浮层与 pill 之间有 8px 缝隙，
+  // 鼠标移向浮层经过缝隙就触发 mouseleave 收层。两道保险：浮层外套 pb-2 的透明
+  // 桥接层填满缝隙（hover 不断）+ 150ms 延迟关闭（快速滑过不收）。
+  const closeTimerRef = useRef<number | null>(null)
+  const openPreview = (): void => {
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current)
+    closeTimerRef.current = null
+    setOpen(true)
+  }
+  const closePreview = (): void => {
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current)
+    closeTimerRef.current = window.setTimeout(() => setOpen(false), 150)
+  }
+  useEffect(
+    () => () => {
+      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current)
+    },
+    []
+  )
+
+  // 「在 worktree 中继续」（2026-09-02）：改动多数派落在会话 cwd 之外的仓库
+  // （changesGitRoot ≠ cwd 所在仓库根；cwd 非仓库也算不等）时，pill 旁给一键
+  // 迁移入口——新会话 cwd 落在该仓库的专用 worktree，后续改动与 git 操作都
+  // 指向它。store 侧动作是 migrateToWorktree。
+  const changesGitRoot = useSessionStore((s) => s.changesGitRoot)
+  const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
+  const migrateToWorktree = useSessionStore((s) => s.migrateToWorktree)
+  // cwd 所在仓库根要异步查（gitRepoRoots）；undefined = 还没查到，先不亮按钮
+  // （避免查询途中按钮闪现）。
+  const [cwdRepoRoot, setCwdRepoRoot] = useState<string | null | undefined>(undefined)
+  const [migrating, setMigrating] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setCwdRepoRoot(undefined)
+    if (!cwd) {
+      setCwdRepoRoot(null)
+      return
+    }
+    void window.api
+      .gitRepoRoots([cwd])
+      .then(([root]) => {
+        if (alive) setCwdRepoRoot(root ?? null)
+      })
+      .catch(() => {
+        if (alive) setCwdRepoRoot(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [cwd])
+  const showMigrate =
+    !!changesGitRoot &&
+    cwdRepoRoot !== undefined &&
+    normalizePath(changesGitRoot).toLowerCase() !== (cwdRepoRoot ? normalizePath(cwdRepoRoot).toLowerCase() : '')
+  const migrateRepoName = changesGitRoot?.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? ''
+  const onMigrate = (): void => {
+    if (migrating) return
+    setMigrating(true)
+    // 成功后切到新会话（changesGitRoot 随会话重置，按钮自然消失）；失败由
+    // status.error 当面报，这里只负责解锁按钮。
+    void migrateToWorktree().finally(() => setMigrating(false))
+  }
 
   // 这个对话一行没改 → 整枚隐藏。
   if (files.length === 0) return null
@@ -68,13 +131,15 @@ export default function SessionChangesPill(): JSX.Element | null {
 
   return (
     <div className="pointer-events-none relative z-20 flex justify-center">
-      <div
-        className="pointer-events-auto relative"
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
-      >
-        {open && (
-          <div className="absolute bottom-full left-1/2 mb-2 w-[min(420px,70vw)] -translate-x-1/2 overflow-hidden rounded-xl border border-border-subtle bg-bg-elev shadow-xl shadow-black/40">
+      <div className="pointer-events-auto flex items-center gap-1.5">
+        <div
+          className="relative"
+          onMouseEnter={openPreview}
+          onMouseLeave={closePreview}
+        >
+          {open && (
+          <div className="absolute bottom-full left-1/2 w-[min(420px,70vw)] -translate-x-1/2 pb-2">
+            <div className="overflow-hidden rounded-xl border border-border-subtle bg-bg-elev shadow-xl shadow-black/40">
             {shown.map((f) => (
               // 2026-08-25：原生 title= 太丑，统一换 HoverTip 气泡（全文路径）。
               <HoverTip key={f.path} tip={f.path} tipClassName="break-all" className="block">
@@ -94,6 +159,7 @@ export default function SessionChangesPill(): JSX.Element | null {
                 还有 {rest} 个文件…
               </div>
             )}
+            </div>
           </div>
         )}
         <HoverTip tip="查看本次会话的工作区改动" preferBelow>
@@ -107,6 +173,23 @@ export default function SessionChangesPill(): JSX.Element | null {
             <span className="tabular-nums text-red-400">-{removedTotal}</span>
           </button>
         </HoverTip>
+        </div>
+        {showMigrate && (
+          <HoverTip
+            tip={`改动落在仓库 ${migrateRepoName}——在该仓库的专用 worktree 开新会话，后续改动与 git 操作都指向它`}
+            tipClassName="break-all"
+            preferBelow
+          >
+            <button
+              type="button"
+              disabled={migrating}
+              onClick={onMigrate}
+              className="mb-1.5 flex shrink-0 items-center gap-1 rounded-full border border-border-subtle bg-bg-elev px-2.5 py-1.5 text-[12px] text-zinc-300 shadow-lg shadow-black/30 transition hover:bg-bg-hover disabled:opacity-50"
+            >
+              ⎇ 在 worktree 中继续
+            </button>
+          </HoverTip>
+        )}
       </div>
     </div>
   )

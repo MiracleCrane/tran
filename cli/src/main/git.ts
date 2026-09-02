@@ -82,14 +82,53 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
   }
 }
 
+/** 目录 → 所属 git 仓库根的进程级缓存（2026-09-02 「改动多数派仓库」推导用）。
+ *  每个改动文件的 dirname 都要查一次 rev-parse，一轮几十文件的会话不缓存就是
+ *  几十次 spawn。git 仓库根在进程生命周期内不会变（init/移动仓库级别的事件
+ *  重启后才生效，可接受），正/负结果都缓存。 */
+const repoRootCache = new Map<string, string | null>()
+
+/** 查 dir 所属 git 仓库的工作区根（git rev-parse --show-toplevel）。
+ *  git 自己沿目录向上找 .git，dir 是仓库内任意路径即可；非仓库返回 null。 */
+export async function getRepoRoot(dir: string): Promise<string | null> {
+  const key = normalizeCwdForCompare(dir)
+  const cached = repoRootCache.get(key)
+  if (cached !== undefined) return cached
+  let root: string | null = null
+  try {
+    const { stdout } = await runGit(dir, [...READ_ONLY_GIT_FLAGS, 'rev-parse', '--show-toplevel'])
+    root = stdout || null
+  } catch {
+    root = null
+  }
+  repoRootCache.set(key, root)
+  return root
+}
+
+/** 批量查仓库根：先按归一化路径去重再并发，返回值顺序与入参一一对应。 */
+export async function getRepoRootsForDirs(dirs: string[]): Promise<(string | null)[]> {
+  const unique = [...new Map(dirs.map((d) => [normalizeCwdForCompare(d), d])).values()]
+  const roots = await Promise.all(unique.map((d) => getRepoRoot(d)))
+  const byKey = new Map(unique.map((d, i) => [normalizeCwdForCompare(d), roots[i] ?? null]))
+  return dirs.map((d) => byKey.get(normalizeCwdForCompare(d)) ?? null)
+}
+
 /** Get current branch name, or null if detached/not a repo. */
 export async function getCurrentBranch(cwd: string): Promise<string | null> {
   try {
     const { stdout } = await runGit(cwd, [...READ_ONLY_GIT_FLAGS, 'rev-parse', '--abbrev-ref', 'HEAD'])
     return stdout === 'HEAD' ? null : stdout || null
   } catch (e: unknown) {
-    log('git', `getCurrentBranch failed cwd=${cwd}: ${e instanceof Error ? e.message : String(e)}`)
-    return null
+    // 空仓库（刚 git init、还没有任何提交）HEAD 是 unborn，rev-parse 会失败——
+    // 退回 symbolic-ref 拿分支名（2026-09-02：scratch 目录建时即 git init，
+    // 没这一步新 scratch 目录会被当成「不是 git 仓库」，工具条整个不渲染）。
+    try {
+      const { stdout } = await runGit(cwd, [...READ_ONLY_GIT_FLAGS, 'symbolic-ref', '--short', '-q', 'HEAD'])
+      return stdout || null
+    } catch {
+      log('git', `getCurrentBranch failed cwd=${cwd}: ${e instanceof Error ? e.message : String(e)}`)
+      return null
+    }
   }
 }
 

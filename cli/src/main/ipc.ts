@@ -1638,6 +1638,14 @@ export function registerIpc(
     gitModule.getWorkingChanges(requireString(cwd, 'cwd'))
   )
 
+  // 2026-09-02 「改动多数派仓库」推导：渲染层把会话改动文件的 dirname 批量传上来
+  // 查各自所属 git 仓库根。入参只收字符串数组，逐元素过滤非法值（渲染层的数据
+  // 源自 agent 工具输入，不做路径存在性校验——git 查不到自然回 null）。
+  ipcMain.handle('forge:gitRepoRoots', async (_e, dirs: unknown): Promise<(string | null)[]> => {
+    const list = Array.isArray(dirs) ? dirs.filter((d): d is string => typeof d === 'string' && d.length > 0) : []
+    return gitModule.getRepoRootsForDirs(list)
+  })
+
   ipcMain.handle(
     'forge:gitFileDiff',
     async (_e, cwd: string, path: string, opts?: { untracked?: boolean; oldPath?: string }) =>
@@ -1667,10 +1675,11 @@ export function registerIpc(
   // 以抛错形式回渲染层，由入口弹窗展示。
   ipcMain.handle(
     'forge:createWorktree',
-    async (_e, repoRoot: string, projectId: string, name: string) =>
+    async (_e, repoRoot: string, projectId: string | null, name: string) =>
       createWorktreeRecord(
         requireString(repoRoot, 'repoRoot'),
-        requireString(projectId, 'projectId').trim(),
+        // 2026-09-02「改动迁移 worktree」：改动落在未注册仓库时无归属项目，允许 null
+        projectId === null ? null : requireString(projectId, 'projectId').trim(),
         requireString(name, 'name').trim()
       )
   )

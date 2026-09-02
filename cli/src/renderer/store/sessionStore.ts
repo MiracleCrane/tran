@@ -39,7 +39,20 @@ import { DEFAULT_KIMI_MODEL_ID } from '../../shared/models'
 import { normalizeCwdForCompare } from '../../shared/paths'
 import { isScratchCwd, matchProjectByCwd } from '../../shared/projectMatch'
 import { emitForgeEvent } from '../events'
-import { backgroundTaskInfo, taskTerminalFromEnvelope } from '../utils/toolStats'
+import {
+  collectChangeFileEntries,
+  dirnameOf,
+  groupChangeFilesByRepoRoot,
+  pickMajorityRepoRoot,
+  type ChangesGitGroup
+} from '../gitTarget'
+import {
+  AGENT_TOOL_NAMES,
+  backgroundTaskInfo,
+  collectBackgroundTaskBlocks,
+  countRunningTools,
+  taskTerminalFromEnvelope
+} from '../utils/toolStats'
 import { useSessionProjectStore } from './sessionProjectStore'
 import {
   clearTodoOverrides,
@@ -206,6 +219,16 @@ interface SessionStore {
   scratchRoots: string[]
   meta: SessionMeta | null
   items: TranscriptItem[]
+  /** 「改动目标仓库」（2026-09-02）：会话改动文件多数派所在的 git 仓库根。
+   *  null = 无改动或改动不在任何 git 仓库。推导逻辑见本文件
+   *  recomputeChangesGitRoot；消费方：GitToolbar（diff 面板数据源）与
+   *  TurnChangesCard（整轮还原的路径折算）。 */
+  changesGitRoot: string | null
+  /** 改动文件按仓库根分组（2026-09-02 分组改动面板）：与 changesGitRoot 同一次
+   *  重算、同一趟 gitRepoRoots IPC 产出（recomputeChangesGitRoot），排序多数派
+   *  在前、root=null（不在任何 git 仓库）垫底。消费方：ChangesPanel 分组渲染，
+   *  每组用自己的 root 出 diff；GitToolbar 全局操作仍只跟多数派/cwd。 */
+  changesGitGroups: ChangesGitGroup[]
   /** 历史渐进注水（头部 prepend）事件号：每实际前置一批旧条目 +1。
    *  Transcript 的 firstItemIndex 滚动补偿以此为触发信号——不再靠「上一帧
    *  首行 key 反推行数」（折叠段向前延伸时组行 id 会变，findIndex 落空，
@@ -228,6 +251,13 @@ interface SessionStore {
   /** Messages sent while the agent was busy — hover above the Composer and drop
    *  into the transcript one-per-turn-end (result). */
   pendingQueue: PendingMessage[]
+  /** 2026-09-02 steered 唤醒轮在跑标记。根因：steered 轮不是客户端 turn（主进程
+   *  session.running 仍是 false），status.running 只被 steered_turn 事件点亮——
+   *  此时用户发消息若按 running 挂进 pendingQueue，渲染层会等一个永远不来的
+   *  「前轮 result」弹队（整轮假排队、气泡位置错乱、running 卡 true）。
+   *  故 busy 判定豁免它走直达（同 hasBackgroundSubagent 先例），直达发送一次性
+   *  清旗；真实 result（客户端 turn 生命周期接管）与各会话级重置点也清旗。 */
+  steeredRunning: boolean
   /** UI-selected model/effort differs from the live bridge process. Apply it
    *  lazily right before the next user message so changing controls is inert. */
   sessionConfigDirty: boolean
@@ -271,6 +301,12 @@ interface SessionStore {
    *  同规则）——侧栏行只有 sdkSessionId，拿不到桥接 id，无法直接消费
    *  bgWaitingCounts。0 删键；sdkSessionId 未知（init 未达）时侧栏尚无对应行，跳过。 */
   waitingCounts: Record<string, number>
+  /** 2026-09-02 侧栏「后台任务/子 Agent 运行中」计数镜像（蓝色呼吸圆点气泡）：
+   *  键 = 侧栏行键（同 waitingCounts/unreadReplies 规则）。口径同底部 chip——
+   *  后台工具块 isBackground 且无 bgTerminal 终态 + countRunningTools 的子 Agent
+   *  运行中口径，由 recomputeBgRunning 全量重算写入（维护点见其注释）。0 删键；
+   *  激活会话气泡不显示，但镜像仍维护（非 chat 视图下该行不算激活，要看）。 */
+  bgRunningCounts: Record<string, number>
   /** #5（对外契约，字段名不可改）正在跑 turn 的会话 sdkSessionId 去重数组：
    *  任何会话（前台/后台）turn 开始加入、结束（result/error/close）移除，
    *  sdkSessionId 未知（init 未到）的会话忽略。侧栏用
@@ -324,12 +360,15 @@ interface SessionStore {
    *  init 拿到 sdkSessionId 后显式写「不在项目中工作」归属覆盖。
    *  opts.worktree（2026-09-01 第 4 期）：本次会话跑在项目 worktree 里——cwd 不在
    *  项目 rootPaths 下，归属覆盖与台账回填要等 init 拿 sdkSessionId 后写。 */
-  switchProject: (path: string, opts?: { noProject?: boolean; worktree?: { projectId: string; path: string } }) => Promise<void>
+  switchProject: (path: string, opts?: { noProject?: boolean; worktree?: { projectId: string | null; path: string } }) => Promise<void>
   /** 「不在项目中工作」入口：ensureScratchDir 建独立目录后复用 switchProject。 */
   switchToScratch: () => Promise<void>
   /** 「在 worktree 中隔离运行」（2026-09-01 第 4 期）：为项目建 worktree，
    *  新会话 cwd 落到 worktree 路径（复用 switchProject 懒创建通路）。 */
   switchToWorktree: (project: Project) => Promise<void>
+  /** 「在 worktree 中继续」（2026-09-02）：改动落在会话 cwd 之外的仓库
+   * （changesGitRoot）时，为该仓库建 worktree 并开新会话迁过去。 */
+  migrateToWorktree: () => Promise<void>
 
   /**
    * 从 kimi 本地 server 补拉待办真值（零 token）。
@@ -599,6 +638,57 @@ function computeTurnChangesFromItems(
     addedTotal: files.reduce((n, f) => n + f.added, 0),
     removedTotal: files.reduce((n, f) => n + f.removed, 0)
   }
+}
+
+
+/** 「改动目标仓库」重算（2026-09-02）：会话改动文件多数派所在的 git 仓库根。
+ *  触发点只有三处：turnChanges 卡落地（turn 结束）、切会话、历史注水 prepend
+ *  ——不逐 render 算。一次重算 = 一趟 gitRepoRoots IPC，主进程侧对 dirname
+ *  有进程级缓存，重复 turn 的成本趋近于零。 */
+let changesGitRootSeq = 0
+async function recomputeChangesGitRoot(): Promise<void> {
+  const seq = ++changesGitRootSeq
+  const s = useSessionStore.getState()
+  const sessionId = s.meta?.sessionId ?? null
+  const cwd = s.meta?.cwd ?? ''
+  const entries = collectChangeFileEntries(s.items, cwd)
+  if (entries.length === 0) {
+    if (s.changesGitRoot !== null || s.changesGitGroups.length > 0)
+      useSessionStore.setState({ changesGitRoot: null, changesGitGroups: [] })
+    return
+  }
+  const dirs = [...new Set(entries.map((e) => dirnameOf(e.abs)).filter(Boolean))]
+  let roots: (string | null)[]
+  try {
+    roots = await window.api.gitRepoRoots(dirs)
+  } catch {
+    return // 查询失败保持现状，下次触发再试
+  }
+  // 竞态守卫：IPC 期间又发起过更新的重算、或已经切了会话，结果直接丢弃。
+  if (seq !== changesGitRootSeq) return
+  const cur = useSessionStore.getState()
+  if ((cur.meta?.sessionId ?? null) !== sessionId) return
+  const byDir = new Map(dirs.map((d, i) => [d, roots[i] ?? null]))
+  const next = pickMajorityRepoRoot(entries, (d) => byDir.get(d) ?? null)
+  // 2026-09-02：同一趟 IPC 结果顺手产出按仓库根分组（改动面板分组渲染用），
+  // 与多数派一次 setState 落地，消费方不会看到二者不一致的中间态。
+  const groups = groupChangeFilesByRepoRoot(entries, (d) => byDir.get(d) ?? null, next)
+  if (cur.changesGitRoot !== next || !sameChangesGitGroups(cur.changesGitGroups, groups))
+    useSessionStore.setState({ changesGitRoot: next, changesGitGroups: groups })
+}
+
+/** changesGitGroups 浅比较（分组函数产出已排序，逐项等值即可）：避免重算
+ *  结果没变也 setState，白触发 GitToolbar/ChangesPanel 重渲染。 */
+function sameChangesGitGroups(a: ChangesGitGroup[], b: ChangesGitGroup[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].root !== b[i].root) return false
+    const fa = a[i].files
+    const fb = b[i].files
+    if (fa.length !== fb.length) return false
+    for (let j = 0; j < fa.length; j++) if (fa[j] !== fb[j]) return false
+  }
+  return true
 }
 
 /** 取出（并移除）该会话的全部未确认直达消息（保持发送顺序）。 */
@@ -1476,6 +1566,78 @@ function setBgWaiting(bridgeSessionId: string, count: number, sdkSessionId?: str
   })
 }
 
+/** 2026-09-02 bgRunningCounts 镜像写入（字段语义见 state 声明处注释）。
+ *  与 setBgWaiting 不同：没有桥接 id 镜像（任务栏角标不消费它），只存行键一份。 */
+function setBgRunning(sdkSessionId: string | undefined, count: number): void {
+  if (!sdkSessionId) return // init 未达时侧栏尚无对应行（同 setBgWaiting 惯例）
+  useSessionStore.setState((s) => {
+    const rowKey = unreadSessionKey(
+      sdkSessionId,
+      s.sessions.find((it) => it.sessionId === sdkSessionId)?.runtimeBackend
+    )
+    // 值没变就不发 setState：流式期间重算频繁，避免白触发侧栏重渲染。
+    if ((s.bgRunningCounts[rowKey] ?? 0) === Math.max(count, 0)) return s
+    const next = { ...s.bgRunningCounts }
+    if (count > 0) next[rowKey] = count
+    else delete next[rowKey]
+    return { bgRunningCounts: next }
+  })
+}
+
+/** 后台运行中计数口径（2026-09-02，与 Composer 上方 chip 一致）：
+ *  后台任务 = Bash/terminal 工具块 isBackground 且未补登终态（bgTerminal 信封）；
+ *  子 Agent = countRunningTools 的 Agent/Task 口径（后台 agent 以 server 轮询
+ *  校正为准，server 不可用时保守不计；前台块只在轮内 pending/running 才计）。 */
+function countBgRunningItems(
+  items: TranscriptItem[],
+  swarmTasks: KimiTaskInfo[] | null | undefined,
+  turnRunning: boolean
+): number {
+  const bashRunning = collectBackgroundTaskBlocks(items).filter((b) => !b.bgTerminal).length
+  return bashRunning + countRunningTools(items, AGENT_TOOL_NAMES, swarmTasks, turnRunning)
+}
+
+/** 2026-09-02 侧栏后台运行中计数重算：全量数一遍再写镜像——比增量加减可靠
+ * （漏一个维护点计数就漂）。维护点：
+ *  - 事件流：ingestAgentEvent（前台）/ foldBackgroundAgentEvent（后台）的事件末尾，
+ *    由 bgRunningEventMayMatter 门控（纯 stream delta 不扫）；
+ *  - server 校正与 turn 起止：foldBackgroundSwarmTasks / applySessionRunningChanged；
+ *  - 快照：snapshotActiveSessionIntoBackground（切走时刻的权威值；attach 回前台
+ *    不清镜像，由前台事件钩继续维护，非 chat 视图下气泡仍准确）；
+ *  - 清零：快照淘汰分支、takeBackgroundSession、deleteSession/deleteSessions。 */
+function recomputeBgRunning(
+  sdkSessionId: string | undefined,
+  items: TranscriptItem[],
+  swarmTasks: KimiTaskInfo[] | null | undefined,
+  turnRunning: boolean
+): void {
+  setBgRunning(sdkSessionId, countBgRunningItems(items, swarmTasks, turnRunning))
+}
+
+/** recomputeBgRunning 的事件门控（2026-09-02）：只有可能改变计数的事件才全量扫
+ * items——逐 token 的 stream delta 走 applyStreamBatch/foldBackgroundDeltaInPlace
+ * 原地折叠，不影响计数也不经过这里。 */
+function bgRunningEventMayMatter(e: AgentEvent): boolean {
+  if (e.type === 'agent:ended') return true
+  const msg = e.message as
+    | { type?: string; subtype?: string; event?: { type?: string; content_block?: { type?: string } } }
+    | undefined
+  if (!msg) return false
+  // assistant：工具块落地/终态覆盖；user：tool_result 状态与 run_in_background
+  // 补丁、后台任务完成通知信封（bgTerminal）；result：悬挂块封口 + turnRunning 变。
+  if (msg.type === 'assistant' || msg.type === 'user' || msg.type === 'result') return true
+  if (msg.type === 'stream_event') {
+    // 工具块由 content_block_start(tool_use) 创建，其余流式事件不影响计数。
+    return msg.event?.type === 'content_block_start' && msg.event.content_block?.type === 'tool_use'
+  }
+  if (msg.type === 'system') {
+    // permission_denied：pending→denied；steered_turn：前台 status.running 翻转
+    //（countRunningTools 的 turnRunning 入参）。
+    return msg.subtype === 'permission_denied' || msg.subtype === 'steered_turn'
+  }
+  return false
+}
+
 // ── 2026-09-01 项目模型 Codex 化第 3 期：切项目不杀会话、多项目并行 ──
 
 /** 每个项目（SCRATCH_THREAD_KEY = 无项目会话）「当前线程」的桥接会话 id。
@@ -1594,6 +1756,9 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
   // 等待计数镜像：前台队列随快照进了后台缓冲，紧随其后的导航 set 会把前台
   // elicitationQueue/pendingPermissions 清空——总数靠这条镜像保持连续。
   setBgWaiting(meta.sessionId, s.elicitationQueue.length + s.pendingPermissions.length, meta.sdkSessionId)
+  // 后台运行中计数镜像（2026-09-02）：快照即权威值——前台期间 streamBatcher
+  // 原地折叠不逐事件重算，切走这一刻按完整 items 数一遍。
+  recomputeBgRunning(meta.sdkSessionId, s.items, s.swarmTasks, s.status.running)
   // 优先淘汰空闲会话；全都在跑时（长 turn 叠着开）此前直接 break，Map 会
   // 无上限增长——每个缓冲还在持续累积 items，底下的 bridge 会话也不释放。
   // 2026-09-01 第 3 期起淘汰项目感知：
@@ -1613,6 +1778,7 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
       backgroundSessions.delete(idle.bridgeSessionId)
       dropThreadPointer(idle.bridgeSessionId)
       setBgWaiting(idle.bridgeSessionId, 0, idle.sdkSessionId)
+      setBgRunning(idle.sdkSessionId, 0) // 2026-09-02 缓冲销毁：蓝色气泡镜像同步清零
       void window.api.destroySession(idle.bridgeSessionId).catch(() => {})
       // #5 连后端一起销毁的会话不再运行。
       markSdkSessionRunning(idle.sdkSessionId, false)
@@ -1627,6 +1793,7 @@ function snapshotActiveSessionIntoBackground(get: () => SessionStore): void {
     backgroundSessions.delete(oldest.bridgeSessionId)
     dropThreadPointer(oldest.bridgeSessionId)
     setBgWaiting(oldest.bridgeSessionId, 0, oldest.sdkSessionId)
+    setBgRunning(oldest.sdkSessionId, 0) // 2026-09-02 同上：降级淘汰也清镜像
   }
 }
 
@@ -1645,6 +1812,7 @@ function takeBackgroundSession(sdkSessionId: string): BackgroundSessionState | n
       backgroundSessions.delete(bg.bridgeSessionId)
       dropThreadPointer(bg.bridgeSessionId)
       setBgWaiting(bg.bridgeSessionId, 0, bg.sdkSessionId)
+      setBgRunning(bg.sdkSessionId, 0) // 2026-09-02 删除会话：蓝色气泡镜像同步清零
       return bg
     }
   }
@@ -1691,6 +1859,9 @@ function attachLiveBackgroundSession(
     tasks: bg.tasks,
     // 队列恢复：#29 回收的未送达消息在前，切走时带走的排队镜像在后。
     pendingQueue: [...(bg.recycledQueue ?? []), ...(bg.queuedMirror ?? [])],
+    // bg 缓冲没有 steeredRunning 概念（见 foldBackgroundAgentEvent 注释），
+    // attach 回前台一律清旗，别带上前台的旧值。
+    steeredRunning: false,
     sessionConfigDirty: false,
     sessionModelDirty: false,
     bridgeEnded: false,
@@ -1743,6 +1914,8 @@ export function foldBackgroundSwarmTasks(sdkSessionId: string, tasks: KimiTaskIn
   for (const bg of backgroundSessions.values()) {
     if (bg.sdkSessionId === sdkSessionId) {
       bg.swarmTasks = tasks
+      // 2026-09-02 server 校正变了：后台 agent 的运行中口径以它为准，重算镜像。
+      recomputeBgRunning(bg.sdkSessionId, bg.items, bg.swarmTasks, bg.running)
       return
     }
   }
@@ -1853,6 +2026,8 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
     markSdkSessionRunning(bg.sdkSessionId, false)
     invalidateBackgroundHistoryCache(bg)
     scheduleSessionsRefresh(get)
+    // 2026-09-02 终局重算：running 已落 false，悬挂前台块不再计入。
+    recomputeBgRunning(bg.sdkSessionId, bg.items, bg.swarmTasks, bg.running)
     return
   }
   const msg = e.message as Record<string, unknown> & { type: string }
@@ -1898,7 +2073,27 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
         // kimi 自发唤醒轮（后台任务完成 steer）的起止。收尾时把缓冲里的流式
         // 条目封口——steered 轮没有 result 事件,不封的话 attach 回来那条
         // 消息会永远挂着流式态。running 本身由 running-changed 推送管。
-        if ((msg as unknown as { running?: boolean }).running !== true) {
+        // 2026-09-02：后台路径不需要前台的 steeredRunning 旗——sendMessage 只
+        // 作用于前台 meta，后台会话没有「用户发消息」入口（重建竞态的
+        // backgroundedDuringRebuild 路径恒直达、不排队），前台的假排队 bug
+        // 在后台无从发生；attach 回前台时统一清旗（见 attachLiveBackgroundSession）。
+        const m = msg as unknown as { running?: boolean; startedAt?: number }
+        if (m.running === true) {
+          // 与前台同款（2026-09-02）：唤醒轮开头插 steered 分割线；末尾已是
+          // steered 条目则去重不追加（判早收尾再点亮的同一轮不刷一屏分割线）。
+          const last = bg.items[bg.items.length - 1]
+          if (last?.kind !== 'steered') {
+            bg.items = [
+              ...bg.items,
+              {
+                id: uid(),
+                kind: 'steered' as const,
+                parentToolUseId: null,
+                at: m.startedAt ?? Date.now()
+              }
+            ]
+          }
+        } else {
           bg.items = bg.items.map((i) =>
             i.kind === 'assistant' && i.streaming ? { ...i, streaming: false } : i
           )
@@ -2281,6 +2476,10 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
     default:
       break
   }
+  // 2026-09-02 后台运行中计数镜像：全量重算（口径与维护点见 recomputeBgRunning）。
+  if (bgRunningEventMayMatter(e)) {
+    recomputeBgRunning(bg.sdkSessionId, bg.items, bg.swarmTasks, bg.running)
+  }
 }
 
 /** 上一个在飞的 init 看门狗。每次导航都会排一个 60s 定时器，此前从不取消，
@@ -2345,7 +2544,7 @@ function worktreeNameSlug(name: string): string {
 /** 2026-09-01 第 4 期：等待「归属覆盖写项目 id + 台账回填 sessionKey」的桥接
  *  会话 id（switchToWorktree → switchProject 登记；两者都要等 init 事件拿到
  *  sdkSessionId）。从未发消息的懒会话会留一条垃圾登记，数十字节，无害。 */
-const pendingWorktreeAssignments = new Map<string, { projectId: string; path: string }>()
+const pendingWorktreeAssignments = new Map<string, { projectId: string | null; path: string }>()
 
 /** 取走并清空该会话的待起任务（没有则返回 null）。 */
 function takePendingSessionStart(sessionId: string): (() => Promise<void>) | null {
@@ -2424,6 +2623,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   meta: null,
   effort: 'high',
   items: [],
+  changesGitRoot: null,
+  changesGitGroups: [],
   historyPrependSeq: 0,
   historyPrependCount: 0,
   status: emptyStatus,
@@ -2436,6 +2637,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   //（Codex 同款）。scope 机制保留（切换 API 还在），只是 UI 不再暴露。
   sessionScope: 'all',
   tasks: [], pendingQueue: [],
+  steeredRunning: false,
   sessionConfigDirty: false,
   sessionModelDirty: false,
   bridgeEnded: false,
@@ -2450,6 +2652,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   elicitationQueue: [],
   bgWaitingCounts: {},
   waitingCounts: {},
+  bgRunningCounts: {},
   runningSdkSessionIds: [],
   composerDrafts: readStoredComposerDrafts(),
   composerAttachments: {},
@@ -2592,7 +2795,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         // #23 上一会话残留的授权弹窗不属于新会话。
         pendingPermissions: [],
         status: { running: false },
-        currentStreamingMsgId: null
+        currentStreamingMsgId: null,
+        steeredRunning: false
       })
       void get().refreshSessions()
       scheduleInitWatchdog(get, set, newId)
@@ -2764,7 +2968,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const hasBackgroundSubagent = get().tasks.some(
       (t) => t.isBackgrounded && t.status === 'running'
     )
-    const busy = get().status.running && !hasBackgroundSubagent
+    // 2026-09-02 steered 唤醒轮期间同豁免（steeredRunning）：steered 轮不是
+    // 客户端 turn，主进程没有排队——挂进 pendingQueue 会等一个永远不来的
+    // 「前轮 result」，整轮假排队。直达消息有 #29 unacked 台账兜底。
+    const busy = get().status.running && !hasBackgroundSubagent && !get().steeredRunning
     // #29：直达消息入未确认台账（数组：连发多条各占一席，互不覆盖）——turn
     // 错误收尾时靠它全部回收（见 result 分支）；本条 IPC 失败只回收本条。
     let unackedEntry: UnackedDirectMessage | null = null
@@ -2781,7 +2988,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       unackedDirectMessages = [...unackedDirectMessages, unackedEntry]
       set((s) => ({
         items: [...s.items, { id: uid(), kind: 'user', text: value, parentToolUseId: null, ...attProps, ...swarmProps, ...cutInProps }],
-        status: { ...s.status, running: true, error: undefined }
+        status: { ...s.status, running: true, error: undefined },
+        // 2026-09-02 steered 期间走直达时一次性清旗：主进程已静默结束 steered
+        // 轮改开这条消息自己的 turn，steered 收尾事件不会再来；清旗后这个真实
+        // turn 期间的第二条消息照常排队、走正常 result 弹队。
+        steeredRunning: false
       }))
       // #5 turn 开始：加入运行中列表（sdkSessionId 未知则忽略）。
       markSdkSessionRunning(meta.sdkSessionId, true)
@@ -2908,7 +3119,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // #1 丢会话前冲掉 streamBatcher 积压，别让迟到 delta 在清空后的 store 里复活。
     flushPendingStreamDeltas()
     unackedDirectMessages = []
-    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], planUpdatedAt: null, contextUsage: null, mcpServers: null, modePanel: defaultModePanel(), goal: null, elicitationQueue: [], runningSdkSessionIds: [] })
+    set({ starting: false, meta: null, items: [], tasks: [], pendingQueue: [], sessionConfigDirty: false, sessionModelDirty: false, bridgeEnded: false, status: emptyStatus, pendingPermissions: [], currentStreamingMsgId: null, sessions: [], sessionsHasMore: false, slashCommands: [], planEntries: [], planUpdatedAt: null, contextUsage: null, mcpServers: null, modePanel: defaultModePanel(), goal: null, elicitationQueue: [], runningSdkSessionIds: [], steeredRunning: false })
   },
 
   async bootstrap() {
@@ -2976,6 +3187,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       effort,
       items: [],
       tasks: [], pendingQueue: [],
+      steeredRunning: false,
       sessionConfigDirty: false,
       sessionModelDirty: false,
       bridgeEnded: false,
@@ -3035,7 +3247,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  async switchProject(path: string, opts?: { noProject?: boolean; worktree?: { projectId: string; path: string } }) {
+  async switchProject(path: string, opts?: { noProject?: boolean; worktree?: { projectId: string | null; path: string } }) {
     cancelActiveHistoryHydration()
     const oldMeta = get().meta
     const newId = uid()
@@ -3122,6 +3334,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       starting: false,
       items: [],
       tasks: [], pendingQueue: [],
+      steeredRunning: false,
       sessionConfigDirty: false,
       sessionModelDirty: false,
       bridgeEnded: false,
@@ -3262,6 +3475,34 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     await get().switchProject(record.path, { worktree: { projectId: project.id, path: record.path } })
   },
 
+  /** 「在 worktree 中继续」（2026-09-02）：无项目/跨仓库会话的改动多数派落在
+   *  另一个 git 仓库 B（changesGitRoot）时，一键把后续工作迁进 B 的专用
+   *  worktree——建 worktree（slug 取仓库名，冲突由主进程顺延 -2/-3），算出 B
+   *  对应的已注册项目（不中为 null，台账与归属覆盖都允许 null），再走
+   *  switchProject 懒创建通路开新会话：cwd 落在 worktree，改动面板/GitToolbar/
+   *  agent 命令全部指向它，不分裂。与 switchToWorktree 的区别只在目标仓库的
+   *  来源：这里是改动多数派，那边是已注册项目。 */
+  async migrateToWorktree() {
+    const changesGitRoot = get().changesGitRoot
+    if (!changesGitRoot) return
+    // B 未必是已注册项目——先匹配再建，projectId 一并写进台账。
+    const projects = await window.api.listProjects().catch(() => [] as Project[])
+    const projectId = matchProjectByCwd(changesGitRoot, projects)?.id ?? null
+    // worktree 名取仓库目录名；worktreeNameSlug 剔非 ASCII 字符，空则回退 'wt'。
+    const repoName = changesGitRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? ''
+    let record: WorktreeRecord
+    try {
+      record = await window.api.createWorktree(changesGitRoot, projectId, worktreeNameSlug(repoName))
+    } catch (error) {
+      // 失败要当面报（非 git 仓库/无权限等，同 switchToWorktree 的处理）。
+      const message = error instanceof Error ? error.message : String(error)
+      set((s) => ({ status: { ...s.status, error: `创建 worktree 失败：${message}` } }))
+      return
+    }
+    emitForgeEvent('worktreesChanged')
+    await get().switchProject(record.path, { worktree: { projectId, path: record.path } })
+  },
+
   removePendingMessage(id) {
     // 镜像与后端队列同步删：只删镜像的话后端仍会把本条 drain 成一轮（鬼影处理）。
     const meta = get().meta
@@ -3329,6 +3570,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         delete bg.startedAt
         delete bg.stall
       }
+      // 2026-09-02 turn 起止是 countRunningTools 的 turnRunning 入参：重算镜像。
+      recomputeBgRunning(bg.sdkSessionId, bg.items, bg.swarmTasks, bg.running)
     }
     // 当前会话：turn 开始时间戳（忙碌态 mm:ss 计时）从主进程带来的为准；
     // turn 结束时清掉计时与无响应提示。running 本身以事件流为准，这里不动。
@@ -3550,6 +3793,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       starting: false,
       items: [],
       tasks: [], pendingQueue: [],
+      steeredRunning: false,
       sessionConfigDirty: false,
       sessionModelDirty: false,
       bridgeEnded: false,
@@ -3692,6 +3936,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       starting: true,
       items: cachedItems ? visibleHistoryTail(cachedItems) : [],
       tasks: [], pendingQueue: [],
+      steeredRunning: false,
       sessionConfigDirty: false,
       sessionModelDirty: false,
       bridgeEnded: false,
@@ -3871,6 +4116,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     get().setComposerAttachments(sessionId, [])
     // 未读计数同样按会话清（同 forgetSessionLocalState 的死键理由，2026-08-25）。
     get().clearUnread(unreadSessionKey(sessionId, backend))
+    setBgRunning(sessionId, 0) // 2026-09-02 后台运行中镜像同清（前台会话也可能有）
     set((s) => ({ sessions: s.sessions.filter((x) => x.sessionId !== sessionId) }))
     // Deleted the active conversation → start fresh.
     if (meta.sdkSessionId === sessionId) {
@@ -3912,6 +4158,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         get().setComposerAttachments(target.sessionId, [])
         // 同单删：未读计数按会话清，防死键滞留（2026-08-25）。
         get().clearUnread(unreadSessionKey(target.sessionId, target.backend))
+        setBgRunning(target.sessionId, 0) // 2026-09-02 同单删：后台运行中镜像同清
       } catch {
         failed += 1
       }
@@ -3964,6 +4211,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       items: sdkSessionId ? get().items : [],
       tasks: [],
       pendingQueue: [],
+      steeredRunning: false,
       // 旧桥接即将销毁：它挂着的授权弹窗/提问卡的 toolUseID 已死，回应无处
       // 可去，留着只会永远等不到结果。
       pendingPermissions: [],
@@ -4105,6 +4353,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         status: { ...s.status, running: false, startedAt: undefined, stall: undefined, error: endedError ?? s.status.error }
       }))
       scheduleSessionsRefresh(get)
+      // 2026-09-02 前台侧后台运行中镜像：桥接终结 = 全部不再在跑，重算收口。
+      {
+        const st = get()
+        recomputeBgRunning(st.meta?.sdkSessionId, st.items, st.swarmTasks, st.status.running)
+      }
       return
     }
     const msg = e.message as Record<string, unknown> & { type: string }
@@ -4182,16 +4435,40 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           // steered 轮两头都没有那两个事件，只能靠这条专用消息点亮/收尾。
           const m = msg as unknown as { running?: boolean; startedAt?: number }
           if (m.running === true) {
-            set((s) =>
-              s.status.running
-                ? {}
-                : { status: { ...s.status, running: true, startedAt: m.startedAt ?? Date.now(), error: undefined } }
-            )
+            set((s) => {
+              // 唤醒轮开头插一条 steered 分割线（2026-09-02：用户分不清哪段是
+              // 后台任务完成自动拉起的）。去重：steer 轮有「判早收尾再点亮自愈」
+              // 的特性，同一轮可能反复点亮——items 末尾已是 steered 条目（中间
+              // 没有别的条目）就不再追加，否则反复点亮会刷出一屏分割线。
+              const last = s.items[s.items.length - 1]
+              const items =
+                last?.kind === 'steered'
+                  ? s.items
+                  : [
+                      ...s.items,
+                      {
+                        id: uid(),
+                        kind: 'steered' as const,
+                        parentToolUseId: null,
+                        at: m.startedAt ?? Date.now()
+                      }
+                    ]
+              if (s.status.running) return items === s.items ? {} : { items }
+              return {
+                status: { ...s.status, running: true, startedAt: m.startedAt ?? Date.now(), error: undefined },
+                // 2026-09-02 标记 steered 轮在跑：sendMessage 的 busy 判定据此走
+                // 直达（steered 轮非客户端 turn，主进程会直接开消息自己的 turn，
+                // 进 pendingQueue 就是假排队）。
+                steeredRunning: true,
+                items
+              }
+            })
           } else {
             // 收尾对齐 result 分支的兜底：清流式态 + 封悬挂工具块。队列不动
             //（pendingQueue 属于真实 prompt 生命周期,由 result 分支管理）。
             set((s) => ({
               status: { ...s.status, running: s.pendingQueue.length > 0, startedAt: undefined, stall: undefined },
+              steeredRunning: false,
               items: sealHungToolBlocks(
                 s.items.map((i) => (i.kind === 'assistant' && i.streaming ? { ...i, streaming: false } : i)),
                 true
@@ -4656,6 +4933,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           takeUnackedDirectMessages(e.sessionId)
         }
         set((s) => ({
+          // 2026-09-02 真实 result = 客户端 turn 生命周期接管，steered 旗复位。
+          steeredRunning: false,
           status: {
             ...s.status,
             // Stay "running" if a queued message is about to be processed.
@@ -4732,6 +5011,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                 }
               ]
             }))
+            // 2026-09-02：新 turnChanges 卡落地后重算「改动目标仓库」。
+            void recomputeChangesGitRoot()
           }
         }
         break
@@ -4739,6 +5020,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       default:
         // hook_*, task_* etc. are intentionally ignored in the MVP.
         break
+    }
+    // 2026-09-02 前台侧后台运行中计数镜像：激活会话气泡不显示，此值为切走前/
+    // 非 chat 视图时的显示兜底；切走那刻 snapshotActiveSessionIntoBackground 会再
+    // 权威重算一次，这里漏帧（如 streamBatcher 原地折叠）不影响最终正确性。
+    if (bgRunningEventMayMatter(e)) {
+      const st = get()
+      recomputeBgRunning(st.meta?.sdkSessionId, st.items, st.swarmTasks, st.status.running)
     }
   },
 
@@ -4818,4 +5106,25 @@ useSessionStore.subscribe((s) => {
   if (id === todoOverrideSessionId) return
   todoOverrideSessionId = id
   useSessionStore.setState({ todoOverrides: id ? readTodoOverrides(id) : {} })
+})
+
+/** 2026-09-02 changesGitRoot 随会话切换重置并重算（与上面 todoOverrides 同款
+ *  subscribe 模式：meta 写入点太多，散在各路切会话 action 里必漏）。历史渐进
+ *  注水 prepend 可能补进更早的 turnChanges 卡，也要重算。 */
+let changesGitRootSessionId: string | null = null
+let changesGitRootPrependSeq = 0
+useSessionStore.subscribe((s) => {
+  const sid = s.meta?.sessionId ?? null
+  if (sid !== changesGitRootSessionId) {
+    changesGitRootSessionId = sid
+    changesGitRootPrependSeq = s.historyPrependSeq
+    if (s.changesGitRoot !== null || s.changesGitGroups.length > 0)
+      useSessionStore.setState({ changesGitRoot: null, changesGitGroups: [] })
+    void recomputeChangesGitRoot()
+    return
+  }
+  if (s.historyPrependSeq !== changesGitRootPrependSeq) {
+    changesGitRootPrependSeq = s.historyPrependSeq
+    void recomputeChangesGitRoot()
+  }
 })

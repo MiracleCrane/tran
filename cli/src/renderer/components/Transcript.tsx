@@ -19,7 +19,7 @@ import EmptyState from './EmptyState'
 import HoverTip from './HoverTip'
 import QueryResultCard from './QueryResultCard'
 import TurnChangesCard from './TurnChangesCard'
-import { openChangesPanel } from '../events'
+import { openChangesPanel, onForgeEvent } from '../events'
 import UserMessageNav, { type UserNavEntry } from './UserMessageNav'
 import { useCheapNote } from '../hooks/useCheapNote'
 import { useTransientFlag } from '../hooks/useTransientFlag'
@@ -684,8 +684,10 @@ const MessageCopyControls = memo(function MessageCopyControls({
     try {
       await navigator.clipboard.writeText(text)
       flashText()
-    } catch {
-      /* 剪贴板不可用时静默 */
+    } catch (e) {
+      // 2026-09-02：不再纯静默（用户报「复制有时候失灵」——Document is not
+      // focused 等失败此前无声无息），至少进 console；失败时用户看不到 ✓。
+      console.warn('[tran] 复制失败', e)
     }
   }
 
@@ -696,7 +698,12 @@ const MessageCopyControls = memo(function MessageCopyControls({
     const nodes = turnKey
       ? document.querySelectorAll(`[data-turn-id="${CSS.escape(turnKey)}"] .prose-forge`)
       : richRootRef?.current?.querySelectorAll('.prose-forge')
-    if (!nodes || nodes.length === 0) return
+    // 2026-09-02：nodes 为空（整轮被虚拟列表卸载）时不再静默 return——回退成
+    // 纯文本复制 MD 源文，至少有东西进剪贴板（此前表现为「点了复制没反应」）。
+    if (!nodes || nodes.length === 0) {
+      if (text) await copyTextWithFallback(text)
+      return
+    }
     const html = Array.from(nodes).map((n) => n.innerHTML).join('\n')
     // text/plain 给 Markdown 源文而不是拍扁的 textContent（2026-08-24 用户反馈）：
     // 粘到纯文本目标（含 Tran 自己的输入框——输入框不做 md 自动解析）时结构以
@@ -711,8 +718,20 @@ const MessageCopyControls = memo(function MessageCopyControls({
         })
       ])
       flashRich()
-    } catch {
-      /* 剪贴板不可用时静默 */
+    } catch (e) {
+      // 富文本写剪贴板失败（无 OS 焦点等）时回退纯文本 MD，别让用户白点。
+      console.warn('[tran] 富文本复制失败，回退纯文本', e)
+      if (plain) await copyTextWithFallback(plain)
+    }
+  }
+
+  /** 纯文本复制兜底：失败只 console.warn（用户侧看不到 ✓ 即知失败）。 */
+  const copyTextWithFallback = async (value: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(value)
+      flashRich()
+    } catch (e) {
+      console.warn('[tran] 复制失败', e)
     }
   }
 
@@ -1616,6 +1635,11 @@ export default function Transcript({
   const [showLatest, setShowLatest] = useState(false)
   const [deferHighlight, setDeferHighlight] = useState(true)
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null)
+  // Ctrl+F 转录区搜索（2026-09-02 v1）：开关 + 关键词 + 命中游标（-1 = 未跳转）。
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [findCursor, setFindCursor] = useState(-1)
+  const findInputRef = useRef<HTMLInputElement | null>(null)
   /** #48 视口内可见的导航条目 id 集合。Codex 高亮的是**一整段**（用
    *  IntersectionObserver 求首个到最后一个可见回合的连续区间），不是单条——
    *  一屏能看到三条消息时就该亮三格。 */
@@ -1846,17 +1870,41 @@ export default function Transcript({
     // 每节 10px，几百条也就是列内滚动的事。
     return entries
   }, [displayRows])
-  // "最新块"保持展开：最新一条 live（非历史）assistant 消息里的最后一个思考/
-  // 工具块。纯文本段落开头的消息 → 无最新块（上一个收起）；最新是历史 → 不收。
+  // Ctrl+F 命中行（2026-09-02 v1 口径，从简）：只匹配 user 消息 text 与
+  // assistant 的 text 块，大小写不敏感子串；思考块/工具块不匹配。每行一条
+  // 命中（行内多次出现算一条）。值为 displayRows 的相对下标。
+  const findHits = useMemo(() => {
+    const q = findQuery.trim().toLowerCase()
+    if (!q) return []
+    const hits: number[] = []
+    displayRows.forEach((row, rowIndex) => {
+      if (row.kind !== 'item' && row.kind !== 'itemText') return
+      const item = row.node.item
+      let text = ''
+      if (item.kind === 'user') text = item.text
+      else if (item.kind === 'assistant')
+        text = (item.blocks ?? [])
+          .filter((b): b is Extract<AssistantBlock, { kind: 'text' }> => !!b && b.kind === 'text')
+          .map((b) => b.text)
+          .join('\n')
+      if (text && text.toLowerCase().includes(q)) hits.push(rowIndex)
+    })
+    return hits
+  }, [displayRows, findQuery])
+  // "最新块"保持展开：本轮流式中的 assistant 消息里的最后一个思考/工具块。
   // 2026-08-14：只在 turn 运行中生效——turn 一结束回 null，本轮活动块整体折起
   // （用户：「就整个折叠块都输出完再折叠」；此前 lastExpandableKey 在收尾后仍
   // 指着最后一块，于是"输出完又展开"）。
+  // 2026-09-02 修「发新消息时上一轮的思考块被自动打开几秒」（CDP 实测铁证）：
+  // 发送瞬间 turnRunning 已 true 但本轮 item 还没落进 items，倒扫命中**上一轮**
+  // 的 item 把它最后的思考块撑开。加 it.streaming 限定——只有本轮流式中的 item
+  // 才算数；本轮 item 未落前扫到的都是旧轮（streaming 已封口），return null。
   const lastExpandableKey = useMemo(() => {
     if (!turnRunning) return null
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i]
       if (it.kind !== 'assistant') continue
-      if (it.isHistory) return null
+      if (it.isHistory || !it.streaming) return null
       for (let j = it.blocks.length - 1; j >= 0; j--) {
         const b = it.blocks[j]
         if (b && b.kind === 'tool') return b.toolUseId
@@ -1883,6 +1931,28 @@ export default function Transcript({
   useEffect(() => {
     deferHighlightRef.current = deferHighlight
   }, [deferHighlight])
+
+  // Ctrl+F 打开搜索条（shortcuts.ts → forge 事件，对齐 SessionSearchPalette 的接法）。
+  useEffect(() => onForgeEvent('openFindInTranscript', () => setFindOpen(true)), [])
+  useEffect(() => {
+    if (findOpen) findInputRef.current?.focus()
+  }, [findOpen])
+  // Esc 关闭（窗口捕获阶段：焦点不在搜索框时也要生效），关闭后还焦点给 Composer。
+  useEffect(() => {
+    if (!findOpen) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      setFindOpen(false)
+      // v1：富文本实验框不在还焦点口径内，只认 .composer-textarea。
+      window.requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>('.composer-textarea')?.focus()
+      })
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [findOpen])
 
   // #8 埋点：items 每次因流式 flush 变化后，记录 store→commit 耗时（见 streamProbe）。
   useLayoutEffect(() => {
@@ -1958,6 +2028,56 @@ export default function Transcript({
         ],
         { duration: 1400, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' }
       )
+    })
+  }
+
+  /** Ctrl+F 跳转：与 jumpToUserMessage 同套路——解除钉住、记滚动意图、按
+   *  **相对**下标 scrollToIndex（scrollToIndex 不吃 firstItemIndex 基数），
+   *  落地后让目标行闪一下。 */
+  const jumpToFindHit = (rowIndex: number): void => {
+    lockFollowOutput()
+    markScrollIntent()
+    setPinnedAtBottom(false)
+    const absoluteIndex = firstItemIndexRef.current + rowIndex
+    const distance = Math.abs(absoluteIndex - lastRenderedRangeRef.current.startIndex)
+    virtuosoRef.current?.scrollToIndex({
+      index: rowIndex,
+      align: 'center',
+      behavior: distance > USER_NAV_SMOOTH_MAX_ROWS ? 'auto' : 'smooth'
+    })
+    const row = displayRows[rowIndex]
+    if (row) flashFindRow(rowKeyOf(row))
+  }
+
+  /** 命中行闪烁：行内侧描一圈光晕后淡出（与 flashUserMessage 同族时序）。
+   *  用 inset——行 wrapper 是通栏，外描边会贴到列外看不见。 */
+  const flashFindRow = (rowKey: string): void => {
+    window.requestAnimationFrame(() => {
+      const host = scrollElement?.querySelector<HTMLElement>(
+        `[data-find-row-key="${CSS.escape(rowKey)}"]`
+      )
+      host?.animate?.(
+        [
+          { boxShadow: `inset ${USER_NAV_FLASH_FROM}` },
+          { boxShadow: `inset ${USER_NAV_FLASH_FROM}`, offset: 0.35 },
+          { boxShadow: `inset ${USER_NAV_FLASH_TO}` }
+        ],
+        { duration: 1400, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' }
+      )
+    })
+  }
+
+  const stepFindHit = (delta: 1 | -1): void => {
+    if (findHits.length === 0) return
+    const next = (findCursor + delta + findHits.length) % findHits.length
+    setFindCursor(next)
+    jumpToFindHit(findHits[next])
+  }
+
+  const closeFindBar = (): void => {
+    setFindOpen(false)
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('.composer-textarea')?.focus()
     })
   }
 
@@ -2456,6 +2576,19 @@ export default function Transcript({
         />
       )
     if (row.node.item.kind === 'compaction') return <CompactionDivider item={row.node.item} />
+    if (row.node.item.kind === 'steered') {
+      // 后台任务完成自动唤醒轮的开头分割线（2026-09-02）：与「以上为历史消息」
+      // 同款左右细线 + 中间文案；mt-4 给上一条消息的悬停复制钮让位（同历史
+      // 分割线，见 styles.css 的 tran-msg-copy 注释）；⚡ 与压缩分割线同族。
+      return (
+        <div className="mb-2 mt-4 flex items-center gap-2 text-[10px] text-zinc-600">
+          <span className="h-px flex-1 bg-white/[0.06]" />
+          <span className="text-accent">⚡</span>
+          后台任务完成，AI 自动继续
+          <span className="h-px flex-1 bg-white/[0.06]" />
+        </div>
+      )
+    }
     if (row.node.item.kind === 'query') return <QueryResultCard item={row.node.item} />
     if (row.node.item.kind === 'turnChanges') {
       return (
@@ -2579,6 +2712,7 @@ export default function Transcript({
           return (
             <div
               data-user-msg-id={userMsgId}
+              data-find-row-key={rowKey}
               className={`mx-auto w-full max-w-5xl px-6 py-1.5 ${isNew ? 'tran-msg-enter' : ''}`}
               style={isNew ? { animationDelay: `${Math.min(relIndex * 24, 280)}ms` } : undefined}
             >
@@ -2606,6 +2740,63 @@ export default function Transcript({
         components={VIRTUOSO_COMPONENTS}
         context={footerContext}
       />
+      {/* Ctrl+F 搜索条（2026-09-02 v1）：右上角浮条，深色玻璃风同
+          SessionSearchPalette 的 glass-panel。Enter/Shift+Enter 或 ↑↓ 跳命中。 */}
+      {findOpen && (
+        <div className="glass-panel absolute right-4 top-2 z-30 flex items-center gap-1 rounded-xl px-2 py-1.5 shadow-2xl">
+          <input
+            ref={findInputRef}
+            value={findQuery}
+            onChange={(event) => {
+              setFindQuery(event.target.value)
+              // 关键词变了命中集就变了：游标复位到「未跳转」，计数显示 0/N。
+              setFindCursor(-1)
+            }}
+            onKeyDown={(event) => {
+              // 输入法组词中的 Enter 是确认候选词，不能当成跳下一个。
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                stepFindHit(event.shiftKey ? -1 : 1)
+              }
+            }}
+            placeholder="在对话中搜索"
+            spellCheck={false}
+            className="h-7 w-48 rounded-lg border border-white/[0.08] bg-bg-elev/60 px-2 text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-accent/60"
+          />
+          {findQuery.trim() !== '' && (
+            <span className="min-w-[2.5rem] text-center text-[11px] tabular-nums text-zinc-500">
+              {findHits.length === 0
+                ? '0/0'
+                : `${Math.min(findCursor + 1, findHits.length)}/${findHits.length}`}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => stepFindHit(-1)}
+            aria-label="上一个命中"
+            className="rounded px-1.5 py-0.5 text-xs text-zinc-400 transition hover:bg-white/10 hover:text-zinc-200"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            onClick={() => stepFindHit(1)}
+            aria-label="下一个命中"
+            className="rounded px-1.5 py-0.5 text-xs text-zinc-400 transition hover:bg-white/10 hover:text-zinc-200"
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            onClick={closeFindBar}
+            aria-label="关闭搜索"
+            className="rounded px-1.5 py-0.5 text-xs text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+          >
+            ×
+          </button>
+        </div>
+      )}
       <UserMessageNav entries={userNavEntries} activeIds={activeUserNavIds} onJump={jumpToUserMessage} />
       {/* 回到最新：底部居中（Codex 风，2026-08 用户点名）。输出中箭头挂
           紫黄流光（动态=正在干活），非输出静态箭头。按钮带 data-follow-no-lock：

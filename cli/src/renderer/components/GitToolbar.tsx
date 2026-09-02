@@ -6,6 +6,7 @@ import Collapse from './Collapse'
 import ConfirmDialog from './ConfirmDialog'
 import ChangesPanel from './ChangesPanel'
 import { onOpenChangesPanel } from '../events'
+import { normalizeCwdForCompare } from '../../shared/paths'
 import HoverTip from './HoverTip'
 
 /* --- icons --- */
@@ -271,6 +272,13 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   // '' when there's no active project; every git call is guarded by
   // `if (!cwd)` / `if (!branch)` so the empty string never reaches git.
   const cwd = useSessionStore((s) => s.meta?.cwd ?? '')
+  // 2026-09-02「改动目标仓库」：会话改动文件多数派所在的 git 仓库根——可能
+  // 与 cwd 不同库，也可能 cwd 根本不是仓库。diff/改动面板的数据源跟它走；
+  // 分支/pull/push/commit 等项目级操作仍跟 cwd（cwd 是仓库时）。
+  const changesGitRoot = useSessionStore((s) => s.changesGitRoot)
+  // 2026-09-02 分组改动面板：会话改动按仓库根分组，透传给 ChangesPanel
+  // 分组渲染（多仓库改动全部可见，不再只显示多数派仓库）。
+  const changesGitGroups = useSessionStore((s) => s.changesGitGroups)
   // 惰性初始化：getCachedGitToolbar 每次调用都深克隆 status 四个数组 +
   // branches，而结果只用作 useState 初始值（仅首渲染有效）——放组件体里
   // 等于每次渲染白克隆一遍。
@@ -283,6 +291,10 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   const [stashList, setStashList] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 工具条全局状态（分支名/状态计数/分支列表）与所有项目级操作的目标仓库：
+  // cwd 是仓库时 = cwd；cwd 非仓库但改动多数派仓库存在时 = changesGitRoot；
+  // '' = 哪边都不是仓库（保持旧的「非 git 目录」极简形态）。
+  const [globalCwd, setGlobalCwd] = useState<string>(initialGitToolbar?.branch ? cwd : '')
 
   const [drawer, setDrawer] = useState<Drawer>(null)
   const changesRequestSeqRef = useRef(0)
@@ -300,6 +312,8 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   const diffSeqRef = useRef(0)
   const cwdRef = useRef(cwd)
   cwdRef.current = cwd
+  // effect 用的「上一次 cwd」：区分 cwd 真变化与 changesGitRoot 触发的重跑。
+  const prevEffectCwdRef = useRef<string | null>(null)
   const [drawerHeight, setDrawerHeight] = useState<number | null>(null)
   const [drawerLoading, setDrawerLoading] = useState<Partial<Record<OpenDrawer, boolean>>>({})
   const [commitMsg, setCommitMsg] = useState('')
@@ -387,29 +401,36 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   // Refresh branch + status + branches whenever cwd changes. Also closes any
   // open drawer so stale drawer contents from the previous project don't leak.
   useEffect(() => {
-    setDrawer(null)
-    setDiffView(null)
-    if (!cwd) {
-      setBranch(null)
-      setStatus(emptyGitStatus())
-      setBranches([])
-      setGitChecked(true)
-      return
-    }
-    const cached = getCachedGitToolbar(cwd)
-    if (cached) {
-      setBranch(cached.branch)
-      setStatus(cached.status)
-      setBranches(cached.branches)
-      setGitChecked(cached.checked)
-    } else {
-      setGitChecked(false)
-      setBranch(null)
-      setStatus(emptyGitStatus())
-      setBranches([])
+    // cwd 真变化才重置抽屉与本地状态；changesGitRoot 变化（turn 结束重算落地）
+    // 只补一次 refresh——cwd 非仓库时全局状态要改挂改动多数派仓库。
+    const cwdChanged = prevEffectCwdRef.current !== cwd
+    prevEffectCwdRef.current = cwd
+    if (cwdChanged) {
+      setDrawer(null)
+      setDiffView(null)
+      if (!cwd) {
+        setBranch(null)
+        setStatus(emptyGitStatus())
+        setBranches([])
+        setGitChecked(true)
+        setGlobalCwd('')
+        return
+      }
+      const cached = getCachedGitToolbar(cwd)
+      if (cached) {
+        setBranch(cached.branch)
+        setStatus(cached.status)
+        setBranches(cached.branches)
+        setGitChecked(cached.checked)
+      } else {
+        setGitChecked(false)
+        setBranch(null)
+        setStatus(emptyGitStatus())
+        setBranches([])
+      }
     }
     void refresh()
-  }, [cwd])
+  }, [cwd, changesGitRoot])
 
   useEffect(() => {
     renderedDrawerRef.current = renderedDrawer
@@ -454,12 +475,14 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   const refresh = async (): Promise<void> => {
     if (!cwd) {
       setGitChecked(true)
+      setGlobalCwd('')
       return
     }
     // 取消守卫：快照本次刷新的 cwd 与递增序号，await 回来后二者任一失效
     // （切了项目 / 又发起了更新的刷新 / 组件已卸载）就丢弃结果，
     // 避免旧仓库的状态覆盖新仓库的显示。
     const target = cwd
+    const changesRoot = changesGitRoot
     const seq = ++refreshSeqRef.current
     const stale = (): boolean =>
       !mountedRef.current || seq !== refreshSeqRef.current || target !== cwdRef.current
@@ -471,15 +494,41 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
       ])
       setCachedGitToolbar(target, b, s, bl)
       if (stale()) return
+      if (b === null && changesRoot && normalizeCwdForCompare(changesRoot) !== normalizeCwdForCompare(target)) {
+        // 2026-09-02：cwd 不是 git 仓库，但会话改动多数派落在 changesRoot——
+        // 工具条全局状态（分支/状态/操作）改挂那个仓库，无项目会话也能看
+        // diff、做提交。cwd 本身是仓库时不动（拍板「项目级操作跟 cwd」）。
+        try {
+          const [b2, s2, bl2] = await Promise.all([
+            window.api.gitGetCurrentBranch(changesRoot),
+            window.api.gitStatus(changesRoot),
+            window.api.gitListBranches(changesRoot)
+          ])
+          if (stale()) return
+          setBranch(b2)
+          setStatus(s2)
+          setBranches(bl2)
+          setGlobalCwd(b2 ? changesRoot : '')
+        } catch {
+          if (stale()) return
+          setBranch(null)
+          setStatus(emptyGitStatus())
+          setBranches([])
+          setGlobalCwd('')
+        }
+        return
+      }
       setBranch(b)
       setStatus(s)
       setBranches(bl)
+      setGlobalCwd(b ? target : '')
     } catch {
       setCachedGitToolbar(target, null, emptyGitStatus(), [])
       if (stale()) return
       setBranch(null)
       setStatus(emptyGitStatus())
       setBranches([])
+      setGlobalCwd('')
     } finally {
       if (!stale()) setGitChecked(true)
     }
@@ -496,7 +545,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
     setError(null)
     try {
       const res = await fn()
-      if (opts.invalidateLog) invalidateGitLogCache(cwd)
+      if (opts.invalidateLog) invalidateGitLogCache(gcwd)
       if (res && typeof res === 'object' && ('stdout' in res || 'stderr' in res)) {
         const { stdout, stderr } = res as { stdout: string; stderr: string }
         const text = [stdout, stderr].filter(Boolean).join('\n').trim()
@@ -529,13 +578,13 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   }
 
   const loadDrawerData = (next: OpenDrawer): void => {
-    if (!cwd) return
+    if (!gcwd) return
 
     if (next === 'log') {
       const seq = (drawerLoadSeqRef.current.log ?? 0) + 1
       drawerLoadSeqRef.current.log = seq
       const logBranch = branch
-      const cachedCommits = getCachedGitLog(cwd, logBranch, GIT_LOG_LIMIT)
+      const cachedCommits = getCachedGitLog(gcwd, logBranch, GIT_LOG_LIMIT)
       if (cachedCommits) {
         setCommits(cachedCommits)
         setDrawerBusy('log', false)
@@ -547,9 +596,9 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
       afterDrawerPaint(() => {
         void (async () => {
           try {
-            const data = await window.api.gitLog(cwd, GIT_LOG_LIMIT)
+            const data = await window.api.gitLog(gcwd, GIT_LOG_LIMIT)
             if (mountedRef.current && drawerLoadSeqRef.current.log === seq) {
-              setCachedGitLog(cwd, logBranch, GIT_LOG_LIMIT, data)
+              setCachedGitLog(gcwd, logBranch, GIT_LOG_LIMIT, data)
               lockDrawerVisibleHeight()
               setCommits(data)
             }
@@ -571,7 +620,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
       afterDrawerPaint(() => {
         void (async () => {
           try {
-            const res = await window.api.gitStash(cwd, 'list')
+            const res = await window.api.gitStash(gcwd, 'list')
             if (mountedRef.current && drawerLoadSeqRef.current.stash === seq) {
               lockDrawerVisibleHeight()
               setStashList(res.split('\n').filter(Boolean))
@@ -610,7 +659,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   }, [])
 
   const loadDiff = async (paths: string[], staged: boolean, note?: string): Promise<void> => {
-    if (!cwd) return
+    if (!gcwd) return
     // 竞态守卫：先点大文件（diff 慢）再点小文件（快），慢响应后到会覆盖，
     // 面板跳回上一个文件。用序号只让最后一次点击的结果落地。
     const seq = ++diffSeqRef.current
@@ -620,7 +669,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
       return
     }
     try {
-      const text = await window.api.gitDiff(cwd, { paths, staged })
+      const text = await window.api.gitDiff(gcwd, { paths, staged })
       if (seq !== diffSeqRef.current) return
       setDiffView({ paths, staged, text, loading: false })
     } catch (e: unknown) {
@@ -629,14 +678,14 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
     }
   }
 
-  const stageFile = (path: string): Promise<void> => runGitAction(() => window.api.gitAdd(cwd, [path]), '暂存')
-  const unstageFile = (path: string): Promise<void> => runGitAction(() => window.api.gitReset(cwd, [path]), '取消暂存')
+  const stageFile = (path: string): Promise<void> => runGitAction(() => window.api.gitAdd(gcwd, [path]), '暂存')
+  const unstageFile = (path: string): Promise<void> => runGitAction(() => window.api.gitReset(gcwd, [path]), '取消暂存')
 
   const doCommit = async (): Promise<void> => {
     const msg = commitMsg.trim()
     if (!msg) { setError('请输入提交信息'); return }
     await runGitAction(async () => {
-      await window.api.gitCommit(cwd, msg)
+      await window.api.gitCommit(gcwd, msg)
       setCommitMsg('')
       setDiffView(null)
     }, '提交', { invalidateLog: true })
@@ -648,6 +697,8 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   // （2026-08-25 用户抓包：「本会话 N 个文件已更改」是死按钮）。补一个极简
   // 抽屉：只认 changes，里面是一句诚实说明（复用 ChangesPanel 的空态样式），
   // 不挂 ChangesPanel 本体，免得 gitWorkingChanges 在非 git 目录空转报错。
+  // 2026-09-02：cwd 非仓库但改动多数派仓库（changesGitRoot）存在时走不到
+  // 这里——refresh 已把 branch/globalCwd 挂到那个仓库，按正常工具条渲染。
   if (!branch) {
     if (gitChecked) {
       const changesOpen = renderedDrawer === 'changes'
@@ -694,6 +745,12 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
     )
   }
 
+  // 全局状态目标仓库：branch 非 null 时 globalCwd 必有值（cwd 或改动多数派
+  // 仓库）。所有项目级 git 操作与抽屉数据源都用它，不再直接用 cwd。
+  const gcwd = globalCwd || cwd
+  const gcwdRepoName = gcwd.replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop() ?? ''
+  const showingChangesRepo =
+    !!globalCwd && normalizeCwdForCompare(globalCwd) !== normalizeCwdForCompare(cwd)
   const btnCls =
     'flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-40'
   const dotCls = 'h-1.5 w-1.5 shrink-0 rounded-full'
@@ -714,6 +771,11 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
         >
           <BranchIcon />
           <span className="max-w-[160px] truncate font-mono">{branch}</span>
+          {showingChangesRepo && (
+            <HoverTip tip={`会话改动所在的仓库：${gcwd}`}>
+              <span className="max-w-[120px] truncate text-[10px] text-zinc-500">· {gcwdRepoName}</span>
+            </HoverTip>
+          )}
           {status.ahead ? <span className="text-[10px] font-semibold text-emerald-400">↑{status.ahead}</span> : null}
           {status.behind ? <span className="text-[10px] font-semibold text-amber-400">↓{status.behind}</span> : null}
         </button>
@@ -731,13 +793,13 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
         <span className="h-3 w-px shrink-0 bg-white/[0.08]" />
 
         {/* Sync: fetch / pull / push */}
-        <button onClick={() => runGitAction(() => window.api.gitFetch(cwd), '拉取(fetch)')} disabled={loading} className={btnCls} aria-label="拉取远端信息(不合并)">
+        <button onClick={() => runGitAction(() => window.api.gitFetch(gcwd), '拉取(fetch)')} disabled={loading} className={btnCls} aria-label="拉取远端信息(不合并)">
           <HoverTip tip="拉取远端信息(不合并)"><FetchIcon /></HoverTip>
         </button>
-        <button onClick={() => runGitAction(() => window.api.gitPull(cwd), '拉取', { invalidateLog: true })} disabled={loading} className={btnCls} aria-label="拉取并合并">
+        <button onClick={() => runGitAction(() => window.api.gitPull(gcwd), '拉取', { invalidateLog: true })} disabled={loading} className={btnCls} aria-label="拉取并合并">
           <HoverTip tip="拉取并合并"><PullIcon /> 拉取</HoverTip>
         </button>
-        <button onClick={() => runGitAction(() => window.api.gitPush(cwd), '推送')} disabled={loading} className={btnCls} aria-label="推送">
+        <button onClick={() => runGitAction(() => window.api.gitPush(gcwd), '推送')} disabled={loading} className={btnCls} aria-label="推送">
           <HoverTip tip="推送"><PushIcon /> 推送</HoverTip>
         </button>
 
@@ -839,7 +901,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                     }`}
                   >
                     <button
-                      onClick={() => runGitAction(() => window.api.gitCheckoutBranch(cwd, b.name), '切换分支').then(() => setDrawer(null))}
+                      onClick={() => runGitAction(() => window.api.gitCheckoutBranch(gcwd, b.name), '切换分支').then(() => setDrawer(null))}
                       disabled={loading || !!b.current}
                       className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-40"
                     >
@@ -853,7 +915,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                           message: `确定删除本地分支 ${b.name}?`,
                           confirmLabel: '删除',
                           danger: true,
-                          onConfirm: () => { const name = b.name; setConfirm(null); void runGitAction(() => window.api.gitDeleteBranch(cwd, name, true), '删除分支') }
+                          onConfirm: () => { const name = b.name; setConfirm(null); void runGitAction(() => window.api.gitDeleteBranch(gcwd, name, true), '删除分支') }
                         })}
                         disabled={loading}
                         className="rounded p-0.5 text-zinc-600 hover:text-red-400"
@@ -898,7 +960,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                 </span>
                 <div className="flex items-center gap-1">
                   {!status.clean && (
-                    <button onClick={() => runGitAction(() => window.api.gitAdd(cwd), '全部暂存')} disabled={loading} className="rounded px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200">
+                    <button onClick={() => runGitAction(() => window.api.gitAdd(gcwd), '全部暂存')} disabled={loading} className="rounded px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200">
                       全部暂存
                     </button>
                   )}
@@ -1007,7 +1069,10 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
           {/* Changes drawer：工作区改动聚合视图 */}
           {renderedDrawer === 'changes' && (
             <ChangesPanel
-              cwd={cwd}
+              cwd={changesGitRoot ?? gcwd}
+              groups={changesGitGroups}
+              // 已知遗留（2026-09-02）：refreshKey 仍只盯主仓库（gcwd）的 status
+              // 计数，其他组仓库的外部改动不触发静默刷新，面板内手动刷新可补。
               refreshKey={`${status.staged.length}:${status.unstaged.length}:${status.untracked.length}:${status.conflicts.length}`}
               initialPath={changesTarget?.path}
               initialRequestKey={changesTarget?.requestKey}
@@ -1040,7 +1105,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                         message: `用 git revert 撤销提交 ${c.shortHash}?\n「${c.message}」\n这会创建一个反向的新提交。`,
                         confirmLabel: '撤销',
                         danger: true,
-                        onConfirm: () => { const hash = c.hash; setConfirm(null); void runGitAction(() => window.api.gitRevert(cwd, hash), '撤销提交', { invalidateLog: true }).then(() => setDrawer(null)) }
+                        onConfirm: () => { const hash = c.hash; setConfirm(null); void runGitAction(() => window.api.gitRevert(gcwd, hash), '撤销提交', { invalidateLog: true }).then(() => setDrawer(null)) }
                       })}
                       disabled={loading}
                       className="shrink-0 rounded p-0.5 text-zinc-600 opacity-0 transition hover:text-amber-400 group-hover:opacity-100 disabled:opacity-30"
@@ -1062,7 +1127,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                 <button onClick={() => setDrawer(null)} className="text-zinc-600 hover:text-zinc-300"><CloseIcon /></button>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => runGitAction(() => window.api.gitStash(cwd, 'push'), '储藏').then(refreshStash)} disabled={loading} className="flex items-center gap-1 rounded-lg border border-white/[0.1] px-2 py-1 text-[11px] text-zinc-300 hover:bg-white/[0.06] disabled:opacity-40">
+                <button onClick={() => runGitAction(() => window.api.gitStash(gcwd, 'push'), '储藏').then(refreshStash)} disabled={loading} className="flex items-center gap-1 rounded-lg border border-white/[0.1] px-2 py-1 text-[11px] text-zinc-300 hover:bg-white/[0.06] disabled:opacity-40">
                   <PlusIcon /> 储藏当前改动
                 </button>
                 <button
@@ -1070,7 +1135,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                     title: '恢复储藏',
                     message: '恢复最近的储藏(stash pop)?\n若与当前改动冲突,会产生合并冲突。',
                     confirmLabel: '恢复',
-                    onConfirm: () => { setConfirm(null); void runGitAction(() => window.api.gitStash(cwd, 'pop'), '恢复储藏').then(refreshStash) }
+                    onConfirm: () => { setConfirm(null); void runGitAction(() => window.api.gitStash(gcwd, 'pop'), '恢复储藏').then(refreshStash) }
                   })}
                   disabled={loading || stashList.length === 0}
                   className="flex items-center gap-1 rounded-lg border border-white/[0.1] px-2 py-1 text-[11px] text-zinc-300 hover:bg-white/[0.06] disabled:opacity-40"
@@ -1126,18 +1191,18 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
     const name = newBranchName.trim()
     if (!name) return
     await runGitAction(async () => {
-      await window.api.gitCreateBranch(cwd, name)
-      await window.api.gitCheckoutBranch(cwd, name)
-      if (pushUpstream) await window.api.gitPushUpstream(cwd)
+      await window.api.gitCreateBranch(gcwd, name)
+      await window.api.gitCheckoutBranch(gcwd, name)
+      if (pushUpstream) await window.api.gitPushUpstream(gcwd)
       setNewBranchName('')
     }, '创建分支')
     setDrawer(null)
   }
 
   async function refreshStash(): Promise<void> {
-    if (!cwd) return
+    if (!gcwd) return
     try {
-      const res = await window.api.gitStash(cwd, 'list')
+      const res = await window.api.gitStash(gcwd, 'list')
       setStashList(res.split('\n').filter(Boolean))
     } catch { setStashList([]) }
   }

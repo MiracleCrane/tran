@@ -829,8 +829,9 @@ export interface WorktreeRecord {
   path: string
   /** 所属 git 仓库的主检出路径。 */
   repoRoot: string
-  /** 归属项目 id（会话的归属覆盖也写它）。 */
-  projectId: string
+  /** 归属项目 id（会话的归属覆盖也写它）；2026-09-02 起允许 null——
+   *  未注册仓库的「改动迁移 worktree」没有归属项目。 */
+  projectId: string | null
   /** worktree 检出的分支（tran/<name>）；删除 worktree 后分支保留在仓库里。 */
   branch: string
   createdAt: number
@@ -1164,12 +1165,16 @@ export interface ForgeApi {
     untracked: boolean,
     opts?: { status?: GitFileChange['status']; oldPath?: string }
   ): Promise<void>
+  /** 批量查目录所属 git 仓库根（2026-09-02 改动多数派仓库推导用）。
+   *  返回值顺序与入参一一对应；非 git 仓库为 null。 */
+  gitRepoRoots(dirs: string[]): Promise<(string | null)[]>
 
 
   /** --- git worktree 隔离（2026-09-01 第 4 期，逐线程 opt-in） ---
-  /** 为项目仓库新建 worktree 并登记台账；名称冲突自动顺延 -2/-3（不复用），
-   *  非 git 仓库抛错。 */
-  createWorktree(repoRoot: string, projectId: string, name: string): Promise<WorktreeRecord>
+  /** 为仓库新建 worktree 并登记台账；名称冲突自动顺延 -2/-3（不复用），
+   *  非 git 仓库抛错。projectId 传 null 表示仓库未注册为项目
+   * （2026-09-02「改动迁移 worktree」入口）。 */
+  createWorktree(repoRoot: string, projectId: string | null, name: string): Promise<WorktreeRecord>
   /** 删除 worktree 并清台账；有未提交改动且非 force 时抛错（消息带原因）。
    *  只许删 Tran 基目录内的 worktree；分支保留在仓库中。 */
   removeWorktree(path: string, opts?: { force?: boolean }): Promise<void>

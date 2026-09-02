@@ -229,6 +229,7 @@ const api: ForgeApi = {
   gitFileDiff: (cwd, path, opts) => ipcRenderer.invoke('forge:gitFileDiff', cwd, path, opts),
   gitRevertFile: (cwd, path, untracked, opts) =>
     ipcRenderer.invoke('forge:gitRevertFile', cwd, path, untracked, opts),
+  gitRepoRoots: (dirs) => ipcRenderer.invoke('forge:gitRepoRoots', dirs),
 
   // --- git worktree 隔离（2026-09-01 第 4 期） ---
   createWorktree: (repoRoot, projectId, name) =>

@@ -771,6 +771,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   // 切到非 chat 视图时该会话行不算「激活」，等待条数仍要在气泡上显示。
   const waitingCounts = useSessionStore((s) => s.waitingCounts)
   const fgWaitingCount = useSessionStore((s) => s.elicitationQueue.length + s.pendingPermissions.length)
+  // 后台任务/子 Agent 运行中计数（2026-09-02 蓝色呼吸圆点气泡）：镜像在
+  // sessionStore 按行键维护（recomputeBgRunning 全量重算），这里只读。
+  const bgRunningCounts = useSessionStore((s) => s.bgRunningCounts)
   const loading = useSessionStore((s) => s.sessionsLoading)
   const sessionsHasMore = useSessionStore((s) => s.sessionsHasMore)
   const refresh = useSessionStore((s) => s.refreshSessions)
@@ -1831,25 +1834,50 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       sessionScope === 'all'
         ? groupSessionsByCwd(inProject, meta?.cwd ?? '', groupPathOf)
         : groupSessionsByProject(inProject, meta?.cwd ?? '', groupPathOf)
-    // 空项目保留组头：会话被删光/还没开过会话的项目不消失（2026-08-18 用户
-    // 拍板）。追加在有会话的组后面，保持 listProjects 顺序；主目录不算项目。
-    const nonEmptyLabels = new Set(cwdGroups.map((g) => normalizeCwdForCompare(g.label)))
-    const emptyProjectGroups =
-      sessionScope === 'all'
-        ? addedProjects
-            .filter((p) => {
-              const root = p.rootPaths[0]
-              if (!root) return false
-              const n = normalizeCwdForCompare(root)
-              return !nonEmptyLabels.has(n) && (!homePath || n !== homePath)
-            })
-            .map((p) => ({ label: p.rootPaths[0] ?? '', items: [] as SessionListItem[], section: false }))
-        : []
+    // 2026-09-02 用户：「项目的顺序不要变，不要说哪个项目新加了会话就放到上面。」
+    // 「全部」视图的项目组改为固定序：置顶优先 + listProjects 顺序（与
+    // ProjectSwitcher 的 orderedProjects 同口径，sort 稳定），不再按组内
+    // 最新会话时间倒序。空项目组（会话删光/还没开过会话，2026-08-18 用户拍板
+    // 保留组头）不再追加在末尾，并进统一的项目序——有会话没会话都站自己该站
+    // 的位置。不属于任何已注册项目的 cwd 组排在项目组之后，仍按最新活动倒序
+    // （它们没有固定序可言）。'project' 视图维持原分组（groupSessionsByProject）。
+    // 匹配口径与原 emptyProjectGroups 一致：组 label 与项目 rootPaths[0] 归一化
+    // 比较；主目录不算项目。
+    let projectOrderedGroups = cwdGroups
+    if (sessionScope === 'all') {
+      const orderedProjects = [...addedProjects].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned))
+      const projectRankByRoot = new Map<string, number>()
+      orderedProjects.forEach((p, index) => {
+        const root = p.rootPaths[0]
+        if (!root) return
+        const n = normalizeCwdForCompare(root)
+        if (!projectRankByRoot.has(n)) projectRankByRoot.set(n, index)
+      })
+      const registered: { rank: number; group: SessionGroup }[] = []
+      const unregistered: SessionGroup[] = []
+      for (const g of cwdGroups) {
+        const rank = projectRankByRoot.get(normalizeCwdForCompare(g.label))
+        if (rank === undefined) unregistered.push(g)
+        else registered.push({ rank, group: g })
+      }
+      const nonEmptyLabels = new Set(registered.map(({ group }) => normalizeCwdForCompare(group.label)))
+      const emptyGroups: { rank: number; group: SessionGroup }[] = []
+      orderedProjects.forEach((p, index) => {
+        const root = p.rootPaths[0]
+        if (!root) return
+        const n = normalizeCwdForCompare(root)
+        if (nonEmptyLabels.has(n) || (homePath && n === homePath)) return
+        emptyGroups.push({ rank: index, group: { label: root, items: [] } })
+      })
+      projectOrderedGroups = [
+        ...[...registered, ...emptyGroups].sort((a, b) => a.rank - b.rank).map(({ group }) => group),
+        ...unregistered
+      ]
+    }
     return [
       ...(pinned.length ? [{ label: '置顶', items: pinned, section: true }] : []),
       ...(qa.length ? [{ label: QA_SECTION_LABEL, items: qa, section: true }] : []),
-      ...cwdGroups,
-      ...emptyProjectGroups,
+      ...projectOrderedGroups,
       ...(recent.length ? [{ label: '最近', items: recent, section: true }] : [])
     ]
   }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjects, projectById, homePath, qaHidden, projectAssignments, scratchRoots])
@@ -2490,6 +2518,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
               const waitingCount = active
                 ? 0
                 : (waitingCounts[key] ?? 0) + (s.sessionId === meta.sdkSessionId ? fgWaitingCount : 0)
+              // 后台运行中气泡（2026-09-02）：激活会话不显示（底部 chip 已覆盖，
+              // 避免重复——同未读/等待惯例）；非 chat 视图下前台会话行不算激活，
+              // 前台镜像由 ingestAgentEvent 的事件钩维护，照常显示。
+              const bgRunningCount = active ? 0 : (bgRunningCounts[key] ?? 0)
               const editing = editingId === key
               const inserting = newlyInsertedSessionKeys.has(key)
               const exiting = item.exiting
@@ -2628,6 +2660,17 @@ ${worktree.path}
                                 播 pop 动画（元素不重建，仅首次挂载播一次）。 */}
                             {/* 等待回答气泡（2026-09-01）：琥珀底「?」与紫色数字未读
                                 气泡并排在左，一眼区分「AI 在等你」与「有未读回复」。 */}
+                            {/* 后台任务/子 Agent 运行中气泡（2026-09-02）：蓝色呼吸圆点
+                                +计数，三款气泡同排最左——「还在跑」与「等你答」「有未读」
+                                一眼区分。计数归零镜像删键，气泡随渲染自动消失。 */}
+                            {bgRunningCount > 0 && (
+                              <HoverTip tip={`${bgRunningCount} 个后台任务/子 Agent 运行中`}>
+                                <span className="session-bg-running-badge">
+                                  <span className="session-bg-running-dot" aria-hidden="true" />
+                                  {bgRunningCount > 9 ? '9+' : bgRunningCount}
+                                </span>
+                              </HoverTip>
+                            )}
                             {waitingCount > 0 && (
                               <HoverTip tip={`${waitingCount} 个问题/授权等待你处理`}><span className="session-waiting-badge">?</span></HoverTip>
                             )}

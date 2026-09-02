@@ -1,5 +1,47 @@
 # Changelog
 
+## v1.1.71 - 2026-09-02
+
+### 中文
+
+- 修复：Shift+Enter 在内容末尾第一次按不换行（浏览器不渲染末尾单个 `<br>`）——行尾插入换行时自动补一个占位 `<br>`（不进消息内容），第一次按就正常换行；删除路径的幻影换行（删空一行后值里多出一个换行、全清后值变 `"\n"`）一并修复。
+- 新增：输入框限高后光标跟随滚动——换行/粘贴大段/链接化重排后自动卷到光标所在行；在中间编辑时不抢滚动条。
+- 新增：后台任务/子 Agent 完成自动唤起新一轮时，对话里插入「⚡ 后台任务完成，AI 自动继续」分割线，与正常轮次一眼区分。
+- 修复：后台唤起（steered）期间发消息显示假排队——此时消息实际已被 kimi 直接处理，但界面挂在「队列」里一整轮、气泡还落到回复末尾；现在 steered 期间的消息直接发送不再假排队。
+- 新增：agent 改动落在会话外 git 仓库时（如 scratch 会话改了别的仓库），改动面板和还原按钮跟随到该仓库——diff 终于能看了；改动 pill 旁出现「⎇ 在 worktree 中继续」，一键在该仓库的专用 worktree 开新会话，后续命令、面板、git 操作全部指向 worktree。
+- 修复：轮次卡「全部还原」对绝对路径的文件会静默失败。
+- 新增：「不在项目中工作」的 scratch 目录创建时即 `git init`，里面的产出文件（发布单等）也有改动面板和还原可用；空仓库的分支名探测同步兼容。
+- 改进：消息里路径 pill 的悬停提示分行显示（路径一行、操作提示各一行），不再挤成一坨。
+- 修复：发新消息的瞬间，上一轮已收起的思考块会被自动撑开几秒（「最新块」判定在新轮内容落地前扫到了上一轮）；现在只有本轮流式中的块才算最新块。
+- 改进：「全部」视图里项目组按「置顶+项目列表」顺序固定排位，新会话不再把项目组顶到最上面；空项目组也站自己的固定位。
+- 新增：改动同时落在多个 git 工作区时，改动面板按仓库分组显示，每组出各自的 diff（此前只能看多数派仓库）；不在 git 仓库的文件归「未跟踪」组，点击可预览。
+- 新增：有后台任务/子 Agent 在跑的会话，侧栏该行显示蓝色呼吸圆点气泡（与紫色未读、琥珀等待气泡并排区分），悬停显示数量。
+- 修复：图文混合粘贴（微信/QQ/网页复制）时文本 100% 丢失——图片走附件管线的同时文本现在正常进输入框；复制失败不再静默（富文本失败回退纯文本 MD）。
+- 改进：滚动条只在指针落到滚动条轨道带（或滚轮/键盘滚动）时显形，悬停预览会话、滑向导航区不再闪现滚动条。
+- 新增：Ctrl+F 对话内搜索——右上角浮条输入关键词显示命中数，Enter/Shift+Enter 在命中行间跳转（当前行光晕提示），Esc 关闭；v1 匹配用户消息与 AI 正文。
+- 修复：会话改动 pill 的悬停文件预览浮层点不到——浮层与 pill 间的缝隙会让鼠标移过去就收层；现在加了透明桥接和延迟关闭，可以正常点选文件。
+- RP 酒馆：生成结束不再抢输入框焦点（避免 Windows 控制台把中文输入法切回英文）；首次打开和退出老板模式时延迟激活控制台窗口以初始化正确的 IME 上下文。
+
+### English
+
+- Fix: the first Shift+Enter at the end of the composer now inserts a visible newline (browsers don't render a single trailing `<br>`; a placeholder `<br>` is added without polluting the message). Phantom newlines on the delete path (extra newline after deleting a blank line, value becoming `"\n"` after select-all + delete) are fixed too.
+- New: the composer auto-scrolls to keep the caret visible after newlines, large pastes, and link re-renders; it never yanks the scroll position while you edit in the middle.
+- New: when a background task or sub-agent completion auto-wakes the agent, a "⚡ Background task completed, agent continues" divider is inserted so auto-triggered turns are visually distinct.
+- Fix: messages sent during an auto-wake (steered) turn no longer show a phantom "queued" state—they were already being processed directly by the agent, but the UI displayed them as queued for the whole turn and appended the bubble after the reply.
+- New: when the agent's changes land in a git repo outside the session directory (e.g. scratch sessions editing another repo), the changes panel and revert now follow that repo so diffs are visible; a "⎇ Continue in a worktree" button next to the changes pill opens a new session inside a dedicated worktree of that repo, so subsequent commands, panels, and git operations all point there.
+- Fix: "revert all" on turn cards silently failed for files given as absolute paths.
+- New: scratch directories ("work outside projects") are now `git init`-ed at creation, so files produced there (release notes, etc.) get the changes panel and revert support; branch detection now handles empty repos.
+- Improvement: the path pill hover tip in messages now shows each option on its own line instead of one crammed blob.
+- Fix: right after sending a message, the previous turn's collapsed thinking block would pop open for a few seconds (the "latest block" scan hit the previous turn before the new turn's content landed); now only blocks in the currently streaming turn count.
+- Improvement: in the "All" view, project groups now hold a fixed order (pinned first, then project list order); new sessions no longer push a group to the top, and empty projects keep their fixed slots.
+- New: when changes span multiple git worktrees/repos, the changes panel groups them per repository with separate diffs (previously only the majority repo was visible); files outside any git repo fall under an "untracked" group and can be previewed.
+- New: sessions with running background tasks or sub-agents show a blue breathing-dot badge on their sidebar row (alongside the purple unread and amber waiting badges), with a hover tip showing the count.
+- Fix: pasting mixed image+text content (WeChat/QQ/web copies) silently dropped the text 100% of the time—images still go to attachments and the text now lands in the composer; copy failures are no longer silent (rich-text copy falls back to plain Markdown).
+- Improvement: scrollbars now reveal only when the pointer is over the scrollbar track (or on wheel/keyboard scrolling)—hovering session previews or sliding toward the nav no longer flashes them.
+- New: Ctrl+F in-conversation search—a floating bar shows match counts, Enter/Shift+Enter jumps between matching rows (with a flash highlight), Esc closes; v1 matches user messages and assistant text.
+- Fix: the hover file-preview popup of the session-changes pill couldn't be clicked—the gap between pill and popup closed it on mouse travel; a transparent bridge plus a close delay now keep it open.
+- RP Tavern: the console no longer steals input focus after generation (which made Windows switch the Chinese IME back to English); the console window is now activated with a delay on first open and when exiting boss mode to initialize the correct IME context.
+
 ## v1.1.70 - 2026-09-01
 
 ### 中文

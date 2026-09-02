@@ -1344,6 +1344,59 @@ textarea:focus-visible {
     animation: none;
   }
 }
+
+/* 后台任务/子 Agent 运行中气泡（2026-09-02）：与琥珀「?」等待气泡、紫色数字
+   未读气泡同排的第三款。16px 药丸沿用同款骨架，配色换蓝色系；内嵌呼吸圆点
+  （透明度+缩放脉动）表示「还在跑」——它是常驻状态指示，不是一次性通知，
+   故整丸不播 pop。prefers-reduced-motion 下圆点常亮不呼吸。 */
+.session-bg-running-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4.5px;
+  border-radius: 9999px;
+  background:
+    radial-gradient(1.2rem circle at 25% 15%, rgba(255, 255, 255, 0.3), transparent 62%),
+    linear-gradient(135deg, rgba(96, 165, 250, 0.98), rgba(59, 130, 246, 0.95) 55%, rgba(37, 99, 235, 0.95));
+  box-shadow:
+    inset 0 1px 0 rgba(239, 246, 255, 0.32),
+    0 1px 6px rgba(59, 130, 246, 0.42),
+    0 0 10px rgba(59, 130, 246, 0.22);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.session-bg-running-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: #fff;
+  animation: session-bg-running-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes session-bg-running-breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.72);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-bg-running-dot {
+    animation: none;
+  }
+}
 .wsl-profile-tab-reveal {
   flex: 0 1 0%;
   min-width: 0;
@@ -1989,6 +2042,11 @@ textarea:focus-visible {
 
 .transcript-scroll {
   overflow-x: hidden;
+  /* overflow-anchor 保持 none：2026-09-02 实测（CDP A/B 对照 + 祖先链取证），
+     Virtuoso 给每个 item 包了内联 overflow-anchor:none，Chromium 选不出锚节点，
+     容器上改 auto 是惰性 no-op。Virtuoso 靠 item 级 none 保护自己的尺寸重估
+     补偿，不能去掉。「折叠拽上去」要治得靠 app 侧在折叠动画期间手动补偿
+     scrollTop，不在 CSS 层。 */
   overflow-anchor: none;
   scrollbar-gutter: stable both-edges;
 }
@@ -3417,7 +3475,7 @@ html.scrollbars-active *::-webkit-scrollbar-thumb:hover {
    不占布局高度。图标行整条约 26px（6px 悬停桥 + 20px 钮），而行间留白只有
    12px（行包装 py-1.5 = 上下各 6px）——超出部分压进下一行的内边距区：下一条
    是用户气泡时左侧本来就空（右对齐），看不见；下一条是占满列宽的卡片时
-   由卡片自己让位（改动卡 mt-3、「以上为历史消息」分隔线 mt-4）。
+   由卡片自己让位（改动卡 mt-3、「以上为历史消息」/steered 唤醒分隔线 mt-4）。
    默认 pointer-events:none——opacity 0 时按钮虽看不见却还在原地，不关掉
    会在下一条消息顶部埋隐形点击陷阱；悬停淡入的同时恢复点击。
    容器的 padding-top 是悬停桥：图标行与消息块底边之间不留空隙，指针从正文

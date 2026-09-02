@@ -101,7 +101,18 @@ function CodeRenderer({ className, children: c }: any): JSX.Element {
     return (
       // 原生 title 换成 HoverTip（2026-08-26：右键菜单上线，提示里补「右键复制」；
       // 原生 title 样式丑，用户此前已嫌过原生悬停提示）。
-      <HoverTip tip={`预览 ${path}；Ctrl+点击在资源管理器中显示；右键复制路径`} tipClassName="break-all">
+      // 2026-09-02 改分行显示（用户：「这些选项分行显示」）：路径一行、操作提示
+      // 各一行；「右键复制路径」字样去掉，右键菜单里自有。
+      <HoverTip
+        tip={
+          <span className="flex flex-col gap-0.5">
+            <span className="break-all">预览 {path}</span>
+            <span className="text-zinc-500">Ctrl+点击 在资源管理器中显示</span>
+            <span className="text-zinc-500">右键 更多操作</span>
+          </span>
+        }
+        tipClassName="break-all"
+      >
         <button
           type="button"
           onClick={(event) => {

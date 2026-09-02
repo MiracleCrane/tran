@@ -11,6 +11,8 @@ export const FORGE_RENDERER_EVENTS = {
   worktreesChanged: 'forge:worktrees-changed',
   /** 打开会话搜索面板（侧栏搜索图标 / Ctrl+K → SessionSearchPalette）。 */
   openSessionSearch: 'forge:open-session-search',
+  /** 打开转录区内搜索条（Ctrl+F → Transcript 内查找，2026-09-02 v1）。 */
+  openFindInTranscript: 'forge:open-find-in-transcript',
   /** 打开改动面板（轮次改动卡的「审核」→ GitToolbar 的 ChangesPanel）。 */
   openChangesPanel: 'forge:open-changes-panel'
 } as const

@@ -2,6 +2,8 @@ import { app } from 'electron'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { log } from './logger'
 
 /**
@@ -49,6 +51,12 @@ async function createScratchDir(base: string): Promise<string> {
   // 指引落盘失败不致命（目录已可用），只记 log。
   await writeFile(join(dir, 'AGENTS.md'), AGENTS_MD, 'utf8').catch((e: unknown) => {
     log('scratchDirs', `AGENTS.md 写入失败（${dir}）：${e instanceof Error ? e.message : String(e)}`)
+  })
+  // 2026-09-02 用户拍板：scratch 目录建时即 git init——改动面板/还原本地就能用
+  // （scratch 里的产出文件此前完全看不到 diff）。空仓库无提交也无妨：status
+  // porcelain 正常、diffBase 走空树、分支名靠 symbolic-ref 兜底。失败不致命。
+  await promisify(execFile)('git', ['init'], { cwd: dir }).catch((e: unknown) => {
+    log('scratchDirs', `git init 失败（${dir}）：${e instanceof Error ? e.message : String(e)}`)
   })
   return dir
 }

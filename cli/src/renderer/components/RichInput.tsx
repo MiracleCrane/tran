@@ -104,9 +104,27 @@ export function tokenize(value: string, resolve: RichInputProps['resolveCommand'
  *   - 整块只含一个 <br> 的（浏览器表示空行的标准画法 <div><br></div>）不再
  *     递归，边界的那个 '\n' 已经代表这个空行，再递归会叠出第二个。
  */
-function serialize(root: HTMLElement): string {
+function serialize(root: HTMLElement, opts?: { forCaret?: boolean }): string {
   let out = ''
+  // 浏览器原生占位 <br>（删除路径/全清后浏览器自己补的，没有 data-bogus 标记）：
+  // 末尾无标记 <br>，且跳过零长文本后它前面是另一个 <br> 或根本没有内容
+  // （root 全清只剩它）→ 是占位不是内容，序列化跳过（2026-09-01 CDP 逐键实锤：
+  // 删空一行后值里多出幻影 \n；Ctrl+A 全清后值变 "\n" 占位符不亮）。
+  // 折衷：外部恢复的合法尾巴 "\n\n" 重排后末尾也是裸 <br>，会被当占位丢掉一个
+  // 尾部换行——比幻影换行污染发送值可接受。
+  // 注意：caretOffset 的克隆片段禁用这套启发式（forCaret）——克隆截断处的真 <br>
+  // 会被误判成占位符，光标偏移少算 1 行（2026-09-01 CDP 第四轮实测）。
+  let skipLast: Node | null = null
+  if (!opts?.forCaret) {
+    const last = root.childNodes[root.childNodes.length - 1]
+    if (last instanceof HTMLElement && last.tagName === 'BR' && last.dataset.bogus === undefined) {
+      let prev = last.previousSibling
+      while (prev && prev.nodeType === Node.TEXT_NODE && !prev.nodeValue) prev = prev.previousSibling
+      if (!prev || (prev instanceof HTMLElement && prev.tagName === 'BR')) skipLast = last
+    }
+  }
   const walk = (node: Node): void => {
+    if (node === skipLast) return
     if (node.nodeType === Node.TEXT_NODE) {
       out += node.nodeValue ?? ''
       return
@@ -118,6 +136,8 @@ function serialize(root: HTMLElement): string {
       return
     }
     if (node.tagName === 'BR') {
+      // bogus <br>（Shift+Enter 在行尾补的站位符，见 keydown 处理）不是内容，跳过。
+      if (node.dataset.bogus !== undefined) return
       out += '\n'
       return
     }
@@ -147,7 +167,8 @@ function caretOffset(root: HTMLElement): number | null {
   const frag = pre.cloneContents()
   const holder = document.createElement('div')
   holder.appendChild(frag)
-  return serialize(holder).length
+  // forCaret：克隆片段截断处的真 <br> 不能套 root 级占位符启发式（会少算 1 行）。
+  return serialize(holder, { forCaret: true }).length
 }
 
 /** 把光标放到字符偏移处（胶囊是原子的，落在它内部就贴到它后面）。 */
@@ -177,6 +198,8 @@ function placeCaret(root: HTMLElement, offset: number): void {
       return false
     }
     if (node.tagName === 'BR') {
+      // bogus <br> 不占字符串偏移（serialize 同样跳过它）。
+      if (node.dataset.bogus !== undefined) return false
       if (remaining <= 1) {
         range.setStartAfter(node)
         return true
@@ -192,6 +215,40 @@ function placeCaret(root: HTMLElement, offset: number): void {
   range.collapse(true)
   sel.removeAllRanges()
   sel.addRange(range)
+}
+
+/** 光标跟随滚动（2026-09-01 用户：「换行/粘贴后不会自动跳到最下面，得手动滚」）。
+ *  输入框限高（maxHeight + overflow-y-auto）后，手动插 <br>、粘贴大段、重排放回
+ *  光标都可能把光标留在可视区外。只在光标越出可视区时滚动——用户在中间编辑时
+ *  不抢滚动条。 */
+function ensureCaretVisible(root: HTMLElement): void {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return
+  const range = sel.getRangeAt(0)
+  if (!root.contains(range.startContainer)) return
+  let rect = range.getBoundingClientRect()
+  if (rect.height === 0 && rect.top === 0 && rect.bottom === 0) {
+    // 零矩形 ≠ 在末尾：元素边界的光标（如 setStartAfter(br)）即使位于内容中间
+    // 也量不出矩形（2026-09-01 CDP 实测：中间 Shift+Enter 被误判末尾甩到底部）。
+    // 先确认光标真在内容末尾才滚底；否则插零宽标记量出真实位置按越界逻辑滚。
+    const caret = caretOffset(root)
+    if (caret !== null && caret >= serialize(root).length) {
+      root.scrollTop = root.scrollHeight
+      return
+    }
+    const marker = document.createElement('span')
+    const probe = range.cloneRange()
+    probe.collapse(true)
+    probe.insertNode(marker)
+    rect = marker.getBoundingClientRect()
+    marker.remove()
+    // 插/删标记会扰动文本节点与选区：按字符串偏移把光标放回原位。
+    if (caret !== null) placeCaret(root, caret)
+  }
+  const box = root.getBoundingClientRect()
+  const pad = 4
+  if (rect.bottom > box.bottom - pad) root.scrollTop += rect.bottom - (box.bottom - pad)
+  else if (rect.top < box.top + pad) root.scrollTop -= box.top + pad - rect.top
 }
 
 /**
@@ -347,6 +404,8 @@ export default function RichInput({
       const external = lastEmittedRef.current !== value
       const offset = external ? value.length : Math.min(caret ?? value.length, value.length)
       placeCaret(root, offset)
+      // 重排 replaceChildren 会把滚动位置冲掉，光标放回后把它卷进可视区。
+      ensureCaretVisible(root)
     }
   }, [value, resolveCommand])
 
@@ -409,6 +468,10 @@ export default function RichInput({
         // 正字是 <br>，换行在 emit 时就丢了。拦住默认行为、只插 <br>，保住
         // 「换行只有 <br> 一种画法」的不变量（render 写 '\n' 也是 <br>）。
         // Composer 本来就忽略 Shift+Enter，所以不再向上转发。
+        // 2026-09-01 补 bogus <br>（用户：「第一次 Shift+Enter 没用，第二次才行」）：
+        // contenteditable 里落在内容**末尾**的单个 <br> 不渲染（浏览器拿它当光标
+        // 站位），第一次按等于没换行。行尾插入时多补一个 data-bogus 的站位 <br>，
+        // serialize/placeCaret 都跳过它，不影响值；下次重排 replaceChildren 自清。
         if (event.key === 'Enter' && event.shiftKey) {
           event.preventDefault()
           const root = ref.current
@@ -419,10 +482,30 @@ export default function RichInput({
               range.deleteContents()
               const br = document.createElement('br')
               range.insertNode(br)
+              // br 是否为内容末尾的换行：insertNode 会分裂文本节点，br 后面必留
+              // 零长文本节点（2026-09-01 CDP 实测：br.nextSibling 恒为 Text("")），
+              // 末尾判定要跳过零长文本；span（链接/胶囊）里的 br 透到 root 层判。
+              const onlyEmptyTextAfter = (node: Node | null): boolean => {
+                let n = node
+                while (n && n.nodeType === Node.TEXT_NODE && !n.nodeValue) n = n.nextSibling
+                return n === null
+              }
+              const container = br.parentNode
+              const isTrailing =
+                onlyEmptyTextAfter(br.nextSibling) &&
+                (container === root || (!!container && onlyEmptyTextAfter(container.nextSibling)))
+              if (isTrailing && container) {
+                const bogus = document.createElement('br')
+                bogus.dataset.bogus = ''
+                const tail: Node = container === root ? br : container
+                tail.parentNode?.insertBefore(bogus, tail.nextSibling)
+              }
               range.setStartAfter(br)
               range.collapse(true)
               sel.removeAllRanges()
               sel.addRange(range)
+              // 手动插 <br> 浏览器不会自动滚动，把新行卷进可视区。
+              ensureCaretVisible(root)
             }
           }
           emit()
@@ -439,6 +522,9 @@ export default function RichInput({
         event.preventDefault()
         const text = event.clipboardData.getData('text/plain')
         if (text) document.execCommand('insertText', false, text)
+        // 粘贴大段后光标在内容末尾，跟着卷到可视区（insertText 是同步的）。
+        const root = ref.current
+        if (root) ensureCaretVisible(root)
       }}
     />
   )

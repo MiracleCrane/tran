@@ -93,6 +93,7 @@ export type TranscriptItem =
   | CompactionItem
   | QueryItem
   | TurnChangesItem
+  | SteeredWakeItem
 
 /** 一轮对话结束后的文件改动汇总（Codex 同款卡片）。
  *
@@ -119,6 +120,18 @@ export interface QueryItem {
   parentToolUseId: string | null
   command: string
   text: string
+  at: number
+  /** 见 UserItem.isHistory（历史重放里不会出现，占位兼容）。 */
+  isHistory?: boolean
+}
+
+/** 后台任务/子代理完成时 kimi 自动唤起轮（steered turn）的开头分割线
+ *  （system/steered_turn running:true → TranscriptItem，2026-09-02：用户分不清
+ *  哪段是后台完成自动拉起的）。live-only：历史重放不产生此条目（同 QueryItem）。 */
+export interface SteeredWakeItem {
+  id: string
+  kind: 'steered'
+  parentToolUseId: null
   at: number
   /** 见 UserItem.isHistory（历史重放里不会出现，占位兼容）。 */
   isHistory?: boolean

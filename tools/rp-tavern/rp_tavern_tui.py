@@ -73,6 +73,47 @@ def set_console_title(value: str) -> None:
         ctypes.windll.kernel32.SetConsoleTitleW(value)
 
 
+def activate_console_window() -> None:
+    """完成控制台窗口激活，让 Windows 为 TextArea 建立正确的 IME 上下文。"""
+    if os.name != "nt":
+        return
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.GetConsoleWindow()
+    if handle and user32.IsWindowVisible(handle):
+        user32.BringWindowToTop(handle)
+        user32.SetForegroundWindow(handle)
+        return
+
+    # Windows Terminal 使用伪控制台，GetConsoleWindow 得到的窗口不可见；
+    # 按当前控制台标题找到承载它的顶层窗口，再完成一次真正的窗口激活。
+    title_buffer = ctypes.create_unicode_buffer(512)
+    kernel32.GetConsoleTitleW(title_buffer, len(title_buffer))
+    console_title = title_buffer.value.strip()
+    if not console_title:
+        return
+    matches: list[int] = []
+    callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    @callback_type
+    def collect(window, _parameter):
+        if not user32.IsWindowVisible(window):
+            return True
+        length = user32.GetWindowTextLengthW(window)
+        if not length:
+            return True
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(window, buffer, length + 1)
+        if console_title in buffer.value:
+            matches.append(int(window))
+        return True
+
+    user32.EnumWindows(collect, 0)
+    if matches:
+        user32.BringWindowToTop(matches[0])
+        user32.SetForegroundWindow(matches[0])
+
+
 def resize_console_font(delta: int = 0, reset: bool = False) -> int | None:
     """调整经典 Windows 控制台字号；Windows Terminal 仍可使用原生快捷键。"""
     if os.name != "nt":
@@ -215,6 +256,7 @@ class TavernApp(App):
         self.decoy_mode = False
         self.decoy_index = 0
         self.mouse_boss_down = False
+        self.input_focus_initialized = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="toolbar"):
@@ -293,7 +335,9 @@ class TavernApp(App):
         runtime = await self.client.runtime_config()
         self.query_one("#model", Static).update(runtime.model)
         self.set_status(f"ready · {self.character.name} · boss={self.boss_key} · /bosskey <key>")
-        self.query_one("#input", TextArea).focus()
+        if not self.input_focus_initialized:
+            self.restore_input_focus(activate_window=True)
+            self.input_focus_initialized = True
 
     async def select_chat(self, file_id: str) -> None:
         if not self.character:
@@ -371,8 +415,6 @@ class TavernApp(App):
                 self.query_one("#input", TextArea).load_text(user_text)
         finally:
             self.busy = False
-            if not self.decoy_mode:
-                self.query_one("#input", TextArea).focus()
 
     def action_help_answer(self) -> None:
         self.generate("impersonate")
@@ -418,7 +460,12 @@ class TavernApp(App):
         else:
             self.screen.remove_class("decoy")
             set_console_title("terminal")
-            self.query_one("#input", TextArea).focus()
+            self.restore_input_focus(activate_window=True)
+
+    def restore_input_focus(self, activate_window: bool = False) -> None:
+        self.query_one("#input", TextArea).focus()
+        if activate_window:
+            self.set_timer(0.2, activate_console_window)
 
     def append_decoy_line(self) -> None:
         if not self.decoy_mode:
