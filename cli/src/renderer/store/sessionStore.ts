@@ -3556,7 +3556,25 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   async resendPendingQueue() {
     const meta = get().meta
-    if (!meta || get().status.running) return
+    if (!meta) return
+    // 2026-09-02 修「Ctrl+S 排队不消失」（CDP 实测 1/4 复现）：interrupt 乐观清
+    // running 到重发之间有约 34ms 窗口，旧 turn 的在途事件会把 running 翻回
+    // true，重发消息看到 busy 又被塞回队列。先等 running 真正落定（连续 150ms
+    // 为 false，3s 封顶；超时照旧往下走，行为不劣于旧版）。
+    {
+      const deadline = Date.now() + 3000
+      let stableSince = 0
+      while (Date.now() < deadline) {
+        if (get().status.running) {
+          stableSince = 0
+        } else {
+          if (!stableSince) stableSince = Date.now()
+          if (Date.now() - stableSince >= 150) break
+        }
+        await new Promise((r) => setTimeout(r, 50))
+      }
+    }
+    if (get().status.running) return
     const queued = get().pendingQueue
     if (queued.length === 0) return
     // 先撤后端队列里的原件（busy 发送时消息已送达后端排队，见 sendMessage），

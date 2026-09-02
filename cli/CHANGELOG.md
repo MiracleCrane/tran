@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.74 - 2026-09-02
+
+### 中文
+
+- 修复：排队时按 Ctrl+S（打断并发送）队列里的消息有约 1/4 概率不消失、不被处理——interrupt 乐观清 running 到重发之间存在竞态窗口，旧轮在途事件把 running 翻回 true 导致重发消息被塞回队列；现在重发前会等 running 真正落定（连续 150ms，3s 封顶），实测 6/6 通过且打断时延无可感退化。
+
+### English
+
+- Fix: pressing Ctrl+S (interrupt & send) with a queued message had ~25% chance of the queue never clearing—the optimistic running=false after interrupt raced with in-flight events flipping it back, so the resent message re-queued. Resend now waits for running to truly settle (150ms stable, 3s cap); verified 6/6 with no perceptible latency regression.
+
 ## v1.1.73 - 2026-09-02
 
 ### 中文
