@@ -122,16 +122,18 @@ export function backgroundTaskInfo(block: ToolBlock): BackgroundTaskInfo {
 }
 
 /** 后台任务完成通知信封（kimi 宿主注入对话的 `<notification id="task:<id>:<状态>"`）
- *  → 终态。killed/lost 归并到 stopped/failed（与磁盘词表对齐）。 */
+ *  → 终态。killed/lost 归并到 stopped/failed（与磁盘词表对齐）。
+ *  source：id 前缀区分来源——`agent-*` 是子 Agent、`bash-*` 是后台命令
+ * （2026-09-02 用户：「子 Agent 完成也显示后台任务完成的提示么」——分割线文案用）。 */
 const TASK_NOTIFICATION_RE = /^<notification\s[^>]*\bid="task:([\w-]+):(\w+)"/
 export function taskTerminalFromEnvelope(
   text: string
-): { taskId: string; terminal: 'completed' | 'failed' | 'stopped' } | null {
+): { taskId: string; terminal: 'completed' | 'failed' | 'stopped'; source: 'agent' | 'task' } | null {
   const match = text.trimStart().match(TASK_NOTIFICATION_RE)
   if (!match) return null
   const raw = match[2]
   const terminal = raw === 'completed' ? 'completed' : raw === 'failed' || raw === 'lost' ? 'failed' : 'stopped'
-  return { taskId: match[1], terminal }
+  return { taskId: match[1], terminal, source: match[1].startsWith('agent-') ? 'agent' : 'task' }
 }
 
 /** #32 用 kimi server 轮询到的 tasks 校正后台任务状态：launch 结果文本里的

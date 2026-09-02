@@ -915,6 +915,26 @@ function scheduleHistoryHydrationStep(
  *  user 用文本；assistant 用各块文本/toolUseId（tool id 在流式与磁盘间稳定）。
  *  user/assistant 之外的本地条目（query/compaction 等）不参与（返回 null，
  *  一律保留）。 */
+/** 最近一次完成信封的来源（子 Agent / 后台任务）与时刻：steered 唤醒分割线
+ *  文案据此区分（2026-09-02 用户：「子 Agent 完成也显示后台任务完成的提示么」）。
+ *  信封与唤醒相邻到达，15s 新鲜度窗口外视为未知（回退通用文案）。 */
+let lastWakeSource: { kind: 'agent' | 'task'; at: number } | null = null
+
+/** 信封到达时记录唤醒来源（live 路径；历史重建 applyAllTaskTerminalEnvelopes 不算）。 */
+function noteWakeSource(text: string): void {
+  const hit = taskTerminalFromEnvelope(text)
+  if (hit) lastWakeSource = { kind: hit.source, at: Date.now() }
+}
+
+/** steered 分割线文案：新鲜（15s 内）的信封来源决定，否则通用文案。 */
+function steeredWakeLabel(): string {
+  const src = lastWakeSource
+  if (src && Date.now() - src.at < 15_000) {
+    return src.kind === 'agent' ? '子 Agent 完成，AI 自动继续' : '后台任务完成，AI 自动继续'
+  }
+  return '后台任务完成，AI 自动继续'
+}
+
 /** 后台任务完成通知信封（kimi 宿主注入对话的 <notification id="task:…">）到达：
  *  把对应后台工具块补登终态。server/磁盘校正只覆盖宿主最近保留的两条任务记录
  *  （2026-08-20 实证：本会话 132 个后台任务磁盘只剩 2 条 json），老任务的
@@ -2094,6 +2114,7 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
                 id: uid(),
                 kind: 'steered' as const,
                 parentToolUseId: null,
+                label: steeredWakeLabel(),
                 at: m.startedAt ?? Date.now()
               }
             ]
@@ -2287,6 +2308,7 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
           bg.items = [...bg.items, { id: uid(), kind: 'user', text: content, parentToolUseId: parent }]
         }
         // 后台任务完成通知信封：补登对应工具块终态（后台命令面板纠错）。
+        noteWakeSource(content)
         bg.items = applyTaskTerminalEnvelope(bg.items, content)
         bg.running = true
         markSdkSessionRunning(bg.sdkSessionId, true)
@@ -4455,6 +4477,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                         id: uid(),
                         kind: 'steered' as const,
                         parentToolUseId: null,
+                        label: steeredWakeLabel(),
                         at: m.startedAt ?? Date.now()
                       }
                     ]
@@ -4735,6 +4758,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           })
           // 后台任务完成通知信封：补登对应工具块终态（后台命令面板纠错）。
           if (content.trimStart().startsWith('<notification')) {
+            noteWakeSource(content)
             set((s) => ({ items: applyTaskTerminalEnvelope(s.items, content) }))
           }
           // #5 turn 进行中（无论回显还是他端注入的用户消息）。

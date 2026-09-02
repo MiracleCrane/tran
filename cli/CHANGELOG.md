@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.73 - 2026-09-02
+
+### 中文
+
+- 修复：粘贴多行文本后第一次 Shift+Enter 不换行（要按两下）——粘贴的换行被浏览器拆成 `<div>` 块，块内行尾的换行符不渲染；粘贴后现在立即归一化为规范结构（值不变），换行在任何位置都一次生效。
+- 改进：后台完成自动唤起的分割线区分来源——子 Agent 完成显示「⚡ 子 Agent 完成」，后台任务完成显示「⚡ 后台任务完成」。
+
+### English
+
+- Fix: the first Shift+Enter after pasting multi-line text now works on the first press—pasted newlines were split into `<div>` blocks where trailing line breaks don't render; pasted content is now normalized to the canonical structure immediately (value unchanged), so newlines work everywhere on the first try.
+- Improvement: the auto-wake divider now distinguishes its source—"⚡ Sub-agent finished" vs "⚡ Background task finished".
+
 ## v1.1.72 - 2026-09-02
 
 ### 中文

@@ -132,6 +132,8 @@ export interface SteeredWakeItem {
   id: string
   kind: 'steered'
   parentToolUseId: null
+  /** 分割线文案（区分后台任务/子 Agent 完成，2026-09-02）；缺省用通用文案。 */
+  label?: string
   at: number
   /** 见 UserItem.isHistory（历史重放里不会出现，占位兼容）。 */
   isHistory?: boolean

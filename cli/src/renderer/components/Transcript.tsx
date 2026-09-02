@@ -2591,7 +2591,7 @@ export default function Transcript({
         <div className="mb-2 mt-4 flex items-center gap-2 text-[10px] text-zinc-600">
           <span className="h-px flex-1 bg-white/[0.06]" />
           <span className="text-accent">⚡</span>
-          后台任务完成，AI 自动继续
+          {row.node.item.label ?? '⚡ 后台任务完成，AI 自动继续'}
           <span className="h-px flex-1 bg-white/[0.06]" />
         </div>
       )

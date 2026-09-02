@@ -601,9 +601,18 @@ export default function RichInput({
         event.preventDefault()
         const text = event.clipboardData.getData('text/plain')
         if (text) document.execCommand('insertText', false, text)
-        // 粘贴大段后光标在内容末尾，跟着卷到可视区（insertText 是同步的）。
         const root = ref.current
-        if (root) ensureCaretVisible(root)
+        if (root) {
+          // 2026-09-02 修「粘贴后 Shift+Enter 还得按两下」（用户实测）：execCommand
+          // insertText 把换行拆成 <div> 块，而在 <div> 末尾按 Shift+Enter 插入的
+          // <br> 是块级行占位符不渲染（等效不可见换行）。粘贴后立即归一化成
+          // text+<br> 规范结构（serialize 幂等，值不变），光标放回原偏移。
+          const caret = caretOffset(root)
+          render(root, tokenize(serialize(root), resolveCommand))
+          if (document.activeElement === root && caret !== null) placeCaret(root, caret)
+          // 粘贴大段后光标在内容末尾，跟着卷到可视区。
+          ensureCaretVisible(root)
+        }
       }}
     />
   )
