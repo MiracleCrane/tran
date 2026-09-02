@@ -6,6 +6,7 @@ import {
   ToolPanelButton,
   ToolPanelHeader
 } from './ToolPanelChrome'
+import HoverTip from './HoverTip'
 
 function StatusDot({ ok }: { ok: boolean }): JSX.Element {
   return <span className={`h-2 w-2 rounded-full ${ok ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
@@ -18,7 +19,10 @@ function StatusRow({ label, ok, detail }: { label: string; ok: boolean; detail: 
         <StatusDot ok={ok} />
         {label}
       </div>
-      <span className="truncate text-xs text-zinc-500" title={detail}>{detail}</span>
+      {/* 2026-09-02：原生 title= 全 app 禁用，换 HoverTip 气泡（detail 截断时悬停看全文）。 */}
+      <HoverTip tip={detail} tipClassName="break-all" className="inline-flex min-w-0">
+        <span className="truncate text-xs text-zinc-500">{detail}</span>
+      </HoverTip>
     </div>
   )
 }

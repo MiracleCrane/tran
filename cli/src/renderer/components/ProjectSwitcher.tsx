@@ -3,9 +3,11 @@ import { createPortal } from 'react-dom'
 import { useSessionStore } from '../store/sessionStore'
 import type { ClaudeExecutionBackend, Project, ProjectPatch } from '../../shared/ipc'
 import Collapse from './Collapse'
+import ConfirmDialog from './ConfirmDialog'
 import HoverTip from './HoverTip'
 import { showInlineContextMenu, type InlineMenuItem } from './InlineContextMenu'
 import { isWslProjectPath, normalizeCwdForCompare } from '../../shared/paths'
+import { countProjectSessions } from '../utils/projectSessions'
 import { emitForgeEvent, onForgeEvent } from '../events'
 
 const FolderIcon = (): JSX.Element => (
@@ -120,6 +122,8 @@ export default function ProjectSwitcher(): JSX.Element | null {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  /** 删除项目被拒/失败提示（模态，2026-09-02「有会话不可删」守卫）。 */
+  const [removeNotice, setRemoveNotice] = useState<string | null>(null)
   const [wslSupportEnabled, setWslSupportEnabled] = useState(false)
   // 文件选择器等待指示（局部小字，替代整屏转圈）。
   const [picking, setPicking] = useState(false)
@@ -264,6 +268,24 @@ export default function ProjectSwitcher(): JSX.Element | null {
     setProjects(list)
     emitForgeEvent('projectsChanged')
     setEditingId(null)
+  }
+
+  /** 删除守卫（2026-09-02 用户：「项目也要能够支持我手动去删除（有会话不可
+   *  以删除）」）：点删除先查该项目名下有没有会话（归属覆盖优先、无覆盖回退
+   *  cwd 最长前缀匹配、scratch 豁免——见 utils/projectSessions）；有才走现有
+   *  行内确认；有则拒删并提示数量；拉取失败同样拒删（宁可误挡不可误删）。
+   *  守卫放渲染层，主进程 removeProject 保持纯数据删除。 */
+  const requestRemove = async (p: Project): Promise<void> => {
+    const count = await countProjectSessions(p, projects)
+    if (count === null) {
+      setRemoveNotice('无法确认该项目下的会话数量，项目未删除，请稍后重试。')
+      return
+    }
+    if (count > 0) {
+      setRemoveNotice(`该项目下还有 ${count} 个会话，先删除或移走会话再删项目。`)
+      return
+    }
+    setConfirmId(p.id)
   }
 
   const doRemove = async (id: string): Promise<void> => {
@@ -463,7 +485,7 @@ export default function ProjectSwitcher(): JSX.Element | null {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            setConfirmId(p.id)
+                            void requestRemove(p)
                           }}
                           aria-label="删除"
                           className="rounded-lg p-1 text-zinc-500 transition hover:bg-red-950/50 hover:text-red-300"
@@ -550,6 +572,15 @@ export default function ProjectSwitcher(): JSX.Element | null {
           </div>,
           document.body
         )}
+      {/* 删除项目被拒/失败提示（守卫在 requestRemove；有会话不可删） */}
+      <ConfirmDialog
+        open={removeNotice !== null}
+        title="无法删除项目"
+        message={removeNotice ?? ''}
+        confirmLabel="知道了"
+        onConfirm={() => setRemoveNotice(null)}
+        onCancel={() => setRemoveNotice(null)}
+      />
     </div>
   )
 }

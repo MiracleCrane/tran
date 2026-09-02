@@ -10,6 +10,7 @@ import type { ClaudeExecutionBackend, Project, SessionListItem, SessionPreview, 
 import { normalizeCwdForCompare } from '../../shared/paths'
 import { isScratchCwd, matchProjectByCwd } from '../../shared/projectMatch'
 import { relTime } from '../utils/format'
+import { countProjectSessions } from '../utils/projectSessions'
 import { useArchiveStore } from '../store/archiveStore'
 import { useSessionProjectStore } from '../store/sessionProjectStore'
 import { showInlineContextMenu, type InlineMenuItem } from './InlineContextMenu'
@@ -829,6 +830,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   /** 删除失败的显式报错（模态）。 */
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  /** 项目组头右键「删除项目」（2026-09-02 用户：项目支持手动删除、有会话
+   *  不可删）：确认目标 + 守卫拒绝/失败提示。 */
+  const [confirmRemoveProject, setConfirmRemoveProject] = useState<Project | null>(null)
+  const [removeProjectNotice, setRemoveProjectNotice] = useState<string | null>(null)
   /** worktree 联动删除确认（2026-09-01 第 4 期）：会话删成功后，cwd 命中
    *  worktree 台账则询问是否一并删 worktree（仅 worktree 干净才删得掉）。 */
   const [confirmWorktree, setConfirmWorktree] = useState<WorktreeRecord | null>(null)
@@ -888,16 +893,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     () => new Map(worktreeRecords.map((r) => [normalizeCwdForCompare(r.path), r])),
     [worktreeRecords]
   )
-  /** 主目录（归一化）：主目录不是项目——落在主目录的会话一律归「最近」
-   *  （Codex 语义，2026-08-17 用户：「最近就是用来放无项目会话的」「三行字
-   *  和 Codex 完全一致」），即使主目录当初被加进了项目列表。 */
-  const [homePath, setHomePath] = useState('')
-  useEffect(() => {
-    void window.api
-      .getHomeDir()
-      .then((h) => setHomePath(normalizeCwdForCompare(h)))
-      .catch(() => {})
-  }, [])
+  // 2026-09-02：2026-08-17「主目录不是项目、会话一律归最近」的规则作废——
+  // 用户把主目录（C:\Users\12517）显式注册为项目「12517」，期望它与任何
+  // 项目同权（空组可见、会话归组、删除守卫一致）。主目录未注册时
+  // matchProjectByCwd 本就命不中，无需再单列排除，homePath 状态整体移除。
   const previewTimerRef = useRef<number | null>(null)
   /** 预览请求代际号（见 schedulePreview 的竞态守卫）。 */
   const previewSeqRef = useRef(0)
@@ -1585,11 +1584,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
   const handleMoveToProject = (session: SessionListItem, e: MouseEvent<HTMLElement>): void => {
     const key = sessionKey(session)
     const override = projectAssignments?.[key]
-    // 无覆盖时的生效归属：cwd 命中已注册项目（且非主目录）才算，否则 = 不在项目中。
-    const cwdProject =
-      session.cwd && (!homePath || normalizeCwdForCompare(session.cwd) !== homePath)
-        ? matchProjectByCwd(session.cwd, addedProjects)
-        : null
+    // 无覆盖时的生效归属：cwd 命中已注册项目才算，否则 = 不在项目中。
+    // 2026-09-02：主目录注册为项目后与任何项目同权，与 isProjectSession 同步
+    // 去掉主目录排除（scratch 豁免在归组规则里，不在这条展示口径上）。
+    const cwdProject = session.cwd ? matchProjectByCwd(session.cwd, addedProjects) : null
     const effective: Project | null =
       override === undefined
         ? cwdProject
@@ -1671,6 +1669,55 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       emitForgeEvent('worktreesChanged')
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  /** 项目组头右键菜单（2026-09-02）：目前只有「删除项目」。组 label = 项目
+   *  根路径（空组/有会话组同口径）；不属于已注册项目的 cwd 组没有项目可删，
+   *  不挂菜单（也不挡默认行为）。 */
+  const showProjectGroupMenu = (label: string, e: MouseEvent<HTMLElement>): void => {
+    const n = normalizeCwdForCompare(label)
+    const project = addedProjects.find((p) =>
+      p.rootPaths.some((root) => normalizeCwdForCompare(root) === n)
+    )
+    if (!project) return
+    showInlineContextMenu(e, [
+      { label: '删除项目', action: () => void requestRemoveProject(project) }
+    ])
+  }
+  /** 删除项目守卫（2026-09-02 用户：「有会话不可以删除」）：名下还有会话则
+   *  拒删并报数量；拉取失败同样拒删（宁可误挡不可误删）。守卫放渲染层，
+   *  主进程 removeProject 保持纯数据删除。 */
+  const requestRemoveProject = async (project: Project): Promise<void> => {
+    const count = await countProjectSessions(project, addedProjects)
+    if (count === null) {
+      setRemoveProjectNotice('无法确认该项目下的会话数量，项目未删除，请稍后重试。')
+      return
+    }
+    if (count > 0) {
+      setRemoveProjectNotice(`该项目下还有 ${count} 个会话，先删除或移走会话再删项目。`)
+      return
+    }
+    setConfirmRemoveProject(project)
+  }
+  const doRemoveProject = async (): Promise<void> => {
+    const project = confirmRemoveProject
+    setConfirmRemoveProject(null)
+    if (!project) return
+    try {
+      const list = await window.api.removeProject(project.id)
+      emitForgeEvent('projectsChanged')
+      // 删的是当前项目：回退逻辑同 ProjectSwitcher.doRemove——切到剩余第一个
+      // 项目；删光了回 Onboarding。
+      if (
+        meta &&
+        project.rootPaths.some((root) => normalizeCwdForCompare(root) === normalizeCwdForCompare(meta.cwd))
+      ) {
+        if (list[0]?.rootPaths[0]) void switchProject(list[0].rootPaths[0])
+        else useSessionStore.getState().reset()
+      }
+    } catch (e) {
+      setRemoveProjectNotice(e instanceof Error ? e.message : String(e))
     }
   }
   const confirmDeleteTarget = confirmDeleteId
@@ -1793,7 +1840,8 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     if (groupMode === 'time') return groupSessionsByTime(orderedSessions)
     const pinned = orderedSessions.filter((s) => pinnedSessionKeys.has(sessionKey(s)))
     const rest = orderedSessions.filter((s) => !pinnedSessionKeys.has(sessionKey(s)))
-    // 主目录不算项目：cwd 为主目录的会话归「最近」，与 Codex 三段完全一致。
+    // 2026-09-02 起主目录显式注册为项目后与任何项目同权（用户：注册了就是
+    // 想要它当项目），取代 2026-08-17「主目录不算项目、一律归最近」旧规则。
     // 会话→项目归属覆盖（2026-08-27「移动到项目」，Codex 语义：归属 = Tran 侧
     // 元数据，cwd 不动）。返回值：Project = 归到该项目；null = 显式「不在项目
     // 中工作」（归「最近」）；undefined = 无覆盖，跟随 cwd。2026-09-01 起覆盖
@@ -1812,11 +1860,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       if (s.cwd && isScratchCwd(s.cwd, scratchRoots)) return false
       const a = assignmentOf(s)
       if (a !== undefined) return a !== null
-      return (
-        !!s.cwd &&
-        !!matchProjectByCwd(s.cwd, addedProjects) &&
-        (!homePath || normalizeCwdForCompare(s.cwd) !== homePath)
-      )
+      return !!s.cwd && !!matchProjectByCwd(s.cwd, addedProjects)
     }
     // 分组目录的取值口径：有归属覆盖按覆盖项目的根路径，否则按真实 cwd。
     const groupPathOf = (s: SessionListItem): string =>
@@ -1842,7 +1886,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
     // 的位置。不属于任何已注册项目的 cwd 组排在项目组之后，仍按最新活动倒序
     // （它们没有固定序可言）。'project' 视图维持原分组（groupSessionsByProject）。
     // 匹配口径与原 emptyProjectGroups 一致：组 label 与项目 rootPaths[0] 归一化
-    // 比较；主目录不算项目。
+    // 比较；主目录注册为项目后同样参与（见 emptyGroups 处注释）。
     let projectOrderedGroups = cwdGroups
     if (sessionScope === 'all') {
       const orderedProjects = [...addedProjects].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned))
@@ -1866,7 +1910,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
         const root = p.rootPaths[0]
         if (!root) return
         const n = normalizeCwdForCompare(root)
-        if (nonEmptyLabels.has(n) || (homePath && n === homePath)) return
+        // 2026-09-02 用户：主目录被显式注册为项目「12517」后期望它在侧栏
+        // 项目组里始终可见（哪怕没有会话）——空组生成不再排除主目录。
+        if (nonEmptyLabels.has(n)) return
         emptyGroups.push({ rank: index, group: { label: root, items: [] } })
       })
       projectOrderedGroups = [
@@ -1880,7 +1926,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
       ...projectOrderedGroups,
       ...(recent.length ? [{ label: '最近', items: recent, section: true }] : [])
     ]
-  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjects, projectById, homePath, qaHidden, projectAssignments, scratchRoots])
+  }, [orderedSessions, groupMode, meta?.cwd, sessionScope, pinnedSessionKeys, addedProjects, projectById, qaHidden, projectAssignments, scratchRoots])
   sessionGroupsRef.current = sessionGroups
 
   const visibleSessionKeys = useMemo(
@@ -2435,7 +2481,10 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                 子行缩进区分层级；右侧计数删掉（Codex 右缘干净）。行尾悬停出「+」。
                 外层用 div 不用 button：「+」是独立按钮，HTML 不允许按钮套按钮。 */}
             {cwdGroupHeader ? (
-              <div className="group/projhead flex w-full items-center gap-1 px-2 py-1">
+              <div
+                className="group/projhead flex w-full items-center gap-1 px-2 py-1"
+                onContextMenu={(e) => showProjectGroupMenu(g.label, e)}
+              >
                 <HoverTip tip={g.label} tipClassName="break-all text-left" className="flex min-w-0 flex-1">
                   <button
                     type="button"
@@ -2519,9 +2568,9 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                 ? 0
                 : (waitingCounts[key] ?? 0) + (s.sessionId === meta.sdkSessionId ? fgWaitingCount : 0)
               // 后台运行中气泡（2026-09-02）：激活会话不显示（底部 chip 已覆盖，
-              // 避免重复——同未读/等待惯例）；非 chat 视图下前台会话行不算激活，
-              // 前台镜像由 ingestAgentEvent 的事件钩维护，照常显示。
-              const bgRunningCount = active ? 0 : (bgRunningCounts[key] ?? 0)
+              // 2026-09-02 用户：「点进来会话，蓝色气泡也要在」——与未读/等待
+              // 气泡的「激活不显示」不同，后台运行气泡激活会话也显示。）
+              const bgRunningCount = bgRunningCounts[key] ?? 0
               const editing = editingId === key
               const inserting = newlyInsertedSessionKeys.has(key)
               const exiting = item.exiting
@@ -2845,6 +2894,27 @@ ${confirmWorktree?.path ?? ''}
         confirmLabel="知道了"
         onConfirm={() => setDeleteError(null)}
         onCancel={() => setDeleteError(null)}
+      />
+
+      {/* 删除项目确认（守卫已在 requestRemoveProject 挡掉有会话的项目）。
+          只移出项目列表，目录与会话数据不动（同 ProjectSwitcher）。 */}
+      <ConfirmDialog
+        open={confirmRemoveProject !== null}
+        danger
+        title="删除项目"
+        message={`将项目「${confirmRemoveProject?.name ?? ''}」从列表移除？项目目录和会话数据不受影响。`}
+        confirmLabel="删除项目"
+        onConfirm={() => void doRemoveProject()}
+        onCancel={() => setConfirmRemoveProject(null)}
+      />
+      {/* 删除项目被拒/失败提示（有会话不可删，2026-09-02） */}
+      <ConfirmDialog
+        open={removeProjectNotice !== null}
+        title="无法删除项目"
+        message={removeProjectNotice ?? ''}
+        confirmLabel="知道了"
+        onConfirm={() => setRemoveProjectNotice(null)}
+        onCancel={() => setRemoveProjectNotice(null)}
       />
 
       {/* 多选批量删除确认 */}

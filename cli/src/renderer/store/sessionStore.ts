@@ -1593,8 +1593,13 @@ function countBgRunningItems(
   swarmTasks: KimiTaskInfo[] | null | undefined,
   turnRunning: boolean
 ): number {
-  const bashRunning = collectBackgroundTaskBlocks(items).filter((b) => !b.bgTerminal).length
-  return bashRunning + countRunningTools(items, AGENT_TOOL_NAMES, swarmTasks, turnRunning)
+  // 2026-09-02 修「没有后台任务的会话也冒蓝色 9+ 气泡」：历史重放进来的老
+  // 后台任务块没有终态信封（server/磁盘校正只覆盖最近两条），!bgTerminal 把它们
+  // 全算成运行中。历史条目不参与运行中计数——真还在跑的任务会走 live 事件/
+  // server 校正进非历史条目。
+  const live = items.filter((it) => !it.isHistory)
+  const bashRunning = collectBackgroundTaskBlocks(live).filter((b) => !b.bgTerminal).length
+  return bashRunning + countRunningTools(live, AGENT_TOOL_NAMES, swarmTasks, turnRunning)
 }
 
 /** 2026-09-02 侧栏后台运行中计数重算：全量数一遍再写镜像——比增量加减可靠

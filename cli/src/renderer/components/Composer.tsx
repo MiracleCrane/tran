@@ -391,7 +391,11 @@ export default function Composer(): JSX.Element {
     const rect = btn?.getBoundingClientRect()
     if (rect) {
       setChipAnchor({
-        left: Math.max(8, Math.min(rect.left, window.innerWidth - 336)),
+        // 2026-09-02 浮层排查整改：clamp 常量 336 是 #28 加宽前的旧值——浮层
+        // 已加宽到 w-96(384)/w-[30rem](480)（见 ChipPopover 的 widthCls），
+        // 贴右触发时右缘会顶出视口。按各类浮层实际宽度 clamp（max-w-[92vw]
+        // 兜底极窄窗口，Math.max(8,…) 继续兜左缘）。
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - (kind === 'agent' ? 480 : 384) - 8)),
         bottom: window.innerHeight - rect.top + 8
       })
     }

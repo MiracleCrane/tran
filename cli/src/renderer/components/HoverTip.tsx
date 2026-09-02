@@ -27,7 +27,7 @@ export default function HoverTip({
   /** 强制放触发元素下方（上方会遮挡重要内容时使用）。 */
   preferBelow?: boolean
 }): JSX.Element {
-  const [pos, setPos] = useState<{ left: number; top: number; below: boolean } | null>(null)
+  const [pos, setPos] = useState<{ left: number; right: number; top: number; below: boolean; alignRight: boolean } | null>(null)
   const [shown, setShown] = useState(false)
 
   const hide = (): void => {
@@ -39,9 +39,12 @@ export default function HoverTip({
     const rect = event.currentTarget.getBoundingClientRect()
     // 默认放上方（bottom 锚定，不用量气泡高度）；上方贴顶不够 72px 才翻到下边。
     const below = preferBelow || rect.top < 72
-    // max-w-md = 448px，左边往屏内 clamp 一档防出屏。
+    // max-w-md = 448px。2026-09-02 修「气泡离触发元素老远」（用户截图：右侧的
+    // MD 复制钮/待办钮的气泡跑到左边）：clamp 会把左侧拉离触发元素时改为**右缘
+    // 对齐**（气泡右缘贴触发元素右缘），短气泡就正好悬在触发元素上方。
+    const alignRight = rect.left + 456 > window.innerWidth - 8
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - 456))
-    setPos({ left, top: below ? rect.bottom + 6 : rect.top - 6, below })
+    setPos({ left, right: window.innerWidth - rect.right, top: below ? rect.bottom + 6 : rect.top - 6, below, alignRight })
   }
 
   // 挂载后下一帧再转正透明度/位移，做出 ~120ms 淡入。
@@ -69,8 +72,12 @@ export default function HoverTip({
             }${tipClassName ? ` ${tipClassName}` : ''}`}
             style={
               pos.below
-                ? { left: pos.left, top: pos.top }
-                : { left: pos.left, bottom: window.innerHeight - pos.top }
+                ? pos.alignRight
+                  ? { right: pos.right, top: pos.top }
+                  : { left: pos.left, top: pos.top }
+                : pos.alignRight
+                  ? { right: pos.right, bottom: window.innerHeight - pos.top }
+                  : { left: pos.left, bottom: window.innerHeight - pos.top }
             }
           >
             {tip}

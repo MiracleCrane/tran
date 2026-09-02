@@ -246,7 +246,9 @@ function ensureCaretVisible(root: HTMLElement): void {
     if (caret !== null) placeCaret(root, caret)
   }
   const box = root.getBoundingClientRect()
-  const pad = 4
+  // pad 取约一行高（行高 ~22.75px）：2026-09-02 CDP 实测限高态视口外中间换行
+  // 时，零矩形→标记测量与插入后布局差约一行，光标行卡在视口顶缘外一线。
+  const pad = 26
   if (rect.bottom > box.bottom - pad) root.scrollTop += rect.bottom - (box.bottom - pad)
   else if (rect.top < box.top + pad) root.scrollTop -= box.top + pad - rect.top
 }
@@ -269,7 +271,10 @@ function showChipTip(chip: HTMLElement, text: string): void {
   hideChipTip()
   const rect = chip.getBoundingClientRect()
   const below = rect.top < 72
-  // max-w-md = 448px，左边往屏内 clamp 一档防出屏（同 HoverTip）。
+  // max-w-md = 448px。2026-09-02 同步 HoverTip 的右缘对齐修复（「气泡离触发
+  // 元素老远」全面排查：chipTip 抄的是 HoverTip 的旧定位，没跟上修复）——
+  // clamp 会把左缘拉离触发元素时改为右缘对齐（气泡右缘贴胶囊右缘）。
+  const alignRight = rect.left + 456 > window.innerWidth - 8
   const left = Math.max(8, Math.min(rect.left, window.innerWidth - 456))
   const tip = document.createElement('div')
   tip.className =
@@ -277,7 +282,8 @@ function showChipTip(chip: HTMLElement, text: string): void {
     'bg-zinc-900/95 px-2.5 py-1.5 text-left text-xs text-zinc-300 shadow-xl backdrop-blur ' +
     `transition duration-[120ms] ease-out opacity-0 ${below ? '-translate-y-1' : 'translate-y-1'}`
   tip.textContent = text
-  tip.style.left = `${left}px`
+  if (alignRight) tip.style.right = `${window.innerWidth - rect.right}px`
+  else tip.style.left = `${left}px`
   if (below) tip.style.top = `${rect.bottom + 6}px`
   else tip.style.bottom = `${window.innerHeight - rect.top + 6}px`
   document.body.appendChild(tip)
@@ -366,12 +372,55 @@ export default function RichInput({
   /** 最近一次由本组件写出去的值：用来判断 props 是不是"我们自己刚发出去的回声"。 */
   const lastEmittedRef = useRef<string>('')
 
+  /**
+   * 自管撤销/重做栈（2026-09-02 CDP 实测：「换行还有点问题」的最大来源是
+   * Ctrl+Z/Y 错乱——Shift+Enter 手动插 br/bogus、render() 的 replaceChildren、
+   * 草稿恢复全进了 Chromium contenteditable 原生撤销栈，与打字撤销单元交错成
+   * 乱序，按一次 Ctrl+Z 能挖出别的场景的草稿）。字符串是唯一真值，栈里存
+   * {value, caret}，打字突发 600ms 内合帧成一条；外部改值（草稿恢复/发送清空）
+   * 是天然边界。拦截 Ctrl+Z/Y（含 Ctrl+Shift+Z），原生撤销栈从此与我无关。
+   */
+  const historyRef = useRef<{ stack: Array<{ value: string; caret: number }>; index: number }>({
+    stack: [{ value: '', caret: 0 }],
+    index: 0
+  })
+  const applyingHistoryRef = useRef(false)
+  const lastPushAtRef = useRef(0)
+
+  const applyHistory = (dir: -1 | 1): void => {
+    const h = historyRef.current
+    const nextIndex = h.index + dir
+    if (nextIndex < 0 || nextIndex >= h.stack.length) return
+    h.index = nextIndex
+    const entry = h.stack[nextIndex]
+    applyingHistoryRef.current = true
+    lastEmittedRef.current = entry.value
+    onChange(entry.value)
+    // 等 useLayoutEffect 重排完再放光标（entry 里存的是当时的字符串偏移）。
+    requestAnimationFrame(() => {
+      const root = ref.current
+      if (root) placeCaret(root, Math.min(entry.caret, entry.value.length))
+      applyingHistoryRef.current = false
+    })
+  }
+
   // 值变化时才重排 DOM；组词期间一律不碰（第 1 条死规矩）。
   useLayoutEffect(() => {
     const root = ref.current
     if (!root) return
     if (composingRef.current) return
     const segments = tokenize(value, resolveCommand)
+    // 外部改值（草稿恢复/发送后清空/队列取回）也进撤销栈——天然边界，不合帧；
+    // 撤销/重做应用途中 lastEmittedRef 已对齐，不会走到这里。
+    if (lastEmittedRef.current !== value && !applyingHistoryRef.current) {
+      const h = historyRef.current
+      const top = h.stack[h.index]
+      if (!top || top.value !== value) {
+        h.stack = [...h.stack.slice(0, h.index + 1), { value, caret: value.length }].slice(-100)
+        h.index = h.stack.length - 1
+      }
+      lastPushAtRef.current = 0
+    }
     // 手敲即时胶囊化（2026-08-14 用户要求对齐 Codex）：值与 DOM 一致不代表
     // 结构一致——逐字敲出 '/handoff' 时值一路等于 DOM（都是自己刚发的回声），
     // 旧逻辑不重排，胶囊只有菜单选中/草稿恢复才出现。这里比对「行首命令是否
@@ -429,6 +478,21 @@ export default function RichInput({
     if (!root) return
     const next = serialize(root)
     lastEmittedRef.current = next
+    // 自管撤销栈入栈（见上方 historyRef 注释）：打字突发 600ms 内合并成一条，
+    // 超过则开新条目；撤销/重做应用途中（applyingHistoryRef）不入栈。
+    if (!applyingHistoryRef.current) {
+      const h = historyRef.current
+      const top = h.stack[h.index]
+      const caret = caretOffset(root) ?? next.length
+      const now = window.performance.now()
+      if (top && top.value !== next && now - lastPushAtRef.current < 600) {
+        h.stack[h.index] = { value: next, caret }
+      } else if (!top || top.value !== next) {
+        h.stack = [...h.stack.slice(0, h.index + 1), { value: next, caret }].slice(-100)
+        h.index = h.stack.length - 1
+      }
+      lastPushAtRef.current = now
+    }
     onChange(next)
   }
 
@@ -463,6 +527,21 @@ export default function RichInput({
       onKeyDown={(event) => {
         // 组词期间的 Enter / 上下键属于输入法（选字、翻页），一律放行。
         if (event.nativeEvent.isComposing || event.keyCode === 229) return
+        // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z 走自管撤销栈（2026-09-02：程序化 DOM
+        // 变更污染了浏览器原生撤销栈，Ctrl+Z 会挖出别的场景的草稿）。
+        if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+          const k = event.key.toLowerCase()
+          if (k === 'z' && !event.shiftKey) {
+            event.preventDefault()
+            applyHistory(-1)
+            return
+          }
+          if (k === 'y' || (k === 'z' && event.shiftKey)) {
+            event.preventDefault()
+            applyHistory(1)
+            return
+          }
+        }
         // Shift+Enter 手动插 <br>（2026-08-26 用户：「换行每次发出去就没了」）：
         // 浏览器默认行为是在 contenteditable 里拆 <div> 块，而 serialize 的换行
         // 正字是 <br>，换行在 emit 时就丢了。拦住默认行为、只插 <br>，保住

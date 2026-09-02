@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.1.72 - 2026-09-02
+
+### 中文
+
+- 修复：输入框撤销/重做错乱（Ctrl+Z 能挖出别的会话的草稿）——程序化 DOM 变更污染了浏览器原生撤销栈；改为自管撤销栈（打字 600ms 合帧、发送/草稿恢复为边界、光标跟随恢复、redo 截断、IME 组词放行），发送后 Ctrl+Z 还能找回刚发出的内容。
+- 修复：没有后台任务的会话侧栏冒蓝色「9+」气泡——历史重放的老后台任务块没有终态标记被误计为运行中；现在历史条目不参与计数，且点进会话（激活）后气泡也在。
+- 改进：悬停气泡全面整改——右侧触发元素的气泡不再被拉到远处（右缘贴触发元素）；输入框胶囊气泡、整组总结气泡、全局兜底气泡同步对齐；ChipPopover 贴右不再顶出视口；清掉最后一个原生 title 残留。
+- 新增：项目删除守卫——项目下还有会话时不可删除（提示先删除或移走会话）；显式注册的项目（含主目录）在侧栏始终可见；侧栏项目组头右键新增「删除项目」。
+- 修复：路径 pill 右键菜单「复制路径」改名「复制」。
+- 修复：限高输入框在视口外中间位置 Shift+Enter 时，光标行不再卡在视口顶缘外一行。
+
+### English
+
+- Fix: undo/redo in the composer was corrupted (Ctrl+Z could resurrect drafts from other sessions)—programmatic DOM changes polluted the browser's native undo stack; the composer now keeps its own value-history stack (600ms typing coalescing, send/draft-restore boundaries, caret restore, redo truncation, IME pass-through), and Ctrl+Z right after sending restores what you just sent.
+- Fix: sessions without running background tasks showed a blue "9+" badge—history-replayed background blocks lacked terminal markers and were miscounted; history items no longer count, and the badge now also shows on the active session.
+- Improvement: hover tooltips overhauled—tooltips for right-edge triggers no longer land far away (right-edge aligned); the composer chip tip, group-summary bubble, and global fallback tooltip aligned; ChipPopover no longer overflows the right edge; the last native title attribute removed.
+- New: project deletion guard—a project with sessions cannot be deleted (with a notice); explicitly registered projects (including the home directory) always stay visible in the sidebar; project group headers get a "Delete project" context menu entry.
+- Fix: the path pill's context menu item renamed from "Copy path" to "Copy".
+- Fix: Shift+Enter in the middle of a height-capped composer no longer leaves the caret row one line above the viewport edge.
+
 ## v1.1.71 - 2026-09-02
 
 ### 中文

@@ -1321,7 +1321,7 @@ function activityGroupSampleOf(blocks: AssistantBlock[]): string {
  * 会裁掉绝对定位子元素，气泡走 portal 挂到 body（同 ImageContextMenu 的套路）。
  */
 function GroupNoteText({ note }: { note: string }): JSX.Element {
-  const [tip, setTip] = useState<{ left: number; top: number; below: boolean } | null>(null)
+  const [tip, setTip] = useState<{ left: number; right: number; top: number; below: boolean; alignRight: boolean } | null>(null)
   const [shown, setShown] = useState(false)
 
   const hide = (): void => {
@@ -1333,9 +1333,12 @@ function GroupNoteText({ note }: { note: string }): JSX.Element {
     const rect = event.currentTarget.getBoundingClientRect()
     // 默认放上方（bottom 锚定，不用量气泡高度）；上方贴顶不够 72px 才翻到下边。
     const below = rect.top < 72
-    // max-w-md = 448px，左边往屏内 clamp 一档防出屏。
+    // max-w-md = 448px。2026-09-02 同步 HoverTip 的右缘对齐修复（「气泡离触发
+    // 元素老远」全面排查——本气泡是 HoverTip 的视觉来源，定位仍停在旧规则）：
+    // clamp 会把左缘拉离触发元素时改为右缘对齐（气泡右缘贴触发元素右缘）。
+    const alignRight = rect.left + 456 > window.innerWidth - 8
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - 456))
-    setTip({ left, top: below ? rect.bottom + 6 : rect.top - 6, below })
+    setTip({ left, right: window.innerWidth - rect.right, top: below ? rect.bottom + 6 : rect.top - 6, below, alignRight })
   }
 
   // 挂载后下一帧再转正透明度/位移，做出 ~120ms 淡入。
@@ -1363,8 +1366,12 @@ function GroupNoteText({ note }: { note: string }): JSX.Element {
             }`}
             style={
               tip.below
-                ? { left: tip.left, top: tip.top }
-                : { left: tip.left, bottom: window.innerHeight - tip.top }
+                ? tip.alignRight
+                  ? { right: tip.right, top: tip.top }
+                  : { left: tip.left, top: tip.top }
+                : tip.alignRight
+                  ? { right: tip.right, bottom: window.innerHeight - tip.top }
+                  : { left: tip.left, bottom: window.innerHeight - tip.top }
             }
           >
             {note}

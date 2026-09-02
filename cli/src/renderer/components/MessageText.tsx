@@ -129,7 +129,7 @@ function CodeRenderer({ className, children: c }: any): JSX.Element {
             // （含 :line 行号），不是 preview 用的归一化路径。
             const cwd = useSessionStore.getState().meta?.cwd ?? ''
             showInlineContextMenu(event, [
-              { label: '复制路径', action: () => void navigator.clipboard.writeText(text).catch(() => {}) },
+              { label: '复制', action: () => void navigator.clipboard.writeText(text).catch(() => {}) },
               {
                 label: '预览',
                 action: () => openPathPreview(cwd, path, useUiStore.getState().openAttachmentPreview)
