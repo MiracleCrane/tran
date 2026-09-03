@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type AnchorHTMLAttributes, type ImgHTMLAttributes, type MouseEvent } from 'react'
+import { cloneElement, memo, useEffect, useRef, useState, type AnchorHTMLAttributes, type ImgHTMLAttributes, type MouseEvent } from 'react'
 import { useTransientFlag } from '../hooks/useTransientFlag'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -89,12 +89,16 @@ function openPathPreview(
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function CodeRenderer({ className, children: c }: any): JSX.Element {
+function CodeRenderer({ className, children: c, inPre }: any): JSX.Element {
   // cwd/openAttachmentPreview 在点击时经 getState() 现取，不做渲染期订阅：
   // 长会话里成百上千个行内 code span，每个都挂 selector 的话，流式期间每帧
   // store 更新都要跑一遍全部订阅者。
   const text = String(c ?? '')
-  const isBlock = !!className && /language-|hljs/.test(className)
+  // inPre：pre 里的 code 一定是代码块——无语言标记的 fence 没有 className，
+  // 单看 className 会误判成行内 code；内容只要含 / 就中 isPathLike 变成路径
+  // pill 按钮（2026-09-02 用户实测：无语言 fence 里的 JDBC URL 变成可右键的
+  // pill，PreRenderer 的复制按钮 querySelector('code') 落空失效）。
+  const isBlock = !!inPre || (!!className && /language-|hljs/.test(className))
 
   if (!isBlock && isPathLike(text)) {
     const path = normalizePathForPreview(text)
@@ -297,17 +301,49 @@ function PreRenderer({ children, ...props }: any): JSX.Element {
   // useTransientFlag 管定时器的取消与卸载清理：裸 setTimeout 在 1.2s 内组件
   // 卸载（流式重排/切会话）时会打在已卸载组件上，连点还互相踩。
   const [copied, flashCopied] = useTransientFlag(1200)
-  const codeProps = (Array.isArray(children) ? children[0] : children)?.props ?? {}
+  const codeChild = Array.isArray(children) ? children[0] : children
+  const codeProps = codeChild?.props ?? {}
   const lang = /language-([\w-]+)/.exec(codeProps.className ?? '')?.[1] ?? 'text'
 
+  const [failed, flashFailed] = useTransientFlag(1200)
   const copy = async (): Promise<void> => {
-    const text = ref.current?.querySelector('code')?.textContent ?? ''
-    if (!text) return
+    // 取数兜底到 pre（pill 化导致 code 不存在的历史已修，双保险）。
+    const text =
+      ref.current?.querySelector('code')?.textContent ??
+      ref.current?.querySelector('pre')?.textContent ??
+      ''
+    if (!text) {
+      // 2026-09-02：取不到文本也给反馈（此前静默 return，用户分不清没复制到
+      // 还是没点上）。
+      flashFailed()
+      return
+    }
     try {
       await navigator.clipboard.writeText(text)
       flashCopied()
-    } catch {
-      /* 剪贴板不可用时静默 */
+    } catch (e) {
+      // 2026-09-02 修「代码块复制点了没反应」（CDP 实测与链接化无关）：剪贴板
+      // 被外部同步工具（对拷线）锁住或窗口瞬时失焦时 writeText 必挂，此前完全
+      // 静默。回退 execCommand 选区复制，仍失败则按钮给出 ✗ 反馈 + console.warn。
+      console.warn('[tran] 代码块复制 writeText 失败，回退 execCommand', e)
+      const code = ref.current?.querySelector('code')
+      if (!code) {
+        flashFailed()
+        return
+      }
+      try {
+        const sel = window.getSelection()
+        const range = document.createRange()
+        range.selectNodeContents(code)
+        sel?.removeAllRanges()
+        sel?.addRange(range)
+        const ok = document.execCommand('copy')
+        sel?.removeAllRanges()
+        if (ok) flashCopied()
+        else flashFailed()
+      } catch {
+        flashFailed()
+      }
     }
   }
 
@@ -316,10 +352,14 @@ function PreRenderer({ children, ...props }: any): JSX.Element {
       <div className="md-code-head">
         <span className="md-code-lang">{lang}</span>
         <button type="button" onClick={() => void copy()} className="md-code-copy">
-          {copied ? '✓ 已复制' : '复制'}
+          {copied ? '✓ 已复制' : failed ? '✗ 复制失败' : '复制'}
         </button>
       </div>
-      <pre {...props}>{children}</pre>
+      <pre {...props}>
+        {Array.isArray(children)
+          ? children.map((child, i) => cloneElement(child, { key: child.key ?? i, inPre: true }))
+          : cloneElement(children, { inPre: true })}
+      </pre>
     </div>
   )
 }

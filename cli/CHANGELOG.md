@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.76 - 2026-09-03
+
+### 中文
+
+- 修复：不带语言标记的代码块（``` 裸 fence）内容含 `/` 时被误当成路径 pill（可右键），块右上角「复制」点了没反应——pre 里的 code 现在一律按代码块处理不再 pill 化，复制取数兜底到 pre，写入失败回退 execCommand 选区复制并给出「✗ 复制失败」反馈。
+
+### English
+
+- Fix: fenced code blocks without a language tag whose content contained `/` were mis-rendered as right-clickable path pills, and their "Copy" button silently did nothing—code inside `<pre>` is now always treated as a block (never pilled), copy falls back to the `<pre>` text and then to an execCommand selection copy, and failures show "✗ Copy failed".
+
 ## v1.1.75 - 2026-09-02
 
 ### 中文
