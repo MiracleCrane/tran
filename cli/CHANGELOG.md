@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.75 - 2026-09-02
+
+### 中文
+
+- 修复：重启 Tran 后会话的改动面板/改动 pill 消失——轮次改动卡只在 live 轮结束时生成，历史重建不会补建；现在历史重建按轮补建改动卡（含多工作区分组），重启后 diff 依然能看。
+
+### English
+
+- Fix: after restarting Tran, the session's changes panel/pill vanished—turn-changes cards were only created at live turn end and never rebuilt from history; history rebuild now reconstructs them per turn (including multi-repo grouping), so diffs survive restarts.
+
 ## v1.1.74 - 2026-09-02
 
 ### 中文

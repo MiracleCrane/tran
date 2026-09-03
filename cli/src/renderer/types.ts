@@ -99,7 +99,9 @@ export type TranscriptItem =
  *
  *  v1.1.21 起统计来源是**本轮 Write/Edit 工具输入**（轮一结束立刻出卡）；
  *  更早是 git 快照前后差——在 200+ 改动文件的脏仓库里快照 IPC 会被轮内流量
- *  饿死约 1 分钟，卡片落地太晚位置全错，已废弃。 */
+ *  饿死约 1 分钟，卡片落地太晚位置全错，已废弃。
+ *  2026-09-03：历史重建（historyToItems）也按轮补建此卡（isHistory 由调用点
+ *  标），否则重启后改动面板/改动 pill 全空。 */
 export interface TurnChangesItem {
   id: string
   kind: 'turnChanges'

@@ -640,9 +640,58 @@ function computeTurnChangesFromItems(
   }
 }
 
+/**
+ * 2026-09-03 重启后「改动面板/改动 pill 全空」修复：turnChanges 卡原先只在
+ *  live turn 结束时落地，历史重建（historyToItems）不含卡——重启后 items 无卡，
+ *  SessionChangesPill 空、changesGitRoot/changesGitGroups 算不出、改动面板无数据。
+ *  这里在历史重建输出上按轮补建：轮边界与 live 同口径（user 文本条为轮界，
+ *  每轮复用 computeTurnChangesFromItems 统计）；空轮不出卡（与 live 一致）；
+ *  落位在该轮末条之后（live 是轮末 append，同位置）。
+ *  id 取「turnChanges:本轮末条 assistant 的 uuid」确定性值：同一段历史经
+ *  缓存/注水/session-load 重放多次合并时按 id 天然去重；与 live 卡（uid()）
+ *  的对账走 transcriptFingerprint 的 turnChanges 分支。
+ */
+function appendHistoryTurnChanges(items: TranscriptItem[]): TranscriptItem[] {
+  const out: TranscriptItem[] = []
+  let turn: TranscriptItem[] = []
+  const flush = (): void => {
+    const changes = computeTurnChangesFromItems(turn)
+    turn = []
+    if (!changes) return
+    // 有改动必有 assistant 条（改动就是从它的工具块算出的），id 取它保确定性。
+    let lastAssistantId = ''
+    for (let i = out.length - 1; i >= 0; i--) {
+      if (out[i].kind === 'assistant') {
+        lastAssistantId = out[i].id
+        break
+      }
+    }
+    out.push({
+      id: `turnChanges:${lastAssistantId}`,
+      kind: 'turnChanges',
+      parentToolUseId: null,
+      files: changes.files,
+      addedTotal: changes.addedTotal,
+      removedTotal: changes.removedTotal,
+      // 历史消息无时间戳（HistoryMessage 不带）：诚实置 0，卡片不展示时间。
+      at: 0
+    })
+  }
+  for (const it of items) {
+    // user 文本条 = 轮界（computeTurnChangesFromItems 的 break 同口径）：
+    // 先结上一轮，它自己归入新一轮（compute 遇 user 即 break，算不到它头上）。
+    if (it.kind === 'user' && it.text) flush()
+    out.push(it)
+    turn.push(it)
+  }
+  flush()
+  return out
+}
+
 
 /** 「改动目标仓库」重算（2026-09-02）：会话改动文件多数派所在的 git 仓库根。
- *  触发点只有三处：turnChanges 卡落地（turn 结束）、切会话、历史注水 prepend
+ *  触发点：turnChanges 卡落地（turn 结束）、切会话、历史注水 prepend、
+ *  历史首批落地与 session/load 重放（2026-09-03 补，重启后重建卡的路径）
  *  ——不逐 render 算。一次重算 = 一趟 gitRepoRoots IPC，主进程侧对 dirname
  *  有进程级缓存，重复 turn 的成本趋近于零。 */
 let changesGitRootSeq = 0
@@ -913,8 +962,8 @@ function scheduleHistoryHydrationStep(
  *  JSONL uuid，按 id 永远对不上（restartSession/switchProvider 后同一条消息
  *  在历史 tail 之后再排一遍 → 对话重复）。退化到 kind + 内容前缀做指纹：
  *  user 用文本；assistant 用各块文本/toolUseId（tool id 在流式与磁盘间稳定）。
- *  user/assistant 之外的本地条目（query/compaction 等）不参与（返回 null，
- *  一律保留）。 */
+ *  turnChanges 用文件改动签名（2026-09-03，见函数内分支注释）；其余本地条目
+ *  （query/compaction 等）不参与（返回 null，一律保留）。 */
 /** 最近一次完成信封的来源（子 Agent / 后台任务）与时刻：steered 唤醒分割线
  *  文案据此区分（2026-09-02 用户：「子 Agent 完成也显示后台任务完成的提示么」）。
  *  信封与唤醒相邻到达，15s 新鲜度窗口外视为未知（回退通用文案）。 */
@@ -990,6 +1039,11 @@ function applyAllTaskTerminalEnvelopes(items: TranscriptItem[]): TranscriptItem[
 
 function transcriptFingerprint(item: TranscriptItem): string | null {
   if (item.kind === 'user') return `user\n${item.text.slice(0, 200)}`
+  // turnChanges 卡的对账键 = 文件改动签名（files 已按路径排序，签名确定）：
+  // live 卡与历史重建卡源自同一份工具输入，签名必然一致（2026-09-03）。
+  if (item.kind === 'turnChanges') {
+    return `turnChanges\n${item.files.map((f) => `${f.path}:${f.added}:${f.removed}`).join('\n')}`
+  }
   if (item.kind === 'assistant') {
     const text = item.blocks
       .map((b) =>
@@ -1003,6 +1057,32 @@ function transcriptFingerprint(item: TranscriptItem): string | null {
     return text ? `assistant\n${text.slice(0, 200)}` : null
   }
   return null
+}
+
+/** 2026-09-03 历史合并（session/load 重放、后台 history）时的 turnChanges 去重：
+ *  live turn 结束已落过卡的轮，历史重建又补出同轮卡——id 对不上
+ *  （live=uid()、重建=turnChanges:uuid），按内容指纹多重集消耗丢 live 那张，
+ *  留历史位置正确的那张；还没落盘的轮（历史里还没有）live 卡保留。 */
+function dropDuplicatedLiveTurnChanges(
+  existing: TranscriptItem[],
+  fresh: TranscriptItem[]
+): TranscriptItem[] {
+  const counts = new Map<string, number>()
+  for (const i of fresh) {
+    if (i.kind !== 'turnChanges') continue
+    const fp = transcriptFingerprint(i)
+    if (fp) counts.set(fp, (counts.get(fp) ?? 0) + 1)
+  }
+  if (counts.size === 0) return existing
+  return existing.filter((i) => {
+    if (i.kind !== 'turnChanges') return true
+    const fp = transcriptFingerprint(i)
+    if (!fp) return true
+    const remaining = counts.get(fp) ?? 0
+    if (remaining <= 0) return true
+    counts.set(fp, remaining - 1)
+    return false
+  })
 }
 
 function startProgressiveSessionHistory(
@@ -1068,6 +1148,10 @@ function startProgressiveSessionHistory(
       : {}
   ))
 
+  // 2026-09-03：首批可见历史（含补建的 turnChanges 卡）落地后重算「改动目标
+  //  仓库」——subscribe 触发点只有切会话（此刻 items 可能还空）与注水 prepend
+  //  （首批 tail 不 bump seq），首批落地这条路径原先覆盖不到。
+  void recomputeChangesGitRoot()
   scheduleHistoryHydrationStep(get, set, task)
 }
 
@@ -1489,7 +1573,8 @@ export function historyToItems(messages: HistoryMessage[]): TranscriptItem[] {
   }
   // #32 历史里无终态 result 的 tool_use（被杀/中断的子代理）不能重放成
   //  永久"运行中"：封口 stopped（无时间戳，计时诚实显示 —）。
-  return sealHungToolBlocks(items, false)
+  // 2026-09-03：重建输出按轮补建 turnChanges 卡（详见 appendHistoryTurnChanges）。
+  return appendHistoryTurnChanges(sealHungToolBlocks(items, false))
 }
 
 /**
@@ -2084,8 +2169,12 @@ function foldBackgroundAgentEvent(get: () => SessionStore, e: AgentEvent): void 
           )
           bg.items = [
             ...fresh,
-            ...bg.items.filter(
-              (i) => !(i.kind === 'compaction' && i.summary && historySummaries.has(i.summary))
+            // 2026-09-03：同轮 live turnChanges 卡按指纹去重（防一回合两张卡）。
+            ...dropDuplicatedLiveTurnChanges(
+              bg.items.filter(
+                (i) => !(i.kind === 'compaction' && i.summary && historySummaries.has(i.summary))
+              ),
+              fresh
             )
           ]
         }
@@ -4633,12 +4722,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               return {
                 items: [
                   ...fresh,
-                  ...s.items.filter(
-                    (i) => !(i.kind === 'compaction' && i.summary && historySummaries.has(i.summary))
+                  // 2026-09-03：同轮 live turnChanges 卡按指纹去重（防一回合两张卡）。
+                  ...dropDuplicatedLiveTurnChanges(
+                    s.items.filter(
+                      (i) => !(i.kind === 'compaction' && i.summary && historySummaries.has(i.summary))
+                    ),
+                    fresh
                   )
                 ]
               }
             })
+            // 2026-09-03：重放补进的 turnChanges 卡落地后重算「改动目标仓库」
+            // （切会话 subscribe 触发时 items 可能还是空，覆盖不到这条路径）。
+            void recomputeChangesGitRoot()
           }
         } else if (subtype === 'permission_denied') {
           const d = msg as unknown as { tool_use_id: string; message: string }
