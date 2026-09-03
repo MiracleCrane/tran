@@ -23,6 +23,23 @@ function normalizePathForPreview(text: string): string {
   return lineRef?.[1] ?? trimmed
 }
 
+/**
+ * 「在资源管理器中显示」失败（相对路径按会话目录解析后不存在等）不再静默
+ * return false（2026-09-03 用户：「点了一点反应都没有」）：状态栏报错并亮出
+ * 解析后的完整路径。
+ */
+function revealOrReport(cwd: string, path: string): void {
+  window.api.revealInExplorer(cwd, path).then((ok) => {
+    if (ok) return
+    const abs = /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')
+      ? path
+      : `${cwd.replace(/[\\/]+$/, '')}/${path}`
+    useSessionStore.setState((s) => ({
+      status: { ...s.status, error: `找不到文件：${abs}（相对会话目录解析）` }
+    }))
+  }).catch(() => {})
+}
+
 const PREVIEW_READ_ERROR = '文件或目录不存在，或无法读取。'
 
 function loadingPathAttachment(path: string): UserAttachment {
@@ -122,7 +139,7 @@ function CodeRenderer({ className, children: c, inPre }: any): JSX.Element {
           onClick={(event) => {
             const cwd = useSessionStore.getState().meta?.cwd ?? ''
             if (event.ctrlKey) {
-              void window.api.revealInExplorer(cwd, path)
+              revealOrReport(cwd, path)
               return
             }
             openPathPreview(cwd, path, useUiStore.getState().openAttachmentPreview)
@@ -140,7 +157,7 @@ function CodeRenderer({ className, children: c, inPre }: any): JSX.Element {
               },
               {
                 label: '在资源管理器中显示',
-                action: () => void window.api.revealInExplorer(cwd, path)
+                action: () => revealOrReport(cwd, path)
               }
             ])
           }}
@@ -214,7 +231,7 @@ function LinkRenderer({
     if (!path) return
     const cwd = useSessionStore.getState().meta?.cwd ?? ''
     if (event.ctrlKey) {
-      void window.api.revealInExplorer(cwd, path)
+      revealOrReport(cwd, path)
       return
     }
     openPathPreview(cwd, path, useUiStore.getState().openAttachmentPreview)

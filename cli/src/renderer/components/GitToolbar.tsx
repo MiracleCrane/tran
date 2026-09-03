@@ -436,6 +436,13 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
     renderedDrawerRef.current = renderedDrawer
   }, [renderedDrawer])
 
+  // 2026-09-03：非仓库态可能是瞬时失败（仓库锁/detached 中/杀软拦截）卡住的，
+  // 改动抽屉打开时重试一次 refresh 自愈（refresh 每次渲染新建，读的是最新闭包）。
+  useEffect(() => {
+    if (renderedDrawer === 'changes' && !branch && gitChecked) void refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh 非 memo，只需要这三个触发条件
+  }, [renderedDrawer, branch, gitChecked])
+
   useEffect(() => {
     if (drawer) {
       const wasOpen = drawerOpenRef.current
@@ -523,7 +530,8 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
       setBranches(bl)
       setGlobalCwd(b ? target : '')
     } catch {
-      setCachedGitToolbar(target, null, emptyGitStatus(), [])
+      // 2026-09-03：瞬时失败（锁/detached/超时）不写缓存——写进去会被当成
+      // 「已确认非仓库」长期复用，下次挂载直接进极简抽屉不再重试。
       if (stale()) return
       setBranch(null)
       setStatus(emptyGitStatus())
@@ -725,9 +733,24 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
                     ✕
                   </button>
                 </div>
-                <div className="py-6 text-center text-[11px] text-zinc-500">
-                  该目录不是 Git 仓库，查看不了工作区改动
-                </div>
+                {changesGitRoot ? (
+                  // 2026-09-03 修「明明有改动却提示不是 Git 仓库」（用户截图）：
+                  // branch 查询的瞬时失败（仓库锁/detached 中/杀软拦截）会把工具条
+                  // 卡在非仓库态且不自愈。diff 不需要分支信息——changesGitRoot 在
+                  // 就直接挂 ChangesPanel，照常出 diff。
+                  <ChangesPanel
+                    cwd={changesGitRoot}
+                    groups={changesGitGroups}
+                    refreshKey={`${status.staged.length}:${status.unstaged.length}:${status.untracked.length}:${status.conflicts.length}`}
+                    initialPath={changesTarget?.path}
+                    initialRequestKey={changesTarget?.requestKey}
+                    onClose={() => setDrawer(null)}
+                  />
+                ) : (
+                  <div className="py-6 text-center text-[11px] text-zinc-500">
+                    该目录不是 Git 仓库，查看不了工作区改动
+                  </div>
+                )}
               </div>
             </div>
           </Collapse>

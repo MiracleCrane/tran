@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.77 - 2026-09-03
+
+### 中文
+
+- 修复：「明明有改动却提示该目录不是 Git 仓库」——工具条的仓库判定被瞬时失败（cherry-pick/rebase 中途、仓库锁、杀软拦截）卡死且缓存不复自愈；现在开改动抽屉时自动重试、瞬时失败不写缓存，且只要检测到改动落在别的仓库就直接出 diff（不需要分支信息）。
+- 修复：路径 pill 的「在资源管理器中显示」（Ctrl+点击/右键菜单）在路径不存在时完全没反应——现在状态栏报错并亮出解析后的完整路径。
+- 修复：后台任务在活跃轮期间完成时，蓝色后台运行气泡永远不消失——完成通知 steer 进活跃轮会被吞（wire 监听轮内停表、重挂时跳过整轮），bgTerminal 补登不上；气泡计数改为与 Composer chip 同款的 server 校正口径，swarm 推送也会触发气泡刷新。
+
+### English
+
+- Fix: "this directory is not a Git repository" shown despite existing changes—the toolbar's repo check could get stuck by transient failures (mid cherry-pick/rebase, repo locks, antivirus interference) with a poisoned cache; opening the changes drawer now retries, transient failures are no longer cached, and diffs show as long as the changes' repo is detected (no branch info needed).
+- Fix: the path pill's "reveal in Explorer" (Ctrl+click / context menu) did nothing when the path didn't exist—it now reports the resolved absolute path in the status bar.
+- Fix: the blue background-running badge never cleared when a background task finished during an active turn—the completion notification was swallowed (wire watcher pauses mid-turn and skips the whole turn on re-arm), so the terminal marker never landed; badge counting now uses the same server-corrected semantics as the composer chip, and swarm pushes trigger badge refreshes.
+
 ## v1.1.76 - 2026-09-03
 
 ### 中文

@@ -49,7 +49,7 @@ import {
 import {
   AGENT_TOOL_NAMES,
   backgroundTaskInfo,
-  collectBackgroundTaskBlocks,
+  countRunningBackgroundTasks,
   countRunningTools,
   taskTerminalFromEnvelope
 } from '../utils/toolStats'
@@ -1702,8 +1702,11 @@ function countBgRunningItems(
   // 后台任务块没有终态信封（server/磁盘校正只覆盖最近两条），!bgTerminal 把它们
   // 全算成运行中。历史条目不参与运行中计数——真还在跑的任务会走 live 事件/
   // server 校正进非历史条目。
+  // 2026-09-03 再修「气泡永不消失」：信封的 live 生产链是断的（steer 进活跃轮
+  // 的通知被吞：wire 监听轮内停表、重挂时 offset 跳过整轮），bgTerminal 常常
+  // 补不上。bash 分支改用与 Composer chip 同款的 server 校正口径，信封只作补充。
   const live = items.filter((it) => !it.isHistory)
-  const bashRunning = collectBackgroundTaskBlocks(live).filter((b) => !b.bgTerminal).length
+  const bashRunning = countRunningBackgroundTasks(live, swarmTasks ?? null)
   return bashRunning + countRunningTools(live, AGENT_TOOL_NAMES, swarmTasks, turnRunning)
 }
 
@@ -1722,6 +1725,14 @@ function recomputeBgRunning(
   turnRunning: boolean
 ): void {
   setBgRunning(sdkSessionId, countBgRunningItems(items, swarmTasks, turnRunning))
+}
+
+/** 前台会话的后台运行镜像重算入口（2026-09-03）：swarm 推送等 store 外触发点用
+ *  （bash 口径走 server 校正后，纯 server 态变化也必须能刷新气泡）。 */
+export function recomputeForegroundBgRunning(): void {
+  const s = useSessionStore.getState()
+  if (!s.meta) return
+  recomputeBgRunning(s.meta.sdkSessionId, s.items, s.swarmTasks, s.status.running)
 }
 
 /** recomputeBgRunning 的事件门控（2026-09-02）：只有可能改变计数的事件才全量扫

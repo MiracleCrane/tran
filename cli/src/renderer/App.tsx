@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react'
-import { useSessionStore, foldBackgroundSwarmTasks, takeAttachedSwarmTasks } from './store/sessionStore'
+import { useSessionStore, foldBackgroundSwarmTasks, takeAttachedSwarmTasks, recomputeForegroundBgRunning} from './store/sessionStore'
 import { todoKeyOf } from './lib/todoOverrides'
 import { useUiStore, type View } from './store/uiStore'
 import { installShortcuts } from './shortcuts'
@@ -654,8 +654,12 @@ export default function App(): JSX.Element {
     void window.api.subscribeSwarmTasks(sdkSessionId).catch(() => {})
     const off = window.api.onSwarmTasks((e) => {
       // #23 非当前会话的推送折叠进对应后台缓冲（attach 时随快照恢复）。
-      if (e.sessionId === sdkSessionId) useSessionStore.setState({ swarmTasks: e.tasks })
-      else foldBackgroundSwarmTasks(e.sessionId, e.tasks)
+      if (e.sessionId === sdkSessionId) {
+        useSessionStore.setState({ swarmTasks: e.tasks })
+        // 2026-09-03：气泡 bash 口径已走 server 校正，swarm 推送也要触发重算，
+        // 否则「纯 server 态变化、无任何事件」时侧栏气泡不刷新（残留根因之一）。
+        recomputeForegroundBgRunning()
+      } else foldBackgroundSwarmTasks(e.sessionId, e.tasks)
     })
     return () => {
       off()
