@@ -5,9 +5,8 @@ import { createPortal } from 'react-dom'
  * 悬停气泡（2026-08-25：用户嫌原生 title= 提示丑——「悬停还是丑丑的」）。
  * 视觉与 Transcript 的 GroupNoteText 气泡同款：深色玻璃圆角、~120ms 淡入、
  * portal 挂 body 逃出祖先 overflow 裁剪。默认在触发元素上方，贴顶不足 72px
- * 时翻到下方。2026-09-01 破例加 preferBelow：会话改动 pill 悬停时上方气泡
- * 会盖住 Transcript 末尾文字（用户：「这边挡住了」），pill 下方是 Composer
- * 空白区，强制朝下。
+ * 时翻到下方。preferBelow 可强制朝下（上方会遮挡重要内容时用；2026-09-01 为
+ * 会话改动 pill 所加，2026-09-03 pill 下线后暂无消费方，API 保留）。
  *
  * 用法：<HoverTip tip="提示全文">…触发元素…</HoverTip>
  */

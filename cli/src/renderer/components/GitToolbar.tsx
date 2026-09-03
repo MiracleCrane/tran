@@ -700,7 +700,7 @@ export default function GitToolbar({ cornerAction }: GitToolbarProps = {}): JSX.
   }
 
   // 非 git 目录（gitChecked 后 branch 仍是 null）：工具条本体不渲染，但「改动」
-  // 抽屉的宿主必须在——轮次卡/会话 pill 的 openChangesPanel 监听在上面的 hook
+  // 抽屉的宿主必须在——轮次卡的 openChangesPanel 监听在上面的 hook
   // 里照常挂着，此前这条早退路径没有抽屉 DOM，非 git 会话点了等于没点
   // （2026-08-25 用户抓包：「本会话 N 个文件已更改」是死按钮）。补一个极简
   // 抽屉：只认 changes，里面是一句诚实说明（复用 ChangesPanel 的空态样式），

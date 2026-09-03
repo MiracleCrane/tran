@@ -9,7 +9,6 @@ import SidebarShell from './components/SidebarShell'
 import Transcript from './components/Transcript'
 import Composer from './components/Composer'
 import ElicitationCard from './components/ElicitationCard'
-import SessionChangesPill from './components/SessionChangesPill'
 import TurnTimerStrip from './components/TurnTimerStrip'
 import RightDock from './components/RightDock'
 import GitToolbar, { requestCloseGitDrawer } from './components/GitToolbar'
@@ -342,7 +341,9 @@ function MainViewContent({
         <RightDock />
       </div>
       <ElicitationCard />
-      <SessionChangesPill />
+      {/* 2026-09-03 去掉会话改动悬浮 pill（SessionChangesPill 已删）：对齐 Codex——
+          改动摘要只在对话流内联（TurnChangesCard），无常驻悬浮件；「在 worktree 中
+          继续」入口挪进改动抽屉头部（ChangesPanel）。 */}
       <Composer />
       <ErrorDiagnosticPanel />
     </>

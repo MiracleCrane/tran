@@ -101,7 +101,7 @@ export type TranscriptItem =
  *  更早是 git 快照前后差——在 200+ 改动文件的脏仓库里快照 IPC 会被轮内流量
  *  饿死约 1 分钟，卡片落地太晚位置全错，已废弃。
  *  2026-09-03：历史重建（historyToItems）也按轮补建此卡（isHistory 由调用点
- *  标），否则重启后改动面板/改动 pill 全空。 */
+ *  标），否则重启后改动面板全空（当时的改动 pill 同理，pill 已于 2026-09-03 下线）。 */
 export interface TurnChangesItem {
   id: string
   kind: 'turnChanges'

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.78 - 2026-09-03
+
+### 中文
+
+- 新增：侧栏会话标题悬停时滚动显示——名字超长被省略号截断的会话，鼠标移上去会按溢出长度来回滚动看全名（减动效偏好下不滚）。
+- 调整：移除输入框上方的会话改动悬浮 pill（对齐 Codex——改动摘要只在对话流内联，无常驻悬浮件，不再占用正文空间）。「⎇ 在 worktree 中继续」入口移到改动抽屉头部；会话累计改动看对话流里的轮次卡，当前未提交看 git 工具条。
+
+### English
+
+- New: sidebar session titles scroll on hover—truncated names scroll to reveal the full text (disabled under reduced-motion).
+- Change: the floating session-changes pill above the composer is removed (aligned with Codex—change summaries live inline in the conversation, no persistent floating widgets taking up space). The "⎇ Continue in a worktree" entry moved to the changes drawer header; per-turn cards still carry session changes, and uncommitted work lives in the git toolbar.
+
 ## v1.1.77 - 2026-09-03
 
 ### 中文

@@ -229,6 +229,12 @@ interface SessionStore {
    *  在前、root=null（不在任何 git 仓库）垫底。消费方：ChangesPanel 分组渲染，
    *  每组用自己的 root 出 diff；GitToolbar 全局操作仍只跟多数派/cwd。 */
   changesGitGroups: ChangesGitGroup[]
+  /** 未提交文件数（2026-09-03 起随重算维护；当时供 pill「未提交 N」段用，
+   *  2026-09-03 pill 下线后暂无 UI 消费方，口径保留）：与 changesGitRoot 同一次
+   *  重算产出（recomputeChangesGitRoot），口径 =
+   *  gitStatus 的 staged/unstaged/untracked/conflicts 按路径去重后的总数。
+   *  null = 还没算出或目标不是 git 仓库。 */
+  uncommittedFiles: number | null
   /** 历史渐进注水（头部 prepend）事件号：每实际前置一批旧条目 +1。
    *  Transcript 的 firstItemIndex 滚动补偿以此为触发信号——不再靠「上一帧
    *  首行 key 反推行数」（折叠段向前延伸时组行 id 会变，findIndex 落空，
@@ -641,9 +647,9 @@ function computeTurnChangesFromItems(
 }
 
 /**
- * 2026-09-03 重启后「改动面板/改动 pill 全空」修复：turnChanges 卡原先只在
+ * 2026-09-03 重启后「改动面板/改动汇总全空」修复：turnChanges 卡原先只在
  *  live turn 结束时落地，历史重建（historyToItems）不含卡——重启后 items 无卡，
- *  SessionChangesPill 空、changesGitRoot/changesGitGroups 算不出、改动面板无数据。
+ *  changesGitRoot/changesGitGroups 算不出、改动面板无数据。
  *  这里在历史重建输出上按轮补建：轮边界与 live 同口径（user 文本条为轮界，
  *  每轮复用 computeTurnChangesFromItems 统计）；空轮不出卡（与 live 一致）；
  *  落位在该轮末条之后（live 是轮末 append，同位置）。
@@ -692,8 +698,9 @@ function appendHistoryTurnChanges(items: TranscriptItem[]): TranscriptItem[] {
 /** 「改动目标仓库」重算（2026-09-02）：会话改动文件多数派所在的 git 仓库根。
  *  触发点：turnChanges 卡落地（turn 结束）、切会话、历史注水 prepend、
  *  历史首批落地与 session/load 重放（2026-09-03 补，重启后重建卡的路径）
- *  ——不逐 render 算。一次重算 = 一趟 gitRepoRoots IPC，主进程侧对 dirname
- *  有进程级缓存，重复 turn 的成本趋近于零。 */
+ *  ——不逐 render 算。一次重算 = 一趟 gitRepoRoots IPC（主进程侧对 dirname
+ *  有进程级缓存，重复 turn 的成本趋近于零）+ 一趟多数派仓库的 gitStatus
+ *  （2026-09-03 未提交文件数）。 */
 let changesGitRootSeq = 0
 async function recomputeChangesGitRoot(): Promise<void> {
   const seq = ++changesGitRootSeq
@@ -702,28 +709,52 @@ async function recomputeChangesGitRoot(): Promise<void> {
   const cwd = s.meta?.cwd ?? ''
   const entries = collectChangeFileEntries(s.items, cwd)
   if (entries.length === 0) {
-    if (s.changesGitRoot !== null || s.changesGitGroups.length > 0)
-      useSessionStore.setState({ changesGitRoot: null, changesGitGroups: [] })
+    if (s.changesGitRoot !== null || s.changesGitGroups.length > 0 || s.uncommittedFiles !== null)
+      useSessionStore.setState({ changesGitRoot: null, changesGitGroups: [], uncommittedFiles: null })
     return
   }
   const dirs = [...new Set(entries.map((e) => dirnameOf(e.abs)).filter(Boolean))]
+  // 2026-09-03：cwd 一并捎进同一趟 IPC（未提交数回退「cwd 所在仓库」要用，
+  // 见下方 statusTarget），不额外花一趟。
+  const queryDirs = cwd && !dirs.includes(cwd) ? [...dirs, cwd] : dirs
   let roots: (string | null)[]
   try {
-    roots = await window.api.gitRepoRoots(dirs)
+    roots = await window.api.gitRepoRoots(queryDirs)
   } catch {
     return // 查询失败保持现状，下次触发再试
   }
   // 竞态守卫：IPC 期间又发起过更新的重算、或已经切了会话，结果直接丢弃。
   if (seq !== changesGitRootSeq) return
-  const cur = useSessionStore.getState()
-  if ((cur.meta?.sessionId ?? null) !== sessionId) return
-  const byDir = new Map(dirs.map((d, i) => [d, roots[i] ?? null]))
+  if ((useSessionStore.getState().meta?.sessionId ?? null) !== sessionId) return
+  const byDir = new Map(queryDirs.map((d, i) => [d, roots[i] ?? null]))
   const next = pickMajorityRepoRoot(entries, (d) => byDir.get(d) ?? null)
   // 2026-09-02：同一趟 IPC 结果顺手产出按仓库根分组（改动面板分组渲染用），
   // 与多数派一次 setState 落地，消费方不会看到二者不一致的中间态。
   const groups = groupChangeFilesByRepoRoot(entries, (d) => byDir.get(d) ?? null, next)
-  if (cur.changesGitRoot !== next || !sameChangesGitGroups(cur.changesGitGroups, groups))
-    useSessionStore.setState({ changesGitRoot: next, changesGitGroups: groups })
+  // 2026-09-03：同一次重算顺手查「未提交文件数」。查哪个仓库：优先改动多数派
+  // 仓库（next）；改动都不在任何 git 仓库时回退到 cwd 所在仓库；cwd 也不是
+  // 仓库则 null。
+  const statusTarget = next ?? (cwd ? (byDir.get(cwd) ?? null) : null)
+  let uncommitted: number | null = null
+  if (statusTarget) {
+    try {
+      const st = await window.api.gitStatus(statusTarget)
+      // 同一文件可能同时出现在 staged 与 unstaged（部分暂存），按路径去重计数。
+      uncommitted = new Set([...st.staged, ...st.unstaged, ...st.untracked, ...st.conflicts]).size
+    } catch {
+      uncommitted = null // 查询失败保持 null，下次触发再试
+    }
+  }
+  // 第二道竞态守卫：gitStatus await 期间又发起了更新的重算、或切了会话，丢弃。
+  if (seq !== changesGitRootSeq) return
+  const cur = useSessionStore.getState()
+  if ((cur.meta?.sessionId ?? null) !== sessionId) return
+  if (
+    cur.changesGitRoot !== next ||
+    !sameChangesGitGroups(cur.changesGitGroups, groups) ||
+    cur.uncommittedFiles !== uncommitted
+  )
+    useSessionStore.setState({ changesGitRoot: next, changesGitGroups: groups, uncommittedFiles: uncommitted })
 }
 
 /** changesGitGroups 浅比较（分组函数产出已排序，逐项等值即可）：避免重算
@@ -2752,6 +2783,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   items: [],
   changesGitRoot: null,
   changesGitGroups: [],
+  uncommittedFiles: null,
   historyPrependSeq: 0,
   historyPrependCount: 0,
   status: emptyStatus,
@@ -5272,8 +5304,8 @@ useSessionStore.subscribe((s) => {
   if (sid !== changesGitRootSessionId) {
     changesGitRootSessionId = sid
     changesGitRootPrependSeq = s.historyPrependSeq
-    if (s.changesGitRoot !== null || s.changesGitGroups.length > 0)
-      useSessionStore.setState({ changesGitRoot: null, changesGitGroups: [] })
+    if (s.changesGitRoot !== null || s.changesGitGroups.length > 0 || s.uncommittedFiles !== null)
+      useSessionStore.setState({ changesGitRoot: null, changesGitGroups: [], uncommittedFiles: null })
     void recomputeChangesGitRoot()
     return
   }

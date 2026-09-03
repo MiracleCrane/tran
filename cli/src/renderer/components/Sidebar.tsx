@@ -282,6 +282,41 @@ function sessionKey(session: SessionListItem): string {
   return `${session.runtimeBackend ?? 'windows'}:${session.sessionId}`
 }
 
+/**
+ * 悬停滚动标题（2026-09-03 用户：「会话名字显示不全，移上去要滚动」）：
+ * 平时与 truncate 一致（单行省略号）；悬停行时若文本超宽，按实测溢出量
+ * 用 CSS 变量驱动来回滚动（marquee）。减动效偏好下不滚。
+ */
+function MarqueeTitle({ text }: { text: string }): JSX.Element {
+  const outerRef = useRef<HTMLSpanElement>(null)
+  const innerRef = useRef<HTMLSpanElement>(null)
+  const [dist, setDist] = useState(0)
+  const measure = (): void => {
+    const outer = outerRef.current
+    const inner = innerRef.current
+    if (!outer || !inner) return
+    setDist(Math.max(0, inner.scrollWidth - outer.clientWidth))
+  }
+  return (
+    <span ref={outerRef} className="min-w-0 flex-1 overflow-hidden" onMouseEnter={measure}>
+      <span
+        ref={innerRef}
+        className="session-title-marquee"
+        style={
+          dist > 0
+            ? ({
+                '--scroll-dist': `-${dist + 12}px`,
+                animationDuration: `${Math.max(3, dist / 45)}s`
+              } as CSSProperties)
+            : undefined
+        }
+      >
+        {text}
+      </span>
+    </span>
+  )
+}
+
 function pathName(path: string | undefined): string {
   if (!path) return 'Unknown project'
   const clean = path.replace(/[\\/]+$/, '')
@@ -2218,7 +2253,7 @@ export default function Sidebar({ forceExpanded = false }: { forceExpanded?: boo
                       <StarOrbitTitle text={s.summary || '(未命名)'} />
                     </span>
                   ) : (
-                    <span className="min-w-0 flex-1 truncate">{s.summary || '(未命名)'}</span>
+                    <MarqueeTitle text={s.summary || '(未命名)'} />
                   )}
                   <span className={`session-runtime-badge ${snapshot.showRuntimeBadges ? 'is-visible' : ''}`}>
                     {backendLabel(s.runtimeBackend)}

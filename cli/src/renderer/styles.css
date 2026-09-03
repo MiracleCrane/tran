@@ -4303,3 +4303,31 @@ div:has(textarea:focus) .composer-shortcut-hint {
 :root[data-glass-glow='off'] .app-shell-merged .main-surface {
   box-shadow: none !important;
 }
+
+/* 会话行标题悬停滚动（2026-09-03 用户：「名字显示不全移上去要滚动」）：
+   平时单行省略号；行悬停且实测超宽（--scroll-dist 存在）时来回滚动。 */
+.session-title-marquee {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.sidebar-session-row:hover .session-title-marquee[style*='--scroll-dist'] {
+  overflow: visible;
+  text-overflow: clip;
+  animation-name: session-title-marquee;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+@keyframes session-title-marquee {
+  0%, 12% { transform: translateX(0); }
+  88%, 100% { transform: translateX(var(--scroll-dist)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-session-row:hover .session-title-marquee[style*='--scroll-dist'] {
+    animation: none;
+  }
+}

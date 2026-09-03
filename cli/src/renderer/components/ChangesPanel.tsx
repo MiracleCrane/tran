@@ -79,6 +79,50 @@ export default function ChangesPanel({ cwd, groups, refreshKey, initialPath, ini
   const [manualRefreshSeq, setManualRefreshSeq] = useState(0)
   const [statsBySection, setStatsBySection] = useState<Record<string, SectionStats>>({})
 
+  // 「⎇ 在 worktree 中继续」（2026-09-03 从会话改动悬浮 pill 迁入——pill 整件下线：
+  // 对齐 Codex，改动摘要只在对话流内联，无常驻悬浮件）：改动多数派仓库
+  // （changesGitRoot）与会话 cwd 所在仓库根不一致时（cwd 非仓库也算不等），面板
+  // 头部给一键迁移入口——新会话 cwd 落在该仓库的专用 worktree，后续改动与 git
+  // 操作都指向它。store 侧动作是 migrateToWorktree。判定口径与 pill 完全一致。
+  const changesGitRoot = useSessionStore((s) => s.changesGitRoot)
+  const sessionCwd = useSessionStore((s) => s.meta?.cwd ?? '')
+  const migrateToWorktree = useSessionStore((s) => s.migrateToWorktree)
+  // cwd 所在仓库根要异步查（gitRepoRoots）；undefined = 还没查到，先不亮按钮
+  // （避免查询途中按钮闪现）。
+  const [cwdRepoRoot, setCwdRepoRoot] = useState<string | null | undefined>(undefined)
+  const [migrating, setMigrating] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setCwdRepoRoot(undefined)
+    if (!sessionCwd) {
+      setCwdRepoRoot(null)
+      return
+    }
+    void window.api
+      .gitRepoRoots([sessionCwd])
+      .then(([root]) => {
+        if (alive) setCwdRepoRoot(root ?? null)
+      })
+      .catch(() => {
+        if (alive) setCwdRepoRoot(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [sessionCwd])
+  const showMigrate =
+    !!changesGitRoot &&
+    cwdRepoRoot !== undefined &&
+    normalizePath(changesGitRoot).toLowerCase() !== (cwdRepoRoot ? normalizePath(cwdRepoRoot).toLowerCase() : '')
+  const migrateRepoName = changesGitRoot?.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? ''
+  const onMigrate = (): void => {
+    if (migrating) return
+    setMigrating(true)
+    // 成功后切到新会话（changesGitRoot 随会话重置，按钮自然消失）；失败由
+    // status.error 当面报，这里只负责解锁按钮。
+    void migrateToWorktree().finally(() => setMigrating(false))
+  }
+
   // 主仓库 = cwd；groups 里 root 与主仓库相同的组滤掉（主仓库的工作区视图
   // 就是那一组）。只剩主仓库时 grouped=false，单组渲染不套组头。
   const extraGroups = (groups ?? []).filter((g) => !(g.root && sameRepoRoot(g.root, cwd)))
@@ -159,6 +203,18 @@ export default function ChangesPanel({ cwd, groups, refreshKey, initialPath, ini
           )}
         </div>
         <div className="flex items-center gap-1">
+          {showMigrate && (
+            <button
+              onClick={onMigrate}
+              disabled={migrating}
+              className="rounded px-1.5 py-0.5 text-[10px] text-amber-400/90 transition hover:bg-white/[0.06] hover:text-amber-300 disabled:opacity-40"
+              aria-label="在 worktree 中继续"
+            >
+              <HoverTip tip={`改动落在仓库 ${migrateRepoName}——在该仓库的专用 worktree 开新会话，后续改动与 git 操作都指向它`} tipClassName="break-all">
+                ⎇ 在 worktree 中继续
+              </HoverTip>
+            </button>
+          )}
           <button
             onClick={() => setManualRefreshSeq((n) => n + 1)}
             className="rounded px-1.5 py-0.5 text-[10px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-300"
@@ -234,7 +290,7 @@ function RepoChangesSection({
   const [diffs, setDiffs] = useState<Record<string, string | null>>({})
   const [confirmRevert, setConfirmRevert] = useState<GitFileChange | null>(null)
   const [reverting, setReverting] = useState(false)
-  /** 从轮次卡/pill 点进来、但不在 git 工作区改动里的文件（gitignored/已提交）：
+  /** 从轮次卡点进来、但不在 git 工作区改动里的文件（gitignored/已提交）：
    *  合成条目挂在列表最前，保证"点了一定有东西展开"。 */
   const [extraFiles, setExtraFiles] = useState<GitFileChange[]>([])
   // 切目录/刷新竞态：迟到的响应不覆盖新目录的数据
@@ -302,7 +358,7 @@ function RepoChangesSection({
   useEffect(() => {
     if (!initialTarget || !changes) return
     if (appliedRequestRef.current === initialTarget.requestKey) return
-    // 轮次卡/pill 带进来的路径由面板路由进本组时已折算成 root 内相对路径
+    // 轮次卡带进来的路径由面板路由进本组时已折算成 root 内相对路径
     // （2026-09-02 分组版；在此之前是在本 effect 里对单 cwd 折算，见 git 历史）。
     // outside=true 是兜底：文件不属于任何组，按旧行为挂合成条目 + 提示，
     // 不走 IPC 吃「只接受仓库内的相对路径」报错（2026-09-01 用户截图抓包：
@@ -310,7 +366,7 @@ function RepoChangesSection({
     const rel = initialTarget.path
     const file = changes.files.find((entry) => entry.path === rel)
     appliedRequestRef.current = initialTarget.requestKey
-    // 不在工作区改动里（gitignored / 已提交）：不能静默放弃——那是轮次卡/pill
+    // 不在工作区改动里（gitignored / 已提交）：不能静默放弃——那是轮次卡
     // 点进来"什么都不跳"的根源（2026-08-19 用户抓包）。合成一条未跟踪条目进
     // 列表展开它；diff 由 getFileDiff 兜底合成（tracked 空 → 未跟踪合成）。
     if (!file) {
@@ -359,7 +415,7 @@ function RepoChangesSection({
     }
   }
 
-  // extraFiles（轮次卡/pill 点进来的 gitignored/已提交文件）排在 git 列表前面。
+  // extraFiles（轮次卡点进来的 gitignored/已提交文件）排在 git 列表前面。
   const files = [...extraFiles, ...(changes?.files ?? [])]
 
   // 组计数上报给面板头部聚合（单组时即旧版头部的「N 个文件 +X −Y」）。
@@ -495,7 +551,7 @@ function NonGitFilesSection({
     onStats(statsKey, { n: files.length, add: 0, del: 0 })
   }, [files.length, statsKey, onStats])
 
-  // 轮次卡/pill 带进来的文件落在本组：滚动定位（无 diff 可展开，预览由用户点击触发）。
+  // 轮次卡带进来的文件落在本组：滚动定位（无 diff 可展开，预览由用户点击触发）。
   useEffect(() => {
     if (!scrollTarget || appliedRequestRef.current === scrollTarget.requestKey) return
     appliedRequestRef.current = scrollTarget.requestKey

@@ -559,7 +559,7 @@ export async function getFileDiff(
   if (opts.oldPath) args.push(assertPath(opts.oldPath))
   const { stdout } = await runGit(cwd, args, 20_000)
   // 兜底（2026-08-19）：diff 为空不一定意味着"没差异"——gitignored/未跟踪文件
-  // （如 .scratch 产物）git diff 根本不认识，返回空串。轮次卡/pill 点这种文件
+  // （如 .scratch 产物）git diff 根本不认识，返回空串。轮次卡点这种文件
   // 进面板曾因此什么都看不到。文件在磁盘且不在索引里 → 按未跟踪合成全量 diff。
   if (!stdout.trim()) {
     try {
