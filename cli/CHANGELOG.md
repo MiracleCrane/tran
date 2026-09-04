@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.79 - 2026-09-03
+
+### 中文
+
+- 修复：思考块/工具组的 AI 一句话摘要经常不出来——此前「判废或失败一次就以空串永久缓存」：略超 2× 字数上限的可用摘要被整条毙掉且永不重试，一次网络抖动也会让该块永久空白。现在只有成功结果才落缓存（重启自动清理存量空串），超长改为不断词截断不再判废，失败 5 分钟后自动重试（且冷却期内不会滚动一下重打一发），判废日志带类别与原因。
+
+### English
+
+- Fix: AI one-line summaries for thinking blocks/tool groups often never appeared—a single discard or failure was cached as an empty string forever: slightly over-budget summaries were discarded entirely and never retried, and one network hiccup blanked the block permanently. Now only successful results are cached (stale empty entries are cleaned at startup), over-length text is trimmed word-safely instead of discarded, failures retry after 5 minutes (with cooldown preventing remount retry storms), and discard logs include kind and reason.
+
 ## v1.1.78 - 2026-09-03
 
 ### 中文

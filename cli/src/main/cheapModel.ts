@@ -367,6 +367,9 @@ const ESSAY_OPENERS = [
   /^the (command|following)/i
 ]
 
+/** terseText 的判废原因分类（2026-09-04 日志增强：只打原文看不出为何判废）。 */
+export type TerseRejectReason = 'empty' | 'opener'
+
 /**
  * 把模型输出收成一行短文本；判不出可用结果就返回 null（让调用方回退，
  * 而不是存一段垃圾）。
@@ -374,9 +377,28 @@ const ESSAY_OPENERS = [
  * 三道处理，对应实测到的三种翻车形态：
  * 1. markdown 标题/围栏/列表 —— 模型开始排版了，取第一行有效文字；
  * 2. 开场白（"我来解析这个命令："）—— 整条判废；
- * 3. 超长 —— 说明它根本没在遵守字数，判废而不是硬截（硬截出来的是半句话）。
+ * 3. 超长 —— **2026-09-04 起不再判废，改交 trimToWidth 不断词截断**。
+ *    旧策略（>2× 预算整条毙，刻意不硬截怕切出半句话）把大量本可用的摘要
+ *    判死：模型只是话多，首行方向往往是对的；更糟的是判废结果当时会以
+ *    空串永久落盘（cheap-notes.json），一次话多 = 该块永远空白。
+ *    trimToWidth 有退词首 + 尾部虚词清理（不断词截断能力），处理任意长度
+ *    的输入都没问题——它只是 slice 到预算再修尾，不存在"处理不了超长"
+ *    的情况，所以也不需要把判废阈值提到 3×：直接删掉阈值。
+ *    "截出半句话"的风险远小于"整条没有"。
  */
 export function terseText(raw: string, maxChars: number): string | null {
+  return analyzeTerse(raw, maxChars).text
+}
+
+/**
+ * terseText 的内部分析版：多带回判废原因与清洗后字数，供调用方记日志
+ * （2026-09-04：判废日志要带 kind + 原因分类 + 实际字数/预算，只打原文
+ * 分不清是空响应还是开场白）。
+ */
+export function analyzeTerse(
+  raw: string,
+  maxChars: number
+): { text: string | null; reason: TerseRejectReason | null; chars: number } {
   // 围栏要按"块"跳过而不是按行过滤：只丢 ``` 那两行的话，代码内容会漏出来
   // 当成结果（实测 "## 标题\n```\ncode\n```" 会返回 "code"）。
   let inFence = false
@@ -393,17 +415,16 @@ export function terseText(raw: string, maxChars: number): string | null {
     firstLine = line
     break
   }
-  if (!firstLine) return null
+  if (!firstLine) return { text: null, reason: 'empty', chars: 0 }
 
   const text = firstLine
     .replace(/^[*_`"'「『《]+|[*_`"'」』》。.\s]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-  if (!text) return null
-  if (ESSAY_OPENERS.some((re) => re.test(text))) return null
-  // 宽限一倍：略微超字数还能用，成倍超说明它在写文章。
-  if (text.length > maxChars * 2) return null
-  return trimToWidth(text, maxChars)
+  if (!text) return { text: null, reason: 'empty', chars: 0 }
+  if (ESSAY_OPENERS.some((re) => re.test(text))) return { text: null, reason: 'opener', chars: text.length }
+  // 2026-09-04：超长不再判废（理由见 terseText 头注释），一律截断。
+  return { text: trimToWidth(text, maxChars), reason: null, chars: text.length }
 }
 
 /**
@@ -474,6 +495,8 @@ export async function cheapSummarize(opts: {
   examples: Array<[string, string]>
   input: string
   maxChars: number
+  /** 调用类别（cmd/think/edit/group/title），只用于判废日志定位（2026-09-04）。 */
+  kind?: string
 }): Promise<string | null> {
   const messages: CheapMessage[] = [
     {
@@ -497,13 +520,17 @@ export async function cheapSummarize(opts: {
     maxTokens: Math.max(32, opts.maxChars * 3)
   })
   if (!result.ok) return null
-  const cleaned = terseText(result.text, opts.maxChars)
-  // 判废要留痕：原文打出来，下次"命名没生效"才查得到原因（2026-08-19：
-  //  只记"未得到可用结果"看不到模型到底回了什么）。
-  if (cleaned === null) {
-    log('cheap-model', `terseText 判废: ${result.text.replace(/\s+/g, ' ').slice(0, 80)}`)
+  const analysis = analyzeTerse(result.text, opts.maxChars)
+  // 判废要留痕：kind + 原因分类 + 实际字数/预算 + 原文，下次"命名没生效"才
+  // 查得到原因（2026-08-19：只记"未得到可用结果"看不到模型到底回了什么；
+  // 2026-09-04：再补分类与字数，只打原文分不清空响应还是开场白）。
+  if (analysis.text === null) {
+    log(
+      'cheap-model',
+      `摘要判废 kind=${opts.kind ?? '?'} 原因=${analysis.reason} 输出${analysis.chars}字/预算${opts.maxChars}字: ${result.text.replace(/\s+/g, ' ').slice(0, 80)}`
+    )
   }
-  return cleaned
+  return analysis.text
 }
 
 /**

@@ -24,8 +24,12 @@ import { loadSettings } from './settings'
  * --- 三条硬约束 ---
  * 1. **绝不在流式期间调用**。调用方只在块收尾后才问；流式期间界面用规则摘要，
  *    本来就够看。
- * 2. **一律缓存，且落盘**。命令重复率极高（npm run build 这种一天几十次），
+ * 2. **成功才缓存，且落盘**。命令重复率极高（npm run build 这种一天几十次），
  *    按内容哈希缓存，跨重启复用。缓存命中不发请求。
+ *    2026-09-04 起判废/API 失败**不再落盘**：判废与失败是同一个 null，
+ *    旧版把 null 以空串永久缓存（假设"判废一次就会判废第二次"），一次
+ *    网络抖动 = 该块永久空白（实测 500 条上限里压着 45 条空串）。
+ *    失败改走内存级 TTL 冷却（见 failedAt）。
  * 3. **失败静默**。返回 null，调用方继续用原来的规则摘要/前 60 字截断——
  *    这两项都是锦上添花，任何一次失败都不该在界面上留下痕迹。
  *
@@ -56,7 +60,7 @@ type NoteKind = 'cmd' | 'think' | 'zh' | 'edit' | 'group'
  *
  * 仍然留在 4000 而不是砍小：翻译要的就是整段，砍一半等于给用户看半篇译文，
  * 那比不翻还糟。控成本靠的是另外三条——按需触发（不展开不翻）、按内容哈希
- * 落盘缓存、判废也缓存。真要省，关掉「AI 自动命名」一起停。
+ * 落盘缓存、失败后的内存级重试冷却。真要省，关掉「AI 自动命名」一起停。
  */
 const MAX_TRANSLATE_CHARS = 4000
 
@@ -66,6 +70,32 @@ let cache: Record<string, string> | null = null
 let loadFailed = false
 /** 同一个 key 正在飞行中的请求：同一条命令在一屏里出现多次时只打一发。 */
 const inflight = new Map<string, Promise<string | null>>()
+
+/**
+ * 判废/API 失败的内存级重试冷却（2026-09-04 新增）。
+ *
+ * 失败不再落盘之后必须有这么一层，否则 group 类组件 remount 会反复重打
+ * （实测一分钟 ~30 发）：同一 key 失败后 TTL 内直接回 null，TTL 过后允许
+ * 重试——判废的输入是确定的，重试大概率还是判废，但 5 分钟一发的频率
+ * 谈不上浪费额度，换来的是"网络抖动后该块能自愈"。
+ */
+const FAILURE_RETRY_TTL_MS = 5 * 60_000
+/** 冷却表的条数上限：防长会话无限涨（Map 按插入序，超了删最旧）。 */
+const FAILURE_RETRY_MAX_KEYS = 500
+const failedAt = new Map<string, number>()
+
+function markFailure(key: string): void {
+  if (failedAt.size >= FAILURE_RETRY_MAX_KEYS) {
+    const oldest = failedAt.keys().next().value
+    if (oldest !== undefined) failedAt.delete(oldest)
+  }
+  failedAt.set(key, Date.now())
+}
+
+function inFailureCooldown(key: string): boolean {
+  const at = failedAt.get(key)
+  return at !== undefined && Date.now() - at < FAILURE_RETRY_TTL_MS
+}
 
 function storePath(): string {
   return join(app.getPath('userData'), STORE_FILE)
@@ -87,7 +117,21 @@ function load(): Record<string, string> {
     loadFailed = true
     return cache
   }
-  cache = (raw as Record<string, string> | null) ?? {}
+  const store = (raw as Record<string, string> | null) ?? {}
+  // 2026-09-04 清理存量空串条目：旧版把判废/失败以 '' 落盘永久缓存，
+  // 读盘时把这些条目滤掉（命中 '' 等于永久空白），清到过就顺手重写一次盘。
+  let dropped = 0
+  for (const [key, value] of Object.entries(store)) {
+    if (typeof value !== 'string' || value === '') {
+      delete store[key]
+      dropped++
+    }
+  }
+  cache = store
+  if (dropped > 0) {
+    log('cheap-notes', `清理 ${dropped} 条空串缓存条目（历史判废/失败落盘）`)
+    save()
+  }
   return cache
 }
 
@@ -126,9 +170,6 @@ async function note(
     examples: Array<[string, string]>
     maxChars: number
     maxInput: number
-    /** false = 失败/判废不缓存（下次渲染重试）。默认 true：判废也存空串防重复
-     *  打请求。整组总结（group）传 false——小模型偶发判废不该让这行永远空着。 */
-    cacheNull?: boolean
   }
 ): Promise<string | null> {
   if (!notesEnabled()) return null
@@ -139,6 +180,9 @@ async function note(
   const cached = load()[key]
   if (cached !== undefined) return cached || null
 
+  // 失败冷却期内直接回 null，不重打（防 group 组件 remount 的请求风暴）。
+  if (inFailureCooldown(key)) return null
+
   const pending = inflight.get(key)
   if (pending) return pending
 
@@ -146,14 +190,18 @@ async function note(
     instruction: opts.instruction,
     examples: opts.examples,
     input,
-    maxChars: opts.maxChars
+    maxChars: opts.maxChars,
+    kind
   })
     .then((result) => {
-      // 判废（null）也存进去，存空串。否则同一条命令每次进视口都要重打一发——
-      // 模型对同一个输入判废一次就会判废第二次，重试纯属浪费额度。
-      // 例外：cacheNull=false 的类别（整组总结）失败不落缓存，下次渲染重试。
-      if (result === null && opts.cacheNull === false) return result
-      load()[key] = result ?? ''
+      // 2026-09-04 起只有非空结果才落盘：判废与 API 失败是同一个 null，
+      // 落盘等于把一次抖动变成永久空白。失败进内存级 TTL 冷却（见 failedAt），
+      // 既防 remount 重打风暴，又允许过后自愈重试。
+      if (result === null) {
+        markFailure(key)
+        return null
+      }
+      load()[key] = result
       save()
       return result
     })
@@ -207,7 +255,8 @@ export async function explainEdit(sample: string): Promise<string | null> {
  *
  * 2026-08-18 用户：「这整个块有总结」。输入样本由渲染层从组内各块拼好
  * （每块取首句/工具摘要，≤800 字），按内容哈希缓存——同一组在历史重建后
- * 再渲染零成本。
+ * 再渲染零成本。2026-09-04 起失败与其他类别同规则：不落盘，走 failedAt
+ * 的 TTL 冷却（原 cacheNull=false 每次渲染重打，实测一分钟 ~30 发）。
  */
 export async function summarizeActivityGroup(sample: string): Promise<string | null> {
   return note('group', sample, {
@@ -223,8 +272,7 @@ export async function summarizeActivityGroup(sample: string): Promise<string | n
       ]
     ],
     maxChars: GROUP_NOTE_CHARS,
-    maxInput: MAX_GROUP_SAMPLE_CHARS,
-    cacheNull: false
+    maxInput: MAX_GROUP_SAMPLE_CHARS
   })
 }
 
@@ -330,6 +378,9 @@ export async function translateThinking(text: string): Promise<string | null> {
   const cached = load()[key]
   if (cached !== undefined) return cached || null
 
+  // 与 note() 同一规则：失败冷却期内不重打。
+  if (inFailureCooldown(key)) return null
+
   const pending = inflight.get(key)
   if (pending) return pending
 
@@ -338,10 +389,15 @@ export async function translateThinking(text: string): Promise<string | null> {
   const run = summarizeRaw(buildTranslatePrompt(input))
     .then((result) => {
       const value = result?.trim() ?? ''
-      // 判废也存空串：同一段思考每次展开都重打一发不划算。
+      // 2026-09-04 起空结果不落盘（与 note() 同一语义：失败不该永久生效），
+      // 进 TTL 冷却防每次展开都重打一发。
+      if (!value) {
+        markFailure(key)
+        return null
+      }
       load()[key] = value
       save()
-      return value || null
+      return value
     })
     .catch((error) => {
       log('cheap-notes', `思考翻译失败: ${error instanceof Error ? error.message : String(error)}`)

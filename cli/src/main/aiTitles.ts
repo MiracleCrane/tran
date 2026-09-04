@@ -105,7 +105,8 @@ export async function generateAiTitle(
       ['在 .scratch 目录下依次创建 fold-a.txt、fold-b.txt、fold-c.txt 四个文件，每个写一行 hello', '批量创建测试文件']
     ],
     input: prompt,
-    maxChars: MAX_TITLE_CHARS
+    maxChars: MAX_TITLE_CHARS,
+    kind: 'title'
   })
   if (!title) {
     log('ai-titles', '命名未得到可用结果（回退原标题）')
